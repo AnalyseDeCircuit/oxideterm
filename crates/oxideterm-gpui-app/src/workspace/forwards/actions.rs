@@ -378,41 +378,45 @@ impl WorkspaceApp {
         let tx = self.forwarding_worker_tx.clone();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
-            let (connection_id, binding, result) = match runtime.block_on(
-                Self::forwarding_manager_for_node_async(
+            let scan_node_id = node_id.clone();
+            let (connection_id, binding, result) = runtime.block_on(async move {
+                match Self::forwarding_manager_for_node_async(
                     router,
                     registry.clone(),
                     session_id,
-                    node_id.clone(),
+                    scan_node_id,
                     owner_connection_id,
-                ),
-            ) {
-                Ok((manager, binding)) => {
-                    let connection_id = binding
-                        .as_ref()
-                        .map(|(_, connection_id, _)| connection_id.clone());
-                    let result = if let Some(connection_id) = connection_id.as_ref() {
-                        if restart_degraded_profiler {
-                            let _ = registry.restart_degraded_port_profiler(
-                                connection_id.clone(),
-                                manager.ssh_connection_handle(),
-                            );
+                )
+                .await
+                {
+                    Ok((manager, binding)) => {
+                        let connection_id = binding
+                            .as_ref()
+                            .map(|(_, connection_id, _)| connection_id.clone());
+                        let result = if let Some(connection_id) = connection_id.as_ref() {
+                            // PortDetectionProfiler uses tokio::spawn internally,
+                            // so it must be started while this forwarding runtime
+                            // is entered, not after block_on returns to std::thread.
+                            if restart_degraded_profiler {
+                                let _ = registry.restart_degraded_port_profiler(
+                                    connection_id.clone(),
+                                    manager.ssh_connection_handle(),
+                                );
+                            } else {
+                                let _ = registry.start_port_profiler(
+                                    connection_id.clone(),
+                                    manager.ssh_connection_handle(),
+                                );
+                            }
+                            Ok(registry.detected_ports(connection_id).unwrap_or_default())
                         } else {
-                            let _ = registry.start_port_profiler(
-                                connection_id.clone(),
-                                manager.ssh_connection_handle(),
-                            );
-                        }
-                        Ok(registry
-                            .detected_ports(connection_id)
-                            .unwrap_or_default())
-                    } else {
-                        Err("node has no forwarding connection binding".to_string())
-                    };
-                    (connection_id, binding, result)
+                            Err("node has no forwarding connection binding".to_string())
+                        };
+                        (connection_id, binding, result)
+                    }
+                    Err(error) => (None, None, Err(error)),
                 }
-                Err(error) => (None, None, Err(error)),
-            };
+            });
             let _ = tx.send(ForwardingWorkerResult::PortScan {
                 node_id,
                 connection_id,

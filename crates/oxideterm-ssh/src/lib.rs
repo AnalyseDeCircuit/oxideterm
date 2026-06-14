@@ -21,8 +21,8 @@ pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
     ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, HEARTBEAT_FAIL_THRESHOLD,
-    HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus, SftpSessionState,
-    SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
+    HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus, RemoteEnvInfo,
+    SftpSessionState, SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
     WS_BRIDGE_HEARTBEAT_TIMEOUT,
 };
 pub use host_key::{

@@ -1,4 +1,4 @@
-const AI_SIDEBAR_RESIZE_HIT_SLOP: f32 = 2.0;
+const CONTEXT_SIDEBAR_RESIZE_HIT_SLOP: f32 = 2.0;
 
 impl WorkspaceApp {
     pub(super) fn render_sidebar_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -38,8 +38,19 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_ai_right_sidebar_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_context_right_sidebar_region(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let (title_key, title_role, icon) = match self.active_context_sidebar_panel {
+            ContextSidebarPanel::Assistant => {
+                ("sidebar.panels.ai", "assistant", LucideIcon::Sparkles)
+            }
+            ContextSidebarPanel::HostTools => {
+                ("sidebar.panels.host_tools", "host-tools", LucideIcon::Wrench)
+            }
+        };
         div()
             .relative()
             .w(px(self.ai_sidebar_width))
@@ -61,39 +72,12 @@ impl WorkspaceApp {
                     .px_3()
                     .border_b_1()
                     .border_color(rgba((theme.border << 8) | 0x4d))
-                    .child(
-                        self.render_window_drag_content_region(
-                            "ai-sidebar-titlebar-drag-region",
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::Sparkles,
-                                    16.0,
-                                    rgb(theme.accent),
-                                ))
-                                .child(
-                                    div()
-                                        .text_size(px(13.0))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .text_color(rgb(theme.text))
-                                        .child(self.render_display_text_with_role(
-                                            SelectableTextRole::PlainDocument,
-                                            "ai-sidebar-title",
-                                            "label",
-                                            self.i18n.t("sidebar.panels.ai"),
-                                            theme.text,
-                                            cx,
-                                        )),
-                                )
-                            .into_any_element(),
-                            cx,
-                        ),
-                    )
+                    .child(self.render_context_sidebar_panel_title(
+                        title_key, title_role, icon, cx,
+                    ))
                     .child(
                         div()
-                            .id("ai-sidebar-collapse")
+                            .id("context-sidebar-collapse")
                             .size(px(28.0))
                             .flex()
                             .items_center()
@@ -110,7 +94,7 @@ impl WorkspaceApp {
                                 let label = self.i18n.t("sidebar.tooltips.collapse");
                                 move |this, event: &MouseMoveEvent, _window, cx| {
                                     this.queue_workspace_tooltip(
-                                        "ai-sidebar-collapse",
+                                        "context-sidebar-collapse",
                                         label.clone(),
                                         f32::from(event.position.x) + 12.0,
                                         f32::from(event.position.y) + 16.0,
@@ -120,13 +104,13 @@ impl WorkspaceApp {
                             }))
                             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                                 if !*hovered {
-                                    this.clear_workspace_tooltip("ai-sidebar-collapse", cx);
+                                    this.clear_workspace_tooltip("context-sidebar-collapse", cx);
                                 }
                             }))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
-                                    let _ = this.toggle_ai_sidebar(cx);
+                                    this.collapse_context_sidebar(cx);
                                 }),
                             ),
                     ),
@@ -138,29 +122,40 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .child(self.render_ai_sidebar_content(cx)),
+                    .child(match self.active_context_sidebar_panel {
+                        ContextSidebarPanel::Assistant => self.render_ai_sidebar_content(cx),
+                        ContextSidebarPanel::HostTools => self.render_host_tools_context_panel(cx),
+                    }),
             )
             .child(
                 div()
                     .absolute()
-                    .left_0()
+                    .left(px(-CONTEXT_SIDEBAR_RESIZE_HIT_SLOP))
                     .top_0()
                     .bottom_0()
                     .w(px(
                         self.tokens.metrics.sidebar_resize_handle_width
-                            + AI_SIDEBAR_RESIZE_HIT_SLOP,
+                            + CONTEXT_SIDEBAR_RESIZE_HIT_SLOP,
                     ))
                     .cursor(CursorStyle::ResizeColumn)
-                    // The AI panel sits against scrollable terminal/content
-                    // surfaces. Add a tiny hit slop so resize remains
-                    // reachable without stealing a visible strip of the panel.
+                    // Keep the resize hitbox wider than the visible divider.
+                    // GPUI paints this element inside the panel, so only a
+                    // 1px child may become visible at the real sidebar edge.
                     .occlude()
-                    .bg(if self.ai_sidebar_resizing {
-                        rgb(theme.accent)
-                    } else {
-                        rgba(theme.bg << 8)
-                    })
-                    .hover(|handle| handle.bg(rgba((theme.accent << 8) | 0x80)))
+                    .bg(rgba(0x00000000))
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(CONTEXT_SIDEBAR_RESIZE_HIT_SLOP))
+                            .top_0()
+                            .bottom_0()
+                            .w(px(1.0))
+                            .bg(if self.ai_sidebar_resizing {
+                                rgb(theme.accent)
+                            } else {
+                                rgba(0x00000000)
+                            }),
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
@@ -171,6 +166,43 @@ impl WorkspaceApp {
                     ),
             )
             .into_any_element()
+    }
+
+    fn render_context_sidebar_panel_title(
+        &self,
+        title_key: &'static str,
+        title_role: &'static str,
+        icon: LucideIcon,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        self.render_window_drag_content_region(
+            "context-sidebar-titlebar-title",
+            div()
+                .min_w(px(0.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.accent)))
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .truncate()
+                        .text_size(px(13.0))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "context-sidebar-title",
+                            title_role,
+                            self.i18n.t(title_key),
+                            theme.text,
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+            cx,
+        )
     }
 
     pub(super) fn render_sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {

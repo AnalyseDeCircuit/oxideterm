@@ -225,18 +225,40 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let has_background = self.terminal_background_preferences("forwards").is_some();
+        let mut inner = div()
+            .w_full()
+            .min_w(px(0.0))
+            .max_w(px(self.forwards_content_outer_max_width()))
+            .px(px(FORWARDS_PAGE_PADDING))
+            .pb(px(FORWARDS_SECTION_GAP));
+        if index == 0 {
+            inner = inner.pt(px(FORWARDS_PAGE_PADDING));
+        }
+        if index + 1 == self.forwards_sections().len() {
+            inner = inner.pb(px(FORWARDS_PAGE_PADDING));
+        }
+
         div()
             .w_full()
-            .max_w(px(FORWARDS_MAX_WIDTH))
-            .mx_auto()
-            .px(px(FORWARDS_PAGE_PADDING))
-            .pb(px(FORWARDS_SECTION_GAP))
-            .when(index == 0, |item| item.pt(px(FORWARDS_PAGE_PADDING)))
-            .when(index + 1 == self.forwards_sections().len(), |item| {
-                item.pb(px(FORWARDS_PAGE_PADDING))
-            })
-            .child(self.render_forwards_section(section, tab_id, node_id, has_background, cx))
+            .min_w(px(0.0))
+            .flex()
+            .justify_center()
+            // GPUI List rows need a full-width wrapper before applying the
+            // native wide-content cap to the inner forwarding shell.
+            .child(inner.child(self.render_forwards_section(
+                section,
+                tab_id,
+                node_id,
+                has_background,
+                cx,
+            )))
             .into_any_element()
+    }
+
+    fn forwards_content_outer_max_width(&self) -> f32 {
+        // Forwarding tables are an operational surface, so use the native
+        // wide-page metric instead of the older browser `max-w-4xl` limit.
+        self.tokens.metrics.settings_content_wide_max_width + FORWARDS_PAGE_PADDING * 2.0
     }
 
     fn render_forwards_section(

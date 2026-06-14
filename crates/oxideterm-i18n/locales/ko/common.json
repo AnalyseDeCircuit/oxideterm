@@ -83,6 +83,7 @@
     "cmd_disconnect_all": "모두 연결 해제",
     "cmd_reconnect_all": "모두 재연결",
     "cmd_cancel_reconnect": "모든 재연결 취소",
+    "cmd_open_runtime": "런타임 열기",
     "cmd_open_connection_pool": "연결 풀 열기",
     "cmd_health_check": "상태 확인 실행",
     "health_result": "{{healthy}}/{{total}} 연결 정상",

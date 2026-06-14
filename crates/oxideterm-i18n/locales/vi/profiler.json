@@ -23,7 +23,17 @@
       "rtt": "Độ trễ RTT",
       "source": "Nguồn",
       "disabled": "Giám sát đã tắt",
-      "enable": "Bật lấy mẫu"
+      "enable": "Bật lấy mẫu",
+      "swap": "Swap",
+      "mounts": "Điểm gắn",
+      "interfaces": "Giao diện mạng",
+      "top_processes": "Tiến trình dùng nhiều bộ nhớ",
+      "source_full": "Đầy đủ",
+      "source_partial": "Một phần",
+      "source_rtt_only": "Chỉ RTT",
+      "source_failed": "Thất bại",
+      "source_unsupported": "Không hỗ trợ",
+      "retry": "Dò lại"
     }
   }
 }

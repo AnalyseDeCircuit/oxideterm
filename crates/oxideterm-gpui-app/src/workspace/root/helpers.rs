@@ -5,6 +5,7 @@ fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::FileManager => "file_manager",
         TabKind::Launcher => "launcher",
         TabKind::Graphics => "graphics",
+        TabKind::Runtime => "runtime",
         TabKind::ConnectionPool => "connection_pool",
         TabKind::ConnectionMonitor => "connection_monitor",
         TabKind::Topology => "topology",

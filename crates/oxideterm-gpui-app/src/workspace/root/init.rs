@@ -231,6 +231,8 @@ impl WorkspaceApp {
             ai_sidebar_resizing: false,
             ai_sidebar_width: (settings.sidebar_ui.ai_sidebar_width as f32)
                 .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
+            active_context_sidebar_panel: ContextSidebarPanel::Assistant,
+            active_context_sidebar_tool: ContextSidebarTool::Monitor,
             ai_overlay_window_size: Some(current_window_size(window)),
             ai_overlay_window_bounds_subscription: None,
             knowledge_window_activation_subscription: None,
@@ -606,6 +608,7 @@ impl WorkspaceApp {
             launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics: GraphicsState::new(),
             connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
+            active_connection_runtime_section: ConnectionRuntimeSection::Overview,
             // Monitor pages are variable-height browser sections; keep the
             // summary page and pool body on shared ListState-backed render paths.
             connection_monitor_section_list_state: ListState::new(
@@ -891,7 +894,7 @@ impl WorkspaceApp {
                             workspace.poll_sftp_worker_results(cx);
                             workspace.poll_launcher_worker_results(cx);
                             workspace.poll_graphics_worker_results(window, cx);
-                            workspace.poll_connection_monitor_updates(cx);
+                            workspace.poll_connection_monitor_updates(true, cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_start_sftp_remote_load(cx);

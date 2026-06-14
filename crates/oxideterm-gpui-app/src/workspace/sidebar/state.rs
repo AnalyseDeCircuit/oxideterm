@@ -10,10 +10,20 @@ impl WorkspaceApp {
     }
 
     pub(super) fn ai_sidebar_visible(&self) -> bool {
+        self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::Assistant
+            && self.settings_store.settings().ai.enabled
+    }
+
+    pub(super) fn context_sidebar_visible(&self) -> bool {
         let settings = self.settings_store.settings();
-        settings.ai.enabled
-            && !settings.sidebar_ui.ai_sidebar_collapsed
-            && !settings.sidebar_ui.zen_mode
+        if settings.sidebar_ui.ai_sidebar_collapsed || settings.sidebar_ui.zen_mode {
+            return false;
+        }
+        match self.active_context_sidebar_panel {
+            ContextSidebarPanel::Assistant => settings.ai.enabled,
+            ContextSidebarPanel::HostTools => true,
+        }
     }
 
     pub(super) fn set_sidebar_section(&mut self, section: SidebarSection, cx: &mut Context<Self>) {
@@ -110,7 +120,19 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_ai_sidebar(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.settings_store.settings().ai.enabled {
+        if self.ai_sidebar_visible() {
+            self.collapse_context_sidebar(cx);
+            return true;
+        }
+        self.open_context_sidebar_panel(ContextSidebarPanel::Assistant, cx)
+    }
+
+    pub(super) fn open_context_sidebar_panel(
+        &mut self,
+        panel: ContextSidebarPanel,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if panel == ContextSidebarPanel::Assistant && !self.settings_store.settings().ai.enabled {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.sidebar.not_enabled_hint"),
                 TerminalNoticeVariant::Warning,
@@ -118,19 +140,39 @@ impl WorkspaceApp {
             cx.notify();
             return false;
         }
-        let collapsed = !self.settings_store.settings().sidebar_ui.ai_sidebar_collapsed;
+
+        self.active_context_sidebar_panel = panel;
         self.settings_store
             .settings_mut()
             .sidebar_ui
-            .ai_sidebar_collapsed = collapsed;
-        if !collapsed {
+            .ai_sidebar_collapsed = false;
+        if panel == ContextSidebarPanel::Assistant {
             self.ensure_ai_chat_initialized();
             self.bootstrap_ai_mcp_registry();
+        } else {
+            // Non-AI context panels share the old right-sidebar shell, but must
+            // not keep AI-specific focus or floating popovers alive.
+            self.close_ai_sidebar_popovers();
+            self.active_context_sidebar_tool = ContextSidebarTool::Monitor;
+            self.refresh_connection_monitor_pool_stats();
+            self.sync_connection_monitor_selection(cx);
         }
         self.clear_ai_sidebar_keyboard_focus();
         let _ = self.settings_store.save();
         cx.notify();
         true
+    }
+
+    pub(super) fn collapse_context_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.settings_store
+            .settings_mut()
+            .sidebar_ui
+            .ai_sidebar_collapsed = true;
+        self.ai_sidebar_resizing = false;
+        self.clear_ai_sidebar_keyboard_focus();
+        self.close_ai_sidebar_popovers();
+        let _ = self.settings_store.save();
+        cx.notify();
     }
 
     pub(super) fn set_ai_sidebar_width(&mut self, width: f32, cx: &mut Context<Self>) -> bool {

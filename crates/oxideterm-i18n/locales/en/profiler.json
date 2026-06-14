@@ -23,7 +23,17 @@
       "rtt": "RTT Latency",
       "source": "Source",
       "disabled": "Monitoring disabled",
-      "enable": "Enable sampling"
+      "enable": "Enable sampling",
+      "swap": "Swap",
+      "mounts": "Mounts",
+      "interfaces": "Interfaces",
+      "top_processes": "Top Processes",
+      "source_full": "Full",
+      "source_partial": "Partial",
+      "source_rtt_only": "RTT only",
+      "source_failed": "Failed",
+      "source_unsupported": "Unsupported",
+      "retry": "Retry sampling"
     }
   }
 }

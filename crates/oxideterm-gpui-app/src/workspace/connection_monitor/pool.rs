@@ -147,7 +147,7 @@ impl WorkspaceApp {
                             cx,
                         )),
                 )
-                .child(self.render_system_health_panel(cx))
+                .child(self.render_system_health_panel(false, cx))
                 .into_any_element(),
         }
     }
@@ -217,6 +217,32 @@ impl WorkspaceApp {
                 div()
                     .id("connection-pool-scroll")
                     .flex_1()
+                    .child(self.render_connection_pool_body_list(idle_timeout_secs, cx)),
+            )
+            .child(self.render_connection_pool_keep_alive_legend(idle_timeout_secs, cx))
+            .into_any_element()
+    }
+
+    pub(super) fn render_connection_runtime_pool(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let stats = self.connection_monitor.pool_stats.as_ref();
+        let idle_timeout_secs = stats.map_or(0, |stats| stats.idle_timeout_secs);
+        self.sync_connection_pool_body_list_state();
+
+        div()
+            .id("connection-runtime-pool")
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text))
+            // Runtime already owns the title and section switcher. Keep this
+            // embedded pool view to the table/body chrome only.
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
                     .child(self.render_connection_pool_body_list(idle_timeout_secs, cx)),
             )
             .child(self.render_connection_pool_keep_alive_legend(idle_timeout_secs, cx))

@@ -70,6 +70,7 @@ enum PaletteAction {
     Sidebar(SidebarSection),
     OpenSavedConnections,
     OpenSessionManager,
+    OpenRuntime(ConnectionRuntimeSection),
     OpenConnectionPool,
     OpenTopology,
     OpenPluginManager,
@@ -479,6 +480,9 @@ impl WorkspaceApp {
             PaletteAction::Sidebar(section) => self.set_sidebar_section(section, cx),
             PaletteAction::OpenSavedConnections => self.open_session_manager_tab(window, cx),
             PaletteAction::OpenSessionManager => self.open_session_manager_tab(window, cx),
+            PaletteAction::OpenRuntime(section) => {
+                self.open_connection_runtime_tab(section, window, cx)
+            }
             PaletteAction::OpenConnectionPool => self.open_connection_pool_tab(window, cx),
             PaletteAction::OpenTopology => self.open_topology_tab(window, cx),
             PaletteAction::OpenPluginManager => self.open_plugin_manager_tab(window, cx),
@@ -984,6 +988,7 @@ impl WorkspaceApp {
                     TabKind::SshTerminal => self.i18n.t("command_palette.session_ssh_terminal"),
                     TabKind::Settings => self.i18n.t("settings_view.title"),
                     TabKind::SessionManager => self.i18n.t("sidebar.panels.saved_connections"),
+                    TabKind::Runtime => self.i18n.t("sidebar.panels.runtime"),
                     TabKind::ConnectionPool => self.i18n.t("sidebar.panels.connection_pool"),
                     TabKind::ConnectionMonitor => self.i18n.t("sidebar.panels.connection_monitor"),
                     TabKind::Topology => self.i18n.t("topology.title"),
@@ -2178,6 +2183,7 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::FileManager => LucideIcon::FolderOpen,
         TabKind::Launcher => LucideIcon::Terminal,
         TabKind::Graphics => LucideIcon::AppWindow,
+        TabKind::Runtime => LucideIcon::Gauge,
         TabKind::ConnectionPool => LucideIcon::Terminal,
         TabKind::ConnectionMonitor => LucideIcon::Activity,
         TabKind::Topology => LucideIcon::Network,
@@ -2430,6 +2436,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             icon: LucideIcon::Bot,
             shortcut_action: None,
             action: PaletteAction::Keybinding("palette.aiSidebar"),
+        },
+        CommandSpec {
+            id: "cmd:open_runtime",
+            label_key: "command_palette.cmd_open_runtime".into(),
+            icon: LucideIcon::Gauge,
+            shortcut_action: None,
+            action: PaletteAction::OpenRuntime(ConnectionRuntimeSection::Overview),
         },
         CommandSpec {
             id: "cmd:open_connection_pool",

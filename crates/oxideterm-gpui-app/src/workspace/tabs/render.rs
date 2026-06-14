@@ -57,6 +57,7 @@ impl WorkspaceApp {
                 TabKind::FileManager => LucideIcon::FolderOpen,
                 TabKind::Launcher => LucideIcon::Monitor,
                 TabKind::Graphics => LucideIcon::Monitor,
+                TabKind::Runtime => LucideIcon::Gauge,
                 TabKind::ConnectionPool => LucideIcon::Terminal,
                 TabKind::ConnectionMonitor => LucideIcon::Activity,
                 TabKind::Topology => LucideIcon::Network,

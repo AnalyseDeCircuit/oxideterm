@@ -18,7 +18,7 @@ use tokio::{
 
 use crate::{
     MetricsSource, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceMetrics,
-    parse_cpu_snapshot, parse_net_snapshot, parse_resource_metrics, push_history,
+    parse_resource_metrics, previous_sample_from_metrics, push_history,
 };
 
 pub const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
@@ -28,7 +28,10 @@ pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 65_536;
 pub const RESOURCE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const RESOURCE_END_MARKER: &str = "===END===";
 
-const METRICS_COMMAND_LINUX: &str = "echo '===STAT==='; head -1 /proc/stat 2>/dev/null; echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===DISK==='; df -P -k / 2>/dev/null | tail -1; echo '===NPROC==='; nproc 2>/dev/null";
+const METRICS_COMMAND_LINUX: &str = "echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat 2>/dev/null; echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ((ps -eo pid=,%mem=,comm= --sort=-%mem 2>/dev/null | head -10 | awk '{gsub(/\\t/,\" \",$3); printf \"%s\\t%.1f\\t%s\\n\",$1,$2,$3}') || (ps -o pid,vsz,comm 2>/dev/null | awk 'NR>1 {print $2,$1,$3}' | sort -rn | head -10 | awk -v total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null) '{pct=(total>0?$1*100/total:0); printf \"%s\\t%.1f\\t%s\\n\",$2,pct,$3}'))";
+const METRICS_COMMAND_MACOS: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ps -A -o pid=,%mem=,comm= 2>/dev/null | sort -k2 -rn | head -10 | awk '{printf \"%s\\t%.1f\\t%s\\n\",$1,$2,$3}'";
+const METRICS_COMMAND_UNSUPPORTED: &str =
+    "echo '===UNSUPPORTED==='; uname -s 2>/dev/null || echo unknown";
 const PORT_CMD_LINUX: &str = "echo '===PORTS==='; ((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
 const PORT_CMD_MACOS: &str = "echo '===PORTS==='; ((lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2) || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
 const PORT_CMD_WINDOWS: &str = "echo '===PORTS==='; powershell -NoProfile -Command \"Get-NetTCPConnection -State Listen 2>$null | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -HideTableHeaders\" 2>/dev/null; echo '===PORTS_END==='";
@@ -275,7 +278,15 @@ impl ProfilerRegistry {
 }
 
 pub fn build_sample_command(os_type: &str) -> String {
-    let metrics = METRICS_COMMAND_LINUX;
+    let metrics = match os_type {
+        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
+            METRICS_COMMAND_LINUX
+        }
+        "macOS" | "macos" | "Darwin" => METRICS_COMMAND_MACOS,
+        "Windows" | "windows" => return build_windows_sample_command(),
+        "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => METRICS_COMMAND_UNSUPPORTED,
+        _ => METRICS_COMMAND_UNSUPPORTED,
+    };
     let port_cmd = match os_type {
         "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => PORT_CMD_LINUX,
         "macOS" | "macos" | "Darwin" => PORT_CMD_MACOS,
@@ -285,6 +296,53 @@ pub fn build_sample_command(os_type: &str) -> String {
     };
 
     format!("{metrics}; {port_cmd}; echo '===END==='\n")
+}
+
+fn build_windows_sample_command() -> String {
+    let script = concat!(
+        "$ErrorActionPreference='SilentlyContinue';",
+        "Write-Output '===CPU_DIRECT===';",
+        "$cpu=(Get-CimInstance Win32_Processor|Measure-Object -Property LoadPercentage -Average).Average;",
+        "if($cpu -ne $null){[Math]::Round($cpu,1)};",
+        "Write-Output '===MEMINFO===';",
+        "$os=Get-CimInstance Win32_OperatingSystem;",
+        "if($os){",
+        "Write-Output ('MemTotal: '+$os.TotalVisibleMemorySize+' kB');",
+        "Write-Output ('MemAvailable: '+$os.FreePhysicalMemory+' kB');",
+        "$st=[UInt64]([Math]::Max(0,$os.TotalVirtualMemorySize-$os.TotalVisibleMemorySize));",
+        "$sf=[UInt64]([Math]::Max(0,$os.FreeVirtualMemory-$os.FreePhysicalMemory));",
+        "Write-Output ('SwapTotal: '+$st+' kB');",
+        "Write-Output ('SwapFree: '+$sf+' kB');",
+        "};",
+        "Write-Output '===NPROC===';",
+        "$cores=(Get-CimInstance Win32_Processor|Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum;",
+        "if($cores){$cores};",
+        "Write-Output '===DISKS===';",
+        "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{",
+        "$total=[UInt64]$_.Size;$free=[UInt64]$_.FreeSpace;$used=$total-$free;",
+        "$pct=if($total -gt 0){[Math]::Round(($used*100)/$total,1)}else{0};",
+        "Write-Output ($_.DeviceID+[char]9+$used+[char]9+$total+[char]9+$pct)",
+        "};",
+        "Write-Output '===NETDEV===';",
+        "Get-NetAdapterStatistics|ForEach-Object{",
+        "Write-Output ($_.Name+': '+$_.ReceivedBytes+' 0 0 0 0 0 0 0 '+$_.SentBytes)",
+        "};",
+        "Write-Output '===TOPPROCS===';",
+        "$memTotal=if($os){[double]$os.TotalVisibleMemorySize*1024}else{0};",
+        "Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 10|ForEach-Object{",
+        "$pct=if($memTotal -gt 0){[Math]::Round(($_.WorkingSet64*100)/$memTotal,1)}else{0};",
+        "Write-Output ($_.Id+[char]9+$pct+[char]9+$_.ProcessName)",
+        "};",
+        "Write-Output '===PORTS===';",
+        "Get-NetTCPConnection -State Listen|ForEach-Object{",
+        "Write-Output ($_.LocalAddress+' '+$_.LocalPort+' '+$_.OwningProcess)",
+        "};",
+        "Write-Output '===PORTS_END===';",
+        "Write-Output '===END===';"
+    );
+    // OpenSSH on Windows may start cmd.exe or PowerShell; invoking PowerShell
+    // explicitly keeps the sampler independent from the user's default shell.
+    format!("powershell -NoProfile -ExecutionPolicy Bypass -Command \"{script}\"\r\n")
 }
 
 pub fn shell_init_command(os_type: &str) -> &'static str {
@@ -327,10 +385,7 @@ async fn sample_loop(
     update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
     mut stop_rx: oneshot::Receiver<()>,
 ) {
-    let mut shell = match sampler
-        .open_shell(shell_init_command(&os_type), RESOURCE_CHANNEL_OPEN_TIMEOUT)
-        .await
-    {
+    let mut shell = match open_resource_sample_shell(sampler.as_ref(), &os_type).await {
         Ok(shell) => shell,
         Err(_) => {
             registry.mark_degraded(&connection_id);
@@ -363,10 +418,11 @@ async fn sample_loop(
                         &registry,
                         &update_tx,
                         connection_id.clone(),
-                        ResourceMetrics::empty(now_ms(), MetricsSource::RttOnly),
-                    );
-                    continue;
-                }
+                        ResourceMetrics::empty(now_ms(), MetricsSource::Unsupported),
+                        );
+                    let _ = shell.close().await;
+                    break;
+                    }
 
                 match shell
                     .sample_until(
@@ -378,25 +434,72 @@ async fn sample_loop(
                     .await
                 {
                     Ok(output) => {
-                        consecutive_failures = 0;
                         let metrics =
                             parse_resource_metrics(&output, previous_sample.as_ref(), now_ms());
-                        previous_sample = parse_cpu_snapshot(&output).map(|cpu| {
-                            PreviousResourceSample {
-                                cpu,
-                                net: parse_net_snapshot(&output).unwrap_or_default(),
-                                timestamp_ms: metrics.timestamp_ms,
-                            }
-                        });
+                        if matches!(
+                            metrics.source,
+                            MetricsSource::RttOnly | MetricsSource::Unsupported
+                        ) {
+                            consecutive_failures = consecutive_failures.saturating_add(1);
+                        } else {
+                            consecutive_failures = 0;
+                        }
+                        if consecutive_failures >= RESOURCE_MAX_CONSECUTIVE_FAILURES {
+                            registry.mark_degraded(&connection_id);
+                            record_and_emit(
+                                &registry,
+                                &update_tx,
+                                connection_id.clone(),
+                                ResourceMetrics::empty(now_ms(), MetricsSource::Unsupported),
+                            );
+                            let _ = shell.close().await;
+                            break;
+                        }
+                        previous_sample = previous_sample_from_metrics(&metrics, &output);
                         record_and_emit(&registry, &update_tx, connection_id.clone(), metrics);
                     }
                     Err(_) => {
                         consecutive_failures = consecutive_failures.saturating_add(1);
+                        if consecutive_failures >= RESOURCE_MAX_CONSECUTIVE_FAILURES {
+                            registry.mark_degraded(&connection_id);
+                            record_and_emit(
+                                &registry,
+                                &update_tx,
+                                connection_id.clone(),
+                                ResourceMetrics::empty(now_ms(), MetricsSource::Unsupported),
+                            );
+                            let _ = shell.close().await;
+                            break;
+                        }
+                        // Tauri writes a Failed sample on each transient read
+                        // failure and then tries to reopen the persistent shell
+                        // once. Without that update, the native UI can look
+                        // inert until the profiler finally degrades.
+                        if let Ok(new_shell) =
+                            open_resource_sample_shell(sampler.as_ref(), &os_type).await
+                        {
+                            shell = new_shell;
+                        }
+                        record_and_emit(
+                            &registry,
+                            &update_tx,
+                            connection_id.clone(),
+                            ResourceMetrics::empty(now_ms(), MetricsSource::Failed),
+                        );
                     }
                 }
             }
         }
     }
+}
+
+async fn open_resource_sample_shell(
+    sampler: &dyn ResourceSampler,
+    os_type: &str,
+) -> Result<Box<dyn ResourceSampleShell>, String> {
+    sampler
+        .open_shell(shell_init_command(os_type), RESOURCE_CHANNEL_OPEN_TIMEOUT)
+        .await
 }
 
 fn record_and_emit(
@@ -496,15 +599,24 @@ mod tests {
 
     #[test]
     fn builds_tauri_sampling_commands() {
-        assert!(build_sample_command("Linux").contains("===STAT==="));
-        assert!(build_sample_command("Linux").contains("===DISK==="));
-        assert!(build_sample_command("Linux").contains("df -P -k /"));
-        assert!(build_sample_command("Linux").contains("ss -tlnp"));
+        let linux = build_sample_command("Linux");
+        assert!(linux.contains("===STAT==="));
+        assert!(linux.contains("===DISKS==="));
+        assert!(linux.contains("===TOPPROCS==="));
+        let nproc_marker = linux.find("===NPROC===").expect("nproc marker");
+        let disk_marker = linux.find("===DISKS===").expect("disk marker");
+        assert!(
+            nproc_marker < disk_marker,
+            "nproc should be sampled before disk summaries"
+        );
+        assert!(linux.contains("ss -tlnp"));
         assert!(build_sample_command("Darwin").contains("lsof -iTCP"));
         assert!(build_sample_command("Windows").contains("Get-NetTCPConnection"));
-        assert!(build_sample_command("FreeBSD").contains("sockstat"));
-        assert!(build_sample_command("unknown").contains("ss -tlnp"));
-        assert!(build_sample_command("Linux").contains("===END==="));
+        let freebsd = build_sample_command("FreeBSD");
+        assert!(freebsd.contains("sockstat"));
+        assert!(freebsd.contains("===UNSUPPORTED==="));
+        assert!(build_sample_command("unknown").contains("===UNSUPPORTED==="));
+        assert!(linux.contains("===END==="));
     }
 
     #[test]

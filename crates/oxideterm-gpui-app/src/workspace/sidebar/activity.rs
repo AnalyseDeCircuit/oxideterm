@@ -10,13 +10,12 @@ impl WorkspaceApp {
         let top_items_before_plugins = [
             (SidebarSection::Sessions, LucideIcon::Link2),
             (SidebarSection::Connections, LucideIcon::LayoutList),
-            (SidebarSection::Terminal, LucideIcon::Terminal),
-            (SidebarSection::Activity, LucideIcon::Activity),
-            (SidebarSection::Network, LucideIcon::Network),
+            (SidebarSection::Runtime, LucideIcon::Gauge),
         ];
         let top_items_after_plugins = [
             (SidebarSection::CloudSync, LucideIcon::Cloud),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
+            (SidebarSection::HostTools, LucideIcon::Wrench),
         ];
         let bottom_items = [
             (SidebarSection::Workspace, LucideIcon::Square),
@@ -149,12 +148,16 @@ impl WorkspaceApp {
             SidebarSection::Terminal => self
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::ConnectionPool),
+            SidebarSection::Runtime => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::Runtime),
             SidebarSection::Activity => self
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor),
-            SidebarSection::Network => self
-                .active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::Topology),
+            SidebarSection::Network => {
+                self.active_tab().is_some_and(|tab| tab.kind == TabKind::Runtime)
+                    && self.active_connection_runtime_section == ConnectionRuntimeSection::Topology
+            }
             SidebarSection::Files => self
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::FileManager),
@@ -177,6 +180,10 @@ impl WorkspaceApp {
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::Settings),
             SidebarSection::Assistant => self.ai_sidebar_visible(),
+            SidebarSection::HostTools => {
+                self.context_sidebar_visible()
+                    && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            }
             _ => self.active_sidebar_section == section,
         };
         let tooltip = self.activity_icon_tooltip(section);
@@ -301,6 +308,12 @@ impl WorkspaceApp {
                         this.open_session_manager_tab(window, cx);
                     } else if section == SidebarSection::Terminal {
                         this.open_connection_pool_tab(window, cx);
+                    } else if section == SidebarSection::Runtime {
+                        this.open_connection_runtime_tab(
+                            ConnectionRuntimeSection::Overview,
+                            window,
+                            cx,
+                        );
                     } else if section == SidebarSection::Activity {
                         this.open_connection_monitor_tab(window, cx);
                     } else if section == SidebarSection::Network {
@@ -324,6 +337,8 @@ impl WorkspaceApp {
                         this.open_notification_center_tab(window, cx);
                     } else if section == SidebarSection::Assistant {
                         let _ = this.toggle_ai_sidebar(cx);
+                    } else if section == SidebarSection::HostTools {
+                        let _ = this.open_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
                     } else if section == SidebarSection::CloudSync {
                         this.open_cloud_sync_tab(window, cx);
                     } else if section == SidebarSection::Extensions {
@@ -344,11 +359,13 @@ impl WorkspaceApp {
             SidebarSection::Sftp => self.i18n.t("sidebar.panels.sftp"),
             SidebarSection::Forwards => self.i18n.t("forwards.table.title"),
             SidebarSection::Terminal => self.i18n.t("sidebar.panels.connection_pool"),
+            SidebarSection::Runtime => self.i18n.t("sidebar.panels.runtime"),
             SidebarSection::Activity => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Network => self.i18n.t("sidebar.panels.connection_matrix"),
             SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
             SidebarSection::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),
             SidebarSection::Assistant => self.i18n.t("sidebar.panels.ai"),
+            SidebarSection::HostTools => self.i18n.t("sidebar.panels.host_tools"),
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
             SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),
             SidebarSection::Files => self.i18n.t("sidebar.panels.files"),

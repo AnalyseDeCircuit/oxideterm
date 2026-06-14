@@ -23,7 +23,17 @@
       "rtt": "RTT-Latenz",
       "source": "Quelle",
       "disabled": "Überwachung deaktiviert",
-      "enable": "Abtastung aktivieren"
+      "enable": "Abtastung aktivieren",
+      "swap": "Swap",
+      "mounts": "Einhängepunkte",
+      "interfaces": "Netzwerkschnittstellen",
+      "top_processes": "Speicherintensive Prozesse",
+      "source_full": "Vollständig",
+      "source_partial": "Teilweise",
+      "source_rtt_only": "Nur RTT",
+      "source_failed": "Fehlgeschlagen",
+      "source_unsupported": "Nicht unterstützt",
+      "retry": "Erneut prüfen"
     }
   }
 }

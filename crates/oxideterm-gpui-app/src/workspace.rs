@@ -45,7 +45,11 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use self::{ai_lazy::LazyAiRagStore, settings::SettingsManagedKeyDialog};
+use self::{
+    ai_lazy::LazyAiRagStore,
+    settings::SettingsManagedKeyDialog,
+    sidebar::{ContextSidebarPanel, ContextSidebarTool},
+};
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
@@ -148,7 +152,7 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
-use self::connection_monitor::ConnectionMonitorState;
+use self::connection_monitor::{ConnectionMonitorState, ConnectionRuntimeSection};
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
@@ -594,6 +598,8 @@ pub(crate) struct WorkspaceApp {
     sidebar_width: f32,
     ai_sidebar_resizing: bool,
     ai_sidebar_width: f32,
+    active_context_sidebar_panel: ContextSidebarPanel,
+    active_context_sidebar_tool: ContextSidebarTool,
     ai_overlay_window_size: Option<(f32, f32)>,
     ai_overlay_window_bounds_subscription: Option<Subscription>,
     knowledge_window_activation_subscription: Option<Subscription>,
@@ -834,6 +840,7 @@ pub(crate) struct WorkspaceApp {
     launcher_app_grid_list_cache: RefCell<VirtualListSignatureCache>,
     graphics: GraphicsState,
     connection_monitor: ConnectionMonitorState,
+    active_connection_runtime_section: ConnectionRuntimeSection,
     connection_monitor_section_list_state: ListState,
     connection_monitor_section_list_cache: RefCell<VirtualListSignatureCache>,
     connection_pool_body_list_state: ListState,

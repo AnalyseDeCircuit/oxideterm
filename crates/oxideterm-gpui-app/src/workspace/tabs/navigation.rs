@@ -162,6 +162,9 @@ impl WorkspaceApp {
                 self.active_surface = ActiveSurface::Terminal;
                 self.active_sidebar_section = SidebarSection::Connections;
             }
+            Some(TabKind::Runtime) => {
+                self.active_surface = ActiveSurface::Terminal;
+            }
             Some(TabKind::ConnectionPool) => {
                 self.active_surface = ActiveSurface::Terminal;
             }
@@ -864,12 +867,12 @@ impl WorkspaceApp {
         } else {
             self.sidebar_width
         };
-        let ai_sidebar_width = if self.ai_sidebar_visible() {
+        let context_sidebar_width = if self.context_sidebar_visible() {
             self.ai_sidebar_width
         } else {
             0.0
         };
-        (window_width - sidebar_width - ai_sidebar_width).max(0.0)
+        (window_width - sidebar_width - context_sidebar_width).max(0.0)
     }
 
     fn tabbar_scroll_viewport_width(&self, window: &Window) -> f32 {

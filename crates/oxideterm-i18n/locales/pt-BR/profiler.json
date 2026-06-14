@@ -23,7 +23,17 @@
       "rtt": "Latência RTT",
       "source": "Fonte",
       "disabled": "Monitoramento desativado",
-      "enable": "Ativar amostragem"
+      "enable": "Ativar amostragem",
+      "swap": "Swap",
+      "mounts": "Montagens",
+      "interfaces": "Interfaces de rede",
+      "top_processes": "Processos por memória",
+      "source_full": "Completo",
+      "source_partial": "Parcial",
+      "source_rtt_only": "Somente RTT",
+      "source_failed": "Falhou",
+      "source_unsupported": "Sem suporte",
+      "retry": "Detectar novamente"
     }
   }
 }

@@ -23,7 +23,17 @@
       "rtt": "RTT レイテンシ",
       "source": "ソース",
       "disabled": "モニタリング無効",
-      "enable": "サンプリング開始"
+      "enable": "サンプリング開始",
+      "swap": "スワップ",
+      "mounts": "マウント",
+      "interfaces": "ネットワークインターフェイス",
+      "top_processes": "メモリ上位プロセス",
+      "source_full": "完全",
+      "source_partial": "部分",
+      "source_rtt_only": "RTT のみ",
+      "source_failed": "失敗",
+      "source_unsupported": "未対応",
+      "retry": "再試行"
     }
   }
 }

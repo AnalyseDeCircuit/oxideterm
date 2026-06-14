@@ -311,6 +311,11 @@ impl TextEditorView {
             );
         }
 
+        if show_cursor {
+            let left = content_left + cursor_column as f32 * self.metrics.char_width;
+            row = row.child(self.render_cursor_at(left));
+        }
+
         row.child(
             div()
                 .absolute()
@@ -411,7 +416,6 @@ impl TextEditorView {
 
         if line_text.is_empty() {
             if show_cursor {
-                row = row.child(self.render_cursor());
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
@@ -432,12 +436,11 @@ impl TextEditorView {
             let Some(chunk_text) = line_text.get(chunk.start..chunk.end) else {
                 continue;
             };
-            if show_cursor && !cursor_drawn && byte_column <= chunk.end {
+            if show_cursor && marked_text.is_some() && !cursor_drawn && byte_column <= chunk.end {
                 let split = byte_column.saturating_sub(chunk.start);
                 let split = split.min(chunk_text.len());
                 let (before, after) = chunk_text.split_at(split);
                 row = self.append_rendered_text(row, before, chunk.color);
-                row = row.child(self.render_cursor());
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
@@ -453,8 +456,7 @@ impl TextEditorView {
             }
         }
 
-        if show_cursor && !cursor_drawn {
-            row = row.child(self.render_cursor());
+        if show_cursor && marked_text.is_some() && !cursor_drawn {
             if let Some(marked_text) = marked_text {
                 row = row.child(
                     div()
@@ -596,8 +598,13 @@ impl TextEditorView {
             .collect()
     }
 
-    fn render_cursor(&self) -> Div {
+    fn render_cursor_at(&self, left: f32) -> Div {
+        // Match CodeMirror/browser editor semantics: the caret is painted over
+        // the line box and must never reserve horizontal layout space.
         div()
+            .absolute()
+            .top(px(self.metrics.line_height * 0.11))
+            .left(px(left))
             .w(px(CM_CURSOR_WIDTH))
             .h(px(self.metrics.line_height * 0.78))
             .bg(rgb(self.appearance.accent_hex))

@@ -33,7 +33,6 @@ use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource};
 use super::ime::WorkspaceImeTarget;
 use super::*;
 
-const FORWARDS_MAX_WIDTH: f32 = 896.0; // Tauri max-w-4xl
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
 const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6
 const FORWARDS_TABLE_HEADER_H: f32 = 34.0; // Tauri px-4 py-2 text-sm

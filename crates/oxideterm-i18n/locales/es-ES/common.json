@@ -83,6 +83,7 @@
     "cmd_disconnect_all": "Desconectar todo",
     "cmd_reconnect_all": "Reconectar todo",
     "cmd_cancel_reconnect": "Cancelar todas las reconexiones",
+    "cmd_open_runtime": "Abrir ejecución",
     "cmd_open_connection_pool": "Abrir pool de conexiones",
     "cmd_health_check": "Ejecutar comprobación de estado",
     "health_result": "{{healthy}}/{{total}} conexiones sanas",

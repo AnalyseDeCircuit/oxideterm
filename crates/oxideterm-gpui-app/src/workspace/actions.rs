@@ -150,7 +150,7 @@ impl WorkspaceApp {
         }
 
         let terminal_panel_open =
-            self.search.visible || self.ai_inline_panel.open || self.ai_sidebar_visible();
+            self.search.visible || self.ai_inline_panel.open || self.context_sidebar_visible();
         if !crate::keybindings::action_allowed_by_terminal_behavior(
             definition,
             &combo,
@@ -249,15 +249,9 @@ impl WorkspaceApp {
             self.close_terminal_ai_inline_panel(window, cx);
             return;
         }
-        if self.ai_sidebar_visible() {
-            self.settings_store
-                .settings_mut()
-                .sidebar_ui
-                .ai_sidebar_collapsed = true;
-            self.clear_ai_sidebar_keyboard_focus();
-            let _ = self.settings_store.save();
+        if self.context_sidebar_visible() {
+            self.collapse_context_sidebar(cx);
             self.focus_active_pane(window, cx);
-            cx.notify();
         }
     }
 
@@ -397,11 +391,13 @@ impl WorkspaceApp {
             return;
         }
 
-        if self
+        let connection_monitor_keys_visible = self
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor)
-            && self.handle_connection_monitor_select_key(event, cx)
-        {
+            || (self.context_sidebar_visible()
+                && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+                && self.active_context_sidebar_tool == ContextSidebarTool::Monitor);
+        if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
             return;
         }
 
@@ -498,15 +494,9 @@ impl WorkspaceApp {
             return;
         }
 
-        if close_panel_shortcut && self.ai_sidebar_visible() {
-            self.settings_store
-                .settings_mut()
-                .sidebar_ui
-                .ai_sidebar_collapsed = true;
-            self.clear_ai_sidebar_keyboard_focus();
-            let _ = self.settings_store.save();
+        if close_panel_shortcut && self.context_sidebar_visible() {
+            self.collapse_context_sidebar(cx);
             self.focus_active_pane(window, cx);
-            cx.notify();
             return;
         }
 

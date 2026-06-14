@@ -9,7 +9,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use dashmap::DashMap;
@@ -37,6 +37,13 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 pub const HEARTBEAT_FAIL_THRESHOLD: u8 = 2;
 pub const WS_BRIDGE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 pub const WS_BRIDGE_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(300);
+const REMOTE_ENV_TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
+const REMOTE_ENV_PHASE_A_TIMEOUT: Duration = Duration::from_secs(3);
+const REMOTE_ENV_PHASE_B_TIMEOUT: Duration = Duration::from_secs(5);
+const REMOTE_ENV_MAX_OUTPUT_SIZE: usize = 8192;
+const REMOTE_ENV_PHASE_A_CMD: &str = "echo '===DETECT==='; if [ -n \"$PSModulePath\" ]; then echo 'PLATFORM=windows'; else echo \"PLATFORM=$(uname -s 2>/dev/null || echo unknown)\"; fi; echo '===END==='";
+const REMOTE_ENV_PHASE_B_UNIX_CMD: &str = "echo '===ENV==='; uname -s 2>/dev/null; echo '===ARCH==='; uname -m 2>/dev/null; echo '===KERNEL==='; uname -r 2>/dev/null; echo '===SHELL==='; echo $SHELL 2>/dev/null; echo '===DISTRO==='; cat /etc/os-release 2>/dev/null | grep -E '^(PRETTY_NAME|ID)=' | head -2; echo '===END==='";
+const REMOTE_ENV_PHASE_B_WINDOWS_CMD: &str = "echo '===ENV==='; [System.Environment]::OSVersion.VersionString; echo '===ARCH==='; $env:PROCESSOR_ARCHITECTURE; echo '===SHELL==='; \"PowerShell $($PSVersionTable.PSVersion)\"; echo '===END==='";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,6 +84,36 @@ pub struct ConnectionInfo {
     pub created_at: SystemTime,
     pub last_active_at: SystemTime,
     pub idle_timeout_secs: Option<u64>,
+    pub remote_env: Option<RemoteEnvInfo>,
+}
+
+/// Remote environment detected after SSH connection establishment.
+///
+/// This mirrors Tauri's `RemoteEnvInfo` payload so profiler and host tools can
+/// choose platform-specific commands from registry state instead of probing in
+/// every caller.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEnvInfo {
+    pub os_type: String,
+    pub os_version: Option<String>,
+    pub kernel: Option<String>,
+    pub arch: Option<String>,
+    pub shell: Option<String>,
+    pub detected_at: i64,
+}
+
+impl RemoteEnvInfo {
+    pub fn unknown() -> Self {
+        Self {
+            os_type: "Unknown".to_string(),
+            os_version: None,
+            kernel: None,
+            arch: None,
+            shell: None,
+            detected_at: remote_env_detected_at(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -180,6 +217,8 @@ struct ConnectionEntry {
     sftp: Mutex<SharedSftpState>,
     sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
+    remote_env: std::sync::OnceLock<RemoteEnvInfo>,
+    remote_env_detection_started: AtomicBool,
     heartbeat_failures: AtomicU64,
     idle_generation: AtomicU64,
     last_emitted_status: RwLock<Option<String>>,
@@ -204,6 +243,8 @@ impl ConnectionEntry {
             sftp: Mutex::new(SharedSftpState::Empty),
             sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
+            remote_env: std::sync::OnceLock::new(),
+            remote_env_detection_started: AtomicBool::new(false),
             heartbeat_failures: AtomicU64::new(0),
             idle_generation: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
@@ -228,6 +269,7 @@ impl ConnectionEntry {
             created_at: self.created_at,
             last_active_at: *self.last_active_at.read(),
             idle_timeout_secs: self.idle_timeout.map(|duration| duration.as_secs()),
+            remote_env: self.remote_env(),
         }
     }
 
@@ -285,6 +327,21 @@ impl ConnectionEntry {
         *self.last_active_at.write() = SystemTime::now();
     }
 
+    fn remote_env(&self) -> Option<RemoteEnvInfo> {
+        self.remote_env.get().cloned()
+    }
+
+    fn set_remote_env(&self, env: RemoteEnvInfo) -> bool {
+        self.remote_env.set(env).is_ok()
+    }
+
+    fn try_begin_remote_env_detection(&self) -> bool {
+        self.remote_env.get().is_none()
+            && !self
+                .remote_env_detection_started
+                .swap(true, Ordering::AcqRel)
+    }
+
     fn reset_heartbeat_failures(&self) {
         self.heartbeat_failures.store(0, Ordering::Relaxed);
     }
@@ -318,6 +375,14 @@ impl SshConnectionHandle {
 
     pub fn info(&self) -> ConnectionInfo {
         self.entry.info()
+    }
+
+    pub fn remote_env(&self) -> Option<RemoteEnvInfo> {
+        self.entry.remote_env()
+    }
+
+    pub fn set_remote_env(&self, env: RemoteEnvInfo) -> bool {
+        self.entry.set_remote_env(env)
     }
 
     pub fn state(&self) -> ConnectionState {
@@ -625,6 +690,7 @@ impl SshConnectionRegistry {
             .get(connection_id)
             .map(|key| key.value().clone())?;
         let entry = self.by_key.get(&key)?.clone();
+        let became_active = matches!(state, ConnectionState::Active);
         *entry.state.write() = state;
         entry.touch();
         let info = entry.info();
@@ -634,7 +700,35 @@ impl SshConnectionRegistry {
             // whenever the connection has been registered to a node.
             let _ = emitter.emit_state_from_connection(&info.connection_id, &info.state, reason);
         }
+        if became_active {
+            self.maybe_spawn_remote_env_detection(entry);
+        }
         Some(info)
+    }
+
+    fn maybe_spawn_remote_env_detection(&self, entry: Arc<ConnectionEntry>) {
+        let runtime = self
+            .idle_task_runtime
+            .read()
+            .clone()
+            .or_else(|| TokioHandle::try_current().ok());
+        let Some(runtime) = runtime else {
+            return;
+        };
+        if !entry.try_begin_remote_env_detection() {
+            return;
+        }
+
+        let handle = SshConnectionHandle { entry };
+        let task = async move {
+            let env = detect_remote_env_for_handle(&handle).await;
+            let _ = handle.set_remote_env(env);
+        };
+
+        // Tauri stores remote env on the connection entry after connect. Native
+        // uses the registry task runtime when available so detection is owned by
+        // the same long-lived SSH runtime as keepalive and idle tasks.
+        runtime.spawn(task);
     }
 
     fn emit_connection_status_changed(
@@ -1301,6 +1395,176 @@ fn topology_consumer_summary(
     summary
 }
 
+async fn detect_remote_env_for_handle(handle: &SshConnectionHandle) -> RemoteEnvInfo {
+    tokio::time::timeout(REMOTE_ENV_TOTAL_TIMEOUT, detect_remote_env_inner(handle))
+        .await
+        .unwrap_or_else(|_| RemoteEnvInfo::unknown())
+}
+
+async fn detect_remote_env_inner(handle: &SshConnectionHandle) -> RemoteEnvInfo {
+    let phase_a_output = match handle
+        .run_command(
+            REMOTE_ENV_PHASE_A_CMD,
+            REMOTE_ENV_PHASE_A_TIMEOUT,
+            REMOTE_ENV_MAX_OUTPUT_SIZE,
+        )
+        .await
+    {
+        Ok(output) => output,
+        Err(_) => {
+            return handle
+                .run_command(
+                    REMOTE_ENV_PHASE_B_WINDOWS_CMD,
+                    REMOTE_ENV_PHASE_B_TIMEOUT,
+                    REMOTE_ENV_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map(|output| parse_remote_windows_env(&output))
+                .unwrap_or_else(|_| RemoteEnvInfo::unknown());
+        }
+    };
+
+    let is_windows = phase_a_output.contains("PLATFORM=windows");
+    let raw_platform = extract_between(&phase_a_output, "PLATFORM=", "\n")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let phase_b_command = if is_windows {
+        REMOTE_ENV_PHASE_B_WINDOWS_CMD
+    } else {
+        REMOTE_ENV_PHASE_B_UNIX_CMD
+    };
+
+    match handle
+        .run_command(
+            phase_b_command,
+            REMOTE_ENV_PHASE_B_TIMEOUT,
+            REMOTE_ENV_MAX_OUTPUT_SIZE,
+        )
+        .await
+    {
+        Ok(output) if is_windows => parse_remote_windows_env(&output),
+        Ok(output) => parse_remote_unix_env(&output, &raw_platform),
+        Err(_) => RemoteEnvInfo {
+            os_type: if is_windows {
+                "Windows".to_string()
+            } else {
+                classify_remote_unix_os(&raw_platform)
+            },
+            os_version: None,
+            kernel: None,
+            arch: None,
+            shell: None,
+            detected_at: remote_env_detected_at(),
+        },
+    }
+}
+
+fn parse_remote_unix_env(output: &str, raw_platform: &str) -> RemoteEnvInfo {
+    let os_type = classify_remote_unix_os(raw_platform);
+    let env_value = extract_section_between(output, "===ENV===", "===ARCH===")
+        .map(clean_remote_env_value)
+        .filter(|value| !value.is_empty());
+    let arch = extract_section_between(output, "===ARCH===", "===KERNEL===")
+        .map(clean_remote_env_value)
+        .filter(|value| !value.is_empty());
+    let kernel = extract_section_between(output, "===KERNEL===", "===SHELL===")
+        .map(clean_remote_env_value)
+        .filter(|value| !value.is_empty());
+    let shell = extract_section_between(output, "===SHELL===", "===DISTRO===")
+        .map(clean_remote_env_value)
+        .filter(|value| !value.is_empty());
+    let distro_block =
+        extract_section_between(output, "===DISTRO===", "===END===").unwrap_or_default();
+    let os_version = extract_os_release_field(distro_block, "PRETTY_NAME")
+        .or_else(|| extract_os_release_field(distro_block, "ID"))
+        .or(env_value);
+
+    RemoteEnvInfo {
+        os_type,
+        os_version,
+        kernel,
+        arch,
+        shell,
+        detected_at: remote_env_detected_at(),
+    }
+}
+
+fn parse_remote_windows_env(output: &str) -> RemoteEnvInfo {
+    RemoteEnvInfo {
+        os_type: "Windows".to_string(),
+        os_version: extract_section_between(output, "===ENV===", "===ARCH===")
+            .map(clean_remote_env_value)
+            .filter(|value| !value.is_empty()),
+        kernel: None,
+        arch: extract_section_between(output, "===ARCH===", "===SHELL===")
+            .map(clean_remote_env_value)
+            .filter(|value| !value.is_empty()),
+        shell: extract_section_between(output, "===SHELL===", "===END===")
+            .map(clean_remote_env_value)
+            .filter(|value| !value.is_empty()),
+        detected_at: remote_env_detected_at(),
+    }
+}
+
+fn classify_remote_unix_os(uname_s: &str) -> String {
+    let trimmed = uname_s.trim();
+    let upper = trimmed.to_uppercase();
+    if upper.starts_with("MINGW32") || upper.starts_with("MINGW64") {
+        return "Windows_MinGW".to_string();
+    }
+    if upper.starts_with("MSYS") {
+        return "Windows_MSYS".to_string();
+    }
+    if upper.starts_with("CYGWIN") {
+        return "Windows_Cygwin".to_string();
+    }
+
+    match trimmed {
+        "Linux" => "Linux".to_string(),
+        "Darwin" => "macOS".to_string(),
+        "FreeBSD" => "FreeBSD".to_string(),
+        "OpenBSD" => "OpenBSD".to_string(),
+        "NetBSD" => "NetBSD".to_string(),
+        "SunOS" => "SunOS".to_string(),
+        "" | "unknown" => "Unknown".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn extract_between(value: &str, start: &str, end: &str) -> Option<String> {
+    let start_index = value.find(start)? + start.len();
+    let rest = &value[start_index..];
+    let end_index = rest.find(end).unwrap_or(rest.len());
+    Some(rest[..end_index].to_string())
+}
+
+fn extract_section_between<'a>(value: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let start_index = value.find(start)? + start.len();
+    let rest = &value[start_index..];
+    let end_index = rest.find(end).unwrap_or(rest.len());
+    Some(rest[..end_index].trim())
+}
+
+fn extract_os_release_field(block: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    block.lines().find_map(|line| {
+        let value = line.trim().strip_prefix(&prefix)?;
+        Some(value.trim_matches('"').to_string())
+    })
+}
+
+fn clean_remote_env_value(value: impl AsRef<str>) -> String {
+    value.as_ref().trim().trim_matches('\r').trim().to_string()
+}
+
+fn remote_env_detected_at() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
 impl From<&ConnectionState> for ConnectionTopologyStatus {
     fn from(state: &ConnectionState) -> Self {
         match state {
@@ -1363,6 +1627,45 @@ mod tests {
         assert_eq!(first.connection_id(), second.connection_id());
         assert_eq!(first.info().ref_count, 2);
         assert_eq!(first.state(), ConnectionState::Connecting);
+    }
+
+    #[test]
+    fn remote_env_is_stored_once_on_connection_entry() {
+        let registry = SshConnectionRegistry::default();
+        let handle = registry.acquire(
+            SshConfig::password("host", 22, "me", "pw"),
+            ConnectionConsumer::Terminal("a".into()),
+        );
+        let first = RemoteEnvInfo {
+            os_type: "Linux".to_string(),
+            os_version: Some("Ubuntu".to_string()),
+            kernel: Some("6.0".to_string()),
+            arch: Some("x86_64".to_string()),
+            shell: Some("/bin/bash".to_string()),
+            detected_at: 1,
+        };
+        let second = RemoteEnvInfo {
+            os_type: "macOS".to_string(),
+            os_version: Some("14".to_string()),
+            kernel: None,
+            arch: None,
+            shell: Some("/bin/zsh".to_string()),
+            detected_at: 2,
+        };
+
+        assert!(handle.set_remote_env(first.clone()));
+        assert!(!handle.set_remote_env(second));
+
+        assert_eq!(handle.remote_env(), Some(first.clone()));
+        assert_eq!(handle.info().remote_env, Some(first));
+    }
+
+    #[test]
+    fn remote_env_parser_matches_tauri_unix_os_names() {
+        assert_eq!(classify_remote_unix_os("Linux"), "Linux");
+        assert_eq!(classify_remote_unix_os("Darwin"), "macOS");
+        assert_eq!(classify_remote_unix_os("MINGW64_NT-10.0"), "Windows_MinGW");
+        assert_eq!(classify_remote_unix_os(""), "Unknown");
     }
 
     #[test]

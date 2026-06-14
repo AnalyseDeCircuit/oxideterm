@@ -1038,7 +1038,7 @@ impl WorkspaceApp {
                 available_width -= self.sidebar_panel_width();
             }
         }
-        if self.ai_sidebar_visible() {
+        if self.context_sidebar_visible() {
             available_width -= self.ai_sidebar_width;
         }
         let grid_width = (available_width - LAUNCHER_HEADER_PADDING_X * 2.0).max(LAUNCHER_TILE_W);

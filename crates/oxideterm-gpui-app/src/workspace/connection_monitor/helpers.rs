@@ -148,12 +148,13 @@ fn rtt_color(value: Option<u64>) -> u32 {
     }
 }
 
-fn metrics_source_label(source: MetricsSource) -> &'static str {
+fn metrics_source_label_key(source: MetricsSource) -> &'static str {
     match source {
-        MetricsSource::Full => "full",
-        MetricsSource::Partial => "partial",
-        MetricsSource::RttOnly => "rtt_only",
-        MetricsSource::Failed => "failed",
+        MetricsSource::Full => "profiler.panel.source_full",
+        MetricsSource::Partial => "profiler.panel.source_partial",
+        MetricsSource::RttOnly => "profiler.panel.source_rtt_only",
+        MetricsSource::Failed => "profiler.panel.source_failed",
+        MetricsSource::Unsupported => "profiler.panel.source_unsupported",
     }
 }
 

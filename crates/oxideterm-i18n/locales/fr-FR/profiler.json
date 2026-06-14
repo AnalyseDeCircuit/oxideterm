@@ -23,7 +23,17 @@
       "rtt": "Latence RTT",
       "source": "Source",
       "disabled": "Surveillance désactivée",
-      "enable": "Activer l'échantillonnage"
+      "enable": "Activer l'échantillonnage",
+      "swap": "Swap",
+      "mounts": "Points de montage",
+      "interfaces": "Interfaces réseau",
+      "top_processes": "Processus mémoire",
+      "source_full": "Complet",
+      "source_partial": "Partiel",
+      "source_rtt_only": "RTT seul",
+      "source_failed": "Échec",
+      "source_unsupported": "Non pris en charge",
+      "retry": "Relancer la détection"
     }
   }
 }

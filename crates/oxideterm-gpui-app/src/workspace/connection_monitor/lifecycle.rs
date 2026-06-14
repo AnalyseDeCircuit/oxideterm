@@ -1,22 +1,20 @@
 impl WorkspaceApp {
-    pub(super) fn open_connection_monitor_tab(
+    pub(super) fn open_connection_runtime_tab(
         &mut self,
+        section: ConnectionRuntimeSection,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_id = if let Some(tab) = self
-            .tabs
-            .iter()
-            .find(|tab| tab.kind == TabKind::ConnectionMonitor)
-        {
+        self.active_connection_runtime_section = section;
+        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Runtime) {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id();
             self.tabs.push(Tab {
                 id: tab_id,
-                kind: TabKind::ConnectionMonitor,
-                title: self.i18n.t("sidebar.panels.connection_monitor"),
-                title_source: TabTitleSource::I18nKey("sidebar.panels.connection_monitor"),
+                kind: TabKind::Runtime,
+                title: self.i18n.t("sidebar.panels.runtime"),
+                title_source: TabTitleSource::I18nKey("sidebar.panels.runtime"),
                 root_pane: None,
                 active_pane_id: None,
             });
@@ -27,66 +25,54 @@ impl WorkspaceApp {
         self.sync_connection_monitor_selection(cx);
     }
 
+    pub(super) fn open_connection_monitor_tab(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_connection_runtime_tab(ConnectionRuntimeSection::Health, window, cx);
+    }
+
     pub(super) fn open_connection_pool_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_id = if let Some(tab) = self
-            .tabs
-            .iter()
-            .find(|tab| tab.kind == TabKind::ConnectionPool)
-        {
-            tab.id
-        } else {
-            let tab_id = self.alloc_tab_id();
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::ConnectionPool,
-                title: self.i18n.t("sidebar.panels.connection_pool"),
-                title_source: TabTitleSource::I18nKey("sidebar.panels.connection_pool"),
-                root_pane: None,
-                active_pane_id: None,
-            });
-            tab_id
-        };
-        self.set_active_tab(tab_id, window, cx);
-        self.refresh_connection_monitor_pool_stats();
+        self.open_connection_runtime_tab(ConnectionRuntimeSection::Pool, window, cx);
     }
 
     pub(super) fn open_topology_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Topology) {
-            tab.id
-        } else {
-            let tab_id = self.alloc_tab_id();
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Topology,
-                title: self.i18n.t("sidebar.panels.connection_matrix"),
-                title_source: TabTitleSource::I18nKey("sidebar.panels.connection_matrix"),
-                root_pane: None,
-                active_pane_id: None,
-            });
-            tab_id
-        };
-        self.set_active_tab(tab_id, window, cx);
-        self.refresh_connection_monitor_pool_stats();
+        self.open_connection_runtime_tab(ConnectionRuntimeSection::Topology, window, cx);
     }
 
-    pub(super) fn poll_connection_monitor_updates(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn poll_connection_monitor_updates(
+        &mut self,
+        request_repaint: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut received_update = false;
         while self
             .connection_monitor
             .profiler_update_rx
             .try_recv()
             .is_ok()
         {
+            received_update = true;
+        }
+        if received_update && request_repaint {
+            // Background polling should wake the UI, but render-time draining
+            // must not schedule a second frame after the current one.
             cx.notify();
         }
     }
 
     pub(super) fn maybe_refresh_connection_monitor(&mut self, cx: &mut Context<Self>) {
-        if !self.active_tab().is_some_and(|tab| {
+        let monitor_surface_visible = self.active_tab().is_some_and(|tab| {
             matches!(
                 tab.kind,
                 TabKind::ConnectionPool | TabKind::ConnectionMonitor | TabKind::Topology
+                    | TabKind::Runtime
             )
-        }) {
+        }) || (self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            && self.active_context_sidebar_tool == ContextSidebarTool::Monitor);
+        if !monitor_surface_visible {
             return;
         }
 
@@ -97,10 +83,25 @@ impl WorkspaceApp {
         if stale {
             self.refresh_connection_monitor_pool_stats();
         }
-        self.sync_connection_monitor_selection(cx);
+        let selected_missing = self
+            .connection_monitor
+            .selected_connection_id
+            .as_ref()
+            .is_none_or(|selected| {
+                !self
+                    .connection_monitor
+                    .pool_summaries
+                    .iter()
+                    .any(|summary| summary.id == *selected)
+            });
+        if stale || selected_missing {
+            // Selection sync scans the registry and may start profilers. Keep it
+            // tied to pool refreshes instead of every terminal-driven repaint.
+            self.sync_connection_monitor_selection(cx);
+        }
     }
 
-    fn refresh_connection_monitor_pool_stats(&mut self) {
+    pub(super) fn refresh_connection_monitor_pool_stats(&mut self) {
         self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
         self.connection_monitor.pool_summaries = self.ssh_registry.list_connection_summaries();
         self.connection_monitor.topology_snapshot =
@@ -126,7 +127,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn sync_connection_monitor_selection(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn sync_connection_monitor_selection(&mut self, cx: &mut Context<Self>) {
         let connections = self.monitor_connections();
         let live_connection_ids = connections
             .iter()
@@ -195,13 +196,17 @@ impl WorkspaceApp {
         self.connection_monitor
             .disabled_profiler_connections
             .remove(&connection_id);
+        let os_type = handle
+            .remote_env()
+            .map(|env| env.os_type)
+            .unwrap_or_else(|| "Linux".to_string());
         let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
         self.connection_monitor
             .profiler_registry
             .start_with_sampler_on(
                 connection_id,
                 sampler,
-                "Linux",
+                os_type,
                 Some(self.connection_monitor.profiler_update_tx.clone()),
                 self.forwarding_runtime.handle().clone(),
             );

@@ -23,7 +23,17 @@
       "rtt": "RTT 延遲",
       "source": "資料來源",
       "disabled": "監控已關閉",
-      "enable": "開啟採樣"
+      "enable": "開啟採樣",
+      "swap": "交換空間",
+      "mounts": "掛載點",
+      "interfaces": "網路介面",
+      "top_processes": "高記憶體程序",
+      "source_full": "完整",
+      "source_partial": "部分",
+      "source_rtt_only": "僅 RTT",
+      "source_failed": "失敗",
+      "source_unsupported": "不支援",
+      "retry": "重新探測"
     }
   }
 }

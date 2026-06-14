@@ -23,7 +23,17 @@
       "rtt": "RTT 지연",
       "source": "소스",
       "disabled": "모니터링 비활성화됨",
-      "enable": "샘플링 시작"
+      "enable": "샘플링 시작",
+      "swap": "스왑",
+      "mounts": "마운트",
+      "interfaces": "네트워크 인터페이스",
+      "top_processes": "메모리 상위 프로세스",
+      "source_full": "전체",
+      "source_partial": "부분",
+      "source_rtt_only": "RTT만",
+      "source_failed": "실패",
+      "source_unsupported": "지원 안 함",
+      "retry": "다시 탐지"
     }
   }
 }

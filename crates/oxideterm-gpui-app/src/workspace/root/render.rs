@@ -10,7 +10,7 @@ impl Render for WorkspaceApp {
         self.sync_tab_titles(cx);
         self.poll_forwarding_worker_results(cx);
         self.poll_graphics_worker_results(window, cx);
-        self.poll_connection_monitor_updates(cx);
+        self.poll_connection_monitor_updates(false, cx);
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
@@ -48,6 +48,7 @@ impl Render for WorkspaceApp {
                             | TabKind::FileManager
                             | TabKind::Launcher
                             | TabKind::Graphics
+                            | TabKind::Runtime
                             | TabKind::ConnectionPool
                             | TabKind::ConnectionMonitor
                             | TabKind::Topology
@@ -76,6 +77,7 @@ impl Render for WorkspaceApp {
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
+                (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
                 (TabKind::ConnectionPool, _) => self.render_connection_pool_surface(cx),
                 (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
                 (TabKind::Topology, _) => self.render_topology_surface(cx),
@@ -615,8 +617,8 @@ impl Render for WorkspaceApp {
                                 ),
                             ),
                     )
-                    .when(self.ai_sidebar_visible(), |layout| {
-                        layout.child(self.render_ai_right_sidebar_region(cx))
+                    .when(self.context_sidebar_visible(), |layout| {
+                        layout.child(self.render_context_right_sidebar_region(cx))
                     }),
             )
             .when(self.new_connection_form.is_some(), |root| {

@@ -23,7 +23,17 @@
       "rtt": "Latencia RTT",
       "source": "Fuente",
       "disabled": "Monitoreo desactivado",
-      "enable": "Activar muestreo"
+      "enable": "Activar muestreo",
+      "swap": "Intercambio",
+      "mounts": "Montajes",
+      "interfaces": "Interfaces de red",
+      "top_processes": "Procesos con más memoria",
+      "source_full": "Completo",
+      "source_partial": "Parcial",
+      "source_rtt_only": "Solo RTT",
+      "source_failed": "Fallido",
+      "source_unsupported": "No compatible",
+      "retry": "Volver a detectar"
     }
   }
 }

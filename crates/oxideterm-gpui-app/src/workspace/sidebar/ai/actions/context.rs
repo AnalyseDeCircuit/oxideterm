@@ -577,6 +577,7 @@ fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
         TabKind::Settings => "settings",
         TabKind::FileManager => "file_manager",
         TabKind::SessionManager => "session_manager",
+        TabKind::Runtime => "runtime",
         TabKind::ConnectionMonitor => "connection_monitor",
         TabKind::ConnectionPool => "connection_pool",
         TabKind::Topology => "topology",

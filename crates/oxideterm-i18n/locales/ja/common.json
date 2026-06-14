@@ -83,6 +83,7 @@
     "cmd_disconnect_all": "すべて切断",
     "cmd_reconnect_all": "すべて再接続",
     "cmd_cancel_reconnect": "すべての再接続をキャンセル",
+    "cmd_open_runtime": "ランタイムを開く",
     "cmd_open_connection_pool": "接続プールを開く",
     "cmd_health_check": "ヘルスチェックを実行",
     "health_result": "{{healthy}}/{{total}} 接続が正常",

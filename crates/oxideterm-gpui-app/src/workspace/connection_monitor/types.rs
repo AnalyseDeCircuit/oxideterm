@@ -113,6 +113,14 @@ struct ConnectionPoolStateView {
     color: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ConnectionRuntimeSection {
+    Overview,
+    Pool,
+    Health,
+    Topology,
+}
+
 pub(super) struct ConnectionMonitorState {
     pub(super) pool_stats: Option<ConnectionPoolMonitorStats>,
     pub(super) pool_summaries: Vec<ConnectionPoolEntrySummary>,

@@ -23,7 +23,17 @@
       "rtt": "RTT 延迟",
       "source": "数据来源",
       "disabled": "监控已关闭",
-      "enable": "开启采样"
+      "enable": "开启采样",
+      "swap": "交换空间",
+      "mounts": "挂载点",
+      "interfaces": "网卡",
+      "top_processes": "高内存进程",
+      "source_full": "完整",
+      "source_partial": "部分",
+      "source_rtt_only": "仅 RTT",
+      "source_failed": "失败",
+      "source_unsupported": "不支持",
+      "retry": "重新探测"
     }
   }
 }

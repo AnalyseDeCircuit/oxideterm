@@ -25,6 +25,7 @@ pub enum TabKind {
     FileManager,
     Launcher,
     Graphics,
+    Runtime,
     ConnectionPool,
     ConnectionMonitor,
     Topology,

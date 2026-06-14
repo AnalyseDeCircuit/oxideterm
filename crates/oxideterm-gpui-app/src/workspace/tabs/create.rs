@@ -481,8 +481,9 @@ impl WorkspaceApp {
             .with_managed_key_resolver(managed_key_resolver)
             // SSH terminal connect tasks share the workspace backend runtime so
             // opening many SSH tabs does not create one Tokio runtime per pane.
+            // Match Tauri: request the PTY before shell startup using the
+            // terminal's default size so login MOTD is emitted in the first shell.
             .with_runtime_handle(self.forwarding_runtime.handle().clone())
-            .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
         self.register_terminal_endpoint_session(&node_id, session_id, shared_session.clone());
@@ -685,8 +686,8 @@ impl WorkspaceApp {
             .with_managed_key_resolver(managed_key_resolver)
             // Reopened node terminals are consumers of the same backend runtime
             // as the node-owned SSH transport.
+            // Keep PTY allocation immediate like Tauri's createTerminalForNode path.
             .with_runtime_handle(self.forwarding_runtime.handle().clone())
-            .with_deferred_pty(true)
             .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
         self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone());

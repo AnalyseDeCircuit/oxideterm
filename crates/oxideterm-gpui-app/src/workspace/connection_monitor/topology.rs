@@ -55,6 +55,22 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(super) fn render_connection_runtime_topology(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .id("connection-runtime-topology")
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text))
+            // Runtime already labels this section as Connection Matrix, so the
+            // embedded graph starts directly at the canvas.
+            .child(self.render_connection_topology(cx))
+            .into_any_element()
+    }
+
     fn format_connection_pool_time(&self, time: SystemTime) -> String {
         let elapsed = SystemTime::now()
             .duration_since(time)

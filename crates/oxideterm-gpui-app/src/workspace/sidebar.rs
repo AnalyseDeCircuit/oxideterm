@@ -44,18 +44,36 @@ pub(super) enum SidebarSection {
     Connections,
     Sftp,
     Forwards,
+    Runtime,
     Terminal,
     Activity,
     Network,
     Extensions,
     CloudSync,
     Assistant,
+    HostTools,
     Automation,
     Workspace,
     Files,
     Monitor,
     Notifications,
     Settings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ContextSidebarPanel {
+    Assistant,
+    HostTools,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ContextSidebarTool {
+    Monitor,
+    Processes,
+    Services,
+    Logs,
+    Tmux,
+    Docker,
 }
 
 #[derive(Clone, Copy)]
@@ -85,6 +103,7 @@ impl SidebarSection {
             "connections" | "saved" => Self::Connections,
             "sftp" => Self::Sftp,
             "forwards" => Self::Forwards,
+            "runtime" => Self::Runtime,
             "connection_pool" | "terminal" => Self::Terminal,
             "connection_monitor" => Self::Activity,
             "activity" => Self::Activity,
@@ -92,6 +111,7 @@ impl SidebarSection {
             "extensions" => Self::Extensions,
             "cloud_sync" => Self::CloudSync,
             "ai" | "assistant" => Self::Assistant,
+            "host_tools" => Self::HostTools,
             "automation" => Self::Automation,
             "workspace" => Self::Workspace,
             "files" => Self::Files,
@@ -109,12 +129,14 @@ impl SidebarSection {
             Self::Connections => "saved",
             Self::Sftp => "sftp",
             Self::Forwards => "forwards",
+            Self::Runtime => "runtime",
             Self::Terminal => "connection_pool",
             Self::Activity => "activity",
             Self::Network => "topology",
             Self::Extensions => "extensions",
             Self::CloudSync => "cloud_sync",
             Self::Assistant => "ai",
+            Self::HostTools => "host_tools",
             Self::Automation => "automation",
             Self::Workspace => "workspace",
             Self::Files => "files",
@@ -137,9 +159,11 @@ impl WorkspaceApp {
             // Tauri separates activity-bar tab buttons from sidebar sections.
             // Keep tab-only entries from replacing the Sessions sidebar body.
             SidebarSection::Terminal
+            | SidebarSection::Runtime
             | SidebarSection::Activity
             | SidebarSection::Network
             | SidebarSection::Assistant
+            | SidebarSection::HostTools
             | SidebarSection::Automation
             | SidebarSection::Workspace
             | SidebarSection::Files
@@ -170,12 +194,14 @@ mod sidebar_persistence_tests {
             SidebarSection::Connections,
             SidebarSection::Sftp,
             SidebarSection::Forwards,
+            SidebarSection::Runtime,
             SidebarSection::Terminal,
             SidebarSection::Activity,
             SidebarSection::Network,
             SidebarSection::Extensions,
             SidebarSection::CloudSync,
             SidebarSection::Assistant,
+            SidebarSection::HostTools,
             SidebarSection::Automation,
             SidebarSection::Workspace,
             SidebarSection::Files,

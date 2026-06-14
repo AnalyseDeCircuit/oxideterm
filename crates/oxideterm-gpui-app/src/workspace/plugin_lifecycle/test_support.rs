@@ -67,6 +67,7 @@ pub(super) fn test_host_api_snapshot_with_connections() -> NativePluginHostApiSn
         created_at: std::time::UNIX_EPOCH + Duration::from_secs(1),
         last_active_at: std::time::UNIX_EPOCH + Duration::from_secs(2),
         idle_timeout_secs: Some(1800),
+        remote_env: None,
     };
     let connections = vec![native_plugin_connection_snapshot(&connection)];
     let connection_states = HashMap::from([(
