@@ -61,7 +61,9 @@
         "cancel_reconnect": "Cancelar reconexão",
         "port_forwarding": "Encaminhamento de portas",
         "drill_in": "Navegar (próximo salto)",
-        "connect": "Conectar"
+        "saved_next_hop": "Usar conexão salva como próximo salto...",
+        "connect": "Conectar",
+        "save_as_connection": "Salvar como conexão..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Encaminhamento de portas",
       "disconnect": "Desconectar",
       "reconnect": "Reconectar",
-      "drill_in": "Navegar (próximo salto)"
+      "drill_in": "Navegar (próximo salto)",
+      "saved_next_hop": "Usar conexão salva como próximo salto...",
+      "save_as_connection": "Salvar como conexão..."
+    },
+    "saved_next_hop": {
+      "title": "Usar conexão salva como próximo salto",
+      "description": "Escolha uma conexão salva para anexar abaixo de {{host}}.",
+      "empty": "Nenhuma conexão salva disponível.",
+      "cancel": "Cancelar",
+      "proxy_chain_badge": "{{count}} saltos",
+      "parent_not_ready": "Conecte o nó pai antes de adicionar um próximo salto salvo.",
+      "not_found": "Conexão salva não encontrada.",
+      "missing_credentials": "Esta conexão salva não possui as credenciais necessárias para conectar.",
+      "materialize_failed": "Não foi possível adicionar a conexão salva à árvore de sessões."
     },
     "breadcrumb": {
       "back_to_root": "Voltar à visualização raiz",

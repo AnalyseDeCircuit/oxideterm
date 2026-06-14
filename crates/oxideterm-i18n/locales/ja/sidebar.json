@@ -61,7 +61,9 @@
         "cancel_reconnect": "再接続をキャンセル",
         "port_forwarding": "ポートフォワーディング",
         "drill_in": "ドリルイン（次のホップ）",
-        "connect": "接続"
+        "saved_next_hop": "保存済み接続を次のホップとして使用...",
+        "connect": "接続",
+        "save_as_connection": "接続として保存..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "ポートフォワーディング",
       "disconnect": "切断",
       "reconnect": "再接続",
-      "drill_in": "ドリルイン（次のホップ）"
+      "drill_in": "ドリルイン（次のホップ）",
+      "saved_next_hop": "保存済み接続を次のホップとして使用...",
+      "save_as_connection": "接続として保存..."
+    },
+    "saved_next_hop": {
+      "title": "保存済み接続を次のホップとして使用",
+      "description": "{{host}} の下に接続する保存済み接続を選択します。",
+      "empty": "利用できる保存済み接続はありません。",
+      "cancel": "キャンセル",
+      "proxy_chain_badge": "{{count}} ホップ",
+      "parent_not_ready": "保存済みの次のホップを追加する前に親ノードへ接続してください。",
+      "not_found": "保存済み接続が見つかりません。",
+      "missing_credentials": "この保存済み接続には接続に必要な認証情報がありません。",
+      "materialize_failed": "保存済み接続をセッションツリーに追加できませんでした。"
     },
     "breadcrumb": {
       "back_to_root": "ルートビューに戻る",

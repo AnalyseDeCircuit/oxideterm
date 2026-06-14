@@ -76,7 +76,10 @@
       "managed_key": "Chave SSH gerenciada",
       "managed_key_placeholder": "Selecionar uma chave gerenciada",
       "managed_key_hint": "Chaves gerenciadas ficam no chaveiro local. Esta conexão armazena apenas a referência da chave e uma frase secreta opcional.",
-      "managed_key_required": "Uma chave SSH gerenciada é necessária para autenticação por chave gerenciada."
+      "managed_key_required": "Uma chave SSH gerenciada é necessária para autenticação por chave gerenciada.",
+      "save": "Salvar",
+      "save_and_connect": "Salvar e conectar",
+      "runtime_node_missing": "O nó SSH em execução não está mais disponível"
     },
     "auth": {
       "password": "Senha",

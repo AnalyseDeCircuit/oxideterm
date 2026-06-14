@@ -61,7 +61,9 @@
         "cancel_reconnect": "Reconnect abbrechen",
         "port_forwarding": "Portweiterleitung",
         "drill_in": "Hineinnavigieren (Nächster Hop)",
-        "connect": "Verbinden"
+        "saved_next_hop": "Gespeicherte Verbindung als nächsten Hop verwenden...",
+        "connect": "Verbinden",
+        "save_as_connection": "Als Verbindung speichern..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Portweiterleitung",
       "disconnect": "Trennen",
       "reconnect": "Erneut verbinden",
-      "drill_in": "Hineinnavigieren (Nächster Hop)"
+      "drill_in": "Hineinnavigieren (Nächster Hop)",
+      "saved_next_hop": "Gespeicherte Verbindung als nächsten Hop verwenden...",
+      "save_as_connection": "Als Verbindung speichern..."
+    },
+    "saved_next_hop": {
+      "title": "Gespeicherte Verbindung als nächsten Hop verwenden",
+      "description": "Wählen Sie eine gespeicherte Verbindung, die unter {{host}} angehängt wird.",
+      "empty": "Keine gespeicherten Verbindungen verfügbar.",
+      "cancel": "Abbrechen",
+      "proxy_chain_badge": "{{count}} Hops",
+      "parent_not_ready": "Verbinden Sie zuerst den übergeordneten Knoten, bevor Sie einen gespeicherten nächsten Hop hinzufügen.",
+      "not_found": "Gespeicherte Verbindung wurde nicht gefunden.",
+      "missing_credentials": "Dieser gespeicherten Verbindung fehlen die benötigten Zugangsdaten.",
+      "materialize_failed": "Die gespeicherte Verbindung konnte nicht zum Sitzungsbaum hinzugefügt werden."
     },
     "breadcrumb": {
       "back_to_root": "Zurück zur Stammansicht",

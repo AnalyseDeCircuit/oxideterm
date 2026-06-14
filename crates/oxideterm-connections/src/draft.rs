@@ -263,12 +263,13 @@ fn saved_proxy_hop_auth_from_draft(
         anyhow::bail!("Proxy hop {hop_index} does not support keyboard-interactive/2FA");
     }
     if auth.kind == ConnectionAuthDraftKind::DefaultKey {
+        let has_passphrase = !auth.passphrase.is_empty();
         return Ok(SavedAuth::Key {
             key_path: first_loadable_default_key_path(auth.passphrase.expose_secret())
                 .map_err(|error| anyhow::anyhow!("No SSH key found for proxy hop: {error}"))?,
-            has_passphrase: false,
+            has_passphrase,
             passphrase_keychain_id: None,
-            plaintext_passphrase: None,
+            plaintext_passphrase: has_passphrase.then_some(auth.passphrase),
         });
     }
     if auth.kind == ConnectionAuthDraftKind::Password {

@@ -2220,10 +2220,25 @@ impl WorkspaceApp {
                     this.start_new_connection_flow(SshConnectionIntent::Test, window, cx);
                 }
                 ConnectionButtonAction::Connect => {
-                    this.submit_new_connection_form(window, cx);
+                    this.submit_new_connection_form_with_action(
+                        NewConnectionSubmitAction::Connect,
+                        window,
+                        cx,
+                    );
                 }
                 ConnectionButtonAction::Save => {
-                    this.submit_new_connection_form(window, cx);
+                    this.submit_new_connection_form_with_action(
+                        NewConnectionSubmitAction::Save,
+                        window,
+                        cx,
+                    );
+                }
+                ConnectionButtonAction::SaveAndConnect => {
+                    this.submit_new_connection_form_with_action(
+                        NewConnectionSubmitAction::SaveAndConnect,
+                        window,
+                        cx,
+                    );
                 }
             }),
         )

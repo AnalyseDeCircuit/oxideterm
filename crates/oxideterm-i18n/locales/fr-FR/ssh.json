@@ -76,7 +76,10 @@
       "managed_key": "Clé SSH gérée",
       "managed_key_placeholder": "Sélectionner une clé gérée",
       "managed_key_hint": "Les clés gérées restent dans le trousseau local. Cette connexion ne stocke que la référence de clé et la phrase secrète facultative.",
-      "managed_key_required": "Une clé SSH gérée est requise pour l'authentification par clé gérée."
+      "managed_key_required": "Une clé SSH gérée est requise pour l'authentification par clé gérée.",
+      "save": "Enregistrer",
+      "save_and_connect": "Enregistrer et connecter",
+      "runtime_node_missing": "Le nœud SSH en cours n’est plus disponible"
     },
     "auth": {
       "password": "Mot de passe",

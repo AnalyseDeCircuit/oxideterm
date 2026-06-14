@@ -61,7 +61,9 @@
         "cancel_reconnect": "Annulla riconnessione",
         "port_forwarding": "Port Forwarding",
         "drill_in": "Drill In (Prossimo Hop)",
-        "connect": "Connetti"
+        "saved_next_hop": "Usa connessione salvata come prossimo hop...",
+        "connect": "Connetti",
+        "save_as_connection": "Salva come connessione..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Port Forwarding",
       "disconnect": "Disconnetti",
       "reconnect": "Riconnetti",
-      "drill_in": "Drill In (Prossimo Hop)"
+      "drill_in": "Drill In (Prossimo Hop)",
+      "saved_next_hop": "Usa connessione salvata come prossimo hop...",
+      "save_as_connection": "Salva come connessione..."
+    },
+    "saved_next_hop": {
+      "title": "Usa connessione salvata come prossimo hop",
+      "description": "Scegli una connessione salvata da collegare sotto {{host}}.",
+      "empty": "Nessuna connessione salvata disponibile.",
+      "cancel": "Annulla",
+      "proxy_chain_badge": "{{count}} hop",
+      "parent_not_ready": "Connetti prima il nodo padre prima di aggiungere un prossimo hop salvato.",
+      "not_found": "Connessione salvata non trovata.",
+      "missing_credentials": "Questa connessione salvata non contiene le credenziali necessarie.",
+      "materialize_failed": "Impossibile aggiungere la connessione salvata all'albero delle sessioni."
     },
     "breadcrumb": {
       "back_to_root": "Torna alla vista radice",

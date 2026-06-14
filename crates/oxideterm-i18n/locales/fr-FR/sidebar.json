@@ -61,7 +61,9 @@
         "cancel_reconnect": "Annuler la reconnexion",
         "port_forwarding": "Transfert de ports",
         "drill_in": "Drill In (saut suivant)",
-        "connect": "Connecter"
+        "saved_next_hop": "Utiliser une connexion enregistrée comme saut suivant...",
+        "connect": "Connecter",
+        "save_as_connection": "Enregistrer comme connexion..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Transfert de ports",
       "disconnect": "Déconnecter",
       "reconnect": "Reconnecter",
-      "drill_in": "Drill In (saut suivant)"
+      "drill_in": "Drill In (saut suivant)",
+      "saved_next_hop": "Utiliser une connexion enregistrée comme saut suivant...",
+      "save_as_connection": "Enregistrer comme connexion..."
+    },
+    "saved_next_hop": {
+      "title": "Utiliser une connexion enregistrée comme saut suivant",
+      "description": "Choisissez une connexion enregistrée à rattacher sous {{host}}.",
+      "empty": "Aucune connexion enregistrée disponible.",
+      "cancel": "Annuler",
+      "proxy_chain_badge": "{{count}} sauts",
+      "parent_not_ready": "Connectez d'abord le nœud parent avant d'ajouter un saut suivant enregistré.",
+      "not_found": "Connexion enregistrée introuvable.",
+      "missing_credentials": "Cette connexion enregistrée ne contient pas les identifiants nécessaires.",
+      "materialize_failed": "Impossible d'ajouter la connexion enregistrée à l'arbre de sessions."
     },
     "breadcrumb": {
       "back_to_root": "Retour à la vue racine",

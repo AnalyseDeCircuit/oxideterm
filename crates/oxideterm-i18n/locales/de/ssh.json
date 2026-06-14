@@ -76,7 +76,10 @@
       "managed_key": "Verwalteter SSH-Schlüssel",
       "managed_key_placeholder": "Verwalteten Schlüssel auswählen",
       "managed_key_hint": "Verwaltete Schlüssel bleiben im lokalen Schlüsselbund. Diese Verbindung speichert nur die Schlüsselreferenz und eine optionale Passphrase.",
-      "managed_key_required": "Für die Authentifizierung mit verwaltetem Schlüssel ist ein verwalteter SSH-Schlüssel erforderlich."
+      "managed_key_required": "Für die Authentifizierung mit verwaltetem Schlüssel ist ein verwalteter SSH-Schlüssel erforderlich.",
+      "save": "Speichern",
+      "save_and_connect": "Speichern und verbinden",
+      "runtime_node_missing": "Der laufende SSH-Knoten ist nicht mehr verfügbar"
     },
     "auth": {
       "password": "Passwort",

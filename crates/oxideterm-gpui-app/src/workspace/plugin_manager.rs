@@ -1664,6 +1664,7 @@ impl WorkspaceApp {
                 ),
         );
         if let Some(error_message) = error_message {
+            let copy_error_message = error_message.clone();
             row = row.child(
                 div()
                     .ml(px(28.0))
@@ -1693,7 +1694,28 @@ impl WorkspaceApp {
                         14.0,
                         plugin_manager_palette_alpha(PLUGIN_MANAGER_TW_RED_400, 0xff),
                     ))
-                    .child(div().min_w(px(0.0)).child(error_message)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .whitespace_normal()
+                            .child(error_message),
+                    )
+                    .child(self.render_native_plugin_row_icon_button(
+                        LucideIcon::Copy,
+                        PLUGIN_MANAGER_TW_RED_400,
+                        Some(cx.listener(move |this, _event, _window, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                copy_error_message.clone(),
+                            ));
+                            this.plugin_manager_operation_status =
+                                NativePluginManagerOperationStatus::Success(
+                                    this.i18n.t("plugin.error_copied"),
+                                );
+                            cx.stop_propagation();
+                            cx.notify();
+                        })),
+                    )),
             );
         }
         if is_expanded {

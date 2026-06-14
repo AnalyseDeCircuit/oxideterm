@@ -176,7 +176,7 @@ fn connections_deleted_label(i18n: &I18n, count: usize) -> String {
         .replace("{{count}}", &count.to_string())
 }
 
-fn duplicate_connection_template_name<'a>(
+pub(in crate::workspace) fn duplicate_connection_template_name<'a>(
     source_name: &str,
     existing_names: impl IntoIterator<Item = &'a str>,
 ) -> String {

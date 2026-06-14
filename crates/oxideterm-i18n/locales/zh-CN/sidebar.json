@@ -61,7 +61,9 @@
         "reconnect": "重新连接",
         "cancel_reconnect": "取消重连",
         "drill_in": "钻入 (下一跳)",
-        "connect": "连接"
+        "saved_next_hop": "使用已保存连接作为下一跳...",
+        "connect": "连接",
+        "save_as_connection": "保存为连接..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "端口转发",
       "disconnect": "断开连接",
       "reconnect": "重新连接",
-      "drill_in": "钻入 (下一跳)"
+      "drill_in": "钻入 (下一跳)",
+      "saved_next_hop": "使用已保存连接作为下一跳...",
+      "save_as_connection": "保存为连接..."
+    },
+    "saved_next_hop": {
+      "title": "使用已保存连接作为下一跳",
+      "description": "选择一个已保存连接，接到 {{host}} 下方。",
+      "empty": "暂无可用的已保存连接。",
+      "cancel": "取消",
+      "proxy_chain_badge": "{{count}} 跳",
+      "parent_not_ready": "请先连接父节点，再添加已保存的下一跳。",
+      "not_found": "未找到该已保存连接。",
+      "missing_credentials": "此已保存连接缺少连接所需的凭据。",
+      "materialize_failed": "无法将该已保存连接添加到会话树。"
     },
     "breadcrumb": {
       "back_to_root": "返回根视图",

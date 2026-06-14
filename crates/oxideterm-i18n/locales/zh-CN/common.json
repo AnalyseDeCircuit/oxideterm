@@ -795,6 +795,7 @@
     "enable_success": "{{name}} 已启用。",
     "disable_success": "{{name}} 已禁用。",
     "load_failed_default": "插件加载失败。",
+    "error_copied": "已复制插件错误。",
     "open_dir_create_failed": "无法创建插件目录：{{message}}",
     "open_dir_failed": "无法打开插件目录：{{message}}",
     "open_dir_status_failed": "无法打开插件目录：{{status}}",

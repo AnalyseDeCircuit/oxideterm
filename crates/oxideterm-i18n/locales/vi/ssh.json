@@ -76,7 +76,10 @@
       "managed_key": "Khóa SSH được quản lý",
       "managed_key_placeholder": "Chọn khóa được quản lý",
       "managed_key_hint": "Khóa được quản lý nằm trong keychain cục bộ. Kết nối này chỉ lưu tham chiếu khóa và passphrase tùy chọn.",
-      "managed_key_required": "Cần khóa SSH được quản lý để xác thực bằng khóa được quản lý."
+      "managed_key_required": "Cần khóa SSH được quản lý để xác thực bằng khóa được quản lý.",
+      "save": "Lưu",
+      "save_and_connect": "Lưu và kết nối",
+      "runtime_node_missing": "Nút SSH đang chạy không còn khả dụng"
     },
     "auth": {
       "password": "Mật khẩu",

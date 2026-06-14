@@ -795,6 +795,7 @@
     "enable_success": "{{name}} đã bật.",
     "disable_success": "{{name}} đã tắt.",
     "load_failed_default": "Không tải được plugin.",
+    "error_copied": "Đã sao chép lỗi plugin.",
     "open_dir_create_failed": "Không tạo được thư mục plugin: {{message}}",
     "open_dir_failed": "Không mở được thư mục plugin: {{message}}",
     "open_dir_status_failed": "Không mở được thư mục plugin: {{status}}",

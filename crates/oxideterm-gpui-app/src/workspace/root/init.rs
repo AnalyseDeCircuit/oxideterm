@@ -466,6 +466,7 @@ impl WorkspaceApp {
             portable_confirm_password: String::new(),
             new_connection_form: None,
             drill_down_parent_node_id: None,
+            saved_next_hop_dialog: None,
             editing_saved_connection_id: None,
             duplicating_saved_connection_id: None,
             saved_connection_prompt_action: None,

@@ -795,6 +795,7 @@
     "enable_success": "{{name}} 활성화됨.",
     "disable_success": "{{name}} 비활성화됨.",
     "load_failed_default": "플러그인을 로드하지 못했습니다.",
+    "error_copied": "플러그인 오류를 복사했습니다.",
     "open_dir_create_failed": "플러그인 디렉터리를 만들 수 없습니다: {{message}}",
     "open_dir_failed": "플러그인 디렉터리를 열 수 없습니다: {{message}}",
     "open_dir_status_failed": "플러그인 디렉터리를 열 수 없습니다: {{status}}",

@@ -61,7 +61,9 @@
         "cancel_reconnect": "Cancelar reconexión",
         "port_forwarding": "Reenvío de puertos",
         "drill_in": "Profundizar (siguiente salto)",
-        "connect": "Conectar"
+        "saved_next_hop": "Usar conexión guardada como siguiente salto...",
+        "connect": "Conectar",
+        "save_as_connection": "Guardar como conexión..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Reenvío de puertos",
       "disconnect": "Desconectar",
       "reconnect": "Reconectar",
-      "drill_in": "Profundizar (siguiente salto)"
+      "drill_in": "Profundizar (siguiente salto)",
+      "saved_next_hop": "Usar conexión guardada como siguiente salto...",
+      "save_as_connection": "Guardar como conexión..."
+    },
+    "saved_next_hop": {
+      "title": "Usar conexión guardada como siguiente salto",
+      "description": "Elige una conexión guardada para adjuntarla bajo {{host}}.",
+      "empty": "No hay conexiones guardadas disponibles.",
+      "cancel": "Cancelar",
+      "proxy_chain_badge": "{{count}} saltos",
+      "parent_not_ready": "Conecta el nodo padre antes de añadir un siguiente salto guardado.",
+      "not_found": "No se encontró la conexión guardada.",
+      "missing_credentials": "A esta conexión guardada le faltan credenciales necesarias para conectar.",
+      "materialize_failed": "No se pudo añadir la conexión guardada al árbol de sesiones."
     },
     "breadcrumb": {
       "back_to_root": "Volver a la vista raíz",

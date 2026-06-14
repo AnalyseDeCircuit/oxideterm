@@ -61,7 +61,9 @@
         "cancel_reconnect": "재연결 취소",
         "port_forwarding": "포트 포워딩",
         "drill_in": "드릴 인 (다음 홉)",
-        "connect": "연결"
+        "saved_next_hop": "저장된 연결을 다음 홉으로 사용...",
+        "connect": "연결",
+        "save_as_connection": "연결로 저장..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "포트 포워딩",
       "disconnect": "연결 해제",
       "reconnect": "재연결",
-      "drill_in": "드릴 인 (다음 홉)"
+      "drill_in": "드릴 인 (다음 홉)",
+      "saved_next_hop": "저장된 연결을 다음 홉으로 사용...",
+      "save_as_connection": "연결로 저장..."
+    },
+    "saved_next_hop": {
+      "title": "저장된 연결을 다음 홉으로 사용",
+      "description": "{{host}} 아래에 붙일 저장된 연결을 선택하세요.",
+      "empty": "사용 가능한 저장된 연결이 없습니다.",
+      "cancel": "취소",
+      "proxy_chain_badge": "{{count}} 홉",
+      "parent_not_ready": "저장된 다음 홉을 추가하기 전에 부모 노드에 먼저 연결하세요.",
+      "not_found": "저장된 연결을 찾을 수 없습니다.",
+      "missing_credentials": "이 저장된 연결에는 접속에 필요한 자격 증명이 없습니다.",
+      "materialize_failed": "저장된 연결을 세션 트리에 추가할 수 없습니다."
     },
     "breadcrumb": {
       "back_to_root": "루트 뷰로 돌아가기",

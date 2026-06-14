@@ -8,19 +8,22 @@ use std::{
 
 use gpui::{Context, Window};
 use oxideterm_connections::{
-    SaveConnectionRequest, SaveSerialProfileRequest, first_available_default_key_path,
+    SaveConnectionRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
+    first_available_default_key_path,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
     NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
-    SshTransportClient, check_host_key_with_upstream_proxy,
+    SshTransportClient, UpstreamProxyAuth, UpstreamProxyProtocol,
+    check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
 use super::{
     form_state::{
-        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionTransport,
+        NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
+        NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
         SavedConnectionPromptAction, SshAuthTab, new_connection_form_mode,
     },
     host_key_dialog::HostKeyChallenge,
@@ -32,7 +35,7 @@ use super::{
 use crate::workspace::{
     NativeProxyConnectRun, WorkspaceApp,
     session_manager::{
-        form_from_saved_connection, save_request_from_form,
+        duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
         save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
     },
 };
@@ -106,6 +109,13 @@ impl SshPromptHandler for NativeSshPromptHandler {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn prepare_saved_tree_config_for_connect(
+        &self,
+        config: &mut SshConfig,
+    ) -> Result<(), String> {
+        prepare_tree_connect_config(config)
+    }
+
     pub(in crate::workspace) fn saved_connection_form_source_id(&self) -> Option<&str> {
         self.editing_saved_connection_id
             .as_deref()
@@ -200,6 +210,95 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn open_save_runtime_node_form(
+        &mut self,
+        node_id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+            self.session_manager.status = Some(self.i18n.t("ssh.form.runtime_node_missing"));
+            cx.notify();
+            return;
+        };
+        let parent_id = self
+            .node_runtime_store
+            .snapshot(&node_id)
+            .and_then(|snapshot| snapshot.parent_id);
+        let proxy_hops = match parent_id
+            .as_ref()
+            .map(|parent_id| self.runtime_proxy_hops_for_parent_path(parent_id))
+            .transpose()
+        {
+            Ok(hops) => hops.unwrap_or_default(),
+            Err(error) => {
+                self.session_manager.status = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        self.prepare_modal_interaction_boundary();
+        let mut form = form_from_runtime_config(
+            &node.config,
+            Some(&node.title),
+            self.i18n.t("ssh.form.ungrouped"),
+        );
+        form.proxy_hops = proxy_hops;
+        form.proxy_chain_expanded = !form.proxy_hops.is_empty();
+        form.agent_available = detect_ssh_agent_available();
+        form.save_connection = true;
+        self.new_connection_form = Some(form);
+        self.drill_down_parent_node_id = None;
+        self.editing_saved_connection_id = None;
+        self.duplicating_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
+        self.close_new_connection_select();
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
+    fn runtime_proxy_hops_for_parent_path(
+        &self,
+        parent_id: &NodeId,
+    ) -> anyhow::Result<Vec<NewConnectionProxyHop>> {
+        let mut configs = Vec::new();
+        let mut cursor = Some(parent_id.clone());
+        while let Some(node_id) = cursor {
+            let snapshot = self.node_runtime_store.snapshot(&node_id).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{}: {}",
+                    self.i18n.t("ssh.form.runtime_node_missing"),
+                    node_id.0
+                )
+            })?;
+            configs.push(snapshot.config);
+            cursor = snapshot.parent_id;
+        }
+        configs.reverse();
+
+        Ok(configs
+            .into_iter()
+            .flat_map(|config| {
+                let embedded_hops = config.proxy_chain.unwrap_or_default().into_iter();
+                embedded_hops
+                    .chain(std::iter::once(ProxyHopConfig {
+                        host: config.host,
+                        port: config.port,
+                        username: config.username,
+                        auth: config.auth,
+                        agent_forwarding: config.agent_forwarding,
+                        strict_host_key_checking: true,
+                        trust_host_key: None,
+                        expected_host_key_fingerprint: None,
+                    }))
+                    .map(proxy_hop_form_from_runtime_config)
+            })
+            .collect())
+    }
+
     pub(in crate::workspace) fn close_new_connection_form(
         &mut self,
         window: &mut Window,
@@ -223,6 +322,19 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.submit_new_connection_form_with_action(
+            NewConnectionSubmitAction::SaveAndConnect,
+            window,
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn submit_new_connection_form_with_action(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self
             .new_connection_form
             .as_ref()
@@ -241,6 +353,25 @@ impl WorkspaceApp {
             return;
         }
         if let Some(parent_id) = self.drill_down_parent_node_id.clone() {
+            match action {
+                NewConnectionSubmitAction::Save => {
+                    self.save_new_connection_without_connecting(Some(&parent_id), window, cx);
+                    return;
+                }
+                NewConnectionSubmitAction::SaveAndConnect => {
+                    if !self.save_current_connection_form(Some(&parent_id), cx) {
+                        return;
+                    }
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.save_connection = false;
+                    }
+                }
+                NewConnectionSubmitAction::Connect => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.save_connection = false;
+                    }
+                }
+            }
             self.start_new_connection_flow(SshConnectionIntent::DrillDown(parent_id), window, cx);
             return;
         }
@@ -258,10 +389,133 @@ impl WorkspaceApp {
             NewConnectionFormMode::DuplicateTemplate => {
                 self.save_duplicate_connection_template(window, cx);
             }
-            NewConnectionFormMode::NewConnection => {
-                self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
+            NewConnectionFormMode::NewConnection => match action {
+                NewConnectionSubmitAction::Connect => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.save_connection = false;
+                    }
+                    self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
+                }
+                NewConnectionSubmitAction::Save => {
+                    self.save_new_connection_without_connecting(None, window, cx);
+                }
+                NewConnectionSubmitAction::SaveAndConnect => {
+                    if !self.save_current_connection_form(None, cx) {
+                        return;
+                    }
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.save_connection = false;
+                    }
+                    self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
+                }
+            },
+        }
+    }
+
+    fn save_new_connection_without_connecting(
+        &mut self,
+        drill_down_parent_id: Option<&NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.save_current_connection_form(drill_down_parent_id, cx) {
+            self.close_new_connection_form(window, cx);
+        }
+    }
+
+    fn save_current_connection_form(
+        &mut self,
+        drill_down_parent_id: Option<&NodeId>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.ensure_new_connection_save_name_is_unique(drill_down_parent_id);
+        let request = match self.save_request_for_current_form(drill_down_parent_id) {
+            Some(Ok(request)) => request,
+            Some(Err(error)) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.error = Some(error.to_string());
+                }
+                cx.notify();
+                return false;
+            }
+            None => return false,
+        };
+
+        // The Save and Save & Connect buttons mean "persist this draft now",
+        // so duplicate-name and keychain failures should block connection start.
+        match self.connection_store.upsert(request) {
+            Ok(_) => {
+                self.queue_cloud_sync_dirty_refresh(cx);
+                true
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.error = Some(format!(
+                        "{}: {error}",
+                        self.i18n.t("modals.new_connection.save_failed")
+                    ));
+                }
+                cx.notify();
+                false
             }
         }
+    }
+
+    fn ensure_new_connection_save_name_is_unique(
+        &mut self,
+        _drill_down_parent_id: Option<&NodeId>,
+    ) {
+        let occupied_names: Vec<String> = self
+            .connection_store
+            .connections()
+            .iter()
+            .map(|connection| connection.name.clone())
+            .collect();
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let fallback_name = if form.name.trim().is_empty() {
+            let host = form.host.trim();
+            let username = form.username.trim();
+            if host.is_empty() || username.is_empty() {
+                return;
+            }
+            format!("{username}@{host}")
+        } else {
+            form.name.trim().to_string()
+        };
+        let name_exists = occupied_names
+            .iter()
+            .any(|name| name.trim().eq_ignore_ascii_case(&fallback_name));
+        let next_name = if name_exists {
+            // New/save-as flows create a fresh connection id, so avoid storing a
+            // second indistinguishable row when the draft name already exists.
+            duplicate_connection_template_name(
+                &fallback_name,
+                occupied_names.iter().map(String::as_str),
+            )
+        } else {
+            fallback_name
+        };
+        form.name = next_name;
+    }
+
+    fn save_request_for_current_form(
+        &self,
+        drill_down_parent_id: Option<&NodeId>,
+    ) -> Option<anyhow::Result<SaveConnectionRequest>> {
+        let form = self.new_connection_form.as_ref()?;
+        let mut form = form.clone();
+        if let Some(parent_id) = drill_down_parent_id {
+            match self.runtime_proxy_hops_for_parent_path(parent_id) {
+                Ok(mut hops) => {
+                    hops.extend(form.proxy_hops);
+                    form.proxy_hops = hops;
+                }
+                Err(error) => return Some(Err(error)),
+            }
+        }
+        Some(save_request_from_form(&form, None))
     }
 
     fn submit_serial_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1821,6 +2075,276 @@ fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+    }
+}
+
+fn form_from_runtime_config(
+    config: &SshConfig,
+    title: Option<&str>,
+    default_group: String,
+) -> NewConnectionForm {
+    let auth_fields = runtime_auth_form_fields(&config.auth);
+    let mut form = NewConnectionForm {
+        name: title
+            .filter(|title| !title.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}@{}", config.username, config.host)),
+        host: config.host.clone(),
+        port: config.port.to_string(),
+        username: config.username.clone(),
+        auth_tab: auth_fields.auth_tab,
+        password: auth_fields.password,
+        key_path: auth_fields.key_path,
+        managed_key_id: auth_fields.managed_key_id,
+        cert_path: auth_fields.cert_path,
+        passphrase: auth_fields.passphrase,
+        group: default_group,
+        post_connect_command: config.post_connect_command.clone().unwrap_or_default(),
+        agent_forwarding: config.agent_forwarding,
+        save_password: auth_fields.save_password,
+        ..NewConnectionForm::default()
+    };
+
+    if let Some(chain) = &config.proxy_chain {
+        form.proxy_hops = chain
+            .iter()
+            .cloned()
+            .map(proxy_hop_form_from_runtime_config)
+            .collect();
+        form.proxy_chain_expanded = !form.proxy_hops.is_empty();
+    }
+    if let Some(proxy) = &config.upstream_proxy {
+        form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
+        form.upstream_proxy_protocol = match proxy.protocol {
+            UpstreamProxyProtocol::Socks5 => SavedUpstreamProxyProtocol::Socks5,
+            UpstreamProxyProtocol::HttpConnect => SavedUpstreamProxyProtocol::HttpConnect,
+        };
+        form.upstream_proxy_host = proxy.host.clone();
+        form.upstream_proxy_port = proxy.port.to_string();
+        form.upstream_proxy_remote_dns = proxy.remote_dns;
+        form.upstream_proxy_no_proxy = proxy.no_proxy.clone();
+        if let UpstreamProxyAuth::Password { username, password } = &proxy.auth {
+            form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
+            form.upstream_proxy_username = username.clone();
+            form.upstream_proxy_password = password.as_str().to_string();
+        }
+    }
+    form
+}
+
+fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewConnectionProxyHop {
+    let auth_fields = runtime_auth_form_fields(&config.auth);
+    NewConnectionProxyHop {
+        host: config.host,
+        port: config.port.to_string(),
+        username: config.username,
+        auth_tab: auth_fields.auth_tab,
+        key_path: auth_fields.key_path,
+        managed_key_id: auth_fields.managed_key_id,
+        cert_path: auth_fields.cert_path,
+        // Dynamic drill-down save-as must persist a usable proxy chain. Runtime
+        // secrets are copied only after the user explicitly asks to save this
+        // live path; the connection store then moves them into the keychain.
+        password: auth_fields.password,
+        passphrase: auth_fields.passphrase,
+        agent_forwarding: config.agent_forwarding,
+    }
+}
+
+struct RuntimeAuthFormFields {
+    auth_tab: SshAuthTab,
+    password: String,
+    key_path: String,
+    managed_key_id: String,
+    cert_path: String,
+    passphrase: String,
+    save_password: bool,
+}
+
+fn runtime_auth_form_fields(auth: &AuthMethod) -> RuntimeAuthFormFields {
+    match auth {
+        AuthMethod::Password { password } => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::Password,
+            password: password.as_str().to_string(),
+            key_path: String::new(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
+            save_password: true,
+        },
+        AuthMethod::Key {
+            key_path,
+            passphrase,
+        } if key_path.trim().is_empty() => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::DefaultKey,
+            password: String::new(),
+            key_path: String::new(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: passphrase
+                .as_ref()
+                .map(|value| value.as_str().to_string())
+                .unwrap_or_default(),
+            save_password: false,
+        },
+        AuthMethod::Key {
+            key_path,
+            passphrase,
+        } => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::SshKey,
+            password: String::new(),
+            key_path: key_path.clone(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: passphrase
+                .as_ref()
+                .map(|value| value.as_str().to_string())
+                .unwrap_or_default(),
+            save_password: false,
+        },
+        AuthMethod::ManagedKey { key_id, passphrase } => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::ManagedKey,
+            password: String::new(),
+            key_path: String::new(),
+            managed_key_id: key_id.clone(),
+            cert_path: String::new(),
+            passphrase: passphrase
+                .as_ref()
+                .map(|value| value.as_str().to_string())
+                .unwrap_or_default(),
+            save_password: false,
+        },
+        AuthMethod::Certificate {
+            key_path,
+            cert_path,
+            passphrase,
+        } => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::Certificate,
+            password: String::new(),
+            key_path: key_path.clone(),
+            managed_key_id: String::new(),
+            cert_path: cert_path.clone(),
+            passphrase: passphrase
+                .as_ref()
+                .map(|value| value.as_str().to_string())
+                .unwrap_or_default(),
+            save_password: false,
+        },
+        AuthMethod::Agent => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::Agent,
+            password: String::new(),
+            key_path: String::new(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
+            save_password: false,
+        },
+        AuthMethod::KeyboardInteractive => RuntimeAuthFormFields {
+            auth_tab: SshAuthTab::TwoFactor,
+            password: String::new(),
+            key_path: String::new(),
+            managed_key_id: String::new(),
+            cert_path: String::new(),
+            passphrase: String::new(),
+            save_password: false,
+        },
+    }
+}
+
+#[cfg(test)]
+mod runtime_save_tests {
+    use super::*;
+    use zeroize::Zeroizing;
+
+    #[test]
+    fn runtime_proxy_hop_form_preserves_password_for_save_as() {
+        let hop = proxy_hop_form_from_runtime_config(ProxyHopConfig {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: AuthMethod::password_secret(Zeroizing::new("jump-secret".to_string())),
+            agent_forwarding: true,
+            strict_host_key_checking: true,
+            trust_host_key: None,
+            expected_host_key_fingerprint: None,
+        });
+
+        assert_eq!(hop.auth_tab, SshAuthTab::Password);
+        assert_eq!(hop.password, "jump-secret");
+        assert!(hop.agent_forwarding);
+    }
+
+    #[test]
+    fn runtime_proxy_hop_form_preserves_key_passphrase_for_save_as() {
+        let hop = proxy_hop_form_from_runtime_config(ProxyHopConfig {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: AuthMethod::key_secret(
+                "/home/ops/.ssh/id_ed25519",
+                Some(Zeroizing::new("key-secret".to_string())),
+            ),
+            agent_forwarding: false,
+            strict_host_key_checking: true,
+            trust_host_key: None,
+            expected_host_key_fingerprint: None,
+        });
+
+        assert_eq!(hop.auth_tab, SshAuthTab::SshKey);
+        assert_eq!(hop.key_path, "/home/ops/.ssh/id_ed25519");
+        assert_eq!(hop.passphrase, "key-secret");
+    }
+
+    #[test]
+    fn runtime_target_form_marks_password_for_persistence() {
+        let form = form_from_runtime_config(
+            &SshConfig {
+                host: "target.example.com".to_string(),
+                port: 22,
+                username: "deploy".to_string(),
+                auth: AuthMethod::password_secret(Zeroizing::new("target-secret".to_string())),
+                ..SshConfig::default()
+            },
+            None,
+            "Ungrouped".to_string(),
+        );
+
+        assert_eq!(form.auth_tab, SshAuthTab::Password);
+        assert_eq!(form.password, "target-secret");
+        assert!(form.save_password);
+    }
+
+    #[test]
+    fn runtime_form_preserves_upstream_proxy_password_for_save_as() {
+        let form = form_from_runtime_config(
+            &SshConfig {
+                host: "target.example.com".to_string(),
+                port: 22,
+                username: "deploy".to_string(),
+                auth: AuthMethod::Agent,
+                upstream_proxy: Some(oxideterm_ssh::UpstreamProxyConfig {
+                    protocol: UpstreamProxyProtocol::Socks5,
+                    host: "127.0.0.1".to_string(),
+                    port: 1080,
+                    auth: UpstreamProxyAuth::Password {
+                        username: "proxy-user".to_string(),
+                        password: Zeroizing::new("proxy-secret".to_string()),
+                    },
+                    remote_dns: true,
+                    no_proxy: String::new(),
+                }),
+                ..SshConfig::default()
+            },
+            None,
+            "Ungrouped".to_string(),
+        );
+
+        assert_eq!(
+            form.upstream_proxy_auth,
+            NewConnectionUpstreamProxyAuth::Password
+        );
+        assert_eq!(form.upstream_proxy_username, "proxy-user");
+        assert_eq!(form.upstream_proxy_password, "proxy-secret");
     }
 }
 

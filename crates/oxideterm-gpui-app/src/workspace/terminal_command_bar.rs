@@ -1290,6 +1290,7 @@ mod privilege_prompt_helper_tests {
             username_hint: username_hint.map(str::to_string),
             prompt_patterns: Vec::new(),
             keychain_id: Some(format!("privilege:v1:conn-1:{id}")),
+            plaintext_secret: None,
             enabled: true,
             require_click_to_send: true,
             created_at: now,

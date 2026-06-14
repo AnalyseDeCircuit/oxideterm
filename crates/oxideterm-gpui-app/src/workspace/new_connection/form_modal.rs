@@ -630,45 +630,6 @@ impl WorkspaceApp {
                                         ))
                                         .when(!drill_down_mode, |content| {
                                             content
-                                                .child(
-                                                    checkbox(
-                                                        &self.tokens,
-                                                        self.i18n.t("ssh.form.save_connection"),
-                                                        form.save_connection,
-                                                    )
-                                                    .on_mouse_down(
-                                                        MouseButton::Left,
-                                                        cx.listener(|this, _event, _window, cx| {
-                                                            let save_connection = if let Some(
-                                                                form,
-                                                            ) = this
-                                                                .new_connection_form
-                                                                .as_mut()
-                                                            {
-                                                                form.save_connection =
-                                                                    !form.save_connection;
-                                                                Some(form.save_connection)
-                                                            } else {
-                                                                None
-                                                            };
-                                                            if let Some(save_connection) =
-                                                                save_connection
-                                                            {
-                                                                this.settings_store
-                                                                    .settings_mut()
-                                                                    .new_connection
-                                                                    .save_connection =
-                                                                    save_connection;
-                                                                let _ = this.settings_store.save();
-                                                            }
-                                                            this.close_new_connection_select();
-                                                            cx.notify();
-                                                        }),
-                                                    ),
-                                                )
-                                                .child(self.render_connection_hint(
-                                                    self.i18n.t("ssh.form.save_connection_hint"),
-                                                ))
                                                 .child(self.render_upstream_proxy_policy_section(form, cx))
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
@@ -716,39 +677,75 @@ impl WorkspaceApp {
                                 ))
                             },
                         )
-                        .child(self.render_connection_button(
-                            if self.saved_connection_prompt_action
-                                == Some(SavedConnectionPromptAction::Test)
-                            {
-                                self.i18n.t("ssh.form.test")
-                            } else if self.saved_connection_prompt_action
-                                == Some(SavedConnectionPromptAction::Connect)
-                            {
-                                self.i18n.t("ssh.form.connect")
-                            } else if drill_down_mode {
-                                if form.pending {
-                                    self.i18n.t("ssh.drill_down.connecting")
-                                } else {
-                                    self.i18n.t("ssh.drill_down.connect")
-                                }
-                            } else if edit_properties_mode {
-                                self.i18n.t("sessionManager.edit_properties.save")
-                            } else if serial_mode {
-                                self.i18n.t("modals.new_connection.serial_open")
-                            } else {
-                                self.i18n.t("ssh.form.connect")
-                            },
-                            true,
-                            if edit_properties_mode
+                        .when(
+                            !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
-                            {
-                                ConnectionButtonAction::Save
-                            } else {
-                                ConnectionButtonAction::Connect
+                                && !serial_mode,
+                            |footer| {
+                                footer
+                                    .child(self.render_connection_button(
+                                        self.i18n.t("ssh.form.save"),
+                                        false,
+                                        ConnectionButtonAction::Save,
+                                        primary_disabled,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_button(
+                                        if drill_down_mode {
+                                            self.i18n.t("ssh.drill_down.connect")
+                                        } else {
+                                            self.i18n.t("ssh.form.connect")
+                                        },
+                                        false,
+                                        ConnectionButtonAction::Connect,
+                                        primary_disabled,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_button(
+                                        if form.pending && drill_down_mode {
+                                            self.i18n.t("ssh.drill_down.connecting")
+                                        } else {
+                                            self.i18n.t("ssh.form.save_and_connect")
+                                        },
+                                        true,
+                                        ConnectionButtonAction::SaveAndConnect,
+                                        primary_disabled,
+                                        cx,
+                                    ))
                             },
-                            primary_disabled,
-                            cx,
-                        )),
+                        )
+                        .when(
+                            edit_properties_mode
+                                || self.saved_connection_prompt_action.is_some()
+                                || serial_mode,
+                            |footer| {
+                                footer.child(self.render_connection_button(
+                                    if self.saved_connection_prompt_action
+                                        == Some(SavedConnectionPromptAction::Test)
+                                    {
+                                        self.i18n.t("ssh.form.test")
+                                    } else if self.saved_connection_prompt_action
+                                        == Some(SavedConnectionPromptAction::Connect)
+                                    {
+                                        self.i18n.t("ssh.form.connect")
+                                    } else if edit_properties_mode {
+                                        self.i18n.t("sessionManager.edit_properties.save")
+                                    } else {
+                                        self.i18n.t("modals.new_connection.serial_open")
+                                    },
+                                    true,
+                                    if edit_properties_mode
+                                        && self.saved_connection_prompt_action.is_none()
+                                    {
+                                        ConnectionButtonAction::Save
+                                    } else {
+                                        ConnectionButtonAction::Connect
+                                    },
+                                    primary_disabled,
+                                    cx,
+                                ))
+                            },
+                        ),
                 ),
         )
         .into_any_element()

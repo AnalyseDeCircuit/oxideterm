@@ -76,7 +76,10 @@
       "managed_key": "Managed SSH key",
       "managed_key_placeholder": "Select a managed key",
       "managed_key_hint": "Managed keys stay in the local keychain. This connection stores only the key reference and optional passphrase.",
-      "managed_key_required": "Managed SSH key is required for managed-key authentication."
+      "managed_key_required": "Managed SSH key is required for managed-key authentication.",
+      "save": "Save",
+      "save_and_connect": "Save & Connect",
+      "runtime_node_missing": "Runtime SSH node is no longer available"
     },
     "auth": {
       "password": "Password",

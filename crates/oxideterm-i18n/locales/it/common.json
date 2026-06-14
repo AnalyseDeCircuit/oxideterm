@@ -795,6 +795,7 @@
     "enable_success": "{{name}} abilitato.",
     "disable_success": "{{name}} disabilitato.",
     "load_failed_default": "Caricamento del plugin non riuscito.",
+    "error_copied": "Errore del plugin copiato.",
     "open_dir_create_failed": "Impossibile creare la directory dei plugin: {{message}}",
     "open_dir_failed": "Impossibile aprire la directory dei plugin: {{message}}",
     "open_dir_status_failed": "Impossibile aprire la directory dei plugin: {{status}}",

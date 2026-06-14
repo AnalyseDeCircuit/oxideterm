@@ -795,6 +795,7 @@
     "enable_success": "{{name}} ativado.",
     "disable_success": "{{name}} desativado.",
     "load_failed_default": "Falha ao carregar o plugin.",
+    "error_copied": "Erro do plugin copiado.",
     "open_dir_create_failed": "Falha ao criar o diretório de plugins: {{message}}",
     "open_dir_failed": "Falha ao abrir o diretório de plugins: {{message}}",
     "open_dir_status_failed": "Falha ao abrir o diretório de plugins: {{status}}",

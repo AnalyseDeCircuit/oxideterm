@@ -3,6 +3,7 @@ use super::session_manager::{
 };
 use super::*;
 use oxideterm_gpui_ui::{TreeBranchMetrics, tree_child};
+use oxideterm_session_adapter::ssh_config_from_saved_connection;
 
 const SESSION_TREE_NODE_HEIGHT: f32 = 32.0;
 const SESSION_TREE_ITEM_HEIGHT: f32 = 28.0;

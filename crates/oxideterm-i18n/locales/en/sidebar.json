@@ -61,7 +61,9 @@
         "reconnect": "Reconnect",
         "cancel_reconnect": "Cancel Reconnect",
         "drill_in": "Drill In (Next Hop)",
-        "connect": "Connect"
+        "saved_next_hop": "Use Saved Next Hop...",
+        "connect": "Connect",
+        "save_as_connection": "Save as Connection..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Port Forwarding",
       "disconnect": "Disconnect",
       "reconnect": "Reconnect",
-      "drill_in": "Drill In (Next Hop)"
+      "drill_in": "Drill In (Next Hop)",
+      "saved_next_hop": "Use Saved Next Hop...",
+      "save_as_connection": "Save as Connection..."
+    },
+    "saved_next_hop": {
+      "title": "Use Saved Connection as Next Hop",
+      "description": "Choose a saved connection to attach under {{host}}.",
+      "empty": "No saved connections available.",
+      "cancel": "Cancel",
+      "proxy_chain_badge": "{{count}} hops",
+      "parent_not_ready": "Connect the parent node before adding a saved next hop.",
+      "not_found": "Saved connection was not found.",
+      "missing_credentials": "This saved connection is missing credentials needed to connect.",
+      "materialize_failed": "Could not add the saved connection to the session tree."
     },
     "breadcrumb": {
       "back_to_root": "Back to root view",

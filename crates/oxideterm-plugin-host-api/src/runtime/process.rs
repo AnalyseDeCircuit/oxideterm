@@ -6,6 +6,9 @@
 
 use super::*;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 pub struct NativeProcessPluginRuntime {
     plugin_dir: PathBuf,
     entry: String,
@@ -67,19 +70,25 @@ impl NativeProcessPluginRuntime {
             // Process plugins communicate over host-owned stdio. Do not inherit
             // workspace stdio, because plugin logs/results must be captured and
             // classified by the runtime bridge instead of leaking to the app.
-            let mut child = tokio::process::Command::new(executable)
+            let mut command = tokio::process::Command::new(executable);
+            command
                 .current_dir(&self.plugin_dir)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|error| {
-                    PluginError::runtime(
-                        "process_spawn_failed",
-                        format!("Cannot start native plugin process: {error}"),
-                    )
-                })?;
+                .kill_on_drop(true);
+            #[cfg(windows)]
+            {
+                // Windows GUI launches must not flash a console window for
+                // process-backed plugins; stdio remains captured via pipes.
+                command.creation_flags(CREATE_NO_WINDOW);
+            }
+            let mut child = command.spawn().map_err(|error| {
+                PluginError::runtime(
+                    "process_spawn_failed",
+                    format!("Cannot start native plugin process: {error}"),
+                )
+            })?;
             let stdin = child.stdin.take().ok_or_else(|| {
                 PluginError::runtime(
                     "process_stdin_unavailable",

@@ -167,6 +167,22 @@ impl NodeRuntimeStore {
         })
     }
 
+    pub fn expand_manual_preset_under_parent(
+        &self,
+        parent_id: NodeId,
+        saved_connection_id: &str,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        let saved_connection_id = saved_connection_id.to_string();
+        self.expand_preset_chain_under_parent_internal(parent_id, hops, target, |hop_index| {
+            NodeOrigin::ManualPreset {
+                saved_connection_id: saved_connection_id.clone(),
+                hop_index,
+            }
+        })
+    }
+
     pub fn expand_auto_route(
         &self,
         target_host: &str,
@@ -234,6 +250,64 @@ impl NodeRuntimeStore {
         // Tauri returns the path from root to target so the frontend can call
         // connect_tree_node linearly. Native keeps the same shape even though
         // GPUI can let `ensure_node_connection_started` walk ancestors itself.
+        Ok(NodeTreeExpansion {
+            target_node_id,
+            path_node_ids,
+            chain_depth,
+        })
+    }
+
+    fn expand_preset_chain_under_parent_internal(
+        &self,
+        parent_id: NodeId,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+        origin_for_hop: impl Fn(u32) -> NodeOrigin,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        let parent_depth = {
+            let parent = self
+                .nodes
+                .get(&parent_id)
+                .ok_or_else(|| RouteError::NodeNotFound(parent_id.0.clone()))?;
+            if !matches!(parent.state.readiness, NodeReadiness::Ready) {
+                return Err(RouteError::ParentNotConnected(parent_id.0.clone()));
+            }
+            parent.depth
+        };
+        let chain_depth = hops.len() as u32 + 1;
+        if parent_depth + chain_depth > MAX_SESSION_TREE_DEPTH {
+            return Err(RouteError::MaxDepthExceeded(MAX_SESSION_TREE_DEPTH));
+        }
+
+        let mut path_node_ids = Vec::with_capacity(chain_depth as usize);
+        let mut current_parent_id = parent_id;
+        for (index, hop) in hops.into_iter().enumerate() {
+            let node_id = generated_tree_node_id("hop");
+            self.upsert_child_node_with_origin(
+                current_parent_id,
+                node_id.clone(),
+                hop,
+                origin_for_hop(index as u32),
+            )?;
+            path_node_ids.push(node_id.clone());
+            current_parent_id = node_id;
+        }
+
+        let target_node_id = generated_tree_node_id(if path_node_ids.is_empty() {
+            "direct"
+        } else {
+            "target"
+        });
+        // Native extends Tauri's manual-preset expansion so a saved connection
+        // can be consumed as a next hop beneath an already connected node.
+        self.upsert_child_node_with_origin(
+            current_parent_id,
+            target_node_id.clone(),
+            target,
+            origin_for_hop(chain_depth - 1),
+        )?;
+        path_node_ids.push(target_node_id.clone());
+
         Ok(NodeTreeExpansion {
             target_node_id,
             path_node_ids,

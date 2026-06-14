@@ -76,7 +76,10 @@
       "managed_key": "託管 SSH 金鑰",
       "managed_key_placeholder": "選擇託管金鑰",
       "managed_key_hint": "託管金鑰保存在本機鑰匙圈中。此連線只保存金鑰引用和可選金鑰密碼。",
-      "managed_key_required": "託管金鑰認證需要選擇託管 SSH 金鑰。"
+      "managed_key_required": "託管金鑰認證需要選擇託管 SSH 金鑰。",
+      "save": "儲存",
+      "save_and_connect": "儲存並連線",
+      "runtime_node_missing": "執行中的 SSH 節點已不可用"
     },
     "auth": {
       "password": "密碼",

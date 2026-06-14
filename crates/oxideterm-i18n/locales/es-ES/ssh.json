@@ -76,7 +76,10 @@
       "managed_key": "Clave SSH gestionada",
       "managed_key_placeholder": "Selecciona una clave gestionada",
       "managed_key_hint": "Las claves gestionadas permanecen en el llavero local. Esta conexión solo guarda la referencia de clave y la frase de paso opcional.",
-      "managed_key_required": "Se requiere una clave SSH gestionada para la autenticación con clave gestionada."
+      "managed_key_required": "Se requiere una clave SSH gestionada para la autenticación con clave gestionada.",
+      "save": "Guardar",
+      "save_and_connect": "Guardar y conectar",
+      "runtime_node_missing": "El nodo SSH en ejecución ya no está disponible"
     },
     "auth": {
       "password": "Contraseña",

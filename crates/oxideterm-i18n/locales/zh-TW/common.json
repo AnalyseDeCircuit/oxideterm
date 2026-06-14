@@ -795,6 +795,7 @@
     "enable_success": "{{name}} 已啟用。",
     "disable_success": "{{name}} 已停用。",
     "load_failed_default": "外掛程式載入失敗。",
+    "error_copied": "已複製外掛程式錯誤。",
     "open_dir_create_failed": "無法建立外掛程式目錄：{{message}}",
     "open_dir_failed": "無法開啟外掛程式目錄：{{message}}",
     "open_dir_status_failed": "無法開啟外掛程式目錄：{{status}}",

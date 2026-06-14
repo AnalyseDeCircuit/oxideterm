@@ -61,7 +61,9 @@
         "cancel_reconnect": "Hủy kết nối lại",
         "port_forwarding": "Chuyển tiếp cổng",
         "drill_in": "Drill In (Bước tiếp)",
-        "connect": "Kết nối"
+        "saved_next_hop": "Dùng kết nối đã lưu làm bước tiếp...",
+        "connect": "Kết nối",
+        "save_as_connection": "Lưu thành kết nối..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "Chuyển tiếp cổng",
       "disconnect": "Ngắt kết nối",
       "reconnect": "Kết nối lại",
-      "drill_in": "Drill In (Bước tiếp)"
+      "drill_in": "Drill In (Bước tiếp)",
+      "saved_next_hop": "Dùng kết nối đã lưu làm bước tiếp...",
+      "save_as_connection": "Lưu thành kết nối..."
+    },
+    "saved_next_hop": {
+      "title": "Dùng kết nối đã lưu làm bước tiếp",
+      "description": "Chọn một kết nối đã lưu để gắn dưới {{host}}.",
+      "empty": "Không có kết nối đã lưu nào khả dụng.",
+      "cancel": "Hủy",
+      "proxy_chain_badge": "{{count}} bước",
+      "parent_not_ready": "Hãy kết nối nút cha trước khi thêm bước tiếp đã lưu.",
+      "not_found": "Không tìm thấy kết nối đã lưu.",
+      "missing_credentials": "Kết nối đã lưu này thiếu thông tin xác thực cần thiết để kết nối.",
+      "materialize_failed": "Không thể thêm kết nối đã lưu vào cây phiên."
     },
     "breadcrumb": {
       "back_to_root": "Quay lại chế độ xem gốc",

@@ -76,7 +76,10 @@
       "managed_key": "관리형 SSH 키",
       "managed_key_placeholder": "관리형 키 선택",
       "managed_key_hint": "관리형 키는 로컬 키체인에 보관됩니다. 이 연결은 키 참조와 선택적 패스프레이즈만 저장합니다.",
-      "managed_key_required": "관리형 키 인증에는 관리형 SSH 키가 필요합니다."
+      "managed_key_required": "관리형 키 인증에는 관리형 SSH 키가 필요합니다.",
+      "save": "저장",
+      "save_and_connect": "저장 후 연결",
+      "runtime_node_missing": "실행 중인 SSH 노드를 더 이상 사용할 수 없습니다"
     },
     "auth": {
       "password": "비밀번호",

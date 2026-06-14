@@ -28,6 +28,13 @@ pub(in crate::workspace) enum SavedConnectionPromptAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum NewConnectionSubmitAction {
+    Connect,
+    Save,
+    SaveAndConnect,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionFormMode {
     NewConnection,
     SavedConnectionPrompt,

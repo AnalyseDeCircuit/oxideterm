@@ -622,6 +622,9 @@ impl Render for WorkspaceApp {
             .when(self.new_connection_form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })
+            .when(self.saved_next_hop_dialog.is_some(), |root| {
+                root.child(self.render_saved_next_hop_dialog(window, cx))
+            })
             .when(self.auto_route_modal.open, |root| {
                 root.child(self.render_auto_route_modal(window, cx))
             })

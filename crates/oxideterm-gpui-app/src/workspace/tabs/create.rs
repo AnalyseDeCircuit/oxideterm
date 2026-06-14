@@ -550,7 +550,32 @@ impl WorkspaceApp {
         let expansion = self
             .node_router
             .expand_manual_preset(saved_connection_id, hops, config)?;
-        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title);
+        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title, true);
+        self.persist_session_tree_snapshot();
+        Ok(expansion)
+    }
+
+    pub(super) fn expand_saved_connection_tree_under_parent(
+        &mut self,
+        parent_node_id: NodeId,
+        saved_connection_id: &str,
+        mut config: SshConfig,
+        target_title: String,
+    ) -> Result<NodeTreeExpansion> {
+        let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        let hops = proxy_chain
+            .iter()
+            .map(ssh_config_from_proxy_hop)
+            .collect::<Vec<_>>();
+        let expansion = self.node_router.expand_manual_preset_under_parent(
+            parent_node_id,
+            saved_connection_id,
+            hops,
+            config,
+        )?;
+        // A saved next hop can be reused under many live parents. Do not
+        // replace the global saved-connection index with this contextual node.
+        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title, false);
         self.persist_session_tree_snapshot();
         Ok(expansion)
     }
@@ -560,6 +585,7 @@ impl WorkspaceApp {
         saved_connection_id: &str,
         expansion: &NodeTreeExpansion,
         target_title: String,
+        update_saved_node_index: bool,
     ) {
         for node_id in &expansion.path_node_ids {
             let Some(snapshot) = self.node_runtime_store.snapshot(node_id) else {
@@ -581,10 +607,12 @@ impl WorkspaceApp {
                 },
             );
         }
-        self.saved_ssh_nodes.insert(
-            saved_connection_id.to_string(),
-            expansion.target_node_id.clone(),
-        );
+        if update_saved_node_index {
+            self.saved_ssh_nodes.insert(
+                saved_connection_id.to_string(),
+                expansion.target_node_id.clone(),
+            );
+        }
     }
 
     fn create_ssh_terminal_pane_for_existing_node(

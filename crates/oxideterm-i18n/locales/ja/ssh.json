@@ -76,7 +76,10 @@
       "managed_key": "管理対象 SSH 鍵",
       "managed_key_placeholder": "管理対象鍵を選択",
       "managed_key_hint": "管理対象鍵はローカルキーチェーンに保存されます。この接続には鍵参照と任意のパスフレーズだけが保存されます。",
-      "managed_key_required": "管理対象鍵認証には管理対象 SSH 鍵が必要です。"
+      "managed_key_required": "管理対象鍵認証には管理対象 SSH 鍵が必要です。",
+      "save": "保存",
+      "save_and_connect": "保存して接続",
+      "runtime_node_missing": "実行中の SSH ノードは利用できません"
     },
     "auth": {
       "password": "パスワード",

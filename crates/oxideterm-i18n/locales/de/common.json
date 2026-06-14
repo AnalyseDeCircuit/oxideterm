@@ -795,6 +795,7 @@
     "enable_success": "{{name}} wurde aktiviert.",
     "disable_success": "{{name}} wurde deaktiviert.",
     "load_failed_default": "Plugin konnte nicht geladen werden.",
+    "error_copied": "Plugin-Fehler kopiert.",
     "open_dir_create_failed": "Plugin-Verzeichnis konnte nicht erstellt werden: {{message}}",
     "open_dir_failed": "Plugin-Verzeichnis konnte nicht geöffnet werden: {{message}}",
     "open_dir_status_failed": "Plugin-Verzeichnis konnte nicht geöffnet werden: {{status}}",

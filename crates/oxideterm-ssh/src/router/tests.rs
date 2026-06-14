@@ -149,6 +149,68 @@ mod tests {
     }
 
     #[test]
+    fn expand_manual_preset_under_parent_materializes_chain_below_ready_parent() {
+        let store = NodeRuntimeStore::default();
+        let parent = NodeId::new("root");
+        store.upsert_node(parent.clone(), SshConfig::password("root", 22, "me", "pw"));
+        store
+            .apply_node_readiness(&parent, NodeReadiness::Ready, "")
+            .unwrap();
+
+        let expansion = store
+            .expand_manual_preset_under_parent(
+                parent.clone(),
+                "saved-a",
+                vec![
+                    SshConfig::password("jump-a", 22, "me", "pw"),
+                    SshConfig::password("jump-b", 22, "me", "pw"),
+                ],
+                SshConfig::password("target", 22, "me", "pw"),
+            )
+            .unwrap();
+
+        assert_eq!(expansion.chain_depth, 3);
+        assert_eq!(expansion.path_node_ids.len(), 3);
+        let path = store.path_to_node(&expansion.target_node_id).unwrap();
+        assert_eq!(path.first(), Some(&parent));
+        assert_eq!(&path[1..], expansion.path_node_ids.as_slice());
+
+        let flat = store.flatten();
+        assert_eq!(flat.len(), 4);
+        assert_eq!(flat[0].id, "root");
+        assert_eq!(flat[1].parent_id.as_deref(), Some("root"));
+        assert_eq!(flat[2].parent_id.as_deref(), Some(flat[1].id.as_str()));
+        assert_eq!(flat[3].parent_id.as_deref(), Some(flat[2].id.as_str()));
+
+        let target = store.snapshot(&expansion.target_node_id).unwrap();
+        assert_eq!(target.depth, 3);
+        assert_eq!(
+            target.origin,
+            NodeOrigin::ManualPreset {
+                saved_connection_id: "saved-a".to_string(),
+                hop_index: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn expand_manual_preset_under_parent_requires_ready_parent() {
+        let store = NodeRuntimeStore::default();
+        let parent = NodeId::new("root");
+        store.upsert_node(parent.clone(), SshConfig::password("root", 22, "me", "pw"));
+
+        assert!(matches!(
+            store.expand_manual_preset_under_parent(
+                parent.clone(),
+                "saved-a",
+                Vec::new(),
+                SshConfig::password("target", 22, "me", "pw"),
+            ),
+            Err(RouteError::ParentNotConnected(_))
+        ));
+    }
+
+    #[test]
     fn remove_subtree_detaches_parent_child_links() {
         let store = NodeRuntimeStore::default();
         let expansion = store

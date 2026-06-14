@@ -76,7 +76,10 @@
       "managed_key": "托管 SSH 密钥",
       "managed_key_placeholder": "选择托管密钥",
       "managed_key_hint": "托管密钥保存在本地钥匙串中。此连接只保存密钥引用和可选密钥口令。",
-      "managed_key_required": "托管密钥认证需要选择托管 SSH 密钥。"
+      "managed_key_required": "托管密钥认证需要选择托管 SSH 密钥。",
+      "save": "保存",
+      "save_and_connect": "保存并连接",
+      "runtime_node_missing": "运行中的 SSH 节点已不可用"
     },
     "auth": {
       "password": "密码",

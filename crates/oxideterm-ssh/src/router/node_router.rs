@@ -78,6 +78,17 @@ impl NodeRouter {
             .expand_manual_preset(saved_connection_id, hops, target)
     }
 
+    pub fn expand_manual_preset_under_parent(
+        &self,
+        parent_id: NodeId,
+        saved_connection_id: &str,
+        hops: Vec<SshConfig>,
+        target: SshConfig,
+    ) -> Result<NodeTreeExpansion, RouteError> {
+        self.runtime
+            .expand_manual_preset_under_parent(parent_id, saved_connection_id, hops, target)
+    }
+
     pub fn expand_auto_route(
         &self,
         target_host: &str,

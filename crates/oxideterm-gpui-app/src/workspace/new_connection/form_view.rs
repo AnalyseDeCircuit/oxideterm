@@ -6,8 +6,8 @@ use gpui::{
 
 use super::{
     form_state::{
-        NewConnectionField, NewConnectionForm, NewConnectionSelect, NewConnectionTransport,
-        NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
+        NewConnectionField, NewConnectionForm, NewConnectionSelect, NewConnectionSubmitAction,
+        NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
         SavedConnectionPromptAction, SshAuthTab, backspace_current_connection_field,
         clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
         current_connection_field, insert_text_into_current_connection_field,
@@ -72,6 +72,7 @@ enum ConnectionButtonAction {
     Test,
     Connect,
     Save,
+    SaveAndConnect,
 }
 
 include!("form_modal.rs");

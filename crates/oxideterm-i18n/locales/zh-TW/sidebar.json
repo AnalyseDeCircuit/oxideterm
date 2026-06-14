@@ -61,7 +61,9 @@
         "cancel_reconnect": "取消重連",
         "port_forwarding": "連接埠轉發",
         "drill_in": "深入連線（下一跳）",
-        "connect": "連線"
+        "saved_next_hop": "使用已儲存連線作為下一跳...",
+        "connect": "連線",
+        "save_as_connection": "儲存為連線..."
       }
     },
     "focused_list": {
@@ -82,7 +84,20 @@
       "port_forwarding": "連接埠轉發",
       "disconnect": "中斷連線",
       "reconnect": "重新連線",
-      "drill_in": "深入連線（下一跳）"
+      "drill_in": "深入連線（下一跳）",
+      "saved_next_hop": "使用已儲存連線作為下一跳...",
+      "save_as_connection": "儲存為連線..."
+    },
+    "saved_next_hop": {
+      "title": "使用已儲存連線作為下一跳",
+      "description": "選擇一個已儲存連線，接到 {{host}} 下方。",
+      "empty": "沒有可用的已儲存連線。",
+      "cancel": "取消",
+      "proxy_chain_badge": "{{count}} 跳",
+      "parent_not_ready": "請先連線父節點，再新增已儲存的下一跳。",
+      "not_found": "找不到該已儲存連線。",
+      "missing_credentials": "此已儲存連線缺少連線所需的憑證。",
+      "materialize_failed": "無法將該已儲存連線加入工作階段樹。"
     },
     "breadcrumb": {
       "back_to_root": "返回根檢視",
