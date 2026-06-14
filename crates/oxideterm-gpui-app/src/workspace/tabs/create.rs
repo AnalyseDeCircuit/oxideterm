@@ -555,6 +555,36 @@ impl WorkspaceApp {
         Ok(expansion)
     }
 
+    pub(super) fn expand_saved_connection_tree_under_parent(
+        &mut self,
+        parent_node_id: NodeId,
+        saved_connection_id: &str,
+        mut config: SshConfig,
+        target_title: String,
+    ) -> Result<NodeTreeExpansion> {
+        let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        let hops = proxy_chain
+            .iter()
+            .map(ssh_config_from_proxy_hop)
+            .collect::<Vec<_>>();
+        let expansion = self.node_router.expand_manual_preset_under_parent(
+            parent_node_id.clone(),
+            saved_connection_id,
+            hops,
+            config,
+        )?;
+        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title, false);
+        self.expanded_ssh_nodes.insert(parent_node_id);
+        for node_id in &expansion.path_node_ids {
+            self.expanded_ssh_nodes.insert(node_id.clone());
+        }
+        // A saved next hop is scoped to its current parent node. Keep the
+        // per-node saved id, but do not replace the root saved-connection
+        // reuse index with a context-specific child path.
+        self.persist_session_tree_snapshot();
+        Ok(expansion)
+    }
+
     fn register_expanded_tree_nodes(
         &mut self,
         saved_connection_id: &str,

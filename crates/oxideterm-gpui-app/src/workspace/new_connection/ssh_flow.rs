@@ -203,6 +203,90 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn connect_saved_connection_as_next_hop(
+        &mut self,
+        parent_node_id: NodeId,
+        saved_connection_id: String,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let parent_ready = self
+            .node_runtime_store
+            .snapshot(&parent_node_id)
+            .is_some_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+        if !parent_ready {
+            self.report_saved_next_hop_error("sessions.saved_next_hop.parent_not_ready", cx);
+            return;
+        }
+
+        let Some(connection) = self.connection_store.get(&saved_connection_id).cloned() else {
+            self.report_saved_next_hop_error("sessions.saved_next_hop.not_found", cx);
+            return;
+        };
+        let Some(mut config) = ssh_config_from_saved_connection(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &connection,
+        ) else {
+            self.report_saved_next_hop_error("sessions.saved_next_hop.missing_credentials", cx);
+            return;
+        };
+        if let Err(error) = prepare_tree_connect_config(&mut config) {
+            self.report_saved_next_hop_message(error, cx);
+            return;
+        }
+
+        // Saved next-hop reuse still belongs to the native SessionTree path:
+        // materialize the saved target under the live parent, then let
+        // NodeRouter connect through that ancestry.
+        let expansion = match self.expand_saved_connection_tree_under_parent(
+            parent_node_id.clone(),
+            &saved_connection_id,
+            config,
+            connection.name.clone(),
+        ) {
+            Ok(expansion) => expansion,
+            Err(error) => {
+                let message = format!(
+                    "{}: {error}",
+                    self.i18n.t("sessions.saved_next_hop.materialize_failed")
+                );
+                self.report_saved_next_hop_message(message, cx);
+                return;
+            }
+        };
+
+        let target_node_id = expansion.target_node_id.clone();
+        if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
+            node.readiness = NodeReadiness::Connecting;
+        }
+        self.active_ssh_node_id = Some(target_node_id.clone());
+        self.host_key_challenge = None;
+        self.new_connection_form = None;
+        self.drill_down_parent_node_id = None;
+        self.duplicating_saved_connection_id = None;
+        self.close_new_connection_select();
+        self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
+        self.ensure_node_connection_started(&target_node_id);
+        let _ = self.connection_store.mark_used(&saved_connection_id);
+        self.persist_session_tree_snapshot();
+        cx.notify();
+    }
+
+    fn report_saved_next_hop_error(&mut self, i18n_key: &str, cx: &mut Context<Self>) {
+        self.report_saved_next_hop_message(self.i18n.t(i18n_key), cx);
+    }
+
+    fn report_saved_next_hop_message(&mut self, message: String, cx: &mut Context<Self>) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.pending = false;
+            form.error = Some(message);
+        } else {
+            self.session_manager.status = Some(message);
+        }
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_save_runtime_node_form(
         &mut self,
         node_id: NodeId,
