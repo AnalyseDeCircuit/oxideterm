@@ -65,6 +65,7 @@ enum PaletteAction {
         port: u16,
     },
     QuickConnectAlias(String),
+    OpenTelnetTerminal,
     OpenSerialTerminal,
     Sidebar(SidebarSection),
     OpenSavedConnections,
@@ -473,6 +474,7 @@ impl WorkspaceApp {
             PaletteAction::QuickConnectAlias(alias) => {
                 self.open_ssh_config_alias_from_palette(alias, window, cx);
             }
+            PaletteAction::OpenTelnetTerminal => self.open_telnet_connection_form(window, cx),
             PaletteAction::OpenSerialTerminal => self.open_serial_connection_form(window, cx),
             PaletteAction::Sidebar(section) => self.set_sidebar_section(section, cx),
             PaletteAction::OpenSavedConnections => self.open_session_manager_tab(window, cx),
@@ -2221,6 +2223,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             LucideIcon::Plus,
         ),
         CommandSpec {
+            id: "cmd:open_telnet_terminal",
+            label_key: Cow::Borrowed("command_palette.cmd_open_telnet_terminal"),
+            icon: LucideIcon::Network,
+            shortcut_action: None,
+            action: PaletteAction::OpenTelnetTerminal,
+        },
+        CommandSpec {
             id: "cmd:open_serial_terminal",
             label_key: Cow::Borrowed("command_palette.cmd_open_serial_terminal"),
             icon: LucideIcon::Radio,
@@ -2663,6 +2672,16 @@ mod tests {
                 .iter()
                 .any(|spec| spec.id == "cmd:reload_window")
         );
+    }
+
+    #[test]
+    fn command_palette_specs_include_native_telnet_terminal_command() {
+        let spec = command_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:open_telnet_terminal")
+            .expect("native Telnet terminal command");
+
+        assert!(matches!(spec.action, PaletteAction::OpenTelnetTerminal));
     }
 
     #[test]

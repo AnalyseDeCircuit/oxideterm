@@ -50,6 +50,30 @@ impl WorkspaceApp {
         rows
     }
 
+    fn filtered_session_telnet_profiles(&self) -> Vec<TelnetProfile> {
+        let query = self.session_manager.search_query.trim().to_lowercase();
+        let mut rows = self.connection_store.telnet_profiles().to_vec();
+        rows.retain(|profile| self.telnet_profile_matches_filter(profile));
+        if !query.is_empty() {
+            rows.retain(|profile| {
+                profile.name.to_lowercase().contains(&query)
+                    || profile.host.to_lowercase().contains(&query)
+                    || profile.port.to_string().contains(&query)
+                    || profile
+                        .group
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .contains(&query)
+            });
+        }
+        rows.sort_by(|left, right| right.last_used_at.cmp(&left.last_used_at));
+        if self.session_manager.selected_group.as_deref() == Some(RECENT_FILTER) {
+            rows.truncate(20);
+        }
+        rows
+    }
+
     fn connection_matches_filter(&self, conn: &ConnectionInfo) -> bool {
         match self.session_manager.selected_group.as_deref() {
             None => true,
@@ -62,6 +86,17 @@ impl WorkspaceApp {
     }
 
     fn serial_profile_matches_filter(&self, profile: &SerialProfile) -> bool {
+        match self.session_manager.selected_group.as_deref() {
+            None => true,
+            Some(UNGROUPED_FILTER) => profile.group.is_none(),
+            Some(RECENT_FILTER) => profile.last_used_at.is_some(),
+            Some(group) => profile.group.as_deref().is_some_and(|profile_group| {
+                profile_group == group || profile_group.starts_with(&format!("{group}/"))
+            }),
+        }
+    }
+
+    fn telnet_profile_matches_filter(&self, profile: &TelnetProfile) -> bool {
         match self.session_manager.selected_group.as_deref() {
             None => true,
             Some(UNGROUPED_FILTER) => profile.group.is_none(),
@@ -117,7 +152,17 @@ impl WorkspaceApp {
                 })
             })
             .count();
-        connection_count + serial_count
+        let telnet_count = self
+            .connection_store
+            .telnet_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
+        connection_count + serial_count + telnet_count
     }
 
     fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -131,6 +176,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.serial_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.telnet_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -345,6 +395,22 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn request_delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(profile) = self
+            .connection_store
+            .telnet_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+        else {
+            return;
+        };
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::TelnetProfile {
+            id: id.to_string(),
+            name: profile.name.clone(),
+        });
+        cx.notify();
+    }
+
     fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let ids = self
             .session_manager
@@ -377,6 +443,9 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::SerialProfile { id, .. } => {
                 self.delete_serial_profile(&id, cx)
             }
+            SessionManagerDeleteConfirm::TelnetProfile { id, .. } => {
+                self.delete_telnet_profile(&id, cx)
+            }
             SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
         }
     }
@@ -396,6 +465,25 @@ impl WorkspaceApp {
                 self.session_manager.status = Some(format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.serial_profiles.delete_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.connection_store.delete_telnet_profile(id) {
+            Ok(true) => {
+                self.session_manager.status = Some(self.i18n.t("sessionManager.telnet_profiles.delete"));
+            }
+            Ok(false) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.telnet_profiles.delete_failed"));
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.telnet_profiles.delete_failed")
                 ));
             }
         }
@@ -434,6 +522,39 @@ impl WorkspaceApp {
                 self.session_manager.status = Some(format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.serial_profiles.open_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_saved_telnet_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .telnet_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let config = oxideterm_terminal::TelnetSessionConfig {
+            host: profile.host.clone(),
+            port: profile.port,
+        };
+        match self.create_telnet_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                let _ = self.connection_store.mark_telnet_profile_used(id);
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.telnet_profiles.open_failed")
                 ));
             }
         }

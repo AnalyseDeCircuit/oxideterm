@@ -104,7 +104,8 @@
     "footer_hint": "按 Esc 關閉",
     "session_ssh_terminal": "SSH 終端機",
     "cmd_open_cloud_sync": "開啟雲端同步",
-    "cmd_open_serial_terminal": "開啟序列埠終端機"
+    "cmd_open_serial_terminal": "開啟序列埠終端機",
+    "cmd_open_telnet_terminal": "開啟 Telnet 終端機"
   },
   "common": {
     "enabled": "已啟用",

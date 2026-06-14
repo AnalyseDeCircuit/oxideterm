@@ -104,7 +104,8 @@
     "quick_connect_resolve_failed": "解析 SSH config alias {{alias}} 失败",
     "footer_hint": "按 Esc 关闭",
     "session_ssh_terminal": "SSH 终端",
-    "cmd_open_serial_terminal": "打开串口终端"
+    "cmd_open_serial_terminal": "打开串口终端",
+    "cmd_open_telnet_terminal": "打开 Telnet 终端"
   },
   "shortcuts_modal": {
     "title": "键盘快捷键",

@@ -104,7 +104,8 @@
     "footer_hint": "Appuyez sur Échap pour fermer",
     "session_ssh_terminal": "Terminal SSH",
     "cmd_open_cloud_sync": "Ouvrir la synchronisation cloud",
-    "cmd_open_serial_terminal": "Ouvrir un terminal série"
+    "cmd_open_serial_terminal": "Ouvrir un terminal série",
+    "cmd_open_telnet_terminal": "Ouvrir un terminal Telnet"
   },
   "common": {
     "enabled": "Activé",

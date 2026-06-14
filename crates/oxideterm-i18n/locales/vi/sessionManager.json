@@ -155,6 +155,15 @@
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
     },
+    "telnet_profiles": {
+      "title": "Hồ sơ Telnet",
+      "count": "{{count}} hồ sơ",
+      "open": "Mở",
+      "delete": "Xóa",
+      "open_failed": "Không mở được hồ sơ Telnet",
+      "delete_failed": "Không xóa được hồ sơ Telnet",
+      "confirm_delete": "Xóa hồ sơ Telnet \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Thông tin xác thực đặc quyền",
       "description": "Lưu riêng thông tin xác thực cho lời nhắc sudo/su. Bí mật nằm trong keychain hệ thống và chỉ được đọc sau khi bạn bấm nút hỗ trợ terminal.",

@@ -16,7 +16,8 @@ use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, list_ssh_config_hosts,
+    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, TelnetProfile,
+    list_ssh_config_hosts,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -196,6 +197,7 @@ pub(super) enum SessionTransferAction {
 pub(super) enum SessionManagerDeleteConfirm {
     Single { id: String, name: String },
     SerialProfile { id: String, name: String },
+    TelnetProfile { id: String, name: String },
     Batch { ids: Vec<String> },
 }
 

@@ -155,6 +155,15 @@
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
     },
+    "telnet_profiles": {
+      "title": "Telnet プロファイル",
+      "count": "{{count}} 件のプロファイル",
+      "open": "開く",
+      "delete": "削除",
+      "open_failed": "Telnet プロファイルを開けませんでした",
+      "delete_failed": "Telnet プロファイルを削除できませんでした",
+      "confirm_delete": "Telnet プロファイル「{{name}}」を削除しますか？"
+    },
     "privilege_credentials": {
       "title": "権限昇格用認証情報",
       "description": "sudo/su プロンプト用の認証情報を別に保存します。シークレットはシステムキーチェーンに保存され、ターミナル補助ボタンをクリックした時だけ読み込まれます。",

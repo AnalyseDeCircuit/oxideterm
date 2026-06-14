@@ -447,6 +447,32 @@ pub struct SaveSerialProfileRequest {
     pub connect_on_open: Option<bool>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TelnetProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub connect_on_open: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SaveTelnetProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub host: String,
+    pub port: u16,
+    pub connect_on_open: Option<bool>,
+}
+
 impl SerialProfile {
     pub fn new(name: impl Into<String>, port_path: impl Into<String>) -> Self {
         let now = Utc::now();
@@ -490,6 +516,36 @@ impl SerialProfile {
     }
 }
 
+impl TelnetProfile {
+    pub fn new(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            host: host.into(),
+            port,
+            connect_on_open: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Telnet profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Telnet profile name is required");
+        }
+        if self.host.trim().is_empty() {
+            bail!("Telnet host is required");
+        }
+        Ok(())
+    }
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -528,6 +584,8 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serial_profiles: Vec<SerialProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub telnet_profiles: Vec<TelnetProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
 }
 
@@ -541,6 +599,7 @@ impl Default for ConnectionStoreData {
             connection_tombstones: Vec::new(),
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
+            telnet_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
         }
     }

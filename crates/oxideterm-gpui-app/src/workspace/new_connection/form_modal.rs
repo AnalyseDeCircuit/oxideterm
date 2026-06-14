@@ -26,6 +26,12 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Serial;
+        let telnet_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::Telnet;
+        let local_transport_mode = serial_mode || telnet_mode;
         let title = if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
@@ -58,6 +64,8 @@ impl WorkspaceApp {
                 .t("sessionManager.edit_properties.duplicate_description")
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.description")
+        } else if telnet_mode {
+            self.i18n.t("modals.new_connection.telnet_description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
         } else {
@@ -70,6 +78,8 @@ impl WorkspaceApp {
                     .trim()
                     .parse::<u32>()
                     .is_ok_and(|baud| baud > 0)
+        } else if telnet_mode {
+            !form.host.trim().is_empty() && form.port.trim().parse::<u16>().is_ok()
         } else {
             !form.host.trim().is_empty()
                 && !form.username.trim().is_empty()
@@ -143,7 +153,10 @@ impl WorkspaceApp {
                                 .when(serial_mode, |content| {
                                     content.child(self.render_serial_form_branch(cx))
                                 })
-                                .when(!serial_mode, |content| {
+                                .when(telnet_mode, |content| {
+                                    content.child(self.render_telnet_form_branch(cx))
+                                })
+                                .when(!serial_mode && !telnet_mode, |content| {
                                     content
                                 .when(!prompt_mode && !drill_down_mode, |content| {
                                     content
@@ -176,7 +189,7 @@ impl WorkspaceApp {
                                                         .child(self.render_connection_field(
                                                             self.i18n.t("ssh.form.port"),
                                                             &form.port,
-                                                            "22".to_string(),
+                                                            SSH_DEFAULT_PORT_TEXT.to_string(),
                                                             NewConnectionField::Port,
                                                             false,
                                                             cx,
@@ -217,7 +230,7 @@ impl WorkspaceApp {
                                                         .child(self.render_connection_field(
                                                             self.i18n.t("ssh.drill_down.port"),
                                                             &form.port,
-                                                            "22".to_string(),
+                                                            SSH_DEFAULT_PORT_TEXT.to_string(),
                                                             NewConnectionField::Port,
                                                             false,
                                                             cx,
@@ -667,7 +680,7 @@ impl WorkspaceApp {
                             !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
                                 && !drill_down_mode
-                                && !serial_mode,
+                                && !local_transport_mode,
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     self.i18n.t("ssh.form.test"),
@@ -680,8 +693,7 @@ impl WorkspaceApp {
                         )
                         .when(
                             !edit_properties_mode
-                                && self.saved_connection_prompt_action.is_none()
-                                && !serial_mode,
+                                && self.saved_connection_prompt_action.is_none(),
                             |footer| {
                                 footer
                                     .child(self.render_connection_button(
@@ -692,7 +704,9 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                     .child(self.render_connection_button(
-                                        if drill_down_mode {
+                                        if local_transport_mode {
+                                            self.i18n.t("modals.new_connection.local_open")
+                                        } else if drill_down_mode {
                                             self.i18n.t("ssh.drill_down.connect")
                                         } else {
                                             self.i18n.t("ssh.form.connect")
@@ -703,7 +717,9 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                     .child(self.render_connection_button(
-                                        if form.pending && drill_down_mode {
+                                        if local_transport_mode {
+                                            self.i18n.t("modals.new_connection.local_save_and_open")
+                                        } else if form.pending && drill_down_mode {
                                             self.i18n.t("ssh.drill_down.connecting")
                                         } else {
                                             self.i18n.t("ssh.form.save_and_connect")
@@ -717,8 +733,7 @@ impl WorkspaceApp {
                         )
                         .when(
                             edit_properties_mode
-                                || self.saved_connection_prompt_action.is_some()
-                                || serial_mode,
+                                || self.saved_connection_prompt_action.is_some(),
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     if self.saved_connection_prompt_action
@@ -732,7 +747,7 @@ impl WorkspaceApp {
                                     } else if edit_properties_mode {
                                         self.i18n.t("sessionManager.edit_properties.save")
                                     } else {
-                                        self.i18n.t("modals.new_connection.serial_open")
+                                        self.i18n.t("modals.new_connection.local_open")
                                     },
                                     true,
                                     if edit_properties_mode

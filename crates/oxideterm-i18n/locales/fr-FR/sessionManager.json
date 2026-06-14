@@ -155,6 +155,15 @@
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
     },
+    "telnet_profiles": {
+      "title": "Profils Telnet",
+      "count": "{{count}} profil(s)",
+      "open": "Ouvrir",
+      "delete": "Supprimer",
+      "open_failed": "Impossible d'ouvrir le profil Telnet",
+      "delete_failed": "Impossible de supprimer le profil Telnet",
+      "confirm_delete": "Supprimer le profil Telnet \"{{name}}\" ?"
+    },
     "privilege_credentials": {
       "title": "Identifiants de privilège",
       "description": "Stocke des identifiants séparés pour les invites sudo/su. Les secrets restent dans le trousseau système et ne sont lus qu’après un clic sur l’aide du terminal.",

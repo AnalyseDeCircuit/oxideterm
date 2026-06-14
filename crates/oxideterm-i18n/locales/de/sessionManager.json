@@ -155,6 +155,15 @@
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
     },
+    "telnet_profiles": {
+      "title": "Telnet-Profile",
+      "count": "{{count}} Profil(e)",
+      "open": "Öffnen",
+      "delete": "Löschen",
+      "open_failed": "Telnet-Profil konnte nicht geöffnet werden",
+      "delete_failed": "Telnet-Profil konnte nicht gelöscht werden",
+      "confirm_delete": "Telnet-Profil \"{{name}}\" löschen?"
+    },
     "privilege_credentials": {
       "title": "Privileg-Anmeldedaten",
       "description": "Separate Anmeldedaten für sudo/su-Prompts speichern. Secrets bleiben im System-Schlüsselbund und werden erst nach Klick auf die Terminal-Hilfe gelesen.",

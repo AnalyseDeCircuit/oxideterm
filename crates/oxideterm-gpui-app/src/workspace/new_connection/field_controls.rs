@@ -1493,6 +1493,11 @@ impl WorkspaceApp {
                 NewConnectionField::Name,
             ),
             (
+                NewConnectionTransport::Telnet,
+                self.i18n.t("modals.new_connection.transport_telnet"),
+                NewConnectionField::Host,
+            ),
+            (
                 NewConnectionTransport::Serial,
                 self.i18n.t("modals.new_connection.transport_serial"),
                 NewConnectionField::SerialPortPath,
@@ -1506,6 +1511,8 @@ impl WorkspaceApp {
                     cx.listener(move |this, _event, _window, cx| {
                         let mut should_refresh_ports = false;
                         if let Some(form) = this.new_connection_form.as_mut() {
+                            let previous_transport = form.transport;
+                            apply_transport_default_port(form, previous_transport, transport);
                             form.transport = transport;
                             form.focused_field = focus_field;
                             form.field_focused = false;
@@ -1525,6 +1532,93 @@ impl WorkspaceApp {
             );
         }
         row.into_any_element()
+    }
+
+    fn render_telnet_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return div().into_any_element();
+        };
+        let telnet_port_invalid =
+            !form.port.trim().is_empty() && form.port.trim().parse::<u16>().is_err();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(
+                div()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(rgba(
+                        (self.tokens.ui.bg << 8) | TAURI_SERIAL_PANEL_BG_ALPHA,
+                    ))
+                    .p(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.new_connection.telnet_section_title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(self.tokens.spacing.one))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("modals.new_connection.telnet_connect_hint")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(self.tokens.metrics.form_host_port_gap))
+                    .child(div().flex_1().child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.telnet_host"),
+                        &form.host,
+                        self.i18n.t("modals.new_connection.telnet_host_placeholder"),
+                        NewConnectionField::Host,
+                        false,
+                        cx,
+                    )))
+                    .child(
+                        div()
+                            .w(px(self.tokens.metrics.form_port_width))
+                            .child(self.render_connection_field(
+                                self.i18n.t("modals.new_connection.telnet_port"),
+                                &form.port,
+                                TELNET_DEFAULT_PORT_TEXT.to_string(),
+                                NewConnectionField::Port,
+                                false,
+                                cx,
+                            )),
+                    ),
+            )
+            .when(telnet_port_invalid, |section| {
+                section.child(self.render_connection_hint_with_color(
+                    self.i18n.t("modals.new_connection.telnet_invalid_port"),
+                    self.tokens.ui.error,
+                ))
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .p(px(self.tokens.spacing.three))
+                    .child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.telnet_profile_name"),
+                        &form.telnet_profile_name,
+                        self.i18n
+                            .t("modals.new_connection.telnet_profile_name_placeholder"),
+                        NewConnectionField::TelnetProfileName,
+                        false,
+                        cx,
+                    )),
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn refresh_serial_ports(&mut self, cx: &mut Context<Self>) {
@@ -1650,32 +1744,19 @@ impl WorkspaceApp {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(self.tokens.spacing.three))
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgb(self.tokens.ui.border))
                     .p(px(self.tokens.spacing.three))
-                    .child(self.render_connection_checkbox(
-                        self.i18n.t("modals.new_connection.save_serial_profile"),
-                        form.save_serial_profile,
-                        |form| form.save_serial_profile = !form.save_serial_profile,
+                    .child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.serial_profile_name"),
+                        &form.serial_profile_name,
+                        self.i18n
+                            .t("modals.new_connection.serial_profile_name_placeholder"),
+                        NewConnectionField::SerialProfileName,
+                        false,
                         cx,
-                    ))
-                    .when(form.save_serial_profile, |section| {
-                        section.child(
-                            div()
-                                .pl(px(TAURI_SERIAL_PROFILE_NAME_INDENT))
-                                .child(self.render_connection_field(
-                                    self.i18n.t("modals.new_connection.serial_profile_name"),
-                                    &form.serial_profile_name,
-                                    self.i18n
-                                        .t("modals.new_connection.serial_profile_name_placeholder"),
-                                    NewConnectionField::SerialProfileName,
-                                    false,
-                                    cx,
-                                )),
-                        )
-                    }),
+                    )),
             )
             .into_any_element()
     }

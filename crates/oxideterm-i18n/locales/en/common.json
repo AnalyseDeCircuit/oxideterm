@@ -104,7 +104,8 @@
     "quick_connect_resolve_failed": "Failed to resolve SSH config alias '{{alias}}'",
     "footer_hint": "Press Esc to close",
     "session_ssh_terminal": "SSH Terminal",
-    "cmd_open_serial_terminal": "Open Serial Terminal"
+    "cmd_open_serial_terminal": "Open Serial Terminal",
+    "cmd_open_telnet_terminal": "Open Telnet Terminal"
   },
   "shortcuts_modal": {
     "title": "Keyboard Shortcuts",

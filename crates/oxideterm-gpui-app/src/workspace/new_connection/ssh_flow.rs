@@ -8,8 +8,8 @@ use std::{
 
 use gpui::{Context, Window};
 use oxideterm_connections::{
-    SaveConnectionRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
-    first_available_default_key_path,
+    SaveConnectionRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
+    SavedUpstreamProxyProtocol, first_available_default_key_path,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
@@ -43,7 +43,7 @@ use oxideterm_session_adapter::{
     managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
     ssh_config_from_saved_connection,
 };
-use oxideterm_terminal::SerialSessionConfig;
+use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
@@ -159,6 +159,20 @@ impl WorkspaceApp {
             form.field_focused = false;
         }
         self.refresh_serial_ports(cx);
+    }
+
+    pub(in crate::workspace) fn open_telnet_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_new_connection_form(window, cx);
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.transport = NewConnectionTransport::Telnet;
+            form.port = super::form_state::TELNET_DEFAULT_PORT_TEXT.to_string();
+            form.focused_field = super::form_state::NewConnectionField::Host;
+            form.field_focused = false;
+        }
     }
 
     pub(in crate::workspace) fn open_drill_down_form(
@@ -426,7 +440,24 @@ impl WorkspaceApp {
                 NewConnectionFormMode::NewConnection
             )
         {
-            self.submit_serial_connection_form(window, cx);
+            self.submit_serial_connection_form(action, window, cx);
+            return;
+        }
+        if self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| form.transport == NewConnectionTransport::Telnet)
+            && self.drill_down_parent_node_id.is_none()
+            && matches!(
+                new_connection_form_mode(
+                    self.editing_saved_connection_id.as_deref(),
+                    self.duplicating_saved_connection_id.as_deref(),
+                    self.saved_connection_prompt_action,
+                ),
+                NewConnectionFormMode::NewConnection
+            )
+        {
+            self.submit_telnet_connection_form(action, window, cx);
             return;
         }
         if let Some(parent_id) = self.drill_down_parent_node_id.clone() {
@@ -595,7 +626,12 @@ impl WorkspaceApp {
         Some(save_request_from_form(&form, None))
     }
 
-    fn submit_serial_connection_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn submit_serial_connection_form(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(form) = self.new_connection_form.as_mut() else {
             return;
         };
@@ -622,7 +658,8 @@ impl WorkspaceApp {
             parity: form.serial_parity,
             flow_control: form.serial_flow_control,
         };
-        let save_request = form.save_serial_profile.then(|| SaveSerialProfileRequest {
+        let should_save_profile = action != NewConnectionSubmitAction::Connect;
+        let mut save_request = should_save_profile.then(|| SaveSerialProfileRequest {
             id: None,
             name: serial_profile_name_or_port(&form.serial_profile_name, &port_path),
             group: serial_profile_group_from_form(&form.group, &self.i18n),
@@ -637,6 +674,49 @@ impl WorkspaceApp {
         form.pending = true;
         form.error = None;
 
+        if action == NewConnectionSubmitAction::Save {
+            let request =
+                save_request.expect("serial save action must build a serial profile request");
+            match self.connection_store.upsert_serial_profile(request) {
+                Ok(_) => {
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                    self.new_connection_form = None;
+                    self.close_new_connection_select();
+                }
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.serial_save_failed")
+                        ));
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        if action == NewConnectionSubmitAction::SaveAndConnect {
+            let request = save_request
+                .take()
+                .expect("serial save-and-open action must build a serial profile request");
+            match self.connection_store.upsert_serial_profile(request) {
+                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.serial_save_failed")
+                        ));
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
         match self.create_serial_terminal_tab(config, window, cx) {
             Ok(_) => {
                 if let Some(request) = save_request {
@@ -646,6 +726,110 @@ impl WorkspaceApp {
                             self.session_manager.status = Some(format!(
                                 "{}: {error}",
                                 self.i18n.t("modals.new_connection.serial_save_failed")
+                            ));
+                        }
+                    }
+                }
+                self.new_connection_form = None;
+                self.close_new_connection_select();
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(error.to_string());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn submit_telnet_connection_form(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let host = form.host.trim().to_string();
+        let port = form.port.trim().parse::<u16>().ok();
+        if host.is_empty() {
+            form.error = Some(self.i18n.t("modals.new_connection.telnet_host_required"));
+            cx.notify();
+            return;
+        }
+        let Some(port) = port else {
+            form.error = Some(self.i18n.t("modals.new_connection.telnet_invalid_port"));
+            cx.notify();
+            return;
+        };
+        let should_save_profile = action != NewConnectionSubmitAction::Connect;
+        let mut save_request = should_save_profile.then(|| SaveTelnetProfileRequest {
+            id: None,
+            name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
+            group: serial_profile_group_from_form(&form.group, &self.i18n),
+            host: host.clone(),
+            port,
+            connect_on_open: None,
+        });
+        let config = TelnetSessionConfig { host, port };
+        form.pending = true;
+        form.error = None;
+
+        if action == NewConnectionSubmitAction::Save {
+            let request =
+                save_request.expect("telnet save action must build a telnet profile request");
+            match self.connection_store.upsert_telnet_profile(request) {
+                Ok(_) => {
+                    self.new_connection_form = None;
+                    self.close_new_connection_select();
+                }
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.telnet_save_failed")
+                        ));
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        if action == NewConnectionSubmitAction::SaveAndConnect {
+            let request = save_request
+                .take()
+                .expect("telnet save-and-open action must build a telnet profile request");
+            match self.connection_store.upsert_telnet_profile(request) {
+                Ok(_) => {}
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.telnet_save_failed")
+                        ));
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
+        // Telnet is opened as a native local terminal transport. It does not
+        // create an SSH node, so SSH-only saved-connection/test flows stay out.
+        match self.create_telnet_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                if let Some(request) = save_request {
+                    match self.connection_store.upsert_telnet_profile(request) {
+                        Ok(_) => {}
+                        Err(error) => {
+                            self.session_manager.status = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.telnet_save_failed")
                             ));
                         }
                     }
@@ -2429,6 +2613,15 @@ fn serial_profile_name_or_port(name: &str, port_path: &str) -> String {
     let name = name.trim();
     if name.is_empty() {
         port_path.to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn telnet_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!("{}:{}", host.trim(), port)
     } else {
         name.to_string()
     }

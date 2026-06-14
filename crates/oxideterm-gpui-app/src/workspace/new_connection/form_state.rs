@@ -15,9 +15,13 @@ pub(in crate::workspace) enum SshAuthTab {
     TwoFactor,
 }
 
+pub(in crate::workspace) const SSH_DEFAULT_PORT_TEXT: &str = "22";
+pub(in crate::workspace) const TELNET_DEFAULT_PORT_TEXT: &str = "23";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionTransport {
     Ssh,
+    Telnet,
     Serial,
 }
 
@@ -131,6 +135,7 @@ pub(in crate::workspace) enum NewConnectionField {
     SerialPortPath,
     SerialBaudRate,
     SerialProfileName,
+    TelnetProfileName,
 }
 
 #[derive(Clone)]
@@ -209,7 +214,7 @@ impl NewConnectionProxyHop {
     pub(in crate::workspace) fn new() -> Self {
         Self {
             host: String::new(),
-            port: "22".to_string(),
+            port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: String::new(),
             auth_tab: SshAuthTab::SshKey,
             password: String::new(),
@@ -281,8 +286,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) serial_stop_bits: u8,
     pub(in crate::workspace) serial_parity: oxideterm_terminal::SerialParity,
     pub(in crate::workspace) serial_flow_control: oxideterm_terminal::SerialFlowControl,
-    pub(in crate::workspace) save_serial_profile: bool,
     pub(in crate::workspace) serial_profile_name: String,
+    pub(in crate::workspace) telnet_profile_name: String,
 }
 
 impl fmt::Debug for NewConnectionForm {
@@ -348,8 +353,8 @@ impl fmt::Debug for NewConnectionForm {
             .field("serial_stop_bits", &self.serial_stop_bits)
             .field("serial_parity", &self.serial_parity)
             .field("serial_flow_control", &self.serial_flow_control)
-            .field("save_serial_profile", &self.save_serial_profile)
             .field("serial_profile_name", &self.serial_profile_name)
+            .field("telnet_profile_name", &self.telnet_profile_name)
             .finish()
     }
 }
@@ -360,7 +365,7 @@ impl Default for NewConnectionForm {
             transport: NewConnectionTransport::Ssh,
             name: String::new(),
             host: String::new(),
-            port: "22".to_string(),
+            port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: "root".to_string(),
             auth_tab: SshAuthTab::Password,
             password: String::new(),
@@ -410,9 +415,30 @@ impl Default for NewConnectionForm {
             serial_stop_bits: 1,
             serial_parity: oxideterm_terminal::SerialParity::None,
             serial_flow_control: oxideterm_terminal::SerialFlowControl::None,
-            save_serial_profile: false,
             serial_profile_name: String::new(),
+            telnet_profile_name: String::new(),
         }
+    }
+}
+
+pub(in crate::workspace) fn apply_transport_default_port(
+    form: &mut NewConnectionForm,
+    previous_transport: NewConnectionTransport,
+    next_transport: NewConnectionTransport,
+) {
+    let current_port = form.port.trim();
+    let should_use_telnet_default = next_transport == NewConnectionTransport::Telnet
+        && (current_port.is_empty() || current_port == SSH_DEFAULT_PORT_TEXT);
+    let should_use_ssh_default = next_transport == NewConnectionTransport::Ssh
+        && previous_transport == NewConnectionTransport::Telnet
+        && (current_port.is_empty() || current_port == TELNET_DEFAULT_PORT_TEXT);
+
+    // Switching transports updates only untouched default ports; user-entered
+    // custom ports are preserved across SSH/Telnet/Serial mode changes.
+    if should_use_telnet_default {
+        form.port = TELNET_DEFAULT_PORT_TEXT.to_string();
+    } else if should_use_ssh_default {
+        form.port = SSH_DEFAULT_PORT_TEXT.to_string();
     }
 }
 
@@ -429,6 +455,25 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::SerialPortPath,
             NewConnectionField::SerialBaudRate,
             NewConnectionField::SerialProfileName,
+        ];
+        let index = fields
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        let next = if forward {
+            (index + 1) % fields.len()
+        } else if index == 0 {
+            fields.len() - 1
+        } else {
+            index - 1
+        };
+        return fields[next];
+    }
+    if transport == NewConnectionTransport::Telnet {
+        let fields = [
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::TelnetProfileName,
         ];
         let index = fields
             .iter()
@@ -673,6 +718,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::SerialPortPath => &mut form.serial_port_path,
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
+        NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
     }
 }
 
@@ -758,6 +804,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::SerialPortPath => &form.serial_port_path,
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
+        NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
     }
 }
 
@@ -832,9 +879,11 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     use super::{
-        NewConnectionField, NewConnectionForm, NewConnectionFormMode, SavedConnectionPromptAction,
-        backspace_current_connection_field, insert_text_into_current_connection_field,
-        new_connection_form_mode, select_current_connection_field, text_from_keystroke,
+        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionTransport,
+        SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, TELNET_DEFAULT_PORT_TEXT,
+        apply_transport_default_port, backspace_current_connection_field,
+        insert_text_into_current_connection_field, new_connection_form_mode, next_connection_field,
+        select_current_connection_field, text_from_keystroke,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -902,6 +951,69 @@ mod tests {
         insert_text_into_current_connection_field(&mut form, "192.168.1.10");
         assert_eq!(form.host, "192.168.1.10");
         assert_eq!(form.selected_field, None);
+    }
+
+    #[test]
+    fn telnet_transport_tabs_between_endpoint_and_profile_name() {
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Host,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Telnet,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Port
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Port,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Telnet,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::TelnetProfileName
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::TelnetProfileName,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Telnet,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Host
+        );
+    }
+
+    #[test]
+    fn transport_default_port_changes_only_for_untouched_defaults() {
+        let mut form = NewConnectionForm::default();
+        apply_transport_default_port(
+            &mut form,
+            NewConnectionTransport::Ssh,
+            NewConnectionTransport::Telnet,
+        );
+        assert_eq!(form.port, TELNET_DEFAULT_PORT_TEXT);
+
+        apply_transport_default_port(
+            &mut form,
+            NewConnectionTransport::Telnet,
+            NewConnectionTransport::Ssh,
+        );
+        assert_eq!(form.port, SSH_DEFAULT_PORT_TEXT);
+
+        form.port = "2323".to_string();
+        apply_transport_default_port(
+            &mut form,
+            NewConnectionTransport::Ssh,
+            NewConnectionTransport::Telnet,
+        );
+        assert_eq!(form.port, "2323");
     }
 
     #[test]

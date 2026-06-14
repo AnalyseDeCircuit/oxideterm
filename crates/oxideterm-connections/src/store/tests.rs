@@ -1130,6 +1130,7 @@ mod tests {
         .unwrap();
 
         assert!(data.serial_profiles.is_empty());
+        assert!(data.telnet_profiles.is_empty());
         assert!(data.connections.is_empty());
     }
 
@@ -1167,6 +1168,55 @@ mod tests {
         let round_trip: ConnectionStoreData = serde_json::from_value(value).unwrap();
         assert_eq!(round_trip.serial_profiles, vec![profile]);
         assert!(round_trip.connections.is_empty());
+    }
+
+    #[test]
+    fn telnet_profile_metadata_round_trips_without_ssh_fields() {
+        let now = Utc::now();
+        let profile = TelnetProfile {
+            id: "telnet-1".to_string(),
+            name: "Router console".to_string(),
+            group: Some("Lab".to_string()),
+            host: "192.168.1.1".to_string(),
+            port: 23,
+            connect_on_open: true,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        };
+        let data = ConnectionStoreData {
+            telnet_profiles: vec![profile.clone()],
+            ..ConnectionStoreData::default()
+        };
+
+        let value = serde_json::to_value(&data).unwrap();
+
+        assert_eq!(value["telnet_profiles"][0]["id"], "telnet-1");
+        assert_eq!(value["telnet_profiles"][0]["host"], "192.168.1.1");
+        assert!(value["telnet_profiles"][0].get("username").is_none());
+        assert!(value["telnet_profiles"][0].get("auth").is_none());
+        assert!(value["telnet_profiles"][0].get("proxy_chain").is_none());
+
+        let round_trip: ConnectionStoreData = serde_json::from_value(value).unwrap();
+        assert_eq!(round_trip.telnet_profiles, vec![profile]);
+        assert!(round_trip.connections.is_empty());
+    }
+
+    #[test]
+    fn telnet_profile_validation_rejects_missing_identity_or_host() {
+        let mut profile = TelnetProfile::new("Router console", "192.168.1.1", 23);
+        assert!(profile.validate().is_ok());
+
+        profile.name.clear();
+        assert!(profile.validate().is_err());
+
+        profile.name = "Router console".to_string();
+        profile.host.clear();
+        assert!(profile.validate().is_err());
+
+        profile.host = "192.168.1.1".to_string();
+        profile.id.clear();
+        assert!(profile.validate().is_err());
     }
 
     #[test]

@@ -69,6 +69,10 @@ impl ConnectionStore {
         &self.data.serial_profiles
     }
 
+    pub fn telnet_profiles(&self) -> &[TelnetProfile] {
+        &self.data.telnet_profiles
+    }
+
     pub fn groups(&self) -> &[String] {
         &self.data.groups
     }
@@ -439,6 +443,83 @@ impl ConnectionStore {
         let Some(profile) = self
             .data
             .serial_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let now = Utc::now();
+        profile.last_used_at = Some(now);
+        profile.updated_at = now;
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn upsert_telnet_profile(
+        &mut self,
+        request: SaveTelnetProfileRequest,
+    ) -> Result<TelnetProfile> {
+        let group = normalize_optional_group_name(request.group.as_deref())?;
+        let now = Utc::now();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let mut profile = self
+            .data
+            .telnet_profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+            .unwrap_or_else(|| {
+                let mut profile =
+                    TelnetProfile::new(request.name.trim(), request.host.trim(), request.port);
+                profile.id = id.clone();
+                profile
+            });
+
+        profile.name = request.name.trim().to_string();
+        profile.group = group;
+        profile.host = request.host.trim().to_string();
+        profile.port = request.port;
+        profile.connect_on_open = request.connect_on_open.unwrap_or(false);
+        if !self
+            .data
+            .telnet_profiles
+            .iter()
+            .any(|existing| existing.id == id)
+        {
+            profile.created_at = now;
+        }
+        profile.updated_at = now;
+        profile.validate()?;
+
+        if let Some(existing) = self
+            .data
+            .telnet_profiles
+            .iter_mut()
+            .find(|existing| existing.id == id)
+        {
+            *existing = profile.clone();
+        } else {
+            self.data.telnet_profiles.push(profile.clone());
+        }
+        self.normalize();
+        self.save()?;
+        Ok(profile)
+    }
+
+    pub fn delete_telnet_profile(&mut self, id: &str) -> Result<bool> {
+        let before = self.data.telnet_profiles.len();
+        self.data.telnet_profiles.retain(|profile| profile.id != id);
+        let deleted = self.data.telnet_profiles.len() != before;
+        if deleted {
+            self.save()?;
+        }
+        Ok(deleted)
+    }
+
+    pub fn mark_telnet_profile_used(&mut self, id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .telnet_profiles
             .iter_mut()
             .find(|profile| profile.id == id)
         else {
@@ -1595,6 +1676,23 @@ impl ConnectionStore {
                 self.data.groups.push(group);
             }
         }
+        let implicit_local_groups = self
+            .data
+            .serial_profiles
+            .iter()
+            .filter_map(|profile| profile.group.clone())
+            .chain(
+                self.data
+                    .telnet_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
+            .collect::<Vec<_>>();
+        for group in implicit_local_groups {
+            if !self.data.groups.contains(&group) {
+                self.data.groups.push(group);
+            }
+        }
         for conn in &mut self.data.connections {
             if conn.options.post_connect_command.is_none() {
                 conn.options.post_connect_command = conn.post_connect_command.take();
@@ -1604,6 +1702,12 @@ impl ConnectionStore {
         }
         self.data
             .connections
+            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data
+            .serial_profiles
+            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data
+            .telnet_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     }
 

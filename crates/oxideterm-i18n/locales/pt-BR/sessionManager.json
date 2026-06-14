@@ -155,6 +155,15 @@
       "delete_failed": "Failed to delete serial profile",
       "confirm_delete": "Delete serial profile \"{{name}}\"?"
     },
+    "telnet_profiles": {
+      "title": "Perfis Telnet",
+      "count": "{{count}} perfil(is)",
+      "open": "Abrir",
+      "delete": "Excluir",
+      "open_failed": "Falha ao abrir perfil Telnet",
+      "delete_failed": "Falha ao excluir perfil Telnet",
+      "confirm_delete": "Excluir perfil Telnet \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Credenciais de privilégio",
       "description": "Armazena credenciais separadas para prompts sudo/su. Os segredos ficam no chaveiro do sistema e só são lidos depois de clicar no auxiliar do terminal.",
