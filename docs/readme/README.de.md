@@ -1,13 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>AI-native Workspace für Remote-Server.</strong>
+  <strong>SSH-Terminal mit KI · SFTP-Browser · Port-Weiterleitung · Serielle Konsole · mini IDE —— Pure Rust Native App </strong>
   <br>
-  Verbinden Sie sich per SSH mit Ihren Servern und arbeiten Sie dann mit Terminals, Dateien, Ports, Transfers, schlanker Bearbeitung, seriellen Konsolen und der OxideSens AI in einer local-first nativen App.
+  GPU-gerendert. Kostenlos. Kein Konto nötig.
   <br>
-  Native GPUI-App · reines Rust-SSH · BYOK OxideSens AI · kein Konto für zentrale SSH-Workflows erforderlich
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust — bis ganz nach unten.</strong>
+  <strong>Zero WebView. Zero OpenSSL. Zero Telemetrie. Zero Abo. BYOK-first. Reines Rust-SSH.</strong>
 </p>
 
 
@@ -39,11 +37,17 @@
 
 ---
 
-## Was Sie damit tun können
+## Was OxideTerm Native ist
 
-- SSH-Terminals, SFTP, Portweiterleitungen, serielle Konsolen, lokale Shells und leichtes Editieren in einem nativen Workspace verwalten
+OxideTerm Native ist eine **pure Rust GPUI Desktop-App** – eine Open-Source-Alternative zu Termius & SecureCRT.
+
+**Was Sie damit tun können:**
+
+- SSH- und Telnet-Terminals, SFTP, Portweiterleitungen, serielle Konsolen, lokale Shells und leichtes Editieren in einem nativen Workspace verwalten
 - Remote-Arbeit mit Grace-Period-Reconnect bei kurzen Netzwerkaussetzern am Leben halten
 - OxideSens AI kann mit Ihrem eigenen KI-Anbieter Live-Sessions prüfen und genehmigte Workspace-Aktionen ausführen
+
+keine gehostete Cloud-Agent-Plattform. Es ist auch keine Electron-App, keine Tauri-App und kein Web-Terminal: kein Chromium, kein WebView, kein JavaScript, kein CSS.
 
 ---
 
@@ -51,18 +55,12 @@
 
 | Wenn Ihnen wichtig ist... | OxideTerm Native bietet... |
 |---|---|
-| Ein Remote-Node, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Monitoring und OxideSens AI bleiben am selben SSH-Workspace |
-| Zero-WebView native Shell | GPUI zeichnet die Desktop-UI direkt auf eine GPU-Surface — ohne DOM, CSS, JavaScript, Chromium oder WebKit-Runtime |
-| Local-first SSH-Workflows | SSH, SFTP, Forwarding, lokale Shell, serielle Terminals und Konfiguration funktionieren ohne Registrierung |
-| Autonome OxideSens AI statt Plattform-Credits | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpoint mit MCP, RAG und genehmigten Workspace-Aktionen |
-| Stabile Wiederverbindung | Grace Period prüft die alte Verbindung 30 s lang, bevor sie ersetzt wird, damit TUI-Apps kurze Aussetzer überstehen können |
-| Reines Rust-SSH und sichere Zugangsdaten | `russh` + `ring`, kein OpenSSL/libssh2; Passwörter und API-Schlüssel bleiben im OS-Keychain, `.oxide` nutzt ChaCha20-Poly1305 + Argon2id |
-
-## Was es ist / was es nicht ist
-
-OxideTerm Native konzentriert sich auf einen **local-first KI-Workspace für Remote-Server**, neu aufgebaut als pure Rust GPUI desktop app. Es richtet sich an Nutzer, die Terminal, Dateien, Ports, Transfers, leichtes Editieren, serielle Konsolen und eine OxideSens AI um ihre eigenen Maschinen und Remote-Nodes herum halten wollen.
-
-Es ist noch nicht die aktuelle stabile Download-Linie und keine gehostete Cloud-Agent-Plattform. Es ist auch keine Electron-App, keine Tauri-App und kein Web-Terminal: kein Chromium, kein WebView, kein JavaScript, kein CSS.
+| Ein Remote-Knoten, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Monitoring und OxideSens AI im selben SSH-Workspace |
+| Zero-WebView native Shell | GPUI zeichnet die Desktop-UI direkt auf einer GPU-Oberfläche – kein DOM, CSS, JavaScript, Chromium oder WebKit |
+| Local-First SSH-Workflows | SSH, Telnet, SFTP, Weiterleitung, lokale Shell, serielle Terminals und Konfiguration ohne Anmeldung |
+| BYOK OxideSens AI statt Plattform-Credits | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpunkt mit MCP, RAG und genehmigten Workspace-Aktionen |
+| Wiederverbindungsstabilität | Grace Period prüft die alte Verbindung 30 s lang, bevor sie ersetzt wird – TUI-Apps überleben kurze Netzwerkausfälle |
+| Reines Rust-SSH und Credential-Sicherheit | `russh` + `ring`, kein OpenSSL/libssh2; Passwörter und API-Schlüssel im OS-Keychain, `.oxide`-Bundle mit ChaCha20-Poly1305 + Argon2id |
 
 ---
 
@@ -93,13 +91,13 @@ Die native UI folgt demselben OxideTerm-Workspace-Modell und derselben visuellen
 | SSH keepalive | JavaScript Timer | Rust async task |
 | Plugins | ESM im Browser-Sandbox | wasmtime WASM + typed Rust host API |
 | CLI | Desktop-App muss laufen | Eigenständiges Binary |
-| Release-Artefaktgröße | Meist ca. 150–200 MB Installer | Aktuell macOS arm64: ca. 50–60 MB komprimiertes Portable/DMG; rohes Release-Binary ca. 132 MB |
+| Runtime-Grenze | Browser-Runtime + WebView-Bridge | Nativer Prozess; keine gebündelte Browser-Runtime |
 
 ## Funktionsübersicht
 
 | Kategorie | Funktionen |
 |---|---|
-| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, Telnet, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | Connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | Dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |
@@ -109,7 +107,7 @@ Die native UI folgt demselben OxideTerm-Workspace-Modell und derselben visuellen
 
 ## Architektur
 
-OxideTerm Native entfernt die WebView-Bridge und hält Terminal, SSH, SFTP, Forwarding, IDE, KI, Plugins und CLI in einer Rust-nativen Architektur. Die vollständigen Implementierungsdetails bleiben unten erhalten.
+OxideTerm Native entfernt die WebView-Bridge und hält Terminal, SSH, Telnet, SFTP, Forwarding, IDE, KI, Plugins und CLI in einer Rust-nativen Architektur. Die vollständigen Implementierungsdetails bleiben unten erhalten.
 
 <details>
 <summary><strong>Architektur, SSH-Internals, GPUI-Shell, Reconnect, KI, Plugins und mehr</strong></summary>
@@ -134,7 +132,7 @@ Zwischen UI und SSH/Terminal-Backend gibt es keine Serialisierungsgrenze. Termin
 
 Die native Edition linkt denselben `russh`-Stack wie die Tauri-Linie direkt in das Desktop-Binary:
 
-- **Keine C/OpenSSL-Abhängigkeiten** durch `ring`
+- **Keine OpenSSL-Abhängigkeiten** durch `ring`
 - Vollständiges SSH2: Key Exchange, Channels, SFTP-Subsystem, Portweiterleitung
 - ChaCha20-Poly1305 / AES-GCM, Ed25519/RSA/ECDSA-Schlüssel
 - SSH Agent unter Unix (`SSH_AUTH_SOCK`) und Windows (`\\.\pipe\openssh-ssh-agent`)
@@ -175,7 +173,7 @@ OxideSens bleibt BYOK-first, mit Kontextaufbau direkt im Prozess:
 
 Die UI wird direkt mit GPUI gezeichnet, ohne DOM/CSS/JavaScript-Rendering-Pipeline:
 
-- 17 Workspace-Tab-Typen: lokale/SSH-Terminals, SFTP, IDE, Forwards, Settings, Plugin, Topology und mehr
+- 17 Workspace-Tab-Typen: lokale, SSH- und Telnet-Terminals, SFTP, IDE, Forwards, Settings, Plugin, Topology und mehr
 - Binärer Pane-Tree mit ziehbaren Dividern, bis zu vier Panes pro Terminal-Tab
 - Command Palette, globale Tastenkürzel und Sidebars bestehen aus GPUI-Primitives
 - Immediate-mode Rendering reagiert auf Rust-State ohne Serialisierungs-Roundtrip

@@ -1,13 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Workspace AI-native para servidores remotos.</strong>
+  <strong>Terminal SSH com IA · Navegador SFTP · Encaminhamento de portas · Console serial · mini IDE —— App nativa Pure Rust </strong>
   <br>
-  Conecte-se aos seus servidores por SSH e trabalhe com terminais, arquivos, portas, transferências, edição leve, consoles seriais e OxideSens AI em um app nativo local-first.
+  Renderização GPU. Grátis. Sem necessidade de conta.
   <br>
-  App GPUI nativo · SSH puro em Rust · OxideSens AI BYOK · sem conta para os workflows SSH principais
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust all the way down.</strong>
+  <strong>Zero WebView. Zero OpenSSL. Zero telemetria. Zero assinatura. BYOK-first. SSH puro em Rust.</strong>
 </p>
 
 
@@ -41,7 +39,7 @@
 
 ## O que você pode fazer
 
-- Gerenciar terminais SSH, SFTP, port forwards, consoles seriais, shells locais e edição leve em um workspace nativo
+- Gerenciar terminais SSH e Telnet, SFTP, port forwards, consoles seriais, shells locais e edição leve em um workspace nativo
 - Manter o trabalho remoto vivo durante instabilidades de rede com Grace Period reconnect
 - Pedir à OxideSens AI para inspecionar sessões ao vivo e executar ações aprovadas do workspace usando seu próprio provedor de IA
 
@@ -53,7 +51,7 @@
 |---|---|
 | Um nó remoto, muitas ferramentas | Terminal, SFTP, port forwarding, trzsz, IDE nativo, monitoramento e OxideSens AI ficam no mesmo workspace SSH |
 | Shell nativo zero-WebView | GPUI desenha a UI desktop diretamente numa superfície GPU, sem DOM, CSS, JavaScript, Chromium ou runtime WebKit |
-| Workflows SSH local-first | SSH, SFTP, forwarding, shell local, terminais seriais e configuração funcionam sem cadastro |
+| Workflows SSH local-first | SSH, Telnet, SFTP, forwarding, shell local, terminais seriais e configuração funcionam sem cadastro |
 | OxideSens AI BYOK em vez de créditos de plataforma | OxideSens usa seu endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible com MCP, RAG e ações aprovadas do workspace |
 | Reconexão estável | Grace Period sonda a conexão antiga por 30 s antes de substituí-la, para que TUIs sobrevivam a quedas curtas |
 | SSH puro em Rust e credenciais seguras | `russh` + `ring`, sem OpenSSL/libssh2; senhas e chaves API ficam no keychain do OS, `.oxide` usa ChaCha20-Poly1305 + Argon2id |
@@ -62,7 +60,7 @@
 
 OxideTerm Native foca em um **workspace AI local-first para servidores remotos**, reconstruído como app desktop GPUI em Rust puro. Ele é feito para usuários que querem terminais, arquivos, portas, transferências, edição leve, consoles seriais e uma OxideSens AI ao redor de suas próprias máquinas e nós remotos.
 
-Ainda não é a linha estável de download atual, nem uma plataforma cloud de agentes. Também não é Electron, Tauri ou terminal web: sem Chromium, sem WebView, sem JavaScript, sem CSS.
+Não é uma plataforma cloud de agentes. Também não é Electron, Tauri ou terminal web: sem Chromium, sem WebView, sem JavaScript, sem CSS.
 
 ---
 
@@ -93,13 +91,13 @@ A UI nativa segue o mesmo modelo de workspace e linguagem visual do OxideTerm da
 | SSH keepalive | Timer JavaScript | Rust async task |
 | Plugins | ESM em sandbox do navegador | WASM wasmtime + typed Rust host API |
 | CLI | Requer app desktop | Binário standalone |
-| Tamanho do artefato | Instaladores geralmente ~150–200 MB | macOS arm64 atual: portable/DMG comprimido ~50–60 MB; binário release bruto ~132 MB |
+| Limite de runtime | Runtime de navegador + ponte WebView | Processo nativo; sem runtime de navegador embutido |
 
 ## Funcionalidades
 
 | Categoria | Funcionalidades |
 |---|---|
-| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, Telnet, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |
@@ -109,7 +107,7 @@ A UI nativa segue o mesmo modelo de workspace e linguagem visual do OxideTerm da
 
 ## Arquitetura
 
-OxideTerm Native remove a ponte WebView e mantém terminal, SSH, SFTP, forwarding, IDE, IA, plugins e CLI em uma arquitetura Rust-native. Os detalhes completos ficam preservados abaixo.
+OxideTerm Native remove a ponte WebView e mantém terminal, SSH, Telnet, SFTP, forwarding, IDE, IA, plugins e CLI em uma arquitetura Rust-native. Os detalhes completos ficam preservados abaixo.
 
 <details>
 <summary><strong>Arquitetura, internals SSH, shell GPUI, reconexão, IA, plugins e mais</strong></summary>
@@ -134,7 +132,7 @@ Não existe fronteira de serialização entre UI e backend SSH/terminal. Os byte
 
 A edição nativa vincula o mesmo stack `russh` da linha Tauri diretamente no binário desktop:
 
-- **Zero dependências C/OpenSSL** via `ring`
+- **Zero dependências OpenSSL** via `ring`
 - SSH2 completo: key exchange, channels, subsistema SFTP, port forwarding
 - ChaCha20-Poly1305 / AES-GCM, chaves Ed25519/RSA/ECDSA
 - SSH Agent no Unix (`SSH_AUTH_SOCK`) e Windows (`\\.\pipe\openssh-ssh-agent`)
@@ -175,7 +173,7 @@ OxideSens continua BYOK-first, com construção de contexto dentro do processo:
 
 A UI é desenhada diretamente com GPUI, sem pipeline DOM/CSS/JavaScript:
 
-- 17 tipos de abas workspace: terminal local/SSH, SFTP, IDE, Forwards, Settings, Plugin, Topology e mais
+- 17 tipos de abas workspace: terminais locais, SSH e Telnet, SFTP, IDE, Forwards, Settings, Plugin, Topology e mais
 - Binary pane tree com divisores arrastáveis, até quatro panes por aba terminal
 - Command palette, atalhos globais e sidebars feitos com primitives GPUI
 - Immediate-mode rendering reage ao estado Rust sem round-trip de serialização

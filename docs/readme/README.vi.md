@@ -1,13 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Workspace AI-native cho máy chủ từ xa.</strong>
+  <strong>Terminal SSH tích hợp AI · Trình duyệt SFTP · Chuyển tiếp cổng · Console nối tiếp · mini IDE —— Ứng dụng Pure Rust Native </strong>
   <br>
-  Kết nối tới server của bạn qua SSH, rồi làm việc với terminal, tệp, cổng, truyền tải, chỉnh sửa nhẹ, serial console và OxideSens AI trong một app native local-first.
+  Kết xuất GPU. Miễn phí. Không cần tài khoản.
   <br>
-  Ứng dụng GPUI native · SSH thuần Rust · OxideSens AI BYOK · không cần tài khoản cho workflow SSH chính
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust all the way down.</strong>
+  <strong>Không WebView. Không OpenSSL. Không đo xa. Không thuê bao. BYOK-first. SSH thuần Rust.</strong>
 </p>
 
 
@@ -41,7 +39,7 @@
 
 ## Bạn có thể làm gì
 
-- Quản lý SSH terminal, SFTP, port forward, serial console, local shell và chỉnh sửa nhẹ trong một native workspace
+- Quản lý terminal SSH và Telnet, SFTP, port forward, serial console, local shell và chỉnh sửa nhẹ trong một native workspace
 - Giữ công việc từ xa sống qua mạng chập chờn với Grace Period reconnect
 - Yêu cầu OxideSens AI kiểm tra live session và chạy các workspace action đã được phê duyệt qua nhà cung cấp AI của bạn
 
@@ -53,7 +51,7 @@
 |---|---|
 | Một remote node, nhiều công cụ | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring và OxideSens AI cùng gắn với một SSH workspace |
 | Native shell zero-WebView | GPUI vẽ desktop UI trực tiếp lên GPU surface, không DOM, CSS, JavaScript, Chromium hay WebKit runtime |
-| Workflow SSH local-first | SSH, SFTP, forwarding, local shell, serial terminal và cấu hình hoạt động không cần đăng ký |
+| Workflow SSH local-first | SSH, Telnet, SFTP, forwarding, local shell, serial terminal và cấu hình hoạt động không cần đăng ký |
 | OxideSens AI BYOK thay vì credit nền tảng | OxideSens dùng endpoint OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible của bạn với MCP, RAG và workspace action đã được phê duyệt |
 | Reconnect ổn định | Grace Period thăm dò kết nối cũ 30 giây trước khi thay thế, giúp TUI sống sót qua mất mạng ngắn |
 | SSH thuần Rust và an toàn credential | `russh` + `ring`, không OpenSSL/libssh2; mật khẩu và API key ở OS keychain, `.oxide` dùng ChaCha20-Poly1305 + Argon2id |
@@ -62,7 +60,7 @@
 
 OxideTerm Native tập trung vào **workspace AI local-first cho máy chủ từ xa**, được xây lại thành app desktop GPUI thuần Rust. Nó dành cho người dùng muốn terminal, tệp, cổng, truyền tải, chỉnh sửa nhẹ, serial console và OxideSens AI xoay quanh máy của họ và các node từ xa.
 
-Nó chưa phải stable download line hiện tại, và không phải nền tảng cloud agent được host. Nó cũng không phải Electron, Tauri hay web terminal: không Chromium, không WebView, không JavaScript, không CSS.
+Nó không phải nền tảng cloud agent được host. Nó cũng không phải Electron, Tauri hay web terminal: không Chromium, không WebView, không JavaScript, không CSS.
 
 ---
 
@@ -93,13 +91,13 @@ Native UI theo cùng mô hình workspace và ngôn ngữ hình ảnh OxideTerm n
 | SSH keepalive | JavaScript timer | Rust async task |
 | Plugin runtime | ESM trong browser sandbox | WASM wasmtime + typed Rust host API |
 | CLI | Cần desktop app chạy | Standalone binary |
-| Kích thước artifact | Trình cài đặt thường ~150–200 MB | macOS arm64 hiện tại: portable/DMG nén ~50–60 MB; release binary thô ~132 MB |
+| Ranh giới runtime | Runtime trình duyệt + cầu WebView | Tiến trình native; không kèm runtime trình duyệt |
 
 ## Tính năng
 
 | Category | Features |
 |---|---|
-| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, Telnet, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |
@@ -109,7 +107,7 @@ Native UI theo cùng mô hình workspace và ngôn ngữ hình ảnh OxideTerm n
 
 ## Kiến trúc
 
-OxideTerm Native loại bỏ WebView bridge và giữ terminal, SSH, SFTP, forwarding, IDE, AI, plugins và CLI trong một kiến trúc Rust-native. Các chi tiết triển khai đầy đủ được giữ lại bên dưới.
+OxideTerm Native loại bỏ WebView bridge và giữ terminal, SSH, Telnet, SFTP, forwarding, IDE, AI, plugins và CLI trong một kiến trúc Rust-native. Các chi tiết triển khai đầy đủ được giữ lại bên dưới.
 
 <details>
 <summary><strong>Kiến trúc, nội bộ SSH, GPUI shell, reconnect, AI, plugins và hơn nữa</strong></summary>
@@ -134,7 +132,7 @@ Không có serialization boundary giữa UI và SSH/terminal backend. Terminal b
 
 Native edition liên kết cùng stack `russh` của Tauri line trực tiếp vào desktop binary:
 
-- **Không phụ thuộc C/OpenSSL** nhờ `ring`
+- **Không phụ thuộc OpenSSL** nhờ `ring`
 - SSH2 đầy đủ: key exchange, channels, SFTP subsystem, port forwarding
 - ChaCha20-Poly1305 / AES-GCM, khóa Ed25519/RSA/ECDSA
 - SSH Agent trên Unix (`SSH_AUTH_SOCK`) và Windows (`\\.\pipe\openssh-ssh-agent`)
@@ -175,7 +173,7 @@ OxideSens vẫn BYOK-first, với context building chạy in-process:
 
 UI được vẽ trực tiếp bằng GPUI, không có DOM/CSS/JavaScript rendering pipeline:
 
-- 17 workspace tab types: local/SSH terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology và hơn nữa
+- 17 workspace tab types: local terminal, SSH terminal, Telnet terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology và hơn nữa
 - Binary pane tree với dividers kéo được, tối đa bốn panes mỗi terminal tab
 - Command palette, global key bindings và sidebars dùng GPUI primitives
 - Immediate-mode rendering phản ứng với Rust state mà không cần serialization round-trip
@@ -271,7 +269,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] SSH Agent forwarding, Grace Period reconnect, GPUI desktop shell
 - [x] In-process terminal data flow without WebSocket
 - [x] SFTP, forwarding, IDE, AI, cloud sync, plugins, CLI
-- [x] Local serial terminals
+- [x] Local serial and Telnet terminals
 - [x] Full ProxyCommand
 - [ ] Audit logging
 

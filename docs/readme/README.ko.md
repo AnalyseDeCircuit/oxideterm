@@ -1,13 +1,11 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>원격 서버를 위한 AI-native 워크스페이스.</strong>
+  <strong>AI 기반 SSH 터미널 · SFTP 브라우저 · 포트 포워딩 · 시리얼 콘솔 · mini IDE —— 순수 Rust 네이티브 앱 </strong>
   <br>
-  SSH로 서버에 연결한 뒤 terminal, 파일, 포트, 전송, 가벼운 편집, serial console, OxideSens AI를 local-first 네이티브 앱에서 다룹니다.
+  GPU 직접 렌더링. 무료, 계정 불필요.
   <br>
-  네이티브 GPUI 앱 · 순수 Rust SSH · BYOK OxideSens AI · 핵심 SSH 워크플로에는 계정 불필요
-  <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetry. Zero Subscription. BYOK-first. Pure Rust all the way down.</strong>
+  <strong>제로 WebView. 제로 OpenSSL. 제로 텔레메트리. 제로 구독. BYOK 우선. 순수 Rust SSH.</strong>
 </p>
 
 
@@ -39,30 +37,30 @@
 
 ---
 
-## 할 수 있는 일
+## OxideTerm Native란
 
-- SSH terminal, SFTP, port forward, serial console, local shell, lightweight editing을 하나의 native workspace에서 관리
+OxideTerm Native는 **순수 Rust GPUI 데스크톱 앱**——Termius & SecureCRT의 오픈소스 대안입니다.
+
+**할 수 있는 일:**
+
+- SSH 및 Telnet terminal, SFTP, port forward, serial console, local shell, lightweight editing을 하나의 native workspace에서 관리
 - Grace Period reconnect로 네트워크가 흔들려도 원격 작업 유지
 - OxideSens AI가 사용자의 AI provider로 live session을 확인하고 승인된 workspace action을 실행하도록 요청
 
+hosted cloud agent platform도 아닙니다. Electron, Tauri, web terminal도 아닙니다. Chromium, WebView, JavaScript, CSS가 없습니다.
+
 ---
 
-## 왜 Native인가?
+## 왜 OxideTerm Native인가?
 
-| 관심사 | OxideTerm Native가 제공하는 것 |
+| 당신이 중요하게 생각하는 것... | OxideTerm Native가 제공하는 것... |
 |---|---|
-| 하나의 remote node, 여러 도구 | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring, OxideSens AI가 같은 SSH workspace에 붙어 있습니다 |
-| Zero WebView native shell | GPUI가 GPU surface에 desktop UI를 직접 그리며 DOM, CSS, JavaScript, Chromium, WebKit runtime이 없습니다 |
-| Local-first SSH workflows | SSH, SFTP, forwarding, local shell, serial terminals, config가 signup 없이 동작합니다 |
-| Platform credit 대신 BYOK OxideSens AI | OxideSens는 OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint를 사용하며 MCP, RAG, 승인된 workspace action을 지원합니다 |
-| 재연결 안정성 | Grace Period가 기존 연결을 30초간 probe한 뒤 교체하므로 짧은 네트워크 끊김에도 TUI가 살아남을 수 있습니다 |
-| 순수 Rust SSH와 자격 증명 안전 | `russh` + `ring`, OpenSSL/libssh2 없음. 비밀번호와 API key는 OS keychain에, `.oxide`는 ChaCha20-Poly1305 + Argon2id 사용 |
-
-## 무엇인가 / 무엇이 아닌가
-
-OxideTerm Native는 **원격 서버를 위한 local-first AI workspace**에 집중하며, 이를 pure Rust GPUI desktop app으로 다시 만든 버전입니다. Terminal, file, port, transfer, lightweight editing, serial console, OxideSens AI를 자신의 machine과 remote node 중심에 두고 싶은 사용자를 위한 것입니다.
-
-아직 현재 stable download line이 아니며, hosted cloud agent platform도 아닙니다. Electron, Tauri, web terminal도 아닙니다. Chromium, WebView, JavaScript, CSS가 없습니다.
+| 하나의 원격 노드, 많은 도구 | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring, OxideSens AI가 동일 SSH workspace에 연결 |
+| Zero WebView native shell | GPUI가 GPU surface에서 직접 데스크톱 UI를 그림 — DOM, CSS, JavaScript, Chromium, WebKit runtime 없음 |
+| Local-first SSH workflows | SSH, Telnet, SFTP, forwarding, local shell, serial terminal, config 작업에 가입 불필요 |
+| BYOK OxideSens AI | OxideSens는 사용자의 OpenAI/Anthropic/Gemini/Ollama/compatible endpoint를 MCP, RAG, 승인된 workspace action과 함께 사용 |
+| Reconnect stability | Grace Period가 30초 동안 기존 연결을 probe — TUI apps가 짧은 네트워크 단절에서도 살아남음 |
+| 순수 Rust SSH와 credential safety | `russh` + `ring`, OpenSSL/libssh2 없음; 비밀번호와 API 키는 OS keychain에 저장, `.oxide` 번들은 ChaCha20-Poly1305 + Argon2id 사용 |
 
 ---
 
@@ -93,13 +91,13 @@ Native UI는 현재 Tauri line과 같은 OxideTerm workspace model과 visual lan
 | SSH keepalive | JavaScript timer | Rust async task |
 | Plugin runtime | ESM in browser sandbox | wasmtime WASM + typed Rust host API |
 | CLI | desktop app 필요 | standalone binary |
-| 배포 아티팩트 크기 | 보통 약 150–200 MB 설치 파일 | 현재 macOS arm64: 압축 portable/DMG 약 50–60 MB, 원본 release binary 약 132 MB |
+| 런타임 경계 | 브라우저 runtime + WebView bridge | native process, bundled browser runtime 없음 |
 
 ## Feature Overview
 
 | Category | Features |
 |---|---|
-| Terminal | Local PTY, SSH, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | Local PTY, SSH, Telnet, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
 | SSH & Auth | connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
 | Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |
@@ -109,7 +107,7 @@ Native UI는 현재 Tauri line과 같은 OxideTerm workspace model과 visual lan
 
 ## Architecture
 
-OxideTerm Native는 WebView bridge를 제거하고 terminal, SSH, SFTP, forwarding, IDE, AI, plugins, CLI를 하나의 Rust-native architecture 안에 유지합니다. 구현 세부 사항은 아래에 보존했습니다.
+OxideTerm Native는 WebView bridge를 제거하고 terminal, SSH, Telnet, SFTP, forwarding, IDE, AI, plugins, CLI를 하나의 Rust-native architecture 안에 유지합니다. 구현 세부 사항은 아래에 보존했습니다.
 
 <details>
 <summary><strong>Architecture, SSH internals, GPUI shell, reconnect, AI, plugins 등</strong></summary>
@@ -134,7 +132,7 @@ UI와 SSH/terminal backend 사이에 serialization boundary가 없습니다. Ter
 
 Native edition은 Tauri line과 같은 `russh` stack을 desktop binary에 직접 link합니다.
 
-- `ring` 기반으로 **C/OpenSSL 의존성 없음**
+- `ring` 기반으로 **OpenSSL 의존성 없음**
 - 전체 SSH2: key exchange, channels, SFTP subsystem, port forwarding
 - ChaCha20-Poly1305 / AES-GCM, Ed25519/RSA/ECDSA keys
 - SSH Agent: Unix (`SSH_AUTH_SOCK`)와 Windows (`\\.\pipe\openssh-ssh-agent`)
@@ -175,7 +173,7 @@ OxideSens는 BYOK-first를 유지하며 context building은 in-process로 수행
 
 UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없습니다.
 
-- 17 workspace tab types: local/SSH terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology 등
+- 17 workspace tab types: local terminal, SSH terminal, Telnet terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology 등
 - draggable dividers를 가진 binary pane tree, terminal tab당 최대 4 panes
 - Command palette, global key bindings, sidebars는 GPUI primitives
 - Immediate-mode rendering은 serialization round-trip 없이 Rust state에 반응
@@ -271,7 +269,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] SSH Agent forwarding, Grace Period reconnect, GPUI desktop shell
 - [x] in-process terminal data flow without WebSocket
 - [x] SFTP, forwarding, IDE, AI, cloud sync, plugins, CLI
-- [x] Local serial terminals
+- [x] Local serial and Telnet terminals
 - [x] Full ProxyCommand
 - [ ] Audit logging
 
