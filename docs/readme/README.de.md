@@ -1,18 +1,18 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>SSH-Client mit KI für Remote-Server — Pure Rust Native App</strong>
+  <strong>KI-gestützter SSH-Client für Remote-Server — native App aus reinem Rust</strong>
   <br>
-  SSH- und Telnet-Terminals, SFTP, Portweiterleitung, serielle Konsolen und leichtes Editieren in einem nativen Workspace.
+  SSH- und Telnet-Terminals, SFTP, Portweiterleitung, serielle Konsolen und leichtes Editieren in einem nativen Arbeitsbereich.
   <br>
   GPU-gerendert. Kostenlos. Kein Konto nötig.
   <br>
-  <strong>Zero WebView. Zero OpenSSL. Zero Telemetrie. Zero Abo. BYOK-first. Reines Rust-SSH.</strong>
+  <strong>Kein WebView. Kein OpenSSL. Keine Telemetrie. Kein Abo. BYOK zuerst. Reines Rust-SSH.</strong>
 </p>
 
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0--gpui--preview.7-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0--gpui--Vorschau.7-blue" alt="Version">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plattform">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Lizenz">
   <img src="https://img.shields.io/badge/rust-2024%20edition-orange" alt="Rust 2024">
@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <sub>Nächste große native Edition von <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — GPU-gerendert, zero-WebView, mit <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (Zeds Rendering-Framework)</sub>
+  <sub>Nächste große native Ausgabe von <a href="https://github.com/AnalyseDeCircuit/oxideterm">OxideTerm</a> — GPU-gerendert, ohne WebView, mit <a href="https://github.com/zed-industries/zed/tree/main/crates/gpui">GPUI</a> (Zeds Rendering-Framework)</sub>
 </p>
 
 <p align="center">
@@ -41,15 +41,15 @@
 
 ## Was OxideTerm Native ist
 
-OxideTerm Native ist eine **pure Rust GPUI Desktop-App** – eine Open-Source-Alternative zu Termius & SecureCRT.
+OxideTerm Native ist eine **GPUI-Desktop-App aus reinem Rust** – eine Open-Source-Alternative zu Termius und SecureCRT.
 
 **Was Sie damit tun können:**
 
-- SSH- und Telnet-Terminals, SFTP, Portweiterleitungen, serielle Konsolen, lokale Shells und leichtes Editieren in einem nativen Workspace verwalten
-- Remote-Arbeit mit Grace-Period-Reconnect bei kurzen Netzwerkaussetzern am Leben halten
-- OxideSens AI kann mit Ihrem eigenen KI-Anbieter Live-Sessions prüfen und genehmigte Workspace-Aktionen ausführen
+- SSH- und Telnet-Terminals, SFTP, Portweiterleitungen, serielle Konsolen, lokale Shells und leichtes Editieren in einem nativen Arbeitsbereich verwalten
+- Remote-Arbeit mit der Grace-Period-Wiederverbindung bei kurzen Netzwerkaussetzern am Leben halten
+- OxideSens AI kann mit Ihrem eigenen KI-Anbieter laufende Sitzungen prüfen und genehmigte Arbeitsbereichsaktionen ausführen
 
-keine gehostete Cloud-Agent-Plattform. Es ist auch keine Electron-App, keine Tauri-App und kein Web-Terminal: kein Chromium, kein WebView, kein JavaScript, kein CSS.
+OxideTerm Native ist keine gehostete Cloud-Agent-Plattform. Es ist auch keine Electron-App, keine Tauri-App und kein Web-Terminal: kein Chromium, kein WebView, kein JavaScript, kein CSS.
 
 ---
 
@@ -57,12 +57,12 @@ keine gehostete Cloud-Agent-Plattform. Es ist auch keine Electron-App, keine Tau
 
 | Wenn Ihnen wichtig ist... | OxideTerm Native bietet... |
 |---|---|
-| Ein Remote-Knoten, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Monitoring und OxideSens AI im selben SSH-Workspace |
-| Zero-WebView native Shell | GPUI zeichnet die Desktop-UI direkt auf einer GPU-Oberfläche – kein DOM, CSS, JavaScript, Chromium oder WebKit |
-| Local-First SSH-Workflows | SSH, Telnet, SFTP, Weiterleitung, lokale Shell, serielle Terminals und Konfiguration ohne Anmeldung |
-| BYOK OxideSens AI statt Plattform-Credits | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpunkt mit MCP, RAG und genehmigten Workspace-Aktionen |
+| Ein Remote-Knoten, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Überwachung und OxideSens AI im selben SSH-Arbeitsbereich |
+| Native Shell ohne WebView | GPUI zeichnet die Desktop-Oberfläche direkt auf einer GPU-Oberfläche – kein DOM, CSS, JavaScript, Chromium oder WebKit |
+| Lokale SSH-Arbeitsabläufe | SSH, Telnet, SFTP, Weiterleitung, lokale Shell, serielle Terminals und Konfiguration ohne Anmeldung |
+| BYOK mit OxideSens AI statt Plattformguthaben | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpunkt mit MCP, RAG und genehmigten Arbeitsbereichsaktionen |
 | Wiederverbindungsstabilität | Grace Period prüft die alte Verbindung 30 s lang, bevor sie ersetzt wird – TUI-Apps überleben kurze Netzwerkausfälle |
-| Reines Rust-SSH und Credential-Sicherheit | `russh` + `ring`, kein OpenSSL/libssh2; Passwörter und API-Schlüssel im OS-Keychain, `.oxide`-Bundle mit ChaCha20-Poly1305 + Argon2id |
+| Reines Rust-SSH und sichere Zugangsdaten | `russh` + `ring`, kein OpenSSL/libssh2; Passwörter und API-Schlüssel im Schlüsselbund des Betriebssystems, `.oxide`-Bundle mit ChaCha20-Poly1305 + Argon2id |
 
 ---
 
@@ -87,11 +87,11 @@ Die native UI folgt demselben OxideTerm-Workspace-Modell und derselben visuellen
 
 | Aspekt | WebView/Tauri | Native |
 |---|---|---|
-| Rendering | Chromium/Safari/WebKit2GTK + CSS | GPUI, GPU-Surface, Immediate Mode, Rust |
+| Rendering | Chromium/Safari/WebKit2GTK + CSS | GPUI, GPU-Oberfläche, Immediate Mode, Rust |
 | Terminaldaten | WebSocket → JS Event Loop → xterm.js | Rust input → `TerminalState` → GPUI render |
 | IPC | JSON-RPC pro Kommando | In-process Funktionsaufrufe |
 | SSH keepalive | JavaScript Timer | Rust async task |
-| Plugins | ESM im Browser-Sandbox | wasmtime WASM + typed Rust host API |
+| Plugins | ESM im Browser-Sandbox | wasmtime WASM + typisierte Rust-Host-API |
 | CLI | Desktop-App muss laufen | Eigenständiges Binary |
 | Runtime-Grenze | Browser-Runtime + WebView-Bridge | Nativer Prozess; keine gebündelte Browser-Runtime |
 
@@ -99,13 +99,13 @@ Die native UI folgt demselben OxideTerm-Workspace-Modell und derselben visuellen
 
 | Kategorie | Funktionen |
 |---|---|
-| Terminal | Local PTY, SSH, Telnet, local serial terminals, split panes, shell integration, command marks, asciicast, trzsz, Sixel/Kitty graphics, rendering policy |
+| Terminal | lokales PTY, SSH, Telnet, lokale serielle Terminals, geteilte Fenster, Shell-Integration, Befehlsmarken, asciicast, trzsz, Sixel/Kitty graphics, Rendering-Policy |
 | SSH & Auth | Connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
-| SFTP / IDE | Dual-pane browser, transfer queue, preview, bookmarks, atomic writes, remote file tree, multi-tab editor, conflict resolution |
-| Forwarding | Local, Remote, Dynamic SOCKS5, saved rules, reconnect restore, death reporting, idle timeout |
-| KI | OxideSens mit OpenAI, Anthropic, Gemini, Ollama/compatible, MCP, RAG, command approval |
+| SFTP / IDE | Zwei-Spalten-Browser, Transfer-Warteschlange, Vorschau, Lesezeichen, atomare Schreibvorgänge, Remote-Dateibaum, Multi-Tab-Editor, Konfliktlösung |
+| Forwarding | Local, Remote, Dynamic SOCKS5, gespeicherte Regeln, Wiederherstellung nach Reconnect, Ausfallmeldung, Leerlauf-Timeout |
+| KI | OxideSens mit OpenAI, Anthropic, Gemini, Ollama/compatible, MCP, RAG, Befehlsfreigabe |
 | Cloud Sync / `.oxide` | push/pull/apply/resolve, S3/WebDAV/Git, rollback backups, verschlüsselter Import/Export |
-| Plugins / CLI | WASM-Sandbox, native host API, Plugin-Einstellungen; CLI für settings, connections, forwards, plugins, secrets, cloud-sync, backup, report |
+| Plugins / CLI | WASM-Sandbox, native Host-API, Plugin-Einstellungen; CLI für settings, connections, forwards, plugins, secrets, cloud-sync, backup, report |
 
 ## Architektur
 
@@ -163,12 +163,12 @@ Pipeline: `queued → snapshot → grace-period → ssh-connect → await-termin
 
 ### OxideSens KI
 
-OxideSens bleibt BYOK-first, mit Kontextaufbau direkt im Prozess:
+OxideSens bleibt BYOK zuerst, mit Kontextaufbau direkt im Prozess:
 
-- Provider: OpenAI, Anthropic, Gemini, Ollama oder jeder OpenAI-compatible Endpoint
+- Anbieter: OpenAI, Anthropic, Gemini, Ollama oder jeder OpenAI-kompatible Endpunkt
 - MCP: stdio- und SSE-Transports, Tool Discovery und Invocation
 - RAG: BM25-Volltext, HNSW-Vektorindex, Reciprocal Rank Fusion, CJK-Bigram-Tokenizer
-- KI-Kontext stammt aus dem Workspace-State; Zugangsdaten werden vor Provider-Aufrufen redigiert
+- KI-Kontext stammt aus dem Arbeitsbereichsstatus; Zugangsdaten werden vor Anbieteraufrufen redigiert
 - API-Schlüssel bleiben im OS-Keychain und gelangen nicht in Logs oder IPC-Frames
 
 ### GPUI Desktop-Shell
@@ -187,7 +187,7 @@ Terminal-Rendering wird zuerst als Rust-State modelliert und anschließend von G
 - PTY-Ausgabe landet in `TerminalState`; Scrollback, Cursor, Auswahl, Marks und Suchzustand bleiben in Rust
 - Die Rendering Policy kann zwischen Boost, Normal und Idle wechseln, ohne auf einen Browser Event Loop zu warten
 - Sixel- und Kitty-Grafiken werden als terminal-eigene Assets verfolgt, nicht als DOM-Nodes oder Canvas-Overlays
-- Split Panes teilen dasselbe Workspace-State-Modell, sodass Tab-Restore und Reconnect die Terminal-Topologie gemeinsam snapshotten können
+- Split Panes teilen dasselbe Arbeitsbereichsstatus-Modell, sodass Tab-Restore und Reconnect die Terminal-Topologie gemeinsam snapshotten können
 
 ### SFTP- und IDE-Workspace
 
@@ -202,9 +202,9 @@ Remote-Dateien sind Teil desselben Node-Workspace und keine getrennte Nebenfunkt
 
 Die native Branch hält Erweiterungen und Support-Flächen innerhalb Rust-nativer Grenzen:
 
-- Plugins laufen in einer wasmtime Sandbox mit typed host capabilities statt Browser-Globals
+- Plugins laufen in einer wasmtime-Sandbox mit typisierten Host-Fähigkeiten statt Browser-Globals
 - Die CLI linkt direkt gegen Domain Crates für doctor, settings, connections, forwards, portable bundles, backups und reports
-- Diagnosen bevorzugen Counts, Paths, Feature Flags und redacted Hints statt roher payloads mit Secrets
+- Diagnosen bevorzugen Zähler, Pfade, Feature-Flags und redigierte Hinweise statt roher payloads mit Geheimnisse
 - Mutierende CLI-Flows nutzen dry-run plans, `--yes` guards und rollback backups, wo anwendbar
 
 ### Portweiterleitung — Lock-Free I/O
@@ -260,11 +260,11 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 | Thema | Umsetzung |
 |---|---|
 | Passwörter & Schlüssel | macOS Keychain / Windows Credential Manager / libsecret |
-| Secrets im Speicher | `zeroize` / `Zeroizing` |
-| Diagnosen & KI-Kontext | Secret-Werte werden vor Ausgabe oder Provider-Aufrufen redigiert |
+| Geheimnisse im Speicher | `zeroize` / `Zeroizing` |
+| Diagnosen & KI-Kontext | Secret-Werte werden vor Ausgabe oder Anbieteraufrufen redigiert |
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI-Schreibzugriffe | dry-run plans, `--yes` guards, rollback backups |
-| Plugins | wasmtime isolation und capability-based host API |
+| Plugins | wasmtime-Isolation und fähigkeitsbasierte Host-API |
 
 ## Release-Status
 
@@ -277,11 +277,11 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ## Beiträge
 
-## Provider-Neutralität
+## Anbieterneutralität
 
-OxideTerm ist BYOK-first und provider-neutral.
+OxideTerm setzt BYOK zuerst und bleibt anbieterneutral.
 
-Provider-Integrationen sollen Nutzern helfen, die Werkzeuge zu verbinden, denen sie bereits vertrauen. Sie sind keine Rangliste, keine Werbefläche und kein Belohnungssystem für diejenigen, die am freundlichsten nach Aufmerksamkeit fragen.
+Anbieterintegrationen sollen Nutzern helfen, die Werkzeuge zu verbinden, denen sie bereits vertrauen. Sie sind keine Rangliste, keine Werbefläche und kein Belohnungssystem für diejenigen, die am freundlichsten nach Aufmerksamkeit fragen.
 
 Kompatibilität, Wartbarkeit, Sicherheit und echter Nutzwert entscheiden, was dokumentiert wird. Sichtbarkeit folgt Nützlichkeit, nicht Begeisterung.
 
