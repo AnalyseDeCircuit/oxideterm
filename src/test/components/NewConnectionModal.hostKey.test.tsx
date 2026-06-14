@@ -5,6 +5,7 @@ import { createMutableSelectorStore } from '@/test/helpers/mockStore';
 
 const apiMocks = vi.hoisted(() => ({
   getGroups: vi.fn().mockResolvedValue([]),
+  getConnections: vi.fn().mockResolvedValue([]),
   isAgentAvailable: vi.fn().mockResolvedValue(true),
   sshPreflight: vi.fn(),
   preflightTreeNode: vi.fn(),
@@ -118,6 +119,7 @@ describe('NewConnectionModal host key flows', () => {
     appStoreState.modals.newConnection = true;
     appStoreState.quickConnectData = null;
     apiMocks.getGroups.mockResolvedValue([]);
+    apiMocks.getConnections.mockResolvedValue([]);
     apiMocks.isAgentAvailable.mockResolvedValue(true);
     apiMocks.resolveUpstreamProxyForConnect.mockResolvedValue(null);
     apiMocks.preflightTreeNode.mockResolvedValue({ status: 'verified' });

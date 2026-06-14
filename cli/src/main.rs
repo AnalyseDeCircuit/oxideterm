@@ -3498,7 +3498,7 @@ mod tests {
     fn compatibility_rejects_non_overlapping_protocol_ranges() {
         let report = check_compatibility(serde_json::json!({
             "version": "9.9.9",
-            "cli_api": { "version": 3, "min_supported": 3 },
+            "cli_api": { "version": 4, "min_supported": 4 },
             "sessions": 0,
             "connections": { "ssh": 0, "local": 0 }
         }));
