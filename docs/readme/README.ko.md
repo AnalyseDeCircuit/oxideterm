@@ -1,7 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>AI 기반 SSH 터미널 · SFTP 브라우저 · 포트 포워딩 · 시리얼 콘솔 · mini IDE —— 순수 Rust 네이티브 앱 </strong>
+  <strong>원격 서버를 위한 AI 기반 SSH 클라이언트 — 순수 Rust 네이티브 앱</strong>
+  <br>
+  SSH 및 Telnet 터미널, SFTP, 포트 포워딩, 시리얼 콘솔, 경량 편집을 하나의 네이티브 워크스페이스에.
   <br>
   GPU 직접 렌더링. 무료, 계정 불필요.
   <br>

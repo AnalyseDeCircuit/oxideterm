@@ -1,7 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>AI-Powered SSH Terminal · SFTP Browser · Port Forwarding · Serial Console · mini IDE — All in a Pure Rust Native App </strong>
+  <strong>AI-Powered SSH Client for Remote Servers — Pure Rust Native App</strong>
+  <br>
+  SSH and Telnet terminals, SFTP, port forwarding, serial consoles, and lightweight editing in one native workspace.
   <br>
   GPU-rendered. Free. No account needed.
   <br>

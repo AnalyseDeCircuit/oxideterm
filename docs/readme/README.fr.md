@@ -1,7 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Terminal SSH avec IA · Explorateur SFTP · Transfert de ports · Console série · mini IDE —— Application native 100% Rust </strong>
+  <strong>Client SSH avec IA pour serveurs distants — Application native 100% Rust</strong>
+  <br>
+  Terminaux SSH et Telnet, SFTP, redirection de ports, consoles série et édition légère dans un workspace natif.
   <br>
   Rendu GPU. Gratuit. Aucun compte requis.
   <br>

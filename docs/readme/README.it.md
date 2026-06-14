@@ -1,7 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Terminale SSH con IA · Browser SFTP · Port Forwarding · Console seriale · mini IDE —— App nativa Pure Rust </strong>
+  <strong>Client SSH con IA per server remoti — App nativa Pure Rust</strong>
+  <br>
+  Terminali SSH e Telnet, SFTP, port forwarding, console seriali ed editing leggero in un workspace nativo.
   <br>
   Rendering GPU. Gratis. Nessun account necessario.
   <br>

@@ -1,7 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>AI 驅動的 SSH 終端 · SFTP 瀏覽器 · 連接埠轉發 · 序列埠主控台 · mini IDE —— 全部在一個純 Rust 原生應用裡 </strong>
+  <strong>面向遠端伺服器的 AI SSH 用戶端 —— 純 Rust 原生應用</strong>
+  <br>
+  SSH 與 Telnet 終端、SFTP、連接埠轉發、序列埠主控台和輕量編輯，集中在一個原生工作區。
   <br>
   GPU 直接渲染。免費，無需註冊。
   <br>

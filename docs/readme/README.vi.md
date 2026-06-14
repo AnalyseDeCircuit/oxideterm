@@ -1,7 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Terminal SSH tích hợp AI · Trình duyệt SFTP · Chuyển tiếp cổng · Console nối tiếp · mini IDE —— Ứng dụng Pure Rust Native </strong>
+  <strong>SSH client tích hợp AI cho máy chủ từ xa — Ứng dụng Pure Rust Native</strong>
+  <br>
+  Terminal SSH và Telnet, SFTP, chuyển tiếp cổng, console nối tiếp và chỉnh sửa nhẹ trong một workspace native.
   <br>
   Kết xuất GPU. Miễn phí. Không cần tài khoản.
   <br>
