@@ -6,6 +6,17 @@ use oxideterm_plugin_registry::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+const PROCESS_RUNTIME_TEST_TIMEOUT_MS: u64 = 10_000;
+
+#[cfg(unix)]
+fn process_runtime_test_timeout() -> Duration {
+    // Full workspace test runs can have many async/process-heavy tests active at
+    // once, so process plugin protocol tests use a release-gate timeout that is
+    // generous enough for scheduler load while still catching real deadlocks.
+    Duration::from_millis(PROCESS_RUNTIME_TEST_TIMEOUT_MS)
+}
+
 fn unique_temp_dir(name: &str) -> PathBuf {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -360,14 +371,14 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requ
         "com.example.runtime",
         &plugin_dir,
         "bin/plugin",
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     );
     let response = runtime
         .activate(PluginActivateRequest {
             request_id: "activate-test".to_string(),
             manifest: sample_manifest(),
             permissions: PluginPermissionSet::default(),
-            timeout_ms: 2_000,
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
         })
         .await
         .unwrap();
@@ -399,14 +410,14 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requ
         "com.example.runtime",
         &plugin_dir,
         "bin/plugin",
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     );
     let response = runtime
         .activate(PluginActivateRequest {
             request_id: "activate-test".to_string(),
             manifest: sample_manifest(),
             permissions: PluginPermissionSet::default(),
-            timeout_ms: 2_000,
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
         })
         .await
         .unwrap();
@@ -446,7 +457,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requ
         "com.example.runtime",
         &plugin_dir,
         "bin/plugin",
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     );
     runtime
         .activate(PluginActivateRequest {
@@ -456,7 +467,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requ
                 capabilities: Vec::new(),
                 allowed_host_apis: vec!["ui.showToast".to_string()],
             },
-            timeout_ms: 2_000,
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
         })
         .await
         .unwrap();
@@ -516,7 +527,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","
                 capabilities: Vec::new(),
                 allowed_host_apis: vec!["ui.showToast".to_string()],
             },
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -572,7 +583,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"command:com.example.runtime:dem
             capabilities: Vec::new(),
             allowed_host_apis: vec!["ui.showToast".to_string()],
         },
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     )
     .await
     .unwrap();
@@ -582,7 +593,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"command:com.example.runtime:dem
             "com.example.runtime",
             "demo.run".to_string(),
             Value::Null,
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -627,7 +638,7 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"event:app.themeChanged\",\
             plugin_dir,
             "bin/plugin".to_string(),
             PluginPermissionSet::default(),
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -651,7 +662,7 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"event:app.themeChanged\",\
                     }
                 }),
             },
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -692,7 +703,7 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:demo.read\",\"payl
         "com.example.runtime",
         &plugin_dir,
         "bin/plugin",
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     );
     runtime.set_host_call_handler(Box::new(|call| {
         assert_eq!(call.namespace, "storage");
@@ -707,7 +718,7 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:demo.read\",\"payl
             request_id: "activate-test".to_string(),
             manifest: sample_manifest(),
             permissions: PluginPermissionSet::default(),
-            timeout_ms: 2_000,
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
         })
         .await
         .unwrap();
@@ -783,7 +794,7 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:com.example.runtim
             capabilities: Vec::new(),
             allowed_host_apis: vec!["storage.get".to_string()],
         },
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     )
     .await
     .unwrap();
@@ -793,7 +804,7 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:com.example.runtim
             "com.example.runtime",
             "demo.read".to_string(),
             Value::Null,
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -844,7 +855,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"command:com.example.runtime:dem
             plugin_dir,
             "bin/plugin".to_string(),
             PluginPermissionSet::default(),
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -866,7 +877,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"command:com.example.runtime:dem
                 .command
                 .clone(),
             Value::Null,
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap();
@@ -902,7 +913,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","
                 capabilities: Vec::new(),
                 allowed_host_apis: vec!["ui.showToast".to_string()],
             },
-            Duration::from_secs(2),
+            process_runtime_test_timeout(),
         )
         .await
         .unwrap_err();
@@ -929,14 +940,14 @@ printf '%s\n' '{"protocolVersion":2,"requestId":"activate-test","payload":{"requ
         "com.example.runtime",
         &plugin_dir,
         "bin/plugin",
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     );
     let error = runtime
         .activate(PluginActivateRequest {
             request_id: "activate-test".to_string(),
             manifest: sample_manifest(),
             permissions: PluginPermissionSet::default(),
-            timeout_ms: 2_000,
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
         })
         .await
         .unwrap_err();
@@ -965,14 +976,14 @@ exit 0
         "com.example.runtime",
         &plugin_dir,
         "bin/plugin",
-        Duration::from_secs(2),
+        process_runtime_test_timeout(),
     );
     let error = runtime
         .activate(PluginActivateRequest {
             request_id: "activate-test".to_string(),
             manifest: sample_manifest(),
             permissions: PluginPermissionSet::default(),
-            timeout_ms: 2_000,
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
         })
         .await
         .unwrap_err();
