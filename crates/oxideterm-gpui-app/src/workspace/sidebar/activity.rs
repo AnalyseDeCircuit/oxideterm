@@ -145,19 +145,39 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = if section == SidebarSection::Notifications {
-            self.active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::NotificationCenter)
-        } else if section == SidebarSection::Extensions {
-            self.active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::PluginManager)
-        } else if section == SidebarSection::CloudSync {
-            self.active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::CloudSync)
-        } else if section == SidebarSection::Assistant {
-            self.ai_sidebar_visible()
-        } else {
-            self.active_sidebar_section == section
+        let active = match section {
+            SidebarSection::Terminal => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::ConnectionPool),
+            SidebarSection::Activity => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor),
+            SidebarSection::Network => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::Topology),
+            SidebarSection::Files => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::FileManager),
+            SidebarSection::Monitor if cfg!(target_os = "macos") => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::Launcher),
+            SidebarSection::Monitor if cfg!(target_os = "windows") => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::Graphics),
+            SidebarSection::Notifications => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::NotificationCenter),
+            SidebarSection::Extensions => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::PluginManager),
+            SidebarSection::CloudSync => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::CloudSync),
+            SidebarSection::Settings => self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == TabKind::Settings),
+            SidebarSection::Assistant => self.ai_sidebar_visible(),
+            _ => self.active_sidebar_section == section,
         };
         let tooltip = self.activity_icon_tooltip(section);
         let tooltip_id = format!("activity-icon-{}", section.as_settings_key());

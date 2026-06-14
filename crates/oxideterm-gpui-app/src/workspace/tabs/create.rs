@@ -555,31 +555,6 @@ impl WorkspaceApp {
         Ok(expansion)
     }
 
-    pub(super) fn expand_saved_connection_tree_under_parent(
-        &mut self,
-        parent_node_id: NodeId,
-        saved_connection_id: &str,
-        mut config: SshConfig,
-        target_title: String,
-    ) -> Result<NodeTreeExpansion> {
-        let proxy_chain = config.proxy_chain.take().unwrap_or_default();
-        let hops = proxy_chain
-            .iter()
-            .map(ssh_config_from_proxy_hop)
-            .collect::<Vec<_>>();
-        let expansion = self.node_router.expand_manual_preset_under_parent(
-            parent_node_id,
-            saved_connection_id,
-            hops,
-            config,
-        )?;
-        // A saved next hop can be reused under many live parents. Do not
-        // replace the global saved-connection index with this contextual node.
-        self.register_expanded_tree_nodes(saved_connection_id, &expansion, target_title, false);
-        self.persist_session_tree_snapshot();
-        Ok(expansion)
-    }
-
     fn register_expanded_tree_nodes(
         &mut self,
         saved_connection_id: &str,
@@ -1001,7 +976,6 @@ impl WorkspaceApp {
         };
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Settings;
-        self.active_sidebar_section = SidebarSection::Settings;
         self.needs_active_pane_focus = false;
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;

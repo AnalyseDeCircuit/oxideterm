@@ -78,17 +78,22 @@ jobs:
             }
 
             // ── 6. Fake version number ──
-            // Extract claimed version from body (e.g. "1.2.1" or "v1.2.1")
-            const versionMatch = body.match(/(?:^|\s)v?(\d+\.\d+\.\d+(?:-[\w.]+)?)/m);
+            // Extract claimed SemVer from body. Preview versions such as
+            // 2.0.0-gpui-preview.7 are valid, so prerelease identifiers must
+            // allow hyphens as well as dots.
+            const versionMatch = body.match(/(?:^|\s)v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)/m);
             if (versionMatch) {
               const claimed = versionMatch[1];
+              const normalizeVersionTag = (tagName) => tagName
+                .replace(/^(?:(?:gpui|native|rustnative)-)?v/, '')
+                .trim();
               try {
                 const tags = await github.paginate(github.rest.repos.listTags, {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   per_page: 100,
                 });
-                const tagNames = tags.map(t => t.name.replace(/^(?:gpui-)?v/, ''));
+                const tagNames = tags.map(t => normalizeVersionTag(t.name));
                 if (!tagNames.includes(claimed)) {
                   problems.push('unknown_version');
                 }

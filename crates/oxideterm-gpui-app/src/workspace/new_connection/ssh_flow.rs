@@ -109,13 +109,6 @@ impl SshPromptHandler for NativeSshPromptHandler {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn prepare_saved_tree_config_for_connect(
-        &self,
-        config: &mut SshConfig,
-    ) -> Result<(), String> {
-        prepare_tree_connect_config(config)
-    }
-
     pub(in crate::workspace) fn saved_connection_form_source_id(&self) -> Option<&str> {
         self.editing_saved_connection_id
             .as_deref()

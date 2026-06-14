@@ -190,8 +190,9 @@ impl WorkspaceApp {
 
     pub(super) fn render_sidebar_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let panel_section = self.effective_sidebar_panel_section();
         let plugin_panel_title =
-            (self.active_sidebar_section == SidebarSection::Extensions)
+            (panel_section == SidebarSection::Extensions)
                 .then(|| {
                     self.active_native_plugin_sidebar_panel
                         .as_ref()
@@ -208,7 +209,7 @@ impl WorkspaceApp {
                         })
                 })
                 .flatten();
-        let title_key = match self.active_sidebar_section {
+        let title_key = match panel_section {
             SidebarSection::Connections => "sidebar.panels.saved_connections",
             SidebarSection::Sftp => "sidebar.panels.sftp",
             SidebarSection::Forwards => "forwards.table.title",
@@ -247,7 +248,7 @@ impl WorkspaceApp {
                     cx,
                 ),
             );
-        if self.active_sidebar_section == SidebarSection::Sessions {
+        if panel_section == SidebarSection::Sessions {
             let (view_icon, view_action) = match self.active_session_sidebar_view_mode {
                 ActiveSessionSidebarViewMode::Tree => {
                     (LucideIcon::Folder, SidebarActionKind::ToggleSessionView)
@@ -320,20 +321,21 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_sidebar_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.active_sidebar_section == SidebarSection::Connections {
+        let panel_section = self.effective_sidebar_panel_section();
+        if panel_section == SidebarSection::Connections {
             return self.render_saved_connections_sidebar_content(cx);
         }
-        if self.active_sidebar_section == SidebarSection::Sessions {
+        if panel_section == SidebarSection::Sessions {
             return self.render_active_sessions_sidebar_content(cx);
         }
-        if self.active_sidebar_section == SidebarSection::Extensions {
+        if panel_section == SidebarSection::Extensions {
             return self.render_native_plugin_sidebar_content(cx);
         }
-        if self.active_sidebar_section == SidebarSection::CloudSync {
+        if panel_section == SidebarSection::CloudSync {
             return self.render_cloud_sync_sidebar_content(cx);
         }
         if matches!(
-            self.active_sidebar_section,
+            panel_section,
             SidebarSection::Sftp | SidebarSection::Forwards
         ) {
             // Tauri only persists these command-palette section keys here; it

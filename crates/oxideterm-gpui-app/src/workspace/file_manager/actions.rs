@@ -34,7 +34,6 @@ impl WorkspaceApp {
         };
         self.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
-        self.active_sidebar_section = SidebarSection::Files;
         self.needs_active_pane_focus = false;
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;

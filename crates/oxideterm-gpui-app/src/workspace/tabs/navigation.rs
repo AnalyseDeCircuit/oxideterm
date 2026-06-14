@@ -164,15 +164,12 @@ impl WorkspaceApp {
             }
             Some(TabKind::ConnectionPool) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Terminal;
             }
             Some(TabKind::ConnectionMonitor) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Activity;
             }
             Some(TabKind::Topology) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Network;
             }
             Some(TabKind::NotificationCenter) => {
                 self.active_surface = ActiveSurface::Terminal;

@@ -752,7 +752,6 @@ pub(crate) struct WorkspaceApp {
     portable_confirm_password: String,
     new_connection_form: Option<NewConnectionForm>,
     drill_down_parent_node_id: Option<NodeId>,
-    saved_next_hop_dialog: Option<SavedNextHopDialog>,
     editing_saved_connection_id: Option<String>,
     duplicating_saved_connection_id: Option<String>,
     saved_connection_prompt_action: Option<SavedConnectionPromptAction>,

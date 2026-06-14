@@ -860,356 +860,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn open_saved_next_hop_dialog(
-        &mut self,
-        parent_node_id: NodeId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.node_runtime_store.snapshot(&parent_node_id).is_some_and(|snapshot| {
-            matches!(snapshot.state.readiness, NodeReadiness::Ready)
-        }) {
-            self.push_command_palette_toast(
-                self.i18n.t("sessions.saved_next_hop.parent_not_ready"),
-                None,
-                TerminalNoticeVariant::Warning,
-            );
-            cx.notify();
-            return;
-        }
-        self.prepare_modal_interaction_boundary();
-        self.saved_next_hop_dialog = Some(SavedNextHopDialog {
-            parent_node_id,
-            error: None,
-        });
-        window.refresh();
-        cx.notify();
-    }
-
-    fn close_saved_next_hop_dialog(&mut self, cx: &mut Context<Self>) {
-        self.saved_next_hop_dialog = None;
-        cx.notify();
-    }
-
-    fn connect_saved_next_hop(
-        &mut self,
-        saved_connection_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(parent_node_id) = self
-            .saved_next_hop_dialog
-            .as_ref()
-            .map(|dialog| dialog.parent_node_id.clone())
-        else {
-            return;
-        };
-        let Some(connection) = self.connection_store.get(&saved_connection_id).cloned() else {
-            if let Some(dialog) = self.saved_next_hop_dialog.as_mut() {
-                dialog.error = Some(self.i18n.t("sessions.saved_next_hop.not_found"));
-            }
-            cx.notify();
-            return;
-        };
-        let title = connection.name.clone();
-        let Some(mut config) = ssh_config_from_saved_connection(
-            &self.connection_store,
-            self.settings_store.settings(),
-            &connection,
-        ) else {
-            if let Some(dialog) = self.saved_next_hop_dialog.as_mut() {
-                dialog.error = Some(self.i18n.t("sessions.saved_next_hop.missing_credentials"));
-            }
-            cx.notify();
-            return;
-        };
-        if let Err(error) = self.prepare_saved_tree_config_for_connect(&mut config) {
-            if let Some(dialog) = self.saved_next_hop_dialog.as_mut() {
-                dialog.error = Some(error);
-            }
-            cx.notify();
-            return;
-        }
-
-        let expansion = match self.expand_saved_connection_tree_under_parent(
-            parent_node_id.clone(),
-            &saved_connection_id,
-            config,
-            title.clone(),
-        ) {
-            Ok(expansion) => expansion,
-            Err(error) => {
-                if let Some(dialog) = self.saved_next_hop_dialog.as_mut() {
-                    dialog.error = Some(error.to_string());
-                }
-                cx.notify();
-                return;
-            }
-        };
-        let Some(target_config) = self
-            .node_runtime_store
-            .snapshot(&expansion.target_node_id)
-            .map(|snapshot| snapshot.config)
-        else {
-            if let Some(dialog) = self.saved_next_hop_dialog.as_mut() {
-                dialog.error = Some(self.i18n.t("sessions.saved_next_hop.materialize_failed"));
-            }
-            cx.notify();
-            return;
-        };
-        self.expanded_ssh_nodes.insert(parent_node_id);
-        for node_id in &expansion.path_node_ids {
-            self.expanded_ssh_nodes.insert(node_id.clone());
-        }
-        self.active_ssh_node_id = Some(expansion.target_node_id.clone());
-        self.saved_next_hop_dialog = None;
-        let post_connect_command = target_config.post_connect_command.clone();
-        if let Err(error) = self.queue_ssh_terminal_tab_for_node_with_mark_used(
-            expansion.target_node_id,
-            post_connect_command,
-            target_config,
-            title,
-            Some(saved_connection_id.clone()),
-            Some(saved_connection_id),
-            None,
-            window,
-            cx,
-        ) {
-            self.push_command_palette_toast(
-                self.i18n.t("sessions.saved_next_hop.materialize_failed"),
-                Some(error.to_string()),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn render_saved_next_hop_dialog(
-        &self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let Some(dialog) = self.saved_next_hop_dialog.as_ref() else {
-            return div().into_any_element();
-        };
-        let parent_title = self
-            .ssh_nodes
-            .get(&dialog.parent_node_id)
-            .map(|node| node.title.clone())
-            .unwrap_or_else(|| dialog.parent_node_id.0.clone());
-        let description = self
-            .i18n
-            .t("sessions.saved_next_hop.description")
-            .replace("{{host}}", &parent_title);
-        let connections = self.connection_store.connection_infos();
-
-        oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_saved_next_hop_dialog(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(oxideterm_gpui_ui::modal::overlay_content_boundary(
-                div()
-                    .w(px(460.0))
-                    .max_h(px(560.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(14.0))
-                    .rounded(px(self.tokens.radii.lg))
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_panel))
-                    .p(px(16.0))
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(18.0))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(self.i18n.t("sessions.saved_next_hop.title")),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(description),
-                            ),
-                    )
-                    .when_some(dialog.error.as_ref(), |panel, error| {
-                        panel.child(
-                            div()
-                                .rounded(px(self.tokens.radii.md))
-                                .border_1()
-                                .border_color(rgb(theme.error))
-                                .bg(rgba((theme.error << 8) | 0x14))
-                                .px_3()
-                                .py_2()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(theme.error))
-                                .child(error.clone()),
-                        )
-                    })
-                    .child(
-                        div()
-                            .id("saved-next-hop-dialog-scroll")
-                            .max_h(px(360.0))
-                            .min_h(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.0))
-                            .selectable_overflow_y_scroll(
-                                &self.selectable_text_scroll_handle(
-                                    "saved-next-hop-dialog-scroll",
-                                ),
-                            )
-                            .children(if connections.is_empty() {
-                                vec![
-                                    div()
-                                        .rounded(px(self.tokens.radii.md))
-                                        .border_1()
-                                        .border_color(rgb(theme.border))
-                                        .px_3()
-                                        .py_3()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .text_color(rgb(theme.text_muted))
-                                        .child(self.i18n.t("sessions.saved_next_hop.empty"))
-                                        .into_any_element(),
-                                ]
-                            } else {
-                                connections
-                                    .into_iter()
-                                    .map(|conn| {
-                                        let id = conn.id.clone();
-                                        let detail =
-                                            format!("{}@{}:{}", conn.username, conn.host, conn.port);
-                                        let hop_count = conn.proxy_chain.len();
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(10.0))
-                                            .rounded(px(self.tokens.radii.md))
-                                            .border_1()
-                                            .border_color(rgb(theme.border))
-                                            .bg(rgb(theme.bg_sunken))
-                                            .px_3()
-                                            .py_2()
-                                            .cursor_pointer()
-                                            .hover(|row| row.bg(rgb(self.tokens.ui.bg_hover)))
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::Server,
-                                                16.0,
-                                                rgb(theme.accent),
-                                            ))
-                                            .child(
-                                                div()
-                                                    .min_w(px(0.0))
-                                                    .flex_1()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap(px(2.0))
-                                                    .child(
-                                                        div()
-                                                            .truncate()
-                                                            .text_size(px(
-                                                                self.tokens.metrics.ui_text_sm,
-                                                            ))
-                                                            .font_weight(
-                                                                gpui::FontWeight::MEDIUM,
-                                                            )
-                                                            .text_color(rgb(theme.text))
-                                                            .child(conn.name),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .truncate()
-                                                            .text_size(px(
-                                                                self.tokens.metrics.ui_text_xs,
-                                                            ))
-                                                            .text_color(rgb(theme.text_muted))
-                                                            .child(detail),
-                                                    ),
-                                            )
-                                            .when(hop_count > 0, |row| {
-                                                row.child(
-                                                    div()
-                                                        .flex_shrink_0()
-                                                        .rounded_full()
-                                                        .border_1()
-                                                        .border_color(rgb(theme.border))
-                                                        .px_2()
-                                                        .py(px(2.0))
-                                                        .text_size(px(10.0))
-                                                        .text_color(rgb(theme.text_muted))
-                                                        .child(
-                                                            self.i18n
-                                                                .t(
-                                                                    "sessions.saved_next_hop.proxy_chain_badge",
-                                                                )
-                                                                .replace(
-                                                                    "{{count}}",
-                                                                    &hop_count.to_string(),
-                                                                ),
-                                                        ),
-                                                )
-                                            })
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(move |this, _event, window, cx| {
-                                                    this.connect_saved_next_hop(
-                                                        id.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                    cx.stop_propagation();
-                                                }),
-                                            )
-                                            .into_any_element()
-                                    })
-                                    .collect::<Vec<_>>()
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .child(
-                                div()
-                                    .h(px(32.0))
-                                    .flex()
-                                    .items_center()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .border_1()
-                                    .border_color(rgb(theme.border))
-                                    .px_3()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(theme.text))
-                                    .cursor_pointer()
-                                    .hover(|button| button.bg(rgb(theme.bg_hover)))
-                                    .child(self.i18n.t("sessions.saved_next_hop.cancel"))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.close_saved_next_hop_dialog(cx);
-                                            cx.stop_propagation();
-                                        }),
-                                    ),
-                            ),
-                    ),
-            ))
-            .into_any_element()
-    }
-
     fn render_active_session_focus_actions(
         &self,
         row: &ActiveSessionSidebarRow,
@@ -1255,18 +905,6 @@ impl WorkspaceApp {
                     self.i18n.t("sessions.tree.actions.port_forwarding"),
                     cx.listener(move |this, _event, window, cx| {
                         this.open_forwards_tab(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }),
-                    cx,
-                )
-            },
-            {
-                let node_id = row.node_id.clone();
-                self.render_active_session_focus_action_chip(
-                    LucideIcon::Server,
-                    self.i18n.t("sessions.tree.actions.saved_next_hop"),
-                    cx.listener(move |this, _event, window, cx| {
-                        this.open_saved_next_hop_dialog(node_id.clone(), window, cx);
                         cx.stop_propagation();
                     }),
                     cx,
@@ -1419,7 +1057,7 @@ impl WorkspaceApp {
                     listener,
                     cx,
                 ));
-                if node.saved_connection_id.is_none() {
+                if self.can_save_runtime_node_as_connection(&node_id, &node) {
                     let listener = cx.listener({
                         let node_id = node_id.clone();
                         move |this, _event, window, cx| {
@@ -1471,25 +1109,9 @@ impl WorkspaceApp {
                 });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
-                    false,
+                    is_last,
                     LucideIcon::ArrowDownRight,
                     self.i18n.t("sessions.tree.actions.drill_in"),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
-                let listener = cx.listener({
-                    let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        this.open_saved_next_hop_dialog(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }
-                });
-                children.push(self.render_session_action_item(
-                    node_depth + 1,
-                    is_last,
-                    LucideIcon::Server,
-                    self.i18n.t("sessions.tree.actions.saved_next_hop"),
                     SessionActionVariant::Primary,
                     listener,
                     cx,
@@ -1572,6 +1194,23 @@ impl WorkspaceApp {
             .child(header)
             .children(children)
             .into_any_element()
+    }
+
+    fn can_save_runtime_node_as_connection(
+        &self,
+        node_id: &NodeId,
+        node: &WorkspaceSshNode,
+    ) -> bool {
+        if node.saved_connection_id.is_some() {
+            return false;
+        }
+        let Some(snapshot) = self.node_runtime_store.snapshot(node_id) else {
+            return true;
+        };
+        // ManualPreset/Restored are already saved-connection materializations,
+        // while AutoRoute is derived topology. Only live drill-down nodes and
+        // genuinely unsaved direct nodes should expose "Save as connection".
+        matches!(snapshot.origin, NodeOrigin::DrillDown { .. } | NodeOrigin::Direct)
     }
 
     fn render_session_node_header(

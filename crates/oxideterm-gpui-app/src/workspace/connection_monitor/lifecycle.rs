@@ -23,7 +23,6 @@ impl WorkspaceApp {
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);
-        self.active_sidebar_section = SidebarSection::Activity;
         self.refresh_connection_monitor_pool_stats();
         self.sync_connection_monitor_selection(cx);
     }
@@ -47,7 +46,6 @@ impl WorkspaceApp {
             });
             tab_id
         };
-        self.active_sidebar_section = SidebarSection::Terminal;
         self.set_active_tab(tab_id, window, cx);
         self.refresh_connection_monitor_pool_stats();
     }
@@ -67,7 +65,6 @@ impl WorkspaceApp {
             });
             tab_id
         };
-        self.active_sidebar_section = SidebarSection::Network;
         self.set_active_tab(tab_id, window, cx);
         self.refresh_connection_monitor_pool_stats();
     }

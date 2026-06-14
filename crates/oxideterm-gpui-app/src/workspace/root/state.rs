@@ -8,12 +8,6 @@ struct WorkspaceSshNode {
 }
 
 #[derive(Clone, Debug)]
-struct SavedNextHopDialog {
-    parent_node_id: NodeId,
-    error: Option<String>,
-}
-
-#[derive(Clone, Debug)]
 struct PendingSshTerminalOpen {
     node_id: NodeId,
     post_connect_command: Option<String>,

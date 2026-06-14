@@ -3,7 +3,9 @@ impl WorkspaceApp {
         self.settings_store.settings_mut().sidebar_ui.collapsed = self.sidebar_collapsed;
         self.settings_store.settings_mut().sidebar_ui.width = self.sidebar_width.round() as i64;
         self.settings_store.settings_mut().sidebar_ui.active_section =
-            self.active_sidebar_section.as_settings_key().to_string();
+            self.effective_sidebar_panel_section()
+                .as_settings_key()
+                .to_string();
         let _ = self.settings_store.save();
     }
 
