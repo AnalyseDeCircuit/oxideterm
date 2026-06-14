@@ -194,6 +194,7 @@ impl WorkspaceApp {
                                 })
                                 .when(drill_down_mode, |content| {
                                     content
+                                        .child(self.render_drill_saved_next_hop_picker(cx))
                                         .child(
                                             div()
                                                 .flex()
@@ -749,6 +750,163 @@ impl WorkspaceApp {
                 ),
         )
         .into_any_element()
+    }
+
+    fn render_drill_saved_next_hop_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let Some(parent_node_id) = self.drill_down_parent_node_id.clone() else {
+            return div().into_any_element();
+        };
+        let parent_title = self
+            .ssh_nodes
+            .get(&parent_node_id)
+            .map(|node| node.title.clone())
+            .unwrap_or_default();
+        let description = self
+            .i18n
+            .t("sessions.saved_next_hop.description")
+            .replace("{{host}}", &parent_title);
+        let connections = self.connection_store.connection_infos();
+        let has_connections = !connections.is_empty();
+        let mut list = div().flex().flex_col().gap(px(4.0));
+        for connection in connections {
+            list = list.child(self.render_drill_saved_next_hop_row(
+                parent_node_id.clone(),
+                connection,
+                cx,
+            ));
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .bg(rgba((theme.bg_card << 8) | 0x66))
+            .p(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("sessions.saved_next_hop.title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(description),
+                    ),
+            )
+            .when(!has_connections, |section| {
+                section.child(self.render_connection_hint(
+                    self.i18n.t("sessions.saved_next_hop.empty"),
+                ))
+            })
+            .when(has_connections, |section| {
+                section.child(
+                    div()
+                        .id("drill-saved-next-hop-scroll")
+                        .max_h(px(180.0))
+                        .selectable_overflow_y_scroll(
+                            &self.selectable_text_scroll_handle("drill-saved-next-hop-scroll"),
+                        )
+                        .child(list),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_drill_saved_next_hop_row(
+        &self,
+        parent_node_id: oxideterm_ssh::NodeId,
+        connection: oxideterm_connections::ConnectionInfo,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let connection_id = connection.id.clone();
+        let detail = format!(
+            "{}@{}:{}",
+            connection.username, connection.host, connection.port
+        );
+        let proxy_hop_count = connection.proxy_chain.len();
+        let proxy_badge = self
+            .i18n
+            .t("sessions.saved_next_hop.proxy_chain_badge")
+            .replace("{{count}}", &proxy_hop_count.to_string());
+
+        div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.sm))
+            .px(px(8.0))
+            .py(px(6.0))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgb(theme.bg_hover)))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Server,
+                13.0,
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(connection.name),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(detail),
+                    ),
+            )
+            .when(proxy_hop_count > 0, |row| {
+                row.child(
+                    div()
+                        .flex_shrink_0()
+                        .rounded(px(self.tokens.radii.sm))
+                        .bg(rgba((theme.accent << 8) | 0x1a))
+                        .px(px(6.0))
+                        .py(px(2.0))
+                        .text_size(px(10.0))
+                        .text_color(rgb(theme.accent))
+                        .child(proxy_badge),
+                )
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    this.connect_saved_connection_as_next_hop(
+                        parent_node_id.clone(),
+                        connection_id.clone(),
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
     }
 
 }
