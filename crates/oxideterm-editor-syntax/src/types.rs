@@ -39,3 +39,10 @@ pub struct FoldRange {
     pub start_line: usize,
     pub end_line: usize,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IndentGuide {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub column: usize,
+}

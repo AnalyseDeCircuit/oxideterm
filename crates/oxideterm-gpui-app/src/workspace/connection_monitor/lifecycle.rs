@@ -223,8 +223,23 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn monitor_connections(&self) -> Vec<oxideterm_ssh::ConnectionInfo> {
-        let mut connections = self.ssh_registry.list();
+    fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
+        if !self.connection_monitor.pool_summaries.is_empty() {
+            return self
+                .connection_monitor
+                .pool_summaries
+                .iter()
+                .filter(|summary| summary.is_displayed_in_pool())
+                .map(MonitorConnectionOption::from_pool_summary)
+                .collect();
+        }
+
+        let mut connections = self
+            .ssh_registry
+            .list()
+            .into_iter()
+            .map(MonitorConnectionOption::from_connection_info)
+            .collect::<Vec<_>>();
         connections.sort_by(|left, right| {
             monitor_connection_label(left).cmp(&monitor_connection_label(right))
         });

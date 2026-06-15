@@ -16,7 +16,7 @@ use gpui::{
     deferred, div, prelude::*, px, rgb, rgba, svg, uniform_list,
 };
 use oxideterm_editor_syntax::LanguageId;
-use oxideterm_gpui_editor::TextEditorView;
+use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
 use oxideterm_gpui_ui::{
     button::ButtonVariant,
     button::{ButtonOptions, ButtonRadius, ButtonSize, button_with},

@@ -9,6 +9,8 @@ pub struct SshPtySession {
     runtime: Option<Runtime>,
     connect_rx: Receiver<Result<SshPtyHandle, String>>,
     handle: Option<SshPtyHandle>,
+    layout_resize_seen: bool,
+    post_connect_input_sent: bool,
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
@@ -112,6 +114,8 @@ impl SshPtySession {
             runtime,
             connect_rx,
             handle: None,
+            layout_resize_seen: false,
+            post_connect_input_sent: false,
             title: None,
             graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
@@ -142,25 +146,19 @@ impl SshPtySession {
             Ok(handle) => {
                 let auth_banner_prelude = handle.take_auth_banner_prelude();
                 self.handle = Some(handle);
-                let _ = self.send_command(SshTransportCommand::Resize {
-                    cols: self.resize.cols as u16,
-                    rows: self.resize.rows as u16,
-                });
+                if !self.waiting_for_deferred_pty_resize() {
+                    let _ = self.send_command(SshTransportCommand::Resize {
+                        cols: self.resize.cols as u16,
+                        rows: self.resize.rows as u16,
+                    });
+                }
                 if !auth_banner_prelude.is_empty() {
                     // Tauri prepends SSH authentication banners when the first
                     // visible terminal becomes ready; consume them before any
                     // post-connect input so the login notice keeps that order.
                     self.feed_transport_output(&auth_banner_prelude);
                 }
-                match self.config.post_connect_input() {
-                    Ok(Some(payload)) => {
-                        let _ = self.send_command(SshTransportCommand::Data(payload));
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.feed_utf8_terminal_output(format!("\r\n{error}\r\n").as_bytes());
-                    }
-                }
+                self.maybe_send_post_connect_input();
                 self.title = Some(self.title_text());
                 self.pending_events
                     .push(TerminalEvent::TitleChanged(self.title_text()));
@@ -173,6 +171,30 @@ impl SshPtySession {
                 );
                 self.pending_events.push(TerminalEvent::ChildExited(None));
                 true
+            }
+        }
+    }
+
+    fn waiting_for_deferred_pty_resize(&self) -> bool {
+        self.config.defer_pty_until_resize() && !self.layout_resize_seen
+    }
+
+    fn maybe_send_post_connect_input(&mut self) {
+        if self.post_connect_input_sent
+            || self.handle.is_none()
+            || self.waiting_for_deferred_pty_resize()
+        {
+            return;
+        }
+
+        self.post_connect_input_sent = true;
+        match self.config.post_connect_input() {
+            Ok(Some(payload)) => {
+                let _ = self.send_command(SshTransportCommand::Data(payload));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.feed_utf8_terminal_output(format!("\r\n{error}\r\n").as_bytes());
             }
         }
     }
@@ -608,6 +630,7 @@ impl TerminalSessionBackend for SshPtySession {
 
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()> {
         self.resize = resize;
+        self.layout_resize_seen = true;
         let size = TerminalSize {
             cols: resize.cols,
             rows: resize.rows,
@@ -619,6 +642,10 @@ impl TerminalSessionBackend for SshPtySession {
             cols: resize.cols as u16,
             rows: resize.rows as u16,
         });
+        // Deferred SSH sessions use this first real GPUI layout resize as the
+        // remote PTY allocation boundary. Post-connect input must follow it so
+        // the transport cannot fall back to a synthetic 120x40 shell.
+        self.maybe_send_post_connect_input();
         Ok(())
     }
 

@@ -52,6 +52,7 @@ impl TextEditorView {
 
     pub(super) fn clear_folds_after_buffer_change(&mut self) {
         self.foldable_ranges = fold_ranges_from_syntax(self.syntax.as_ref());
+        self.refresh_indent_guides();
         if !self.folded_ranges.is_empty() {
             self.folded_ranges.clear();
         }
@@ -60,6 +61,7 @@ impl TextEditorView {
 
     pub(super) fn refresh_foldable_ranges(&mut self) {
         self.foldable_ranges = fold_ranges_from_syntax(self.syntax.as_ref());
+        self.refresh_indent_guides();
         self.folded_ranges.retain(|folded| {
             self.foldable_ranges.iter().any(|range| {
                 range.start_line == folded.start_line && range.end_line == folded.end_line

@@ -496,6 +496,12 @@ impl SshTransportClient {
         let transport_lost_connection_id = ssh_connection
             .as_ref()
             .map(|connection| connection.connection_id().to_string());
+        let visible_terminal_registry = registry_release
+            .as_ref()
+            .map(|(registry, _, _)| registry.clone());
+        let visible_terminal_connection_id = ssh_connection
+            .as_ref()
+            .map(|connection| connection.connection_id().to_string());
 
         if !deferred_pty {
             channel
@@ -605,6 +611,15 @@ impl SshTransportClient {
                         .await;
                     return;
                 }
+            }
+            if let (Some(registry), Some(connection_id)) = (
+                visible_terminal_registry.as_ref(),
+                visible_terminal_connection_id.as_deref(),
+            ) {
+                // Tauri starts remote environment detection only after the
+                // first visible shell has been requested, so hidden probes do
+                // not consume Ubuntu's first-login MOTD before the terminal.
+                let _ = registry.mark_visible_terminal_ready(connection_id);
             }
             loop {
                 let flush_deadline = output_batcher.flush_due();

@@ -283,6 +283,40 @@ fn parses_and_highlights_common_remote_files() {
 }
 
 #[test]
+fn indent_guides_come_from_syntax_blocks() {
+    let source = "fn main() {\n    if true {\n        println!(\"ok\");\n    }\n}\n";
+    let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
+    let guides = session.indent_guides(source, 4);
+
+    assert!(guides.iter().any(|guide| guide.column == 4));
+    assert!(guides.iter().any(|guide| guide.column == 8));
+}
+
+#[test]
+fn indent_guides_ignore_shell_alignment_continuations() {
+    let source = "CHOICE=$(whiptail --title \"Power\" \\\n                --menu \"Current\" 12 40 3 \\\n                \"1\" \"Show\")\n";
+    let session = SyntaxSession::parse(LanguageId::Bash, source).unwrap();
+
+    assert!(session.indent_guides(source, 4).is_empty());
+}
+
+#[test]
+fn indent_guides_cover_c_blocks_without_macro_alignment() {
+    let source = r#"#define GPIOB_CRH (*(uint32_t *) 0x11111111)
+void BEEP_Init()
+{
+    RCC_APB2ENR |= 1<<3;
+    GPIOB_CRH &= 0xFFFFFFF0;
+}
+"#;
+    let session = SyntaxSession::parse(LanguageId::C, source).unwrap();
+    let guides = session.indent_guides(source, 4);
+
+    assert!(guides.iter().any(|guide| guide.column == 4));
+    assert!(!guides.iter().any(|guide| guide.start_line == 0));
+}
+
+#[test]
 fn reparses_incrementally_after_edit() {
     let before = "fn main() {\n    let x = 1;\n}\n";
     let edit_range = TextRange::new(BufferOffset(22), BufferOffset(23));

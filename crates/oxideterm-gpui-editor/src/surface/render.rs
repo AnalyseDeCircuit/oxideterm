@@ -4,9 +4,9 @@
 use std::ops::Range;
 
 use gpui::{
-    Context, Div, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Render, ScrollWheelEvent, SharedString, Styled, Window, div, px,
-    rgb, rgba,
+    AnchoredPositionMode, App, Context, Corner, Div, InteractiveElement, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent,
+    SharedString, Styled, Window, anchored, deferred, div, prelude::FluentBuilder, px, rgb, rgba,
 };
 use oxideterm_editor_core::{BufferOffset, Selection};
 use oxideterm_editor_syntax::SyntaxScope;
@@ -36,7 +36,10 @@ const CM_SELECTION_RADIUS: f32 = 2.0;
 const CM_CURSOR_WIDTH: f32 = 2.0;
 const CM_INDENT_GUIDE_WIDTH: f32 = 1.0;
 const CM_FOLD_ICON_WIDTH: f32 = 14.0;
-const CM_TAB_MARKER: &str = "→";
+const CM_CONTEXT_MENU_WIDTH: f32 = 160.0;
+const CM_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
+const CM_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
+const CM_CONTEXT_MENU_Z: usize = 60;
 const CM_CONTROL_CHAR_MARKER: &str = "�";
 const CM_FOLDED_TOKEN: &str = " …";
 const CM_FOLD_OPEN_ICON: &str = "▾";
@@ -74,6 +77,14 @@ impl Render for TextEditorView {
             .relative()
             .size_full()
             .overflow_hidden()
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.open_context_menu(event.position, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
                 this.handle_scroll(event, cx);
             }))
@@ -103,7 +114,7 @@ impl Render for TextEditorView {
             },
         );
 
-        div()
+        let mut root = div()
             .id("oxideterm-gpui-editor")
             .size_full()
             .track_focus(&self.focus_handle)
@@ -116,14 +127,21 @@ impl Render for TextEditorView {
             .border_color(rgb(self.appearance.border_hex))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event: &MouseDownEvent, window, _cx| {
+                cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle);
+                    if this.context_menu.take().is_some() {
+                        cx.notify();
+                    }
                 }),
             )
             .on_key_down(cx.listener(|this, event, window, cx| {
                 this.handle_key(event, window, cx);
             }))
-            .child(body)
+            .child(body);
+        if let Some(menu) = self.context_menu {
+            root = root.child(self.render_context_menu(menu, window, cx));
+        }
+        root
     }
 }
 
@@ -178,7 +196,7 @@ impl TextEditorView {
         let selection_rects = self.selection_rects_for_line(&segment_text, segment_range.clone());
         let find_rects = self.find_rects_for_line(line, &segment_text, segment_range.clone());
         let bracket_rects = self.bracket_rects_for_line(&segment_text, segment_range.clone());
-        let indent_guides = self.indentation_marker_columns(&line_text, display_row);
+        let indent_guides = self.indentation_marker_columns(display_row);
         let foldable = display_row
             .is_first
             .then(|| self.foldable_range_starting_at(line))
@@ -204,6 +222,7 @@ impl TextEditorView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.context_menu = None;
                     window.focus(&this.focus_handle);
                     if let Some(offset) = this.offset_for_window_point(event.position) {
                         if (event.modifiers.secondary() || event.modifiers.control)
@@ -229,6 +248,16 @@ impl TextEditorView {
                             + this.visual_column_for_window_x(event.position.x);
                         this.place_cursor_on_line(row_display.line, raw_column, cx);
                     }
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    // Match browser editor behavior: opening the context menu
+                    // over a selection must not collapse that selection first.
+                    this.open_context_menu(event.position, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -400,6 +429,140 @@ impl TextEditorView {
             })
     }
 
+    fn open_context_menu(&mut self, position: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        self.context_menu = Some(super::EditorContextMenu {
+            x: f32::from(position.x),
+            y: f32::from(position.y),
+        });
+        cx.notify();
+    }
+
+    fn render_context_menu(
+        &self,
+        menu: super::EditorContextMenu,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let viewport = window.viewport_size();
+        let x = menu
+            .x
+            .min(f32::from(viewport.width) - CM_CONTEXT_MENU_WIDTH - 8.0)
+            .max(8.0);
+        let y = menu
+            .y
+            .min(
+                f32::from(viewport.height)
+                    - CM_CONTEXT_MENU_ITEM_HEIGHT * 4.0
+                    - CM_CONTEXT_MENU_PADDING_Y * 2.0
+                    - 8.0,
+            )
+            .max(8.0);
+        let has_selection = self.has_primary_or_secondary_selection();
+        let can_edit = !self.read_only;
+        let popup = div()
+            .w(px(CM_CONTEXT_MENU_WIDTH))
+            .py(px(CM_CONTEXT_MENU_PADDING_Y))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(rgb(self.appearance.border_hex))
+            .bg(rgb(self.appearance.gutter_background_hex))
+            .shadow_lg()
+            .child(self.render_context_menu_item(
+                self.context_menu_labels.copy.clone(),
+                has_selection,
+                cx.listener(|this, _event, _window, cx| {
+                    this.copy_selection_to_clipboard(cx);
+                    this.context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .child(self.render_context_menu_item(
+                self.context_menu_labels.cut.clone(),
+                has_selection && can_edit,
+                cx.listener(|this, _event, _window, cx| {
+                    this.cut_selection_to_clipboard(cx);
+                    this.context_menu = None;
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(self.render_context_menu_item(
+                self.context_menu_labels.paste.clone(),
+                can_edit,
+                cx.listener(|this, _event, _window, cx| {
+                    this.paste_from_clipboard(cx);
+                    this.context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+            .child(self.render_context_menu_item(
+                self.context_menu_labels.select_all.clone(),
+                !self.buffer.is_empty(),
+                cx.listener(|this, _event, _window, cx| {
+                    this.select_all(cx);
+                    this.context_menu = None;
+                    cx.stop_propagation();
+                }),
+            ))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .into_any_element();
+
+        div()
+            .absolute()
+            .inset_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, _window, cx| {
+                    this.context_menu = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(
+                deferred(
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(x), px(y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(popup),
+                )
+                .with_priority(CM_CONTEXT_MENU_Z),
+            )
+    }
+
+    fn render_context_menu_item(
+        &self,
+        label: String,
+        enabled: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Div {
+        div()
+            .h(px(CM_CONTEXT_MENU_ITEM_HEIGHT))
+            .w_full()
+            .flex()
+            .items_center()
+            .px_3()
+            .text_size(px(12.0))
+            .text_color(rgb(self.appearance.text_hex))
+            .opacity(if enabled { 1.0 } else { 0.45 })
+            .when(enabled, |this| {
+                this.cursor_pointer()
+                    .hover(|style| style.bg(rgb(self.appearance.selection_hex)))
+                    .on_mouse_down(MouseButton::Left, listener)
+            })
+            .child(div().truncate().child(label))
+    }
+
     fn render_line_text(
         &self,
         line: usize,
@@ -511,15 +674,19 @@ impl TextEditorView {
         )
     }
 
-    fn indentation_marker_columns(&self, line_text: &str, display_row: DisplayRow) -> Vec<usize> {
+    fn indentation_marker_columns(&self, display_row: DisplayRow) -> Vec<usize> {
         if !self.settings.indentation_markers {
             return Vec::new();
         }
-        indentation_marker_columns(line_text, self.settings.tab_size, display_row.start_col)
-            .into_iter()
-            .filter(|column| *column >= display_row.start_col && *column < display_row.end_col)
-            .map(|column| column - display_row.start_col)
-            .collect()
+        indentation_marker_columns(
+            &self.indent_guides,
+            display_row.line,
+            display_row.start_col,
+            display_row.end_col,
+        )
+        .into_iter()
+        .map(|column| column - display_row.start_col)
+        .collect()
     }
 
     fn render_placeholder(&self) -> Option<Div> {
@@ -667,6 +834,9 @@ impl TextEditorView {
         }) {
             let start = span.range.start.0.max(line_range.start) - line_range.start;
             let end = span.range.end.0.min(line_range.end) - line_range.start;
+            let Some(highlight_range) = visible_highlight_range(start, end, cursor) else {
+                continue;
+            };
             if start > cursor {
                 push_chunk(
                     &mut chunks,
@@ -679,8 +849,8 @@ impl TextEditorView {
             push_chunk(
                 &mut chunks,
                 line_text,
-                start,
-                end,
+                highlight_range.start,
+                highlight_range.end,
                 self.syntax_color(span.scope),
             );
             cursor = cursor.max(end);
@@ -713,6 +883,18 @@ impl TextEditorView {
     }
 }
 
+fn visible_highlight_range(
+    start: usize,
+    end: usize,
+    already_rendered_until: usize,
+) -> Option<Range<usize>> {
+    // Tree-sitter captures can overlap parent and child nodes. The renderer is
+    // linear, so every later span must be clipped to text that is not already
+    // emitted for this visual line segment.
+    let start = start.max(already_rendered_until);
+    (start < end).then_some(start..end)
+}
+
 fn push_chunk(
     chunks: &mut Vec<LineChunkSpec>,
     line_text: &str,
@@ -736,63 +918,80 @@ fn contains_special_char(text: &str) -> bool {
 
 fn special_char_marker(ch: char) -> Option<&'static str> {
     match ch {
-        '\t' => Some(CM_TAB_MARKER),
+        '\t' => None,
         ch if ch.is_control() => Some(CM_CONTROL_CHAR_MARKER),
         _ => None,
     }
 }
 
 fn indentation_marker_columns(
-    line_text: &str,
-    tab_size: usize,
+    guides: &[oxideterm_editor_syntax::IndentGuide],
+    line: usize,
     first_visible_column: usize,
+    end_visible_column: usize,
 ) -> Vec<usize> {
-    let tab_size = tab_size.max(1);
-    let mut visual_column = 0usize;
-    let mut columns = Vec::new();
-    for ch in line_text.chars() {
-        match ch {
-            ' ' => visual_column += 1,
-            '\t' => visual_column += tab_size,
-            _ => break,
-        }
-        if visual_column >= tab_size
-            && visual_column % tab_size == 0
-            && visual_column > first_visible_column
-        {
-            // CodeMirror's indentation markers are paint-only guides; the text
-            // buffer and byte-offset mapping remain unchanged.
-            columns.push(visual_column);
-        }
-    }
-    columns
+    guides
+        .iter()
+        .filter(|guide| line > guide.start_line && line <= guide.end_line)
+        .map(|guide| guide.column)
+        .filter(|column| *column >= first_visible_column && *column < end_visible_column)
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{contains_special_char, indentation_marker_columns, special_char_marker};
+    use super::{
+        contains_special_char, indentation_marker_columns, special_char_marker,
+        visible_highlight_range,
+    };
+    use oxideterm_editor_syntax::IndentGuide;
 
     #[test]
-    fn special_char_markers_cover_tabs_and_controls_only() {
-        assert!(contains_special_char("\t"));
+    fn special_char_markers_ignore_tabs_but_cover_controls() {
+        assert!(!contains_special_char("\t"));
         assert!(contains_special_char("\u{0007}"));
-        assert_eq!(special_char_marker('\t'), Some("→"));
+        assert_eq!(special_char_marker('\t'), None);
         assert_eq!(special_char_marker(' '), None);
         assert_eq!(special_char_marker('a'), None);
     }
 
     #[test]
-    fn indentation_guides_follow_configured_tab_size() {
-        assert_eq!(indentation_marker_columns("        code", 4, 0), vec![4, 8]);
-        assert_eq!(indentation_marker_columns("\t  code", 4, 0), vec![4]);
-        assert_eq!(indentation_marker_columns("  code", 2, 0), vec![2]);
+    fn indentation_guides_follow_syntax_ranges() {
+        let guides = vec![
+            IndentGuide {
+                start_line: 0,
+                end_line: 4,
+                column: 4,
+            },
+            IndentGuide {
+                start_line: 1,
+                end_line: 3,
+                column: 8,
+            },
+        ];
+
+        assert_eq!(indentation_marker_columns(&guides, 2, 0, 120), vec![4, 8]);
+        assert_eq!(
+            indentation_marker_columns(&guides, 0, 0, 120),
+            Vec::<usize>::new()
+        );
     }
 
     #[test]
     fn indentation_guides_skip_columns_before_wrapped_segment() {
-        assert_eq!(
-            indentation_marker_columns("            code", 4, 4),
-            vec![8, 12]
-        );
+        let guides = vec![IndentGuide {
+            start_line: 0,
+            end_line: 4,
+            column: 8,
+        }];
+
+        assert_eq!(indentation_marker_columns(&guides, 2, 4, 12), vec![8]);
+    }
+
+    #[test]
+    fn overlapping_highlight_spans_are_clipped_to_unrendered_text() {
+        assert_eq!(visible_highlight_range(2, 8, 0), Some(2..8));
+        assert_eq!(visible_highlight_range(2, 8, 5), Some(5..8));
+        assert_eq!(visible_highlight_range(2, 8, 8), None);
     }
 }

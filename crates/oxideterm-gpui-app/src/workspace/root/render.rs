@@ -442,12 +442,18 @@ impl Render for WorkspaceApp {
                 if this.copy_active_text_input(cx) {
                     return;
                 }
+                if this.copy_active_ide_selection(cx) {
+                    return;
+                }
                 if this.new_connection_form.is_none() {
                     this.copy(cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &Paste, _window, cx| {
                 if this.paste_active_text_input(cx) {
+                    return;
+                }
+                if this.paste_into_active_ide_editor(cx) {
                     return;
                 }
                 if this.new_connection_form.is_some() {
@@ -457,12 +463,21 @@ impl Render for WorkspaceApp {
                 }
             }))
             .on_action(cx.listener(|this, _: &Find, window, cx| {
+                if this.open_active_ide_search(cx) {
+                    return;
+                }
                 this.open_search(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FindNext, _window, cx| {
+                if this.select_next_active_ide_search_match(cx) {
+                    return;
+                }
                 this.search_next(true, cx);
             }))
             .on_action(cx.listener(|this, _: &FindPrev, _window, cx| {
+                if this.select_previous_active_ide_search_match(cx) {
+                    return;
+                }
                 this.search_next(false, cx);
             }))
             .on_action(cx.listener(|this, _: &CloseSearch, window, cx| {

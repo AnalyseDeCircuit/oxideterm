@@ -66,10 +66,15 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
+                    .flex_none()
                     .h(px(42.0))
                     .flex()
                     .items_center()
                     .px_3()
+                    // The context-sidebar titlebar is fixed chrome. Give it
+                    // its own hitbox so wheel/drag events cannot fall through
+                    // to a scrollable tool body underneath.
+                    .occlude()
                     .border_b_1()
                     .border_color(rgba((theme.border << 8) | 0x4d))
                     .child(self.render_context_sidebar_panel_title(

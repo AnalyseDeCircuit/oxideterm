@@ -5,7 +5,7 @@ use tree_sitter::{Language, Parser, Query, Tree};
 
 use crate::{
     BracketPair, FoldRange, HighlightSpan, LanguageId, SyntaxEdit, SyntaxError, brackets, folding,
-    highlight,
+    highlight, indent,
 };
 
 pub struct SyntaxSession {
@@ -90,5 +90,9 @@ impl SyntaxSession {
 
     pub fn fold_ranges(&self) -> Vec<FoldRange> {
         folding::fold_ranges(self.tree.root_node())
+    }
+
+    pub fn indent_guides(&self, source: &str, tab_size: usize) -> Vec<crate::IndentGuide> {
+        indent::indent_guides(self.tree.root_node(), source, tab_size)
     }
 }

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{Context, Modifiers, Window};
+use gpui::{ClipboardItem, Context, Modifiers, Window};
+use oxideterm_editor_core::{BufferOffset, LineCol};
 
 use super::{EditorSaveStatus, TextEditorView, coords::floor_char_boundary, input};
 
@@ -58,11 +59,35 @@ impl TextEditorView {
         }
     }
 
-    pub(super) fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
+    pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
         self.insert_text(text, cx);
+    }
+
+    pub fn copy_selection_to_clipboard(&self, cx: &mut Context<Self>) -> bool {
+        let Some(text) = self.selected_text() else {
+            return false;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        true
+    }
+
+    pub fn cut_selection_to_clipboard(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.read_only {
+            return self.copy_selection_to_clipboard(cx);
+        }
+        let ranges = self
+            .all_selections()
+            .into_iter()
+            .filter_map(|selection| (!selection.is_caret()).then_some(selection.range()))
+            .collect::<Vec<_>>();
+        if ranges.is_empty() || !self.copy_selection_to_clipboard(cx) {
+            return false;
+        }
+        self.replace_ranges_with_caret(ranges, "", cx);
+        true
     }
 
     pub(super) fn handle_key(
@@ -76,6 +101,14 @@ impl TextEditorView {
 
         if matches_tauri_plain_mod_key(key, modifiers, "s") {
             self.save(window, cx);
+            return;
+        }
+        if matches_tauri_plain_mod_key(key, modifiers, "c") {
+            self.copy_selection_to_clipboard(cx);
+            return;
+        }
+        if matches_tauri_plain_mod_key(key, modifiers, "x") {
+            self.cut_selection_to_clipboard(cx);
             return;
         }
         if matches_tauri_plain_mod_key(key, modifiers, "v") {
@@ -107,20 +140,141 @@ impl TextEditorView {
         }
 
         match key {
-            "left" => {
+            "left" | "arrowleft" => {
                 self.cursor.move_left(&self.buffer, modifiers.shift);
                 cx.notify();
             }
-            "right" => {
+            "right" | "arrowright" => {
                 self.cursor.move_right(&self.buffer, modifiers.shift);
                 cx.notify();
             }
+            "up" | "arrowup" => self.move_vertically(-1, modifiers.shift, cx),
+            "down" | "arrowdown" => self.move_vertically(1, modifiers.shift, cx),
+            "pageup" => {
+                self.move_vertically(-(self.visible_page_rows() as isize), modifiers.shift, cx)
+            }
+            "pagedown" => {
+                self.move_vertically(self.visible_page_rows() as isize, modifiers.shift, cx)
+            }
+            "home" => self.move_to_line_boundary(false, modifiers.shift, cx),
+            "end" => self.move_to_line_boundary(true, modifiers.shift, cx),
             "backspace" => self.delete_backward(cx),
             "delete" => self.delete_forward(cx),
             "enter" => self.insert_text(self.indented_newline(), cx),
             "tab" => self.insert_text(self.settings.indentation_unit(), cx),
             _ => {}
         }
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        let parts = self
+            .all_selections()
+            .into_iter()
+            .filter_map(|selection| {
+                (!selection.is_caret())
+                    .then(|| self.buffer.slice(selection.range()).ok())
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        (!parts.is_empty()).then(|| parts.join("\n"))
+    }
+
+    fn move_to_line_boundary(&mut self, to_end: bool, extend: bool, cx: &mut Context<Self>) {
+        let Ok(position) = self.buffer.offset_to_line_col(self.cursor.selection().head) else {
+            return;
+        };
+        let offset = if to_end {
+            self.buffer.line_end_offset(position.line)
+        } else {
+            self.buffer.line_start_offset(position.line)
+        };
+        if let Some(offset) = offset {
+            self.cursor.move_to(offset, extend);
+            self.marked_text = None;
+            cx.notify();
+        }
+    }
+
+    fn move_vertically(&mut self, row_delta: isize, extend: bool, cx: &mut Context<Self>) {
+        let Some((current_index, _current_row, current_screen_column)) =
+            self.current_display_row_and_screen_column()
+        else {
+            return;
+        };
+        let rows = self.display_rows();
+        let max_index = rows.len().saturating_sub(1);
+        let target_index = current_index
+            .saturating_add_signed(row_delta)
+            .min(max_index);
+        let Some(target_row) = rows.get(target_index).copied() else {
+            return;
+        };
+        let preferred_column = self.cursor.preferred_column_or(current_screen_column);
+        let target_visual_column = target_row.start_col.saturating_add(preferred_column);
+        let Some(offset) =
+            self.offset_for_line_visual_column(target_row.line, target_visual_column)
+        else {
+            return;
+        };
+        self.cursor
+            .move_to_with_preferred_column(offset, extend, preferred_column);
+        self.secondary_selections.clear();
+        self.marked_text = None;
+        self.viewport.reveal_line(
+            target_index,
+            self.document_row_count(),
+            self.metrics.line_height,
+        );
+        cx.notify();
+    }
+
+    fn current_display_row_and_screen_column(&self) -> Option<(usize, super::DisplayRow, usize)> {
+        let position = self
+            .buffer
+            .offset_to_line_col(self.cursor.selection().head)
+            .ok()?;
+        let line_text = self.buffer.line_text(position.line).unwrap_or_default();
+        let visual_column =
+            super::coords::visual_column_for_byte_column(&line_text, position.column);
+        let rows = self.display_rows();
+        let index = rows
+            .iter()
+            .enumerate()
+            .rfind(|(_, row)| {
+                row.line == position.line
+                    && visual_column >= row.start_col
+                    && visual_column <= row.end_col
+            })
+            .map(|(index, _)| index)
+            .or_else(|| {
+                rows.iter()
+                    .enumerate()
+                    .rfind(|(_, row)| row.line == position.line)
+                    .map(|(index, _)| index)
+            })?;
+        let row = rows.get(index).copied()?;
+        Some((index, row, visual_column.saturating_sub(row.start_col)))
+    }
+
+    fn offset_for_line_visual_column(
+        &self,
+        line: usize,
+        visual_column: usize,
+    ) -> Option<BufferOffset> {
+        let line_text = self.buffer.line_text(line).unwrap_or_default();
+        let byte_column = super::coords::byte_column_for_visual_column(&line_text, visual_column);
+        self.buffer
+            .line_col_to_offset(LineCol::new(line, byte_column))
+            .ok()
+    }
+
+    fn visible_page_rows(&self) -> usize {
+        if self.metrics.line_height <= 0.0 {
+            return 1;
+        }
+        (self.viewport.height_px / self.metrics.line_height)
+            .floor()
+            .max(1.0) as usize
     }
 
     pub(super) fn undo(&mut self, cx: &mut Context<Self>) {
@@ -200,6 +354,16 @@ mod tests {
             "V",
             Modifiers::secondary_key(),
             "v"
+        ));
+        assert!(matches_tauri_plain_mod_key(
+            "c",
+            Modifiers::secondary_key(),
+            "c"
+        ));
+        assert!(matches_tauri_plain_mod_key(
+            "x",
+            Modifiers::secondary_key(),
+            "x"
         ));
         assert!(matches_tauri_plain_mod_key(
             "a",

@@ -127,6 +127,66 @@ impl IdeSurface {
         self.load_directory(IdeLocation::remote(node_id, root_path), cx);
     }
 
+    pub fn copy_active_editor_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(editor) = self.active_editor() else {
+            return false;
+        };
+        // Workspace edit actions are routed at the IDE surface boundary so the
+        // outer app does not need to know which editor tab currently owns focus.
+        editor.update(cx, |editor, cx| editor.copy_selection_to_clipboard(cx))
+    }
+
+    pub fn cut_active_editor_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(editor) = self.active_editor() else {
+            return false;
+        };
+        editor.update(cx, |editor, cx| editor.cut_selection_to_clipboard(cx))
+    }
+
+    pub fn paste_into_active_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(editor) = self.active_editor() else {
+            return false;
+        };
+        editor.update(cx, |editor, cx| {
+            editor.paste_from_clipboard(cx);
+            true
+        })
+    }
+
+    pub fn select_all_in_active_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(editor) = self.active_editor() else {
+            return false;
+        };
+        editor.update(cx, |editor, cx| {
+            editor.select_all(cx);
+            true
+        })
+    }
+
+    pub fn open_active_editor_search(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.active_editor().is_none() {
+            return false;
+        }
+        self.open_editor_search(cx);
+        true
+    }
+
+    pub fn select_next_active_editor_search_match(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.active_editor().is_none() {
+            return false;
+        }
+        self.select_next_editor_search_match(cx);
+        true
+    }
+
+    pub fn select_previous_active_editor_search_match(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.active_editor().is_none() {
+            return false;
+        }
+        self.select_previous_editor_search_match(cx);
+        true
+    }
+
     pub fn restore_snapshot(&mut self, snapshot: WorkspaceSnapshot, cx: &mut Context<Self>) {
         let node_id = match &snapshot.project.root {
             IdeLocation::Remote { node_id, .. } => node_id.clone(),
@@ -944,6 +1004,12 @@ impl IdeSurface {
         let symbol_surface = surface.clone();
         let editor = cx.new(|cx| {
             let mut editor = TextEditorView::new(text, &tokens, cx);
+            editor.set_context_menu_labels(EditorContextMenuLabels {
+                copy: self.labels.editor_copy.clone(),
+                cut: self.labels.editor_cut.clone(),
+                paste: self.labels.editor_paste.clone(),
+                select_all: self.labels.editor_select_all.clone(),
+            });
             editor.apply_ide_runtime_settings(
                 &tokens,
                 runtime_settings.editor_font_size,

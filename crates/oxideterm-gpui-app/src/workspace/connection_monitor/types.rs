@@ -113,6 +113,36 @@ struct ConnectionPoolStateView {
     color: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MonitorConnectionOption {
+    // Sidebar monitoring only needs selector/header fields; avoid cloning the
+    // full registry connection payload on every scroll-driven render.
+    connection_id: String,
+    host: String,
+    port: u16,
+    username: String,
+}
+
+impl MonitorConnectionOption {
+    fn from_connection_info(connection: oxideterm_ssh::ConnectionInfo) -> Self {
+        Self {
+            connection_id: connection.connection_id,
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+        }
+    }
+
+    fn from_pool_summary(summary: &ConnectionPoolEntrySummary) -> Self {
+        Self {
+            connection_id: summary.id.clone(),
+            host: summary.host.clone(),
+            port: summary.port,
+            username: summary.username.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionRuntimeSection {
     Overview,

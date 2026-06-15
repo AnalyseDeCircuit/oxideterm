@@ -3,6 +3,7 @@ const SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT: f32 = 36.0;
 const SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
 const SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS: usize = 4;
 const SYSTEM_HEALTH_SELECTOR_GAP: f32 = 8.0;
+const HOST_TOOLS_TAB_STRIP_HEIGHT: f32 = 44.0;
 
 impl WorkspaceApp {
     pub(super) fn render_host_tools_context_panel(
@@ -16,6 +17,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .min_h_0()
+            .overflow_hidden()
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
             .child(self.render_host_tools_context_tabs(cx))
@@ -55,9 +57,12 @@ impl WorkspaceApp {
             .id("system-health-context-panel")
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll()
+            .overflow_hidden()
+            .occlude()
             .child(
                 div()
+                    .size_full()
+                    .min_h_0()
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -73,12 +78,18 @@ impl WorkspaceApp {
     fn render_host_tools_context_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .flex_none()
+            .h(px(HOST_TOOLS_TAB_STRIP_HEIGHT))
             .min_w(px(0.0))
+            // Host Tools tabs are fixed secondary chrome. The fixed height
+            // keeps horizontal overflow scoped to this row instead of the
+            // whole sidebar body.
+            .occlude()
             .overflow_x_scrollbar()
             .border_b_1()
             .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
             .child(
                 div()
+                    .h_full()
                     .flex()
                     .items_center()
                     .gap_1()
@@ -268,20 +279,33 @@ impl WorkspaceApp {
             .iter()
             .find(|connection| connection.connection_id == selected_id)
             .unwrap_or(&connections[0]);
-        let snapshot = self
-            .connection_monitor
-            .profiler_registry
-            .snapshot(&active_connection.connection_id);
+        let snapshot = (!compact).then(|| {
+            self.connection_monitor
+                .profiler_registry
+                .snapshot(&active_connection.connection_id)
+        }).flatten();
+        let current = compact.then(|| {
+            self.connection_monitor
+                .profiler_registry
+                .current(&active_connection.connection_id)
+        }).flatten();
         let disabled = self
             .connection_monitor
             .disabled_profiler_connections
             .contains(&active_connection.connection_id);
-        let is_running = snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.state == ProfilerState::Running);
-        let metrics = snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.metrics.as_ref());
+        let profiler_state = if compact {
+            current.as_ref().map(|(_, state)| *state)
+        } else {
+            snapshot.as_ref().map(|snapshot| snapshot.state)
+        };
+        let is_running = matches!(profiler_state, Some(ProfilerState::Running));
+        let metrics = if compact {
+            current.as_ref().and_then(|(metrics, _)| metrics.as_ref())
+        } else {
+            snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.metrics.as_ref())
+        };
         let show_history = !compact;
         let history = if show_history {
             snapshot
@@ -302,13 +326,12 @@ impl WorkspaceApp {
         } else {
             Vec::new()
         };
-        let profiler_state = snapshot.as_ref().map(|snapshot| snapshot.state);
-
-        let mut panel = div()
+        let panel = div()
             .relative()
             .flex()
             .flex_col()
             .gap_2()
+            .when(compact, |panel| panel.flex_1().min_h_0())
             .child(self.render_connection_selector(&connections, selected_id, cx))
             .child(self.render_monitor_panel_header(active_connection, is_running, !disabled, cx));
 
@@ -441,8 +464,28 @@ impl WorkspaceApp {
         let can_retry_sampling = !disabled
             && (matches!(profiler_state, Some(ProfilerState::Degraded))
                 || matches!(metrics.source, MetricsSource::Unsupported));
+        if compact {
+            return panel
+                .child(
+                    div()
+                        .id("host-tools-monitor-metrics-scroll")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(self.render_compact_system_health_metrics(
+                            metrics,
+                            is_rtt_only,
+                            can_retry_sampling,
+                            active_connection.connection_id.clone(),
+                            cx,
+                        )),
+                )
+                .into_any_element();
+        }
+
+        let mut metric_body = div().flex().flex_col().gap_2();
         if !is_rtt_only && let Some(cpu) = metrics.cpu_percent {
-            panel = panel.child(self.render_metric_card(
+            metric_body = metric_body.child(self.render_metric_card(
                 self.i18n.t("profiler.panel.cpu"),
                 format!("{cpu:.1}%"),
                 LucideIcon::Cpu,
@@ -454,7 +497,7 @@ impl WorkspaceApp {
             ));
         }
         if !is_rtt_only && metrics.memory_used.is_some() && metrics.memory_total.is_some() {
-            panel = panel.child(self.render_metric_card(
+            metric_body = metric_body.child(self.render_metric_card(
                 self.i18n.t("profiler.panel.memory"),
                 format!(
                     "{} / {}",
@@ -470,7 +513,7 @@ impl WorkspaceApp {
             ));
         }
         if !is_rtt_only && metrics.swap_used.is_some() && metrics.swap_total.is_some() {
-            panel = panel.child(self.render_metric_card(
+            metric_body = metric_body.child(self.render_metric_card(
                 self.i18n.t("profiler.panel.swap"),
                 format!(
                     "{} / {}",
@@ -486,7 +529,7 @@ impl WorkspaceApp {
             ));
         }
         if !is_rtt_only && metrics.disk_used.is_some() && metrics.disk_total.is_some() {
-            panel = panel.child(self.render_metric_card(
+            metric_body = metric_body.child(self.render_metric_card(
                 self.i18n.t("profiler.panel.disk"),
                 format!(
                     "{} / {}",
@@ -504,19 +547,20 @@ impl WorkspaceApp {
         if !is_rtt_only
             && (metrics.net_rx_bytes_per_sec.is_some() || metrics.net_tx_bytes_per_sec.is_some())
         {
-            panel = panel.child(self.render_network_metric_card(metrics, !compact, cx));
+            metric_body = metric_body.child(self.render_network_metric_card(metrics, !compact, cx));
         }
         if !is_rtt_only && !metrics.disks.is_empty() {
-            panel = panel.child(self.render_disk_list_card(metrics, !compact, cx));
+            metric_body = metric_body.child(self.render_disk_list_card(metrics, !compact, cx));
         }
         if !is_rtt_only && !metrics.net_interfaces.is_empty() {
-            panel = panel.child(self.render_interface_list_card(metrics, !compact, cx));
+            metric_body = metric_body.child(self.render_interface_list_card(metrics, !compact, cx));
         }
         if !is_rtt_only && !metrics.top_processes.is_empty() {
-            panel = panel.child(self.render_top_process_list_card(metrics, !compact, cx));
+            metric_body =
+                metric_body.child(self.render_top_process_list_card(metrics, !compact, cx));
         }
 
-        panel
+        let metric_body = metric_body
             .child(
                 div()
                     .grid()
@@ -596,13 +640,14 @@ impl WorkspaceApp {
                                 cx,
                             )),
                     ),
-            )
-            .into_any_element()
+            );
+
+        panel.child(metric_body).into_any_element()
     }
 
     fn render_connection_selector(
         &self,
-        connections: &[oxideterm_ssh::ConnectionInfo],
+        connections: &[MonitorConnectionOption],
         selected_id: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -625,9 +670,8 @@ impl WorkspaceApp {
         )
         .font_family("monospace");
         let selected_index = monitor_connection_selected_index(connections, selected_id);
-        // The popup is painted inside this narrow scroll panel, so reserve
-        // enough layout space while it is open instead of letting following
-        // health cards visually overlap it.
+        // The popup is painted inside this narrow panel, so reserve enough
+        // layout space while it is open instead of letting health cards overlap it.
         let selector_bottom_margin = if self.connection_monitor.selector_open {
             let visible_options = connections
                 .len()
@@ -798,7 +842,7 @@ impl WorkspaceApp {
     fn handle_open_connection_monitor_select_key(
         &mut self,
         event: &KeyDownEvent,
-        connections: &[oxideterm_ssh::ConnectionInfo],
+        connections: &[MonitorConnectionOption],
         current: usize,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -875,7 +919,7 @@ impl WorkspaceApp {
 
     fn render_monitor_panel_header(
         &self,
-        connection: &oxideterm_ssh::ConnectionInfo,
+        connection: &MonitorConnectionOption,
         is_running: bool,
         is_enabled: bool,
         cx: &mut Context<Self>,
@@ -1036,6 +1080,185 @@ impl WorkspaceApp {
                     this.start_connection_monitor_profiler(connection_id.clone(), cx);
                     cx.stop_propagation();
                 }),
+            )
+            .into_any_element()
+    }
+
+    fn render_compact_system_health_metrics(
+        &self,
+        metrics: &ResourceMetrics,
+        is_rtt_only: bool,
+        can_retry_sampling: bool,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mut body = div().flex().flex_col().gap_2().pb_2();
+
+        if !is_rtt_only {
+            let mut resource_card = self.render_compact_monitor_card_shell();
+            let mut resource_rows = 0usize;
+            if let Some(cpu) = metrics.cpu_percent {
+                resource_rows += 1;
+                resource_card = resource_card.child(self.render_compact_monitor_row(
+                    LucideIcon::Cpu,
+                    self.i18n.t("profiler.panel.cpu"),
+                    format!("{cpu:.1}%"),
+                    threshold_color(Some(cpu)),
+                ));
+            }
+            if metrics.memory_used.is_some() && metrics.memory_total.is_some() {
+                resource_rows += 1;
+                resource_card = resource_card.child(self.render_compact_monitor_row(
+                    LucideIcon::MemoryStick,
+                    self.i18n.t("profiler.panel.memory"),
+                    format!(
+                        "{} / {}",
+                        format_bytes(metrics.memory_used.unwrap_or_default()),
+                        format_bytes(metrics.memory_total.unwrap_or_default())
+                    ),
+                    threshold_color(metrics.memory_percent),
+                ));
+            }
+            if metrics.swap_used.is_some() && metrics.swap_total.is_some() {
+                resource_rows += 1;
+                resource_card = resource_card.child(self.render_compact_monitor_row(
+                    LucideIcon::MemoryStick,
+                    self.i18n.t("profiler.panel.swap"),
+                    format!(
+                        "{} / {}",
+                        format_bytes(metrics.swap_used.unwrap_or_default()),
+                        format_bytes(metrics.swap_total.unwrap_or_default())
+                    ),
+                    threshold_color(metrics.swap_percent),
+                ));
+            }
+            if metrics.disk_used.is_some() && metrics.disk_total.is_some() {
+                resource_rows += 1;
+                resource_card = resource_card.child(self.render_compact_monitor_row(
+                    LucideIcon::HardDrive,
+                    self.i18n.t("profiler.panel.disk"),
+                    format!(
+                        "{} / {}",
+                        format_bytes(metrics.disk_used.unwrap_or_default()),
+                        format_bytes(metrics.disk_total.unwrap_or_default())
+                    ),
+                    threshold_color(metrics.disk_percent),
+                ));
+            }
+            if let Some(load) = metrics.load_avg_1 {
+                resource_rows += 1;
+                resource_card = resource_card.child(self.render_compact_monitor_row(
+                    LucideIcon::Gauge,
+                    self.i18n.t("profiler.panel.load_avg"),
+                    format!(
+                        "{load:.2} / {:.2} / {:.2}",
+                        metrics.load_avg_5.unwrap_or_default(),
+                        metrics.load_avg_15.unwrap_or_default()
+                    ),
+                    theme.text,
+                ));
+            }
+            if resource_rows > 0 {
+                body = body.child(resource_card);
+            }
+        }
+
+        if !is_rtt_only
+            && (metrics.net_rx_bytes_per_sec.is_some() || metrics.net_tx_bytes_per_sec.is_some())
+        {
+            body = body.child(
+                self.render_compact_monitor_card_shell()
+                    .child(self.render_compact_monitor_row(
+                        LucideIcon::ArrowDown,
+                        self.i18n.t("profiler.panel.network"),
+                        format_rate(metrics.net_rx_bytes_per_sec.unwrap_or_default()),
+                        MONITOR_EMERALD,
+                    ))
+                    .child(self.render_compact_monitor_row(
+                        LucideIcon::ArrowUp,
+                        self.i18n.t("profiler.panel.network"),
+                        format_rate(metrics.net_tx_bytes_per_sec.unwrap_or_default()),
+                        MONITOR_AMBER,
+                    )),
+            );
+        }
+
+        body = body.child(
+            self.render_compact_monitor_card_shell()
+                .child(self.render_compact_monitor_row(
+                    LucideIcon::Activity,
+                    self.i18n.t("profiler.panel.rtt"),
+                    metrics
+                        .ssh_rtt_ms
+                        .map(|rtt| format!("{rtt} ms"))
+                        .unwrap_or_else(|| "—".to_string()),
+                    rtt_color(metrics.ssh_rtt_ms),
+                ))
+                .child(self.render_compact_monitor_row(
+                    LucideIcon::Info,
+                    self.i18n.t("profiler.panel.source"),
+                    self.i18n.t(metrics_source_label_key(metrics.source)),
+                    theme.text_muted,
+                )),
+        );
+
+        if can_retry_sampling {
+            body = body.child(self.render_retry_sampling_button(connection_id, cx));
+        }
+
+        body.into_any_element()
+    }
+
+    fn render_compact_monitor_card_shell(&self) -> gpui::Div {
+        let theme = self.tokens.ui;
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg_panel))
+            .px_3()
+            .py_2()
+            .flex()
+            .flex_col()
+            .gap_2()
+    }
+
+    fn render_compact_monitor_row(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        value: String,
+        value_color: u32,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        // Compact sidebar rows are deliberately plain text, not selectable
+        // StyledText, because they repaint while the user scrolls.
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .min_w(px(0.0))
+            .text_size(px(12.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_color(rgb(theme.text_muted))
+                    .child(Self::render_lucide_icon(icon, 13.0, rgb(theme.text_muted)))
+                    .child(div().min_w(px(0.0)).truncate().child(label)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(px(180.0))
+                    .truncate()
+                    .font_family("monospace")
+                    .text_color(rgb(value_color))
+                    .child(value),
             )
             .into_any_element()
     }

@@ -32,7 +32,7 @@ fn monitor_center_state(
         .into_any_element()
 }
 
-fn monitor_connection_label(connection: &oxideterm_ssh::ConnectionInfo) -> String {
+fn monitor_connection_label(connection: &MonitorConnectionOption) -> String {
     format!(
         "{}@{}:{}",
         connection.username, connection.host, connection.port
@@ -40,7 +40,7 @@ fn monitor_connection_label(connection: &oxideterm_ssh::ConnectionInfo) -> Strin
 }
 
 fn monitor_connection_selected_index(
-    connections: &[oxideterm_ssh::ConnectionInfo],
+    connections: &[MonitorConnectionOption],
     selected_id: &str,
 ) -> usize {
     // Radix Select opens with the current value highlighted. Keep the lookup

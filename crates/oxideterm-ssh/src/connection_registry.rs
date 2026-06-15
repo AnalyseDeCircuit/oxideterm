@@ -219,6 +219,7 @@ struct ConnectionEntry {
     sftp_state: RwLock<SftpSessionState>,
     remote_env: std::sync::OnceLock<RemoteEnvInfo>,
     remote_env_detection_started: AtomicBool,
+    first_visible_terminal_started: AtomicBool,
     heartbeat_failures: AtomicU64,
     idle_generation: AtomicU64,
     last_emitted_status: RwLock<Option<String>>,
@@ -245,6 +246,7 @@ impl ConnectionEntry {
             sftp_state: RwLock::new(SftpSessionState::default()),
             remote_env: std::sync::OnceLock::new(),
             remote_env_detection_started: AtomicBool::new(false),
+            first_visible_terminal_started: AtomicBool::new(false),
             heartbeat_failures: AtomicU64::new(0),
             idle_generation: AtomicU64::new(0),
             last_emitted_status: RwLock::new(None),
@@ -340,6 +342,16 @@ impl ConnectionEntry {
             && !self
                 .remote_env_detection_started
                 .swap(true, Ordering::AcqRel)
+    }
+
+    fn mark_first_visible_terminal_started(&self) -> bool {
+        !self
+            .first_visible_terminal_started
+            .swap(true, Ordering::AcqRel)
+    }
+
+    fn first_visible_terminal_started(&self) -> bool {
+        self.first_visible_terminal_started.load(Ordering::Acquire)
     }
 
     fn reset_heartbeat_failures(&self) {
@@ -700,10 +712,26 @@ impl SshConnectionRegistry {
             // whenever the connection has been registered to a node.
             let _ = emitter.emit_state_from_connection(&info.connection_id, &info.state, reason);
         }
-        if became_active {
+        if became_active && entry.first_visible_terminal_started() {
+            // Match Tauri's environment detector gate: hidden exec/shell probes
+            // must not be the first session on a fresh SSH login because PAM
+            // MOTD/lastlog output belongs to the user's first visible terminal.
             self.maybe_spawn_remote_env_detection(entry);
         }
         Some(info)
+    }
+
+    pub fn mark_visible_terminal_ready(&self, connection_id: &str) -> Option<bool> {
+        let key = self
+            .by_id
+            .get(connection_id)
+            .map(|key| key.value().clone())?;
+        let entry = self.by_key.get(&key)?.clone();
+        let first = entry.mark_first_visible_terminal_started();
+        if first {
+            self.maybe_spawn_remote_env_detection(entry);
+        }
+        Some(first)
     }
 
     fn maybe_spawn_remote_env_detection(&self, entry: Arc<ConnectionEntry>) {
@@ -1658,6 +1686,25 @@ mod tests {
 
         assert_eq!(handle.remote_env(), Some(first.clone()));
         assert_eq!(handle.info().remote_env, Some(first));
+    }
+
+    #[test]
+    fn visible_terminal_ready_is_recorded_once() {
+        let registry = SshConnectionRegistry::default();
+        let handle = registry.acquire(
+            SshConfig::password("host", 22, "me", "pw"),
+            ConnectionConsumer::Terminal("a".into()),
+        );
+
+        assert_eq!(
+            registry.mark_visible_terminal_ready(handle.connection_id()),
+            Some(true)
+        );
+        assert_eq!(
+            registry.mark_visible_terminal_ready(handle.connection_id()),
+            Some(false)
+        );
+        assert_eq!(registry.mark_visible_terminal_ready("missing"), None);
     }
 
     #[test]

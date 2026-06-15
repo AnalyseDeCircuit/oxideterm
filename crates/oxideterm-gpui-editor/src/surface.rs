@@ -12,7 +12,9 @@ use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
     TextRange, word_at,
 };
-use oxideterm_editor_syntax::{BracketPair, HighlightSpan, LanguageId, SyntaxEdit, SyntaxSession};
+use oxideterm_editor_syntax::{
+    BracketPair, HighlightSpan, IndentGuide, LanguageId, SyntaxEdit, SyntaxSession,
+};
 use oxideterm_theme::ThemeTokens;
 
 use crate::{EditorAppearance, EditorMetrics, EditorSettings, EditorViewport};
@@ -147,6 +149,31 @@ struct MarkedText {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditorContextMenuLabels {
+    pub copy: String,
+    pub cut: String,
+    pub paste: String,
+    pub select_all: String,
+}
+
+impl Default for EditorContextMenuLabels {
+    fn default() -> Self {
+        Self {
+            copy: "Copy".into(),
+            cut: "Cut".into(),
+            paste: "Paste".into(),
+            select_all: "Select All".into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EditorContextMenu {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct DisplayRowsCache {
     buffer_version: u64,
     wrap_column: Option<usize>,
@@ -240,11 +267,14 @@ pub struct TextEditorView {
     active_find_index: Option<usize>,
     foldable_ranges: Vec<FoldRange>,
     folded_ranges: Vec<FoldRange>,
+    indent_guides: Vec<IndentGuide>,
     fold_revision: u64,
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
     highlight_chunk_cache: RefCell<HighlightChunkCache>,
     selection_drag: Option<SelectionDrag>,
     transparent_background: bool,
+    context_menu: Option<EditorContextMenu>,
+    context_menu_labels: EditorContextMenuLabels,
 }
 
 impl TextEditorView {
@@ -277,11 +307,14 @@ impl TextEditorView {
             active_find_index: None,
             foldable_ranges: Vec::new(),
             folded_ranges: Vec::new(),
+            indent_guides: Vec::new(),
             fold_revision: 0,
             display_rows_cache: RefCell::new(None),
             highlight_chunk_cache: RefCell::new(HighlightChunkCache::default()),
             selection_drag: None,
             transparent_background: false,
+            context_menu: None,
+            context_menu_labels: EditorContextMenuLabels::default(),
         }
     }
 
@@ -347,6 +380,10 @@ impl TextEditorView {
 
     pub fn set_on_modified_word_click(&mut self, on_click: ModifiedWordClickCallback) {
         self.on_modified_word_click = Some(on_click);
+    }
+
+    pub fn set_context_menu_labels(&mut self, labels: EditorContextMenuLabels) {
+        self.context_menu_labels = labels;
     }
 
     pub fn set_settings(&mut self, settings: EditorSettings, cx: &mut Context<Self>) {
@@ -668,6 +705,15 @@ impl TextEditorView {
         self.highlight_chunk_cache.borrow_mut().clear();
     }
 
+    pub(super) fn refresh_indent_guides(&mut self) {
+        self.indent_guides = self.buffer.with_text(|text| {
+            self.syntax
+                .as_ref()
+                .map(|syntax| syntax.indent_guides(text, self.settings.tab_size))
+                .unwrap_or_default()
+        });
+    }
+
     fn build_highlight_line_spans(&self) -> Vec<Range<usize>> {
         let mut ranges = Vec::with_capacity(self.buffer.line_count());
         let mut first_span = 0;
@@ -911,6 +957,14 @@ impl TextEditorView {
         });
         selections.dedup();
         selections
+    }
+
+    fn has_primary_or_secondary_selection(&self) -> bool {
+        !self.cursor.selection().is_caret()
+            || self
+                .secondary_selections
+                .iter()
+                .any(|selection| !selection.is_caret())
     }
 
     fn matching_bracket_pair(&self) -> Option<BracketPair> {

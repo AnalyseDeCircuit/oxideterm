@@ -262,6 +262,56 @@ impl WorkspaceApp {
             .unwrap_or_else(|| div().into_any_element())
     }
 
+    pub(super) fn copy_active_ide_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(surface) = self.active_ide_surface() else {
+            return false;
+        };
+        surface.update(cx, |surface, cx| surface.copy_active_editor_selection(cx))
+    }
+
+    pub(super) fn paste_into_active_ide_editor(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(surface) = self.active_ide_surface() else {
+            return false;
+        };
+        surface.update(cx, |surface, cx| surface.paste_into_active_editor(cx))
+    }
+
+    pub(super) fn open_active_ide_search(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(surface) = self.active_ide_surface() else {
+            return false;
+        };
+        surface.update(cx, |surface, cx| surface.open_active_editor_search(cx))
+    }
+
+    pub(super) fn select_next_active_ide_search_match(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(surface) = self.active_ide_surface() else {
+            return false;
+        };
+        surface.update(cx, |surface, cx| {
+            surface.select_next_active_editor_search_match(cx)
+        })
+    }
+
+    pub(super) fn select_previous_active_ide_search_match(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(surface) = self.active_ide_surface() else {
+            return false;
+        };
+        surface.update(cx, |surface, cx| {
+            surface.select_previous_active_editor_search_match(cx)
+        })
+    }
+
+    fn active_ide_surface(&self) -> Option<gpui::Entity<IdeSurface>> {
+        let tab_id = self.active_tab_id?;
+        let tab = self.tabs.iter().find(|tab| tab.id == tab_id)?;
+        (tab.kind == TabKind::Ide)
+            .then(|| self.ide_tab_surfaces.get(&tab_id).cloned())
+            .flatten()
+    }
+
     fn ide_labels(&self) -> IdeLabels {
         IdeLabels {
             open_folder: self.i18n.t("ide.open_folder"),
@@ -303,6 +353,10 @@ impl WorkspaceApp {
             replace_all_btn: self.i18n.t("ide.replace_all_btn"),
             replace: self.i18n.t("ide.replace"),
             replace_all: self.i18n.t("ide.replace_all"),
+            editor_copy: self.i18n.t("menu.copy"),
+            editor_cut: self.i18n.t("fileManager.cut"),
+            editor_paste: self.i18n.t("menu.paste"),
+            editor_select_all: self.i18n.t("fileManager.selectAll"),
             pin_tab: self.i18n.t("ide.pin_tab"),
             unpin_tab: self.i18n.t("ide.unpin_tab"),
             close_tab: self.i18n.t("tabbar.close_tab"),

@@ -272,6 +272,13 @@ impl ProfilerRegistry {
             .map(|entry| entry.snapshot.clone())
     }
 
+    /// Return the live state without cloning history for high-frequency UI renders.
+    pub fn current(&self, connection_id: &str) -> Option<(Option<ResourceMetrics>, ProfilerState)> {
+        lock(&self.profilers)
+            .get(connection_id)
+            .map(|entry| (entry.snapshot.metrics.clone(), entry.snapshot.state))
+    }
+
     pub fn connection_ids(&self) -> Vec<String> {
         lock(&self.profilers).keys().cloned().collect()
     }
@@ -595,6 +602,27 @@ mod tests {
             registry.latest("conn-1").map(|metrics| metrics.source),
             Some(MetricsSource::Partial)
         );
+    }
+
+    #[test]
+    fn current_omits_history_for_lightweight_render_paths() {
+        let registry = ProfilerRegistry::new();
+        registry.start("conn-1");
+        for timestamp_ms in 0..3 {
+            registry.record_metrics(ProfilerUpdate {
+                connection_id: "conn-1".into(),
+                metrics: ResourceMetrics::empty(timestamp_ms, MetricsSource::Full),
+            });
+        }
+
+        assert_eq!(
+            registry.current("conn-1"),
+            Some((
+                Some(ResourceMetrics::empty(2, MetricsSource::Full)),
+                ProfilerState::Running,
+            ))
+        );
+        assert_eq!(registry.history("conn-1").len(), 3);
     }
 
     #[test]
