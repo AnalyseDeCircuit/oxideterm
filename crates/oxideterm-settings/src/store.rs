@@ -87,7 +87,7 @@ fn now_ms() -> u64 {
 
 pub fn default_settings_path() -> PathBuf {
     if let Ok(Some(data_dir)) = oxideterm_portable_runtime::portable_data_dir() {
-        return data_dir.join(SETTINGS_FILENAME);
+        return user_visible_data_dir_path(data_dir).join(SETTINGS_FILENAME);
     }
 
     if let Some(data_dir) = bootstrap_data_dir() {
@@ -114,10 +114,11 @@ fn default_settings_dir() -> PathBuf {
 pub fn data_directory_info() -> Result<DataDirectoryInfo> {
     let is_portable = oxideterm_portable_runtime::is_portable_mode()
         .map_err(|error| anyhow!("failed to detect portable mode: {}", error))?;
-    let default_path = default_settings_dir();
+    let default_path = user_visible_data_dir_path(default_settings_dir());
     let path = if is_portable {
         oxideterm_portable_runtime::portable_data_dir()
             .map_err(|error| anyhow!("failed to resolve portable data directory: {}", error))?
+            .map(user_visible_data_dir_path)
             .unwrap_or_else(|| default_path.clone())
     } else {
         bootstrap_data_dir().unwrap_or_else(|| default_path.clone())
@@ -192,8 +193,9 @@ pub fn set_data_directory(path: &Path) -> Result<()> {
     fs::write(&test_file, b"test").context("Directory is not writable")?;
     let _ = fs::remove_file(&test_file);
 
+    let data_dir = user_visible_data_dir_path(canonical);
     save_bootstrap_config(&BootstrapConfig {
-        data_dir: Some(canonical.to_string_lossy().to_string()),
+        data_dir: Some(data_dir.to_string_lossy().to_string()),
     })
 }
 
@@ -220,10 +222,23 @@ fn bootstrap_data_dir() -> Option<PathBuf> {
     let path = default_settings_dir().join(BOOTSTRAP_FILENAME);
     let contents = fs::read_to_string(path).ok()?;
     let bootstrap: BootstrapConfig = serde_json::from_str(&contents).ok()?;
-    let data_dir = PathBuf::from(bootstrap.data_dir?);
+    let data_dir = user_visible_data_dir_path(PathBuf::from(bootstrap.data_dir?));
     // Tauri ignores relative bootstrap paths; native must do the same so both
     // frontends resolve to one effective data directory.
     data_dir.is_absolute().then_some(data_dir)
+}
+
+fn user_visible_data_dir_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    // Windows canonicalize() returns verbatim paths such as `\\?\D:\...`.
+    // Bootstrap and settings UI should keep the user-facing path form.
+    if let Some(stripped) = text.strip_prefix("\\\\?\\UNC\\") {
+        return PathBuf::from(format!("\\\\{stripped}"));
+    }
+    if let Some(stripped) = text.strip_prefix("\\\\?\\") {
+        return PathBuf::from(stripped);
+    }
+    path
 }
 
 pub fn save_settings_to_path(
@@ -616,6 +631,19 @@ mod tests {
         } else {
             assert!(path.ends_with(Path::new(".oxideterm").join(SETTINGS_FILENAME)));
         }
+    }
+
+    #[test]
+    fn user_visible_data_dir_path_strips_windows_verbatim_prefixes() {
+        let disk =
+            user_visible_data_dir_path(PathBuf::from(r"\\?\D:\DevSoftWare\Remote\OxideTerm\data"));
+        assert_eq!(
+            disk.to_string_lossy(),
+            r"D:\DevSoftWare\Remote\OxideTerm\data"
+        );
+
+        let unc = user_visible_data_dir_path(PathBuf::from(r"\\?\UNC\server\share\OxideTerm"));
+        assert_eq!(unc.to_string_lossy(), r"\\server\share\OxideTerm");
     }
 
     #[test]
