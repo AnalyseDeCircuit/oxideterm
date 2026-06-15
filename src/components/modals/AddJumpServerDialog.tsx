@@ -9,10 +9,12 @@ import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import { Info } from 'lucide-react';
 import { ManagedSshKeySelector } from './ManagedSshKeySelector';
+import type { ConnectionInfo } from '../../types';
 
 interface JumpServer {
   id: string;
@@ -32,12 +34,14 @@ interface AddJumpServerDialogProps {
   open: boolean;
   onClose: () => void;
   onAdd: (server: JumpServer) => void;
+  savedConnections?: ConnectionInfo[];
 }
 
 export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
   open,
   onClose,
-  onAdd
+  onAdd,
+  savedConnections = []
 }) => {
   const { t } = useTranslation();
   const [host, setHost] = useState('');
@@ -50,12 +54,37 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
   const [managedKeyId, setManagedKeyId] = useState('');
   const [passphrase, setPassphrase] = useState<string>('');
   const [agentForwarding, setAgentForwarding] = useState(false);
+  const [savedConnectionId, setSavedConnectionId] = useState('__custom__');
 
   // Type-safe auth type handler
   const handleAuthTypeChange = (value: string) => {
     if (value === 'password' || value === 'key' || value === 'default_key' || value === 'managed_key' || value === 'agent' || value === 'certificate') {
       setAuthType(value);
     }
+  };
+
+  const formatSavedConnectionLabel = (connection: ConnectionInfo) =>
+    `${connection.name || `${connection.username}@${connection.host}`} · ${connection.username}@${connection.host}:${connection.port}`;
+
+  const handleSavedConnectionChange = (connectionId: string) => {
+    setSavedConnectionId(connectionId);
+    if (connectionId === '__custom__') return;
+
+    const connection = savedConnections.find((candidate) => candidate.id === connectionId);
+    if (!connection) return;
+
+    setHost(connection.host);
+    setPort(String(connection.port || 22));
+    setUsername(connection.username);
+    setAuthType(connection.auth_type);
+    // Saved connection lists intentionally expose metadata only. Do not hydrate
+    // keychain-backed passwords or passphrases into this jump-server form.
+    setPassword('');
+    setPassphrase('');
+    setKeyPath(connection.key_path ?? '');
+    setCertPath(connection.cert_path ?? '');
+    setManagedKeyId(connection.managed_key_id ?? '');
+    setAgentForwarding(Boolean(connection.agent_forwarding));
   };
 
   const handleBrowseKey = async () => {
@@ -118,6 +147,34 @@ export const AddJumpServerDialog: React.FC<AddJumpServerDialogProps> = ({
         </DialogHeader>
 
         <div className="min-h-0 space-y-4 overflow-y-auto p-4">
+          <div className="space-y-2">
+            <Label>{t('modals.jump_server.saved_connection')}</Label>
+            <Select
+              value={savedConnectionId}
+              onValueChange={handleSavedConnectionChange}
+              disabled={savedConnections.length === 0}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={t('modals.jump_server.saved_connection_custom')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__custom__">
+                  {t('modals.jump_server.saved_connection_custom')}
+                </SelectItem>
+                {savedConnections.map((connection) => (
+                  <SelectItem key={connection.id} value={connection.id}>
+                    {formatSavedConnectionLabel(connection)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-theme-text-muted">
+              {savedConnections.length === 0
+                ? t('modals.jump_server.saved_connection_empty')
+                : t('modals.jump_server.saved_connection_hint')}
+            </p>
+          </div>
+
           <div className="grid grid-cols-4 gap-4">
             <div className="col-span-3 space-y-2">
               <Label htmlFor="jump-host">{t('modals.jump_server.host')} *</Label>

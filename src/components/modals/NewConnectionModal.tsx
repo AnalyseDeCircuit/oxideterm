@@ -31,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '../ui/select';
-import { ProxyHopConfig, type SaveConnectionRequest, type SerialPortInfo } from '../../types';
+import { ProxyHopConfig, type ConnectionInfo, type SaveConnectionRequest, type SerialPortInfo } from '../../types';
 import { api } from '../../lib/api';
 import type { HostKeyStatus } from '../../types';
 import type { TestConnectionRequest, TestConnectionResponse } from '../../lib/api';
@@ -137,6 +137,7 @@ export const NewConnectionModal = () => {
   const [group, setGroup] = useState('Ungrouped');
   const [groups, setGroups] = useState<string[]>([]);
   const [existingConnectionNames, setExistingConnectionNames] = useState<string[]>([]);
+  const [savedJumpConnections, setSavedJumpConnections] = useState<ConnectionInfo[]>([]);
 
   const [proxyServers, setProxyServers] = useState<ProxyHopConfig[]>([]);
   const [upstreamProxyPolicy, setUpstreamProxyPolicy] = useState<SavedUpstreamProxyPolicy>(
@@ -355,8 +356,14 @@ export const NewConnectionModal = () => {
     if (modals.newConnection) {
       api.getGroups().then(setGroups).catch(() => setGroups([]));
       api.getConnections()
-        .then(connections => setExistingConnectionNames(connections.map(connection => connection.name)))
-        .catch(() => setExistingConnectionNames([]));
+        .then(connections => {
+          setExistingConnectionNames(connections.map(connection => connection.name));
+          setSavedJumpConnections(connections);
+        })
+        .catch(() => {
+          setExistingConnectionNames([]);
+          setSavedJumpConnections([]);
+        });
       api.isAgentAvailable().then(setAgentAvailable).catch(() => setAgentAvailable(false));
 
       // Pre-fill from Quick Connect data (⌘K user@host:port)
@@ -1605,6 +1612,7 @@ export const NewConnectionModal = () => {
         open={showAddJumpDialog}
         onClose={() => setShowAddJumpDialog(false)}
         onAdd={handleAddJumpServer}
+        savedConnections={savedJumpConnections}
       />
     </Dialog>
     </>
