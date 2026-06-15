@@ -2,11 +2,13 @@ use std::{fmt, path::PathBuf};
 
 use anyhow::Result;
 use chrono::Utc;
-use zeroize::Zeroizing;
 
 use crate::{
     ConnectionOptions, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop,
     SavedUpstreamProxyPolicy, SecretString, SshConfigHost,
+    ssh_keys::{
+        DefaultPrivateKeyStatus, default_private_key_paths_in_home, default_private_key_status,
+    },
 };
 
 pub const IMPORTED_GROUP: &str = "Imported";
@@ -289,21 +291,17 @@ pub fn first_available_default_key_path() -> Result<String> {
 }
 
 fn first_available_default_key_path_in_home(home: PathBuf) -> Result<String> {
-    for path in default_key_paths_in_home(home) {
-        if path.exists() {
-            return Ok(path.to_string_lossy().into_owned());
+    for path in default_private_key_paths_in_home(home) {
+        match default_private_key_status(&path, None) {
+            Some(
+                DefaultPrivateKeyStatus::Loadable | DefaultPrivateKeyStatus::RequiresPassphrase,
+            ) => {
+                return Ok(path.to_string_lossy().into_owned());
+            }
+            None => {}
         }
     }
     anyhow::bail!("No default SSH key found")
-}
-
-fn default_key_paths_in_home(home: PathBuf) -> [PathBuf; 3] {
-    let ssh = home.join(".ssh");
-    [
-        ssh.join("id_ed25519"),
-        ssh.join("id_ecdsa"),
-        ssh.join("id_rsa"),
-    ]
 }
 
 fn first_loadable_default_key_path(passphrase: &str) -> Result<String> {
@@ -317,28 +315,15 @@ fn first_loadable_default_key_path_in_home(home: PathBuf, passphrase: &str) -> R
     let passphrase = (!passphrase.is_empty()).then_some(passphrase);
     let mut saw_encrypted_key = false;
 
-    for path in default_key_paths_in_home(home) {
-        if !path.exists() {
-            continue;
-        }
-
-        let key_data = match std::fs::read_to_string(&path) {
-            Ok(contents) => Zeroizing::new(contents),
-            Err(_) => continue,
-        };
-        let is_encrypted =
-            key_data.contains("ENCRYPTED") || key_data.contains("Proc-Type: 4,ENCRYPTED");
-        if is_encrypted && passphrase.is_none() {
-            saw_encrypted_key = true;
-            continue;
-        }
-
-        match russh::keys::decode_secret_key(&key_data, passphrase) {
-            Ok(_) => return Ok(path.to_string_lossy().into_owned()),
-            Err(error) if key_error_is_passphrase_related(&error) => {
+    for path in default_private_key_paths_in_home(home) {
+        match default_private_key_status(&path, passphrase) {
+            Some(DefaultPrivateKeyStatus::Loadable) => {
+                return Ok(path.to_string_lossy().into_owned());
+            }
+            Some(DefaultPrivateKeyStatus::RequiresPassphrase) => {
                 saw_encrypted_key = true;
             }
-            Err(_) => {}
+            None => {}
         }
     }
 
@@ -347,16 +332,6 @@ fn first_loadable_default_key_path_in_home(home: PathBuf, passphrase: &str) -> R
     } else {
         anyhow::bail!("Key file not found: ~/.ssh/id_*")
     }
-}
-
-fn key_error_is_passphrase_related(error: &russh::keys::Error) -> bool {
-    let normalized = error.to_string().to_ascii_lowercase();
-    normalized.contains("decrypt")
-        || normalized.contains("password")
-        || normalized.contains("passphrase")
-        || normalized.contains("encrypted")
-        || normalized.contains("bcrypt")
-        || normalized.contains("kdf")
 }
 
 #[cfg(test)]
@@ -462,7 +437,7 @@ mod tests {
     #[test]
     fn default_key_paths_match_tauri_save_order() {
         let home = PathBuf::from("/tmp/home");
-        let paths = default_key_paths_in_home(home);
+        let paths = default_private_key_paths_in_home(home);
 
         assert_eq!(paths[0], PathBuf::from("/tmp/home/.ssh/id_ed25519"));
         assert_eq!(paths[1], PathBuf::from("/tmp/home/.ssh/id_ecdsa"));
@@ -470,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_default_key_resolves_first_existing_key_path_like_tauri() {
+    fn saving_default_key_resolves_first_parseable_or_promptable_key_path() {
         let dir = std::env::temp_dir().join(format!(
             "oxideterm-conn-default-key-{}-{}",
             std::process::id(),
@@ -480,12 +455,16 @@ mod tests {
         std::fs::create_dir_all(&ssh_dir).unwrap();
         let rsa = ssh_dir.join("id_rsa");
         let ecdsa = ssh_dir.join("id_ecdsa");
-        std::fs::write(&rsa, "rsa").unwrap();
-        std::fs::write(&ecdsa, "ecdsa").unwrap();
+        std::fs::write(&ecdsa, "not a private key").unwrap();
+        let mut rng = UnwrapErr(SysRng);
+        PrivateKey::random(&mut rng, Algorithm::Ed25519)
+            .unwrap()
+            .write_openssh_file(&rsa, LineEnding::LF)
+            .unwrap();
 
         let path = first_available_default_key_path_in_home(dir.clone()).unwrap();
 
-        assert_eq!(path, ecdsa.to_string_lossy());
+        assert_eq!(path, rsa.to_string_lossy());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -515,6 +494,30 @@ mod tests {
         let path = first_loadable_default_key_path_in_home(dir.clone(), "").unwrap();
 
         assert_eq!(path, fallback.to_string_lossy());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saving_default_key_can_return_encrypted_key_to_prompt_later() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxideterm-conn-default-key-encrypted-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        let encrypted = ssh_dir.join("id_ed25519");
+        let mut rng = UnwrapErr(SysRng);
+        PrivateKey::random(&mut rng, Algorithm::Ed25519)
+            .unwrap()
+            .encrypt(&mut rng, "secret")
+            .unwrap()
+            .write_openssh_file(&encrypted, LineEnding::LF)
+            .unwrap();
+
+        let path = first_available_default_key_path_in_home(dir.clone()).unwrap();
+
+        assert_eq!(path, encrypted.to_string_lossy());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

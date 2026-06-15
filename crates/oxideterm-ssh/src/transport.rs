@@ -13,7 +13,7 @@ use russh::{
             AgentIdentity,
             client::{AgentClient, AgentStream},
         },
-        load_openssh_certificate, load_secret_key,
+        load_openssh_certificate,
         ssh_key::private::KeypairData,
     },
 };

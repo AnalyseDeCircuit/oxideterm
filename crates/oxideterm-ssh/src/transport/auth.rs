@@ -252,6 +252,146 @@ fn authentication_failure_message(result: &client::AuthResult) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PrivateKeyAuthErrorKind {
+    MissingPassphrase,
+    InvalidPassphrase,
+    UnsupportedHardwareKey,
+    UnsupportedDsaKey,
+    UnsupportedFormat,
+    Other,
+}
+
+fn private_key_text_looks_encrypted(private_key: &str) -> bool {
+    private_key.contains("ENCRYPTED")
+        || private_key.contains("Proc-Type: 4,ENCRYPTED")
+        || private_key.contains("bcrypt")
+}
+
+fn private_key_text_looks_hardware_key(private_key: &str) -> bool {
+    private_key.contains("sk-ecdsa-sha2-nistp256")
+        || private_key.contains("sk-ssh-ed25519")
+        || private_key.contains("id_ecdsa_sk")
+        || private_key.contains("id_ed25519_sk")
+}
+
+fn private_key_text_looks_dsa(private_key: &str) -> bool {
+    private_key.contains("-----BEGIN DSA PRIVATE KEY-----")
+        || private_key.contains("ssh-dss")
+        || private_key.contains("id_dsa")
+}
+
+fn private_key_error_is_passphrase_related(error: &russh::keys::Error) -> bool {
+    let normalized = error.to_string().to_ascii_lowercase();
+    normalized.contains("decrypt")
+        || normalized.contains("password")
+        || normalized.contains("passphrase")
+        || normalized.contains("encrypted")
+        || normalized.contains("bcrypt")
+        || normalized.contains("kdf")
+        || normalized.contains("crypto")
+        || normalized.contains("cryptographic")
+}
+
+fn classify_private_key_decode_error(
+    private_key: &str,
+    error: &russh::keys::Error,
+    passphrase_supplied: bool,
+) -> PrivateKeyAuthErrorKind {
+    if private_key_text_looks_hardware_key(private_key) {
+        return PrivateKeyAuthErrorKind::UnsupportedHardwareKey;
+    }
+    if private_key_text_looks_dsa(private_key) {
+        return PrivateKeyAuthErrorKind::UnsupportedDsaKey;
+    }
+    if private_key_error_is_passphrase_related(error) || private_key_text_looks_encrypted(private_key)
+    {
+        return if passphrase_supplied {
+            PrivateKeyAuthErrorKind::InvalidPassphrase
+        } else {
+            PrivateKeyAuthErrorKind::MissingPassphrase
+        };
+    }
+
+    let normalized = error.to_string().to_ascii_lowercase();
+    if normalized.contains("unsupported")
+        || normalized.contains("unknown")
+        || normalized.contains("could not read key")
+    {
+        PrivateKeyAuthErrorKind::UnsupportedFormat
+    } else {
+        PrivateKeyAuthErrorKind::Other
+    }
+}
+
+fn private_key_auth_error_message(kind: PrivateKeyAuthErrorKind, fallback: String) -> String {
+    match kind {
+        PrivateKeyAuthErrorKind::MissingPassphrase => "SSH key requires a passphrase".to_string(),
+        PrivateKeyAuthErrorKind::InvalidPassphrase => "Invalid SSH key passphrase".to_string(),
+        PrivateKeyAuthErrorKind::UnsupportedHardwareKey => {
+            "FIDO/security-key SSH private keys require agent-backed signing and are not supported for direct private-key authentication yet".to_string()
+        }
+        PrivateKeyAuthErrorKind::UnsupportedDsaKey => {
+            "DSA SSH private keys are deprecated and are not supported for direct private-key authentication".to_string()
+        }
+        PrivateKeyAuthErrorKind::UnsupportedFormat => {
+            "Unsupported SSH private key format".to_string()
+        }
+        PrivateKeyAuthErrorKind::Other => fallback,
+    }
+}
+
+fn private_key_auth_error_is_missing_passphrase(error: &SshTransportError) -> bool {
+    error
+        .to_string()
+        .contains(&private_key_auth_error_message(
+            PrivateKeyAuthErrorKind::MissingPassphrase,
+            String::new(),
+        ))
+}
+
+fn reject_direct_hardware_key(key: &PrivateKey) -> Result<(), SshTransportError> {
+    let algorithm = key.algorithm().to_string();
+    if algorithm.starts_with("sk-") {
+        return Err(SshTransportError::AuthenticationFailed(
+            private_key_auth_error_message(
+                PrivateKeyAuthErrorKind::UnsupportedHardwareKey,
+                String::new(),
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn decode_private_key_for_auth(
+    private_key: &str,
+    passphrase: Option<&str>,
+) -> Result<PrivateKey, SshTransportError> {
+    let passphrase_supplied = passphrase.is_some_and(|value| !value.is_empty());
+    let key = russh::keys::decode_secret_key(private_key, passphrase)
+        .map_err(|error| {
+            let kind = classify_private_key_decode_error(private_key, &error, passphrase_supplied);
+            SshTransportError::AuthenticationFailed(private_key_auth_error_message(
+                kind,
+                error.to_string(),
+            ))
+        })?;
+    reject_direct_hardware_key(&key)?;
+    Ok(key)
+}
+
+fn load_secret_key_for_auth(
+    key_path: &PathBuf,
+    passphrase: Option<&str>,
+) -> Result<PrivateKey, SshTransportError> {
+    // Private key material is auth-only secret data. Keep the file buffer in a
+    // zeroizing wrapper and return only the parsed key or a redacted reason.
+    let private_key = Zeroizing::new(std::fs::read_to_string(key_path).map_err(|error| {
+        SshTransportError::AuthenticationFailed(format!("failed to read SSH key: {error}"))
+    })?);
+    decode_private_key_for_auth(&private_key, passphrase)
+}
+
 fn load_private_key_material(
     key_path: &str,
     passphrase: Option<&str>,
@@ -260,8 +400,7 @@ fn load_private_key_material(
         load_first_available_default_key(passphrase)?
     } else {
         let key_path = expand_tilde_path(key_path);
-        load_secret_key(&key_path, passphrase)
-            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?
+        load_secret_key_for_auth(&key_path, passphrase)?
     };
     Ok(Arc::new(key))
 }
@@ -270,8 +409,7 @@ fn load_private_key_from_memory(
     private_key: &str,
     passphrase: Option<&str>,
 ) -> Result<Arc<PrivateKey>, SshTransportError> {
-    let key = russh::keys::decode_secret_key(private_key, passphrase)
-        .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+    let key = decode_private_key_for_auth(private_key, passphrase)?;
     Ok(Arc::new(key))
 }
 
@@ -509,6 +647,65 @@ async fn connect_agent_client() -> Result<NativeAgentClient, String> {
     #[cfg(not(any(unix, windows)))]
     {
         Err("SSH Agent is not supported on this platform".to_string())
+    }
+}
+
+#[cfg(test)]
+mod private_key_auth_error_tests {
+    use super::*;
+    use rand10::{rand_core::UnwrapErr, rngs::SysRng};
+    use russh::keys::ssh_key::LineEnding;
+
+    fn generated_key_text(passphrase: Option<&str>) -> String {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-ssh-auth-error-{}-{}.key",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let mut rng = UnwrapErr(SysRng);
+        let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
+        let key = match passphrase {
+            Some(passphrase) => key.encrypt(&mut rng, passphrase).unwrap(),
+            None => key,
+        };
+        key.write_openssh_file(&path, LineEnding::LF).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        text
+    }
+
+    #[test]
+    fn private_key_auth_errors_distinguish_missing_and_invalid_passphrases() {
+        let key = generated_key_text(Some("secret-pass"));
+
+        let missing = decode_private_key_for_auth(&key, None).unwrap_err();
+        let invalid = decode_private_key_for_auth(&key, Some("wrong-pass")).unwrap_err();
+
+        assert!(
+            missing.to_string().contains("requires a passphrase"),
+            "missing passphrase error: {missing}"
+        );
+        assert!(
+            invalid.to_string().contains("Invalid SSH key passphrase"),
+            "invalid passphrase error: {invalid}"
+        );
+    }
+
+    #[test]
+    fn private_key_auth_errors_distinguish_unsupported_formats() {
+        let error = decode_private_key_for_auth("not a private key", None).unwrap_err();
+
+        assert!(error.to_string().contains("Unsupported SSH private key format"));
+    }
+
+    #[test]
+    fn private_key_auth_errors_distinguish_hardware_key_material() {
+        let error = decode_private_key_for_auth("sk-ssh-ed25519", None).unwrap_err();
+
+        assert!(error.to_string().contains("FIDO/security-key"));
     }
 }
 

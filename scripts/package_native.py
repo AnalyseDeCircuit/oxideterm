@@ -19,6 +19,8 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 APP_MANIFEST = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "Cargo.toml"
 RESOURCE_DIR = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "resources"
+MACOS_INFO_PLIST_EXTENSION_DIR = RESOURCE_DIR / "info"
+MACOS_ENTITLEMENTS = RESOURCE_DIR / "OxideTerm.entitlements"
 DIST_DIR = ROOT_DIR / "dist"
 BASE_APP_NAME = "OxideTerm"
 STABLE_APP_IDENTIFIER = "com.oxideterm.app"
@@ -288,11 +290,80 @@ def require_tool(name: str) -> str:
     raise RuntimeError(f"required packaging tool not found: {name}")
 
 
+def read_macos_info_plist_extension(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    try:
+        loaded = plistlib.loads(text.encode("utf-8"))
+    except plistlib.InvalidFileException:
+        # cargo-bundle accepts plist fragments containing only <key>/<value>
+        # pairs. The native packager writes Info.plist itself, so wrap those
+        # fragments before merging them into the generated bundle plist.
+        wrapped = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"https://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            '<plist version="1.0"><dict>'
+            f"{text}"
+            "</dict></plist>"
+        )
+        loaded = plistlib.loads(wrapped.encode("utf-8"))
+    if not isinstance(loaded, dict):
+        raise RuntimeError(f"macOS Info.plist extension must be a dict: {path}")
+    return loaded
+
+
+def merge_plist_value(existing: object, incoming: object) -> object:
+    if isinstance(existing, dict) and isinstance(incoming, dict):
+        merged = dict(existing)
+        merged.update(incoming)
+        return merged
+    return incoming
+
+
+def merge_macos_info_plist_extensions(plist: dict) -> dict:
+    merged = dict(plist)
+    if not MACOS_INFO_PLIST_EXTENSION_DIR.exists():
+        return merged
+    for extension in sorted(MACOS_INFO_PLIST_EXTENSION_DIR.glob("*.plist")):
+        for key, value in read_macos_info_plist_extension(extension).items():
+            merged[key] = merge_plist_value(merged[key], value) if key in merged else value
+    return merged
+
+
+def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
+    plist = {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleDisplayName": identity.app_name,
+        "CFBundleExecutable": APP_BIN,
+        "CFBundleIconFile": "icon.icns",
+        "CFBundleIdentifier": identity.app_identifier,
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": identity.app_name,
+        "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": version,
+        "CFBundleVersion": version,
+        "LSMinimumSystemVersion": "13.0",
+        "NSHighResolutionCapable": True,
+    }
+    return merge_macos_info_plist_extensions(plist)
+
+
+def macos_codesign_command(codesign: str, app_dir: Path) -> list[str]:
+    command = [codesign, "--force", "--deep"]
+    if MACOS_ENTITLEMENTS.exists():
+        # Keep ad-hoc preview builds aligned with the app bundle metadata.
+        # Without these entitlements, macOS can block local/private-network
+        # traffic even when Info.plist contains the usage description.
+        command.extend(["--entitlements", str(MACOS_ENTITLEMENTS)])
+    command.extend(["--sign", "-", str(app_dir)])
+    return command
+
+
 def sign_macos_app_bundle(app_dir: Path) -> None:
     codesign = require_tool("codesign")
     # Ad-hoc signing does not notarize the app, but it keeps stripped preview
     # bundles launchable on Apple Silicon instead of producing a damaged-app error.
-    run([codesign, "--force", "--deep", "--sign", "-", str(app_dir)])
+    run(macos_codesign_command(codesign, app_dir))
     run([codesign, "--verify", "--verbose", str(app_dir)])
 
 
@@ -448,20 +519,7 @@ def create_macos_app(
     shutil.copy2(RESOURCE_DIR / "icons" / "icon.icns", resources / "icon.icns")
     copy_runtime_resources(resources, target)
 
-    plist = {
-        "CFBundleDevelopmentRegion": "en",
-        "CFBundleDisplayName": identity.app_name,
-        "CFBundleExecutable": APP_BIN,
-        "CFBundleIconFile": "icon.icns",
-        "CFBundleIdentifier": identity.app_identifier,
-        "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleName": identity.app_name,
-        "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": version,
-        "CFBundleVersion": version,
-        "LSMinimumSystemVersion": "13.0",
-        "NSHighResolutionCapable": True,
-    }
+    plist = build_macos_info_plist(version, identity)
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump(plist, file)
 

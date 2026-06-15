@@ -7,14 +7,32 @@ fn default_key_paths() -> Vec<PathBuf> {
 
 fn default_key_paths_in_home(home: PathBuf) -> Vec<PathBuf> {
     let ssh = home.join(".ssh");
-    [
-        "id_ed25519",
-        "id_ecdsa",
-        "id_rsa",
-    ]
-    .into_iter()
-    .map(|name| ssh.join(name))
-    .collect()
+    let preferred_names = ["id_ed25519", "id_ecdsa", "id_rsa"];
+    let mut paths = preferred_names
+        .iter()
+        .map(|name| ssh.join(name))
+        .collect::<Vec<_>>();
+
+    let Ok(entries) = std::fs::read_dir(&ssh) else {
+        return paths;
+    };
+    let mut discovered = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| default_key_candidate_name(path).is_some())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_none_or(|name| !preferred_names.contains(&name))
+        })
+        .collect::<Vec<_>>();
+    discovered.sort_by(|left, right| {
+        left.file_name()
+            .unwrap_or_default()
+            .cmp(right.file_name().unwrap_or_default())
+    });
+    paths.extend(discovered);
+    paths
 }
 
 fn load_first_available_default_key(passphrase: Option<&str>) -> Result<PrivateKey, SshTransportError> {
@@ -32,18 +50,16 @@ fn load_first_available_key(
             continue;
         }
 
-        if passphrase.is_none() && private_key_file_looks_encrypted(&path) {
-            saw_encrypted_key = true;
-            continue;
-        }
-
-        match load_secret_key(&path, passphrase) {
+        let key_data = match std::fs::read_to_string(&path) {
+            Ok(contents) => Zeroizing::new(contents),
+            Err(_) => continue,
+        };
+        match decode_private_key_for_auth(&key_data, passphrase) {
             Ok(key) => return Ok(key),
-            Err(error) => {
-                if passphrase.is_none() && private_key_error_is_passphrase_related(&error) {
-                    saw_encrypted_key = true;
-                }
+            Err(error) if private_key_auth_error_is_missing_passphrase(&error) => {
+                saw_encrypted_key = true;
             }
+            Err(_) => {}
         }
     }
 
@@ -58,23 +74,13 @@ fn load_first_available_key(
     }
 }
 
-fn private_key_file_looks_encrypted(path: &PathBuf) -> bool {
-    std::fs::read_to_string(path)
-        .map(|contents| {
-            let contents = Zeroizing::new(contents);
-            contents.contains("ENCRYPTED") || contents.contains("Proc-Type: 4,ENCRYPTED")
-        })
-        .unwrap_or(false)
-}
-
-fn private_key_error_is_passphrase_related(error: &russh::keys::Error) -> bool {
-    let normalized = error.to_string().to_ascii_lowercase();
-    normalized.contains("decrypt")
-        || normalized.contains("password")
-        || normalized.contains("passphrase")
-        || normalized.contains("encrypted")
-        || normalized.contains("bcrypt")
-        || normalized.contains("kdf")
+fn default_key_candidate_name(path: &PathBuf) -> Option<&str> {
+    let name = path.file_name()?.to_str()?;
+    if name.starts_with("id_") && !name.ends_with(".pub") && !name.ends_with("-cert.pub") {
+        Some(name)
+    } else {
+        None
+    }
 }
 
 fn expand_tilde_path(path: &str) -> PathBuf {
@@ -119,18 +125,24 @@ mod path_auth_tests {
     }
 
     #[test]
-    fn default_key_paths_match_tauri_order() {
-        let home = PathBuf::from("/tmp/home");
+    fn default_key_paths_keep_tauri_priority_before_extra_candidates() {
+        let home = unique_temp_dir("default-paths");
+        let ssh = home.join(".ssh");
+        std::fs::create_dir_all(&ssh).unwrap();
+        std::fs::write(ssh.join("id_work"), "").unwrap();
+        std::fs::write(ssh.join("id_ed25519_sk.pub"), "").unwrap();
+        std::fs::write(ssh.join("id_ed25519-cert.pub"), "").unwrap();
 
-        let paths = default_key_paths_in_home(home);
+        let paths = default_key_paths_in_home(home.clone());
 
         assert_eq!(
             paths
                 .iter()
                 .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
-            vec!["id_ed25519", "id_ecdsa", "id_rsa"]
+            vec!["id_ed25519", "id_ecdsa", "id_rsa", "id_work"]
         );
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
@@ -168,6 +180,20 @@ mod path_auth_tests {
         write_test_key(&fallback, None);
 
         let key = load_first_available_key(vec![encrypted, fallback], Some("secret-pass")).unwrap();
+
+        assert_eq!(key.algorithm(), Algorithm::Ed25519);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn default_key_loader_skips_unparseable_extra_candidates() {
+        let dir = unique_temp_dir("skip-invalid");
+        let invalid = dir.join("id_work");
+        let fallback = dir.join("id_other");
+        std::fs::write(&invalid, "not a private key").unwrap();
+        write_test_key(&fallback, None);
+
+        let key = load_first_available_key(vec![invalid, fallback], None).unwrap();
 
         assert_eq!(key.algorithm(), Algorithm::Ed25519);
         let _ = std::fs::remove_dir_all(dir);
