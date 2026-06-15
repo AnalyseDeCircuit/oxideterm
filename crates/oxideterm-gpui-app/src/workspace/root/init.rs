@@ -897,6 +897,8 @@ impl WorkspaceApp {
                             workspace.poll_graphics_worker_results(window, cx);
                             workspace.poll_connection_monitor_updates(true, cx);
                             workspace.poll_host_process_action_results(cx);
+                            workspace.poll_host_docker_action_results(cx);
+                            workspace.poll_host_docker_logs_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_start_sftp_remote_load(cx);

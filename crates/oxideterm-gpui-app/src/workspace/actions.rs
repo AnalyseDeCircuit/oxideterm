@@ -398,13 +398,18 @@ impl WorkspaceApp {
                 && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
                 && matches!(
                     self.active_context_sidebar_tool,
-                    ContextSidebarTool::Monitor | ContextSidebarTool::Processes
+                    ContextSidebarTool::Monitor
+                        | ContextSidebarTool::Processes
+                        | ContextSidebarTool::Docker
                 ));
         if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
             return;
         }
 
         if self.handle_host_process_search_key(event, cx) {
+            return;
+        }
+        if self.handle_host_docker_search_key(event, cx) {
             return;
         }
 

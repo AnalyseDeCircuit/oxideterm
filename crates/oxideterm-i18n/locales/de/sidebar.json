@@ -114,6 +114,64 @@
         "action_failed": "Prozessaktion fehlgeschlagen.",
         "partial_support": "Prozessverwaltung wird unter {{os}} nur teilweise unterstützt."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "Container suchen...",
+      "count_suffix": "Container",
+      "sampling": "Docker-Container werden erfasst...",
+      "empty": "Keine passenden Container",
+      "unavailable": "Docker ist auf diesem Host nicht verfügbar.",
+      "error": "Docker-Befehl fehlgeschlagen: {{error}}",
+      "columns": {
+        "container": "Container / Image",
+        "image": "Image",
+        "state": "Status",
+        "ports": "Ports"
+      },
+      "states": {
+        "running": "Läuft",
+        "exited": "Beendet",
+        "created": "Erstellt",
+        "paused": "Pausiert",
+        "restarting": "Startet neu",
+        "removing": "Wird entfernt",
+        "dead": "Tot",
+        "unknown": "Unbekannt"
+      },
+      "actions": {
+        "refresh": "Container aktualisieren",
+        "logs": "Logs anzeigen",
+        "follow_logs": "Logs verfolgen",
+        "exec": "Shell öffnen",
+        "start": "Starten",
+        "stop": "Stoppen",
+        "restart": "Neu starten"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Docker-Logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Logs werden geladen...",
+        "empty": "Keine aktuellen Logs.",
+        "close": "Logs schließen"
+      },
+      "confirm": {
+        "title": "Docker-Aktion bestätigen",
+        "cancel": "Abbrechen",
+        "start_desc": "Container {{name}} ({{id}}) starten?",
+        "stop_desc": "Container {{name}} ({{id}}) stoppen? Laufende Arbeit im Container kann unterbrochen werden.",
+        "restart_desc": "Container {{name}} ({{id}}) neu starten? Laufende Arbeit im Container wird unterbrochen."
+      },
+      "toast": {
+        "action_already_running": "Es läuft bereits eine Docker-Aktion.",
+        "logs_already_running": "Docker-Logs werden bereits geladen.",
+        "logs_failed": "Docker-Logs konnten nicht geladen werden.",
+        "exec_terminal_missing": "Für diesen Container ist keine aktive SSH-Terminalroute verfügbar.",
+        "exec_opened": "Shell für {{name}} geöffnet.",
+        "follow_opened": "Logs für {{name}} werden verfolgt.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "action_failed": "Docker-Aktion fehlgeschlagen."
+      }
     }
   },
   "sessions": {

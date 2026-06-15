@@ -16,6 +16,26 @@ fn tabbar_scroll_x_after_wheel(current_scroll_x: f32, wheel_delta: f32, max_scro
     (current_scroll_x - wheel_delta).clamp(0.0, max_scroll)
 }
 
+fn attach_terminal_to_existing_ssh_node(
+    node: &mut WorkspaceSshNode,
+    saved_connection_id: Option<String>,
+    config: SshConfig,
+    session_id: TerminalSessionId,
+) {
+    node.config = config;
+    // Terminal tab titles are per-tab state. Never let a Docker exec/logs tab,
+    // quick command tab, or other one-off title rename the host node itself.
+    if !matches!(node.readiness, NodeReadiness::Ready) {
+        node.readiness = NodeReadiness::Connecting;
+    }
+    if !node.terminal_ids.contains(&session_id) {
+        node.terminal_ids.push(session_id);
+    }
+    if node.saved_connection_id.is_none() {
+        node.saved_connection_id = saved_connection_id;
+    }
+}
+
 impl WorkspaceApp {
     pub(super) fn observe_active_tab_for_history(&mut self) {
         let active_tab_id = self.active_tab_id;
@@ -232,22 +252,12 @@ impl WorkspaceApp {
         self.ssh_nodes
             .entry(node_id.clone())
             .and_modify(|node| {
-                node.config = config.clone();
-                node.title = title.clone();
-                // Adding another terminal opens a new shell channel on the
-                // node-owned SSH connection. Tauri does not downgrade an
-                // already-connected node to Connecting for that session-level
-                // operation, so preserve Ready here to avoid tree-wide status
-                // churn when users open terminal #2/#3/#4.
-                if !matches!(node.readiness, NodeReadiness::Ready) {
-                    node.readiness = NodeReadiness::Connecting;
-                }
-                if !node.terminal_ids.contains(&session_id) {
-                    node.terminal_ids.push(session_id);
-                }
-                if node.saved_connection_id.is_none() {
-                    node.saved_connection_id = saved_connection_id.clone();
-                }
+                attach_terminal_to_existing_ssh_node(
+                    node,
+                    saved_connection_id.clone(),
+                    config.clone(),
+                    session_id,
+                );
             })
             .or_insert_with(|| WorkspaceSshNode {
                 saved_connection_id,
@@ -1331,6 +1341,35 @@ mod tests {
         assert!(!tab_drag_is_horizontal_reorder(12.0, 24.0));
         assert!(tab_drag_is_horizontal_reorder(12.0, 8.0));
         assert!(tab_drag_is_horizontal_reorder(-18.0, 4.0));
+    }
+
+    #[test]
+    fn attaching_terminal_does_not_rename_existing_ssh_node() {
+        let mut node = WorkspaceSshNode {
+            saved_connection_id: Some("home".to_string()),
+            config: SshConfig::default(),
+            title: "Home Host".to_string(),
+            terminal_ids: vec![TerminalSessionId(1)],
+            readiness: NodeReadiness::Ready,
+        };
+
+        attach_terminal_to_existing_ssh_node(
+            &mut node,
+            Some("home".to_string()),
+            SshConfig {
+                host: "100.118.61.75".to_string(),
+                ..SshConfig::default()
+            },
+            TerminalSessionId(2),
+        );
+
+        assert_eq!(node.title, "Home Host");
+        assert_eq!(node.config.host, "100.118.61.75");
+        assert_eq!(
+            node.terminal_ids,
+            vec![TerminalSessionId(1), TerminalSessionId(2)]
+        );
+        assert_eq!(node.readiness, NodeReadiness::Ready);
     }
 
     #[test]

@@ -114,6 +114,64 @@
         "action_failed": "A ação do processo falhou.",
         "partial_support": "O gerenciamento de processos é parcial em {{os}}."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "Buscar contêineres...",
+      "count_suffix": "contêineres",
+      "sampling": "Coletando contêineres Docker...",
+      "empty": "Nenhum contêiner correspondente",
+      "unavailable": "Docker não está disponível neste host.",
+      "error": "Comando Docker falhou: {{error}}",
+      "columns": {
+        "container": "Contêiner / Imagem",
+        "image": "Imagem",
+        "state": "Estado",
+        "ports": "Portas"
+      },
+      "states": {
+        "running": "Em execução",
+        "exited": "Finalizado",
+        "created": "Criado",
+        "paused": "Pausado",
+        "restarting": "Reiniciando",
+        "removing": "Removendo",
+        "dead": "Inativo",
+        "unknown": "Desconhecido"
+      },
+      "actions": {
+        "refresh": "Atualizar contêineres",
+        "logs": "Ver logs",
+        "follow_logs": "Acompanhar logs",
+        "exec": "Abrir shell",
+        "start": "Iniciar",
+        "stop": "Parar",
+        "restart": "Reiniciar"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Logs Docker: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Carregando logs...",
+        "empty": "Nenhum log recente.",
+        "close": "Fechar logs"
+      },
+      "confirm": {
+        "title": "Confirmar ação do Docker",
+        "cancel": "Cancelar",
+        "start_desc": "Iniciar o contêiner {{name}} ({{id}})?",
+        "stop_desc": "Parar o contêiner {{name}} ({{id}})? O trabalho em execução dentro do contêiner pode ser interrompido.",
+        "restart_desc": "Reiniciar o contêiner {{name}} ({{id}})? O trabalho em execução dentro do contêiner será interrompido."
+      },
+      "toast": {
+        "action_already_running": "Uma ação Docker já está em execução.",
+        "logs_already_running": "Os logs do Docker já estão sendo carregados.",
+        "logs_failed": "Falha ao carregar os logs do Docker.",
+        "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa está disponível para este contêiner.",
+        "exec_opened": "Shell aberto para {{name}}.",
+        "follow_opened": "Acompanhando logs de {{name}}.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "action_failed": "A ação Docker falhou."
+      }
     }
   },
   "sessions": {

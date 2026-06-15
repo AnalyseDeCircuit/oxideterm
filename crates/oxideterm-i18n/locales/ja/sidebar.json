@@ -114,6 +114,64 @@
         "action_failed": "プロセス操作に失敗しました。",
         "partial_support": "{{os}} のプロセス管理は部分対応です。"
       }
+    },
+    "host_docker": {
+      "search_placeholder": "コンテナを検索...",
+      "count_suffix": "コンテナ",
+      "sampling": "Docker コンテナを取得中...",
+      "empty": "一致するコンテナはありません",
+      "unavailable": "このホストでは Docker を利用できません。",
+      "error": "Docker コマンドに失敗しました: {{error}}",
+      "columns": {
+        "container": "コンテナ / イメージ",
+        "image": "イメージ",
+        "state": "状態",
+        "ports": "ポート"
+      },
+      "states": {
+        "running": "実行中",
+        "exited": "終了",
+        "created": "作成済み",
+        "paused": "一時停止",
+        "restarting": "再起動中",
+        "removing": "削除中",
+        "dead": "停止不能",
+        "unknown": "不明"
+      },
+      "actions": {
+        "refresh": "コンテナを更新",
+        "logs": "ログを表示",
+        "follow_logs": "ログを追跡",
+        "exec": "シェルを開く",
+        "start": "開始",
+        "stop": "停止",
+        "restart": "再起動"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Docker ログ: {{name}}",
+      "logs": {
+        "title": "ログ: {{name}}",
+        "loading": "ログを読み込み中...",
+        "empty": "最近のログはありません。",
+        "close": "ログを閉じる"
+      },
+      "confirm": {
+        "title": "Docker 操作の確認",
+        "cancel": "キャンセル",
+        "start_desc": "コンテナ {{name}}（{{id}}）を開始しますか？",
+        "stop_desc": "コンテナ {{name}}（{{id}}）を停止しますか？コンテナ内の実行中の処理が中断される可能性があります。",
+        "restart_desc": "コンテナ {{name}}（{{id}}）を再起動しますか？コンテナ内の実行中の処理は中断されます。"
+      },
+      "toast": {
+        "action_already_running": "Docker 操作を実行中です。",
+        "logs_already_running": "Docker ログを読み込み中です。",
+        "logs_failed": "Docker ログの読み込みに失敗しました。",
+        "exec_terminal_missing": "このコンテナで利用できるライブ SSH ターミナル経路がありません。",
+        "exec_opened": "{{name}} のシェルを開きました。",
+        "follow_opened": "{{name}} のログを追跡しています。",
+        "connection_missing": "選択した接続は利用できません。",
+        "action_failed": "Docker 操作に失敗しました。"
+      }
     }
   },
   "sessions": {

@@ -34,6 +34,17 @@ const HOST_PROCESS_TABLE_VALUE_TEXT_SIZE: f32 = 11.0;
 const HOST_PROCESS_DETAIL_TEXT_SIZE: f32 = 11.0;
 const HOST_PROCESS_ACTION_TIMEOUT: Duration = Duration::from_secs(8);
 const HOST_PROCESS_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
+const HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_DOCKER_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_DOCKER_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_DOCKER_STATE_COLUMN_WIDTH: f32 = 72.0;
+const HOST_DOCKER_PORTS_COLUMN_MIN_WIDTH: f32 = 92.0;
+const HOST_DOCKER_ACTION_TIMEOUT: Duration = Duration::from_secs(12);
+const HOST_DOCKER_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
+const HOST_DOCKER_LOGS_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_DOCKER_LOGS_MAX_OUTPUT_SIZE: usize = 128 * 1024;
+const HOST_DOCKER_LOGS_DIALOG_WIDTH: f32 = 760.0;
+const HOST_DOCKER_LOGS_DIALOG_MAX_HEIGHT: f32 = 520.0;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
@@ -185,6 +196,41 @@ struct HostProcessActionDelivery {
     result: Result<SshCommandOutput, String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostDockerActionRequest {
+    connection_id: String,
+    container_id: String,
+    container_name: String,
+    action: DockerActionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostDockerActionDelivery {
+    request: HostDockerActionRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostDockerLogsRequest {
+    connection_id: String,
+    container_id: String,
+    container_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostDockerLogsDelivery {
+    request: HostDockerLogsRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostDockerLogsDialog {
+    request: HostDockerLogsRequest,
+    output: Option<String>,
+    error: Option<String>,
+    loading: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionRuntimeSection {
     Overview,
@@ -223,6 +269,18 @@ pub(super) struct ConnectionMonitorState {
     host_process_action_running: Option<HostProcessActionRequest>,
     host_process_action_rx: Option<std::sync::mpsc::Receiver<HostProcessActionDelivery>>,
     host_process_action_polling: bool,
+    pub(in crate::workspace) host_docker_search_query: String,
+    pub(in crate::workspace) host_docker_search_focused: bool,
+    pub(in crate::workspace) host_docker_expanded_id: Option<String>,
+    host_docker_list_state: ListState,
+    host_docker_list_cache: RefCell<VirtualListSignatureCache>,
+    host_docker_pending_confirm: Option<HostDockerActionRequest>,
+    host_docker_action_running: Option<HostDockerActionRequest>,
+    host_docker_action_rx: Option<std::sync::mpsc::Receiver<HostDockerActionDelivery>>,
+    host_docker_action_polling: bool,
+    host_docker_logs_dialog: Option<HostDockerLogsDialog>,
+    host_docker_logs_rx: Option<std::sync::mpsc::Receiver<HostDockerLogsDelivery>>,
+    host_docker_logs_polling: bool,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -274,6 +332,22 @@ impl ConnectionMonitorState {
             host_process_action_running: None,
             host_process_action_rx: None,
             host_process_action_polling: false,
+            host_docker_search_query: String::new(),
+            host_docker_search_focused: false,
+            host_docker_expanded_id: None,
+            host_docker_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_docker_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_docker_pending_confirm: None,
+            host_docker_action_running: None,
+            host_docker_action_rx: None,
+            host_docker_action_polling: false,
+            host_docker_logs_dialog: None,
+            host_docker_logs_rx: None,
+            host_docker_logs_polling: false,
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

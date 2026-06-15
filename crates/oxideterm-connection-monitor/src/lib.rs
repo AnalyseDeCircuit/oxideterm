@@ -6,12 +6,21 @@
 //! This crate owns the UI-consumed monitor shapes and profiler state contract.
 //! SSH registries feed it snapshots; GPUI surfaces render it.
 
+mod docker;
 mod metrics;
 mod process;
 mod profiler;
 mod stats;
 mod summary;
 
+pub use docker::{
+    DockerActionCommand, DockerActionKind, DockerCaptureCommand, ResourceDockerContainer,
+    ResourceDockerSnapshot, ResourceDockerStatus, build_docker_action_command,
+    build_docker_exec_shell_command, build_docker_follow_logs_command, build_docker_logs_command,
+    docker_action_failure_message, docker_action_succeeded, docker_action_success_message,
+    docker_row_signature, docker_sample_command, docker_state_label_key, parse_docker_snapshot,
+    visible_docker_rows,
+};
 pub use metrics::{
     CpuSnapshot, MemorySnapshot, MetricsSource, NetInterfaceSnapshot, NetSnapshot,
     PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceCpuCore, ResourceDisk, ResourceGpu,

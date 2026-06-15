@@ -114,6 +114,64 @@
         "action_failed": "Thao tác tiến trình thất bại.",
         "partial_support": "Quản lý tiến trình chỉ được hỗ trợ một phần trên {{os}}."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "Tìm container...",
+      "count_suffix": "container",
+      "sampling": "Đang lấy mẫu container Docker...",
+      "empty": "Không có container phù hợp",
+      "unavailable": "Docker không khả dụng trên máy chủ này.",
+      "error": "Lệnh Docker thất bại: {{error}}",
+      "columns": {
+        "container": "Container / Image",
+        "image": "Image",
+        "state": "Trạng thái",
+        "ports": "Cổng"
+      },
+      "states": {
+        "running": "Đang chạy",
+        "exited": "Đã thoát",
+        "created": "Đã tạo",
+        "paused": "Đã tạm dừng",
+        "restarting": "Đang khởi động lại",
+        "removing": "Đang xóa",
+        "dead": "Không hoạt động",
+        "unknown": "Không rõ"
+      },
+      "actions": {
+        "refresh": "Làm mới container",
+        "logs": "Xem log",
+        "follow_logs": "Theo dõi log",
+        "exec": "Mở shell",
+        "start": "Khởi động",
+        "stop": "Dừng",
+        "restart": "Khởi động lại"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Log Docker: {{name}}",
+      "logs": {
+        "title": "Log: {{name}}",
+        "loading": "Đang tải log...",
+        "empty": "Không có log gần đây.",
+        "close": "Đóng log"
+      },
+      "confirm": {
+        "title": "Xác nhận thao tác Docker",
+        "cancel": "Hủy",
+        "start_desc": "Khởi động container {{name}} ({{id}})?",
+        "stop_desc": "Dừng container {{name}} ({{id}})? Công việc đang chạy trong container có thể bị gián đoạn.",
+        "restart_desc": "Khởi động lại container {{name}} ({{id}})? Công việc đang chạy trong container sẽ bị gián đoạn."
+      },
+      "toast": {
+        "action_already_running": "Đang có một thao tác Docker chạy.",
+        "logs_already_running": "Log Docker đang được tải.",
+        "logs_failed": "Không thể tải log Docker.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH trực tiếp cho container này.",
+        "exec_opened": "Đã mở shell cho {{name}}.",
+        "follow_opened": "Đang theo dõi log của {{name}}.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "action_failed": "Thao tác Docker thất bại."
+      }
     }
   },
   "sessions": {

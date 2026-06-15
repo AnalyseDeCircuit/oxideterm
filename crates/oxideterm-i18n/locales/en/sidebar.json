@@ -114,6 +114,64 @@
         "action_failed": "Process action failed.",
         "partial_support": "Process management is partial on {{os}}."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "Search containers...",
+      "count_suffix": "containers",
+      "sampling": "Sampling Docker containers...",
+      "empty": "No containers match",
+      "unavailable": "Docker is not available on this host.",
+      "error": "Docker command failed: {{error}}",
+      "columns": {
+        "container": "Container / Image",
+        "image": "Image",
+        "state": "State",
+        "ports": "Ports"
+      },
+      "states": {
+        "running": "Running",
+        "exited": "Exited",
+        "created": "Created",
+        "paused": "Paused",
+        "restarting": "Restarting",
+        "removing": "Removing",
+        "dead": "Dead",
+        "unknown": "Unknown"
+      },
+      "actions": {
+        "refresh": "Refresh containers",
+        "logs": "View logs",
+        "follow_logs": "Follow logs",
+        "exec": "Open shell",
+        "start": "Start",
+        "stop": "Stop",
+        "restart": "Restart"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Docker logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm Docker action",
+        "cancel": "Cancel",
+        "start_desc": "Start container {{name}} ({{id}})?",
+        "stop_desc": "Stop container {{name}} ({{id}})? Running work inside the container may be interrupted.",
+        "restart_desc": "Restart container {{name}} ({{id}})? Running work inside the container will be interrupted."
+      },
+      "toast": {
+        "action_already_running": "A Docker action is already running.",
+        "logs_already_running": "Docker logs are already loading.",
+        "logs_failed": "Failed to load Docker logs.",
+        "exec_terminal_missing": "No live SSH terminal route is available for this container.",
+        "exec_opened": "Opened shell for {{name}}.",
+        "follow_opened": "Following logs for {{name}}.",
+        "connection_missing": "The selected connection is no longer available.",
+        "action_failed": "Docker action failed."
+      }
     }
   },
   "sessions": {

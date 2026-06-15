@@ -7430,6 +7430,7 @@ name = "oxideterm-connection-monitor"
 version = "2.0.0-gpui-preview.8"
 dependencies = [
  "serde",
+ "serde_json",
  "tokio",
 ]
 

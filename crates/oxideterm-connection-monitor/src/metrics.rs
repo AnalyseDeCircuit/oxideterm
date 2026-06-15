@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::docker::{ResourceDockerSnapshot, parse_docker_snapshot};
+
 pub const RESOURCE_HISTORY_CAPACITY: usize = 60;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,6 +106,8 @@ pub struct ResourceMetrics {
     #[serde(default)]
     pub gpus: Vec<ResourceGpu>,
     pub top_processes: Vec<ResourceTopProcess>,
+    #[serde(default)]
+    pub docker: ResourceDockerSnapshot,
     pub ssh_rtt_ms: Option<u64>,
     pub source: MetricsSource,
 }
@@ -135,6 +139,7 @@ impl ResourceMetrics {
             net_interfaces: Vec::new(),
             gpus: Vec::new(),
             top_processes: Vec::new(),
+            docker: ResourceDockerSnapshot::default(),
             ssh_rtt_ms: None,
             source,
         }
@@ -225,6 +230,7 @@ pub fn parse_resource_metrics(
     let nproc = parse_nproc(output);
     let gpus = parse_gpus(output);
     let top_processes = parse_top_processes(output);
+    let docker = parse_docker_snapshot(output);
     let has_memory = mem.is_some();
 
     let cpu_percent = match (&cpu_snap, previous) {
@@ -369,6 +375,7 @@ pub fn parse_resource_metrics(
         net_interfaces,
         gpus,
         top_processes,
+        docker,
         ssh_rtt_ms: None,
         source,
     }

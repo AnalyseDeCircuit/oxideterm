@@ -114,6 +114,64 @@
         "action_failed": "La acción de proceso falló.",
         "partial_support": "La gestión de procesos es parcial en {{os}}."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "Buscar contenedores...",
+      "count_suffix": "contenedores",
+      "sampling": "Muestreando contenedores Docker...",
+      "empty": "No hay contenedores coincidentes",
+      "unavailable": "Docker no está disponible en este host.",
+      "error": "El comando Docker falló: {{error}}",
+      "columns": {
+        "container": "Contenedor / Imagen",
+        "image": "Imagen",
+        "state": "Estado",
+        "ports": "Puertos"
+      },
+      "states": {
+        "running": "En ejecución",
+        "exited": "Finalizado",
+        "created": "Creado",
+        "paused": "Pausado",
+        "restarting": "Reiniciando",
+        "removing": "Eliminando",
+        "dead": "Muerto",
+        "unknown": "Desconocido"
+      },
+      "actions": {
+        "refresh": "Actualizar contenedores",
+        "logs": "Ver registros",
+        "follow_logs": "Seguir registros",
+        "exec": "Abrir shell",
+        "start": "Iniciar",
+        "stop": "Detener",
+        "restart": "Reiniciar"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Registros Docker: {{name}}",
+      "logs": {
+        "title": "Registros: {{name}}",
+        "loading": "Cargando registros...",
+        "empty": "No hay registros recientes.",
+        "close": "Cerrar registros"
+      },
+      "confirm": {
+        "title": "Confirmar acción de Docker",
+        "cancel": "Cancelar",
+        "start_desc": "¿Iniciar el contenedor {{name}} ({{id}})?",
+        "stop_desc": "¿Detener el contenedor {{name}} ({{id}})? El trabajo en ejecución dentro del contenedor puede interrumpirse.",
+        "restart_desc": "¿Reiniciar el contenedor {{name}} ({{id}})? El trabajo en ejecución dentro del contenedor se interrumpirá."
+      },
+      "toast": {
+        "action_already_running": "Ya hay una acción de Docker en curso.",
+        "logs_already_running": "Los registros de Docker ya se están cargando.",
+        "logs_failed": "No se pudieron cargar los registros de Docker.",
+        "exec_terminal_missing": "No hay una ruta de terminal SSH activa disponible para este contenedor.",
+        "exec_opened": "Shell abierto para {{name}}.",
+        "follow_opened": "Siguiendo registros de {{name}}.",
+        "connection_missing": "La conexión seleccionada ya no está disponible.",
+        "action_failed": "La acción de Docker falló."
+      }
     }
   },
   "sessions": {

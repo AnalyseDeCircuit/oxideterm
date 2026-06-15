@@ -114,6 +114,64 @@
         "action_failed": "프로세스 작업에 실패했습니다.",
         "partial_support": "{{os}}의 프로세스 관리는 부분 지원입니다."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "컨테이너 검색...",
+      "count_suffix": "개 컨테이너",
+      "sampling": "Docker 컨테이너를 수집 중...",
+      "empty": "일치하는 컨테이너가 없습니다",
+      "unavailable": "이 호스트에서 Docker를 사용할 수 없습니다.",
+      "error": "Docker 명령 실패: {{error}}",
+      "columns": {
+        "container": "컨테이너 / 이미지",
+        "image": "이미지",
+        "state": "상태",
+        "ports": "포트"
+      },
+      "states": {
+        "running": "실행 중",
+        "exited": "종료됨",
+        "created": "생성됨",
+        "paused": "일시 중지됨",
+        "restarting": "재시작 중",
+        "removing": "삭제 중",
+        "dead": "비정상 종료",
+        "unknown": "알 수 없음"
+      },
+      "actions": {
+        "refresh": "컨테이너 새로고침",
+        "logs": "로그 보기",
+        "follow_logs": "로그 따라가기",
+        "exec": "셸 열기",
+        "start": "시작",
+        "stop": "중지",
+        "restart": "재시작"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Docker 로그: {{name}}",
+      "logs": {
+        "title": "로그: {{name}}",
+        "loading": "로그를 불러오는 중...",
+        "empty": "최근 로그가 없습니다.",
+        "close": "로그 닫기"
+      },
+      "confirm": {
+        "title": "Docker 작업 확인",
+        "cancel": "취소",
+        "start_desc": "컨테이너 {{name}}({{id}})를 시작할까요?",
+        "stop_desc": "컨테이너 {{name}}({{id}})를 중지할까요? 컨테이너 안에서 실행 중인 작업이 중단될 수 있습니다.",
+        "restart_desc": "컨테이너 {{name}}({{id}})를 재시작할까요? 컨테이너 안에서 실행 중인 작업이 중단됩니다."
+      },
+      "toast": {
+        "action_already_running": "Docker 작업이 이미 실행 중입니다.",
+        "logs_already_running": "Docker 로그를 불러오는 중입니다.",
+        "logs_failed": "Docker 로그를 불러오지 못했습니다.",
+        "exec_terminal_missing": "이 컨테이너에 사용할 수 있는 실시간 SSH 터미널 경로가 없습니다.",
+        "exec_opened": "{{name}}의 셸을 열었습니다.",
+        "follow_opened": "{{name}}의 로그를 따라가는 중입니다.",
+        "connection_missing": "선택한 연결을 사용할 수 없습니다.",
+        "action_failed": "Docker 작업에 실패했습니다."
+      }
     }
   },
   "sessions": {

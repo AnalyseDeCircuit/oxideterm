@@ -114,6 +114,64 @@
         "action_failed": "程序操作失敗。",
         "partial_support": "{{os}} 上的程序管理為部分支援。"
       }
+    },
+    "host_docker": {
+      "search_placeholder": "搜尋容器...",
+      "count_suffix": "個容器",
+      "sampling": "正在採樣 Docker 容器...",
+      "empty": "沒有符合的容器",
+      "unavailable": "此主機上 Docker 無法使用。",
+      "error": "Docker 命令失敗：{{error}}",
+      "columns": {
+        "container": "容器 / 映像檔",
+        "image": "映像檔",
+        "state": "狀態",
+        "ports": "連接埠"
+      },
+      "states": {
+        "running": "執行中",
+        "exited": "已退出",
+        "created": "已建立",
+        "paused": "已暫停",
+        "restarting": "重新啟動中",
+        "removing": "移除中",
+        "dead": "已失效",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "重新整理容器",
+        "logs": "查看日誌",
+        "follow_logs": "追蹤日誌",
+        "exec": "開啟 Shell",
+        "start": "啟動",
+        "stop": "停止",
+        "restart": "重新啟動"
+      },
+      "exec_title": "Docker：{{name}}",
+      "follow_title": "Docker 日誌：{{name}}",
+      "logs": {
+        "title": "日誌：{{name}}",
+        "loading": "正在載入日誌...",
+        "empty": "沒有近期日誌。",
+        "close": "關閉日誌"
+      },
+      "confirm": {
+        "title": "確認 Docker 操作",
+        "cancel": "取消",
+        "start_desc": "要啟動容器 {{name}}（{{id}}）嗎？",
+        "stop_desc": "要停止容器 {{name}}（{{id}}）嗎？容器內正在執行的工作可能會中斷。",
+        "restart_desc": "要重新啟動容器 {{name}}（{{id}}）嗎？容器內正在執行的工作會中斷。"
+      },
+      "toast": {
+        "action_already_running": "已有 Docker 操作正在執行。",
+        "logs_already_running": "Docker 日誌正在載入。",
+        "logs_failed": "Docker 日誌載入失敗。",
+        "exec_terminal_missing": "此容器沒有可用的即時 SSH 終端機路由。",
+        "exec_opened": "已為 {{name}} 開啟 Shell。",
+        "follow_opened": "正在追蹤 {{name}} 的日誌。",
+        "connection_missing": "所選連線已無法使用。",
+        "action_failed": "Docker 操作失敗。"
+      }
     }
   },
   "sessions": {

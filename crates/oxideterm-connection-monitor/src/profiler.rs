@@ -18,7 +18,7 @@ use tokio::{
 
 use crate::{
     MetricsSource, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceMetrics,
-    parse_resource_metrics, previous_sample_from_metrics, push_history,
+    docker_sample_command, parse_resource_metrics, previous_sample_from_metrics, push_history,
 };
 
 pub const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
@@ -81,8 +81,8 @@ const METRICS_COMMAND_LINUX_GPU: &str = concat!(
 const METRICS_COMMAND_MACOS: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ps axww -o pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,command= 2>/dev/null | sort -k6 -rn | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;$1=$2=$3=$4=$5=$6=$7=$8=$9=$10=\"\";sub(/^ +/,\"\");gsub(/\\t/,\" \");printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,$0}'";
 const METRICS_COMMAND_UNSUPPORTED: &str =
     "echo '===UNSUPPORTED==='; uname -s 2>/dev/null || echo unknown";
-const PORT_CMD_LINUX: &str = "echo '===PORTS==='; ((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
-const PORT_CMD_MACOS: &str = "echo '===PORTS==='; ((lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2) || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
+const PORT_CMD_LINUX: &str = "echo '===PORTS==='; ((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); echo '===PORTS_END==='";
+const PORT_CMD_MACOS: &str = "echo '===PORTS==='; ((lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2) || true); echo '===PORTS_END==='";
 const PORT_CMD_WINDOWS: &str = "echo '===PORTS==='; powershell -NoProfile -Command \"Get-NetTCPConnection -State Listen 2>$null | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -HideTableHeaders\" 2>/dev/null; echo '===PORTS_END==='";
 const PORT_CMD_FREEBSD: &str =
     "echo '===PORTS==='; sockstat -4 -6 -l -P tcp 2>/dev/null | tail -n +2; echo '===PORTS_END==='";
@@ -356,86 +356,93 @@ pub fn build_sample_command(os_type: &str) -> String {
         }
         _ => None,
     };
+    let docker_metrics = docker_sample_command(os_type);
 
     match gpu_metrics {
-        Some(gpu_metrics) => format!("{metrics}; {gpu_metrics}; {port_cmd}; echo '===END==='\n"),
-        None => format!("{metrics}; {port_cmd}; echo '===END==='\n"),
+        Some(gpu_metrics) => {
+            format!("{metrics}; {gpu_metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n")
+        }
+        None => format!("{metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n"),
     }
 }
 
 fn build_windows_sample_command() -> String {
-    let script = concat!(
-        "$ErrorActionPreference='SilentlyContinue';",
-        "Write-Output '===CPU_DIRECT===';",
-        "$cpu=(Get-CimInstance Win32_Processor|Measure-Object -Property LoadPercentage -Average).Average;",
-        "if($cpu -ne $null){[Math]::Round($cpu,1)};",
-        "Write-Output '===MEMINFO===';",
-        "$os=Get-CimInstance Win32_OperatingSystem;",
-        "if($os){",
-        "Write-Output ('MemTotal: '+$os.TotalVisibleMemorySize+' kB');",
-        "Write-Output ('MemAvailable: '+$os.FreePhysicalMemory+' kB');",
-        "$st=[UInt64]([Math]::Max(0,$os.TotalVirtualMemorySize-$os.TotalVisibleMemorySize));",
-        "$sf=[UInt64]([Math]::Max(0,$os.FreeVirtualMemory-$os.FreePhysicalMemory));",
-        "Write-Output ('SwapTotal: '+$st+' kB');",
-        "Write-Output ('SwapFree: '+$sf+' kB');",
-        "};",
-        "Write-Output '===NPROC===';",
-        "$cores=(Get-CimInstance Win32_Processor|Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum;",
-        "if($cores){$cores};",
-        "Write-Output '===DISKS===';",
-        "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{",
-        "$total=[UInt64]$_.Size;$free=[UInt64]$_.FreeSpace;$used=$total-$free;",
-        "$pct=if($total -gt 0){[Math]::Round(($used*100)/$total,1)}else{0};",
-        "Write-Output ($_.DeviceID+[char]9+$used+[char]9+$total+[char]9+$pct)",
-        "};",
-        "Write-Output '===NETDEV===';",
-        "Get-NetAdapterStatistics|ForEach-Object{",
-        "Write-Output ($_.Name+': '+$_.ReceivedBytes+' 0 0 0 0 0 0 0 '+$_.SentBytes)",
-        "};",
-        "Write-Output '===GPUS===';",
-        "$gpuControllers=@(Get-CimInstance Win32_VideoController);",
-        "$gpuUtil=@{};$gpuMem=@{};",
-        "try{",
-        "$samples=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage').CounterSamples;",
-        "foreach($sample in $samples){",
-        "$instance=$sample.InstanceName;",
-        "$phys=0;",
-        "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
-        "$gpuUtil[$phys]=[double]($gpuUtil[$phys])+[double]$sample.CookedValue",
-        "}",
-        "}catch{};",
-        "try{",
-        "$memSamples=(Get-Counter '\\GPU Adapter Memory(*)\\Dedicated Usage').CounterSamples;",
-        "foreach($sample in $memSamples){",
-        "$instance=$sample.InstanceName;",
-        "$phys=0;",
-        "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
-        "$gpuMem[$phys]=[double]($gpuMem[$phys])+[double]$sample.CookedValue",
-        "}",
-        "}catch{};",
-        "for($i=0;$i -lt $gpuControllers.Count;$i++){",
-        "$gpu=$gpuControllers[$i];",
-        "$name=($gpu.Name -replace ',', ' ');",
-        "$total=if($gpu.AdapterRAM){[Math]::Round(([double]$gpu.AdapterRAM)/1MB)}else{''};",
-        "$used=if($gpuMem.ContainsKey($i)){[Math]::Round(([double]$gpuMem[$i])/1MB)}else{''};",
-        "$util=if($gpuUtil.ContainsKey($i)){[Math]::Min(100,[Math]::Round([double]$gpuUtil[$i],1))}else{''};",
-        "Write-Output ($i+','+$name+','+$util+','+$used+','+$total)",
-        "};",
-        "Write-Output '===TOPPROCS===';",
-        "$memTotal=if($os){[double]$os.TotalVisibleMemorySize*1024}else{0};",
-        "Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 200|ForEach-Object{",
-        "$pct=if($memTotal -gt 0){[Math]::Round(($_.WorkingSet64*100)/$memTotal,1)}else{0};",
-        "$cpu=if($_.CPU -ne $null){[Math]::Round($_.CPU,1)}else{0};",
-        "$rss=[UInt64]$_.WorkingSet64;$vsz=[UInt64]$_.VirtualMemorySize64;",
-        "$elapsed=if($_.StartTime){((Get-Date)-$_.StartTime).ToString()}else{''};",
-        "Write-Output ($_.Id+[char]9+''+[char]9+''+[char]9+''+[char]9+$cpu+[char]9+$pct+[char]9+[Math]::Round($rss/1024)+[char]9+[Math]::Round($vsz/1024)+[char]9+$elapsed+[char]9+$_.ProcessName+[char]9+$_.Path)",
-        "};",
-        "Write-Output '===PORTS===';",
-        "Get-NetTCPConnection -State Listen|ForEach-Object{",
-        "Write-Output ($_.LocalAddress+' '+$_.LocalPort+' '+$_.OwningProcess)",
-        "};",
-        "Write-Output '===PORTS_END===';",
-        "Write-Output '===END===';"
+    let script = format!(
+        "{}{}{}",
+        concat!(
+            "$ErrorActionPreference='SilentlyContinue';",
+            "Write-Output '===CPU_DIRECT===';",
+            "$cpu=(Get-CimInstance Win32_Processor|Measure-Object -Property LoadPercentage -Average).Average;",
+            "if($cpu -ne $null){[Math]::Round($cpu,1)};",
+            "Write-Output '===MEMINFO===';",
+            "$os=Get-CimInstance Win32_OperatingSystem;",
+            "if($os){",
+            "Write-Output ('MemTotal: '+$os.TotalVisibleMemorySize+' kB');",
+            "Write-Output ('MemAvailable: '+$os.FreePhysicalMemory+' kB');",
+            "$st=[UInt64]([Math]::Max(0,$os.TotalVirtualMemorySize-$os.TotalVisibleMemorySize));",
+            "$sf=[UInt64]([Math]::Max(0,$os.FreeVirtualMemory-$os.FreePhysicalMemory));",
+            "Write-Output ('SwapTotal: '+$st+' kB');",
+            "Write-Output ('SwapFree: '+$sf+' kB');",
+            "};",
+            "Write-Output '===NPROC===';",
+            "$cores=(Get-CimInstance Win32_Processor|Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum;",
+            "if($cores){$cores};",
+            "Write-Output '===DISKS===';",
+            "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{",
+            "$total=[UInt64]$_.Size;$free=[UInt64]$_.FreeSpace;$used=$total-$free;",
+            "$pct=if($total -gt 0){[Math]::Round(($used*100)/$total,1)}else{0};",
+            "Write-Output ($_.DeviceID+[char]9+$used+[char]9+$total+[char]9+$pct)",
+            "};",
+            "Write-Output '===NETDEV===';",
+            "Get-NetAdapterStatistics|ForEach-Object{",
+            "Write-Output ($_.Name+': '+$_.ReceivedBytes+' 0 0 0 0 0 0 0 '+$_.SentBytes)",
+            "};",
+            "Write-Output '===GPUS===';",
+            "$gpuControllers=@(Get-CimInstance Win32_VideoController);",
+            "$gpuUtil=@{};$gpuMem=@{};",
+            "try{",
+            "$samples=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage').CounterSamples;",
+            "foreach($sample in $samples){",
+            "$instance=$sample.InstanceName;",
+            "$phys=0;",
+            "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
+            "$gpuUtil[$phys]=[double]($gpuUtil[$phys])+[double]$sample.CookedValue",
+            "}",
+            "}catch{};",
+            "try{",
+            "$memSamples=(Get-Counter '\\GPU Adapter Memory(*)\\Dedicated Usage').CounterSamples;",
+            "foreach($sample in $memSamples){",
+            "$instance=$sample.InstanceName;",
+            "$phys=0;",
+            "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
+            "$gpuMem[$phys]=[double]($gpuMem[$phys])+[double]$sample.CookedValue",
+            "}",
+            "}catch{};",
+            "for($i=0;$i -lt $gpuControllers.Count;$i++){",
+            "$gpu=$gpuControllers[$i];",
+            "$name=($gpu.Name -replace ',', ' ');",
+            "$total=if($gpu.AdapterRAM){[Math]::Round(([double]$gpu.AdapterRAM)/1MB)}else{''};",
+            "$used=if($gpuMem.ContainsKey($i)){[Math]::Round(([double]$gpuMem[$i])/1MB)}else{''};",
+            "$util=if($gpuUtil.ContainsKey($i)){[Math]::Min(100,[Math]::Round([double]$gpuUtil[$i],1))}else{''};",
+            "Write-Output ($i+','+$name+','+$util+','+$used+','+$total)",
+            "};",
+            "Write-Output '===TOPPROCS===';",
+            "$memTotal=if($os){[double]$os.TotalVisibleMemorySize*1024}else{0};",
+            "Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 200|ForEach-Object{",
+            "$pct=if($memTotal -gt 0){[Math]::Round(($_.WorkingSet64*100)/$memTotal,1)}else{0};",
+            "$cpu=if($_.CPU -ne $null){[Math]::Round($_.CPU,1)}else{0};",
+            "$rss=[UInt64]$_.WorkingSet64;$vsz=[UInt64]$_.VirtualMemorySize64;",
+            "$elapsed=if($_.StartTime){((Get-Date)-$_.StartTime).ToString()}else{''};",
+            "Write-Output ($_.Id+[char]9+''+[char]9+''+[char]9+''+[char]9+$cpu+[char]9+$pct+[char]9+[Math]::Round($rss/1024)+[char]9+[Math]::Round($vsz/1024)+[char]9+$elapsed+[char]9+$_.ProcessName+[char]9+$_.Path)",
+            "};",
+            "Write-Output '===PORTS===';",
+            "Get-NetTCPConnection -State Listen|ForEach-Object{",
+            "Write-Output ($_.LocalAddress+' '+$_.LocalPort+' '+$_.OwningProcess)",
+            "};",
+            "Write-Output '===PORTS_END===';"
+        ),
+        docker_sample_command("Windows"),
+        "Write-Output '===END===';",
     );
     // OpenSSH on Windows may start cmd.exe or PowerShell; invoking PowerShell
     // explicitly keeps the sampler independent from the user's default shell.

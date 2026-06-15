@@ -114,6 +114,64 @@
         "action_failed": "Azione processo non riuscita.",
         "partial_support": "La gestione processi è parziale su {{os}}."
       }
+    },
+    "host_docker": {
+      "search_placeholder": "Cerca container...",
+      "count_suffix": "container",
+      "sampling": "Campionamento dei container Docker...",
+      "empty": "Nessun container corrispondente",
+      "unavailable": "Docker non è disponibile su questo host.",
+      "error": "Comando Docker non riuscito: {{error}}",
+      "columns": {
+        "container": "Container / Immagine",
+        "image": "Immagine",
+        "state": "Stato",
+        "ports": "Porte"
+      },
+      "states": {
+        "running": "In esecuzione",
+        "exited": "Terminato",
+        "created": "Creato",
+        "paused": "In pausa",
+        "restarting": "Riavvio",
+        "removing": "Rimozione",
+        "dead": "Non attivo",
+        "unknown": "Sconosciuto"
+      },
+      "actions": {
+        "refresh": "Aggiorna container",
+        "logs": "Vedi log",
+        "follow_logs": "Segui log",
+        "exec": "Apri shell",
+        "start": "Avvia",
+        "stop": "Ferma",
+        "restart": "Riavvia"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Log Docker: {{name}}",
+      "logs": {
+        "title": "Log: {{name}}",
+        "loading": "Caricamento log...",
+        "empty": "Nessun log recente.",
+        "close": "Chiudi log"
+      },
+      "confirm": {
+        "title": "Conferma azione Docker",
+        "cancel": "Annulla",
+        "start_desc": "Avviare il container {{name}} ({{id}})?",
+        "stop_desc": "Fermare il container {{name}} ({{id}})? Il lavoro in esecuzione nel container potrebbe essere interrotto.",
+        "restart_desc": "Riavviare il container {{name}} ({{id}})? Il lavoro in esecuzione nel container verrà interrotto."
+      },
+      "toast": {
+        "action_already_running": "Un’azione Docker è già in corso.",
+        "logs_already_running": "I log Docker sono già in caricamento.",
+        "logs_failed": "Impossibile caricare i log Docker.",
+        "exec_terminal_missing": "Nessuna route di terminale SSH attiva è disponibile per questo container.",
+        "exec_opened": "Shell aperta per {{name}}.",
+        "follow_opened": "Log di {{name}} in monitoraggio.",
+        "connection_missing": "La connessione selezionata non è più disponibile.",
+        "action_failed": "Azione Docker non riuscita."
+      }
     }
   },
   "sessions": {
