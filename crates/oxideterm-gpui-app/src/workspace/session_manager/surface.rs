@@ -179,6 +179,16 @@ impl WorkspaceApp {
                     ))
                 },
             )
+            .when(
+                !self.session_manager.selected_ids.is_empty()
+                    && self.session_manager.show_batch_move,
+                |surface| {
+                    surface.child(self.workspace_context_menu_backdrop(
+                        self.render_batch_move_popover(cx),
+                        cx,
+                    ))
+                },
+            )
             .into_any_element()
     }
 

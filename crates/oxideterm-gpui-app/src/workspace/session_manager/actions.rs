@@ -218,18 +218,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_session_row_menus(&mut self) -> bool {
-        // SessionManager owns inline row menus and tree context menus. Radix
-        // closes them through one ContextMenu root, so native exposes one
-        // dismissal owner for outside click, Esc, and guarded item activation.
-        let changed = self.session_manager.row_menu_connection_id.is_some()
-            || self.session_manager.row_context_menu_connection_id.is_some()
-            || self.session_manager.folder_tree_context_menu_x.is_some()
-            || self.session_manager.folder_tree_context_menu_y.is_some();
-        self.session_manager.row_menu_connection_id = None;
-        self.session_manager.row_context_menu_connection_id = None;
-        self.session_manager.folder_tree_context_menu_x = None;
-        self.session_manager.folder_tree_context_menu_y = None;
-        changed
+        close_session_menu_state(&mut self.session_manager)
     }
 
     fn open_session_row_context_menu(&mut self, id: &str, x: f32, y: f32) {
@@ -736,4 +725,20 @@ impl WorkspaceApp {
         }
         cx.notify();
     }
+}
+
+fn close_session_menu_state(session_manager: &mut SessionManagerState) -> bool {
+    // SessionManager floating menus share one ContextMenu dismissal owner for
+    // outside click, Esc, and guarded item activation.
+    let changed = session_manager.row_menu_connection_id.is_some()
+        || session_manager.row_context_menu_connection_id.is_some()
+        || session_manager.folder_tree_context_menu_x.is_some()
+        || session_manager.folder_tree_context_menu_y.is_some()
+        || session_manager.show_batch_move;
+    session_manager.row_menu_connection_id = None;
+    session_manager.row_context_menu_connection_id = None;
+    session_manager.folder_tree_context_menu_x = None;
+    session_manager.folder_tree_context_menu_y = None;
+    session_manager.show_batch_move = false;
+    changed
 }

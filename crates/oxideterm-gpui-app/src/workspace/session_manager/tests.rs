@@ -24,6 +24,17 @@ mod tests {
     }
 
     #[test]
+    fn session_menu_dismissal_closes_batch_move_popover() {
+        let mut state = SessionManagerState {
+            show_batch_move: true,
+            ..SessionManagerState::default()
+        };
+
+        assert!(close_session_menu_state(&mut state));
+        assert!(!state.show_batch_move);
+    }
+
+    #[test]
     fn oxide_export_logical_scroll_change_detects_inner_consumption() {
         // GPUI ListState owns measured row heights internally, so scroll-chain
         // decisions must compare actual logical movement instead of estimates.

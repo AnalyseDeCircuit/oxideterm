@@ -108,10 +108,6 @@ impl WorkspaceApp {
                             )
                     }),
             )
-            .when(
-                selected_count > 0 && self.session_manager.show_batch_move,
-                |toolbar| toolbar.child(self.render_batch_move_popover(cx)),
-            )
             .child(
                 div()
                     .flex()
