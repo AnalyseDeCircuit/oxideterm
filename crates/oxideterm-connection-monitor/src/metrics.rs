@@ -396,11 +396,44 @@ pub fn push_history(history: &mut Vec<ResourceMetrics>, metrics: ResourceMetrics
 
 fn extract_section<'a>(output: &'a str, marker: &str) -> Option<&'a str> {
     let start_marker = format!("==={marker}===");
-    let start = output.find(&start_marker)?;
-    let after_marker = start + start_marker.len();
-    let rest = &output[after_marker..];
-    let end = rest.find("===").unwrap_or(rest.len());
-    Some(rest[..end].trim())
+    let mut section_start = None;
+    let mut offset = 0;
+    for line in output.split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = line_start + line.len();
+        let trimmed = line.trim();
+
+        if section_start.is_none() {
+            if trimmed == start_marker {
+                section_start = Some(line_end);
+            }
+        } else if is_metrics_section_marker(trimmed) {
+            return Some(output[section_start?..line_start].trim());
+        }
+
+        offset = line_end;
+    }
+
+    let trailing = &output[offset..];
+    if !trailing.is_empty() {
+        let trimmed = trailing.trim();
+        if section_start.is_none() {
+            if trimmed == start_marker {
+                section_start = Some(output.len());
+            }
+        } else if is_metrics_section_marker(trimmed) {
+            return Some(output[section_start?..offset].trim());
+        }
+    }
+
+    section_start.map(|start| output[start..].trim())
+}
+
+fn is_metrics_section_marker(line: &str) -> bool {
+    // Persistent SSH shells can echo the whole sampling command when stty -echo
+    // is unavailable or ignored. Treat only standalone marker lines as section
+    // boundaries so echoed command text cannot hide the real TOPPROCS payload.
+    line.len() > 6 && line.starts_with("===") && line.ends_with("===")
 }
 
 pub fn parse_cpu_snapshot(output: &str) -> Option<CpuSnapshot> {
@@ -969,6 +1002,54 @@ Inter-|   Receive                                                |  Transmit
             processes[0].full_command.as_deref(),
             Some("/usr/bin/node /srv/app/server.js")
         );
+    }
+
+    #[test]
+    fn parses_processes_when_shell_echoes_sampling_command() {
+        let output = r#"echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat; echo '===TOPPROCS==='; ps ww -eo pid=,args=; echo '===END==='
+===STAT===
+cpu  1 2 3 4 5 6 7 8
+===TOPPROCS===
+1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
+===END==="#;
+
+        let processes = parse_top_processes(output);
+
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0].pid, "1362735");
+        assert_eq!(processes[0].command, "node");
+    }
+
+    #[test]
+    fn parses_process_command_lines_containing_marker_text() {
+        let output = r#"===TOPPROCS===
+1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node --flag ===END=== /srv/app/server.js
+1363656	1	root	S	0.5	0.2	131072	262144		postgres	/usr/lib/postgresql/bin/postgres
+===END==="#;
+
+        let processes = parse_top_processes(output);
+
+        assert_eq!(processes.len(), 2);
+        assert_eq!(
+            processes[0].full_command.as_deref(),
+            Some("/usr/bin/node --flag ===END=== /srv/app/server.js")
+        );
+        assert_eq!(processes[1].command, "postgres");
+    }
+
+    #[test]
+    fn parses_busybox_process_fallback_rows_with_empty_extended_fields() {
+        let output = r#"===TOPPROCS===
+42					2.5		102400		ash	ash
+===END==="#;
+
+        let processes = parse_top_processes(output);
+
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0].pid, "42");
+        assert_eq!(processes[0].memory_percent, 2.5);
+        assert_eq!(processes[0].vsz_bytes, Some(102400 * 1024));
+        assert_eq!(processes[0].command, "ash");
     }
 
     #[test]

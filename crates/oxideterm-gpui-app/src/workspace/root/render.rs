@@ -640,7 +640,10 @@ impl Render for WorkspaceApp {
                             ),
                     )
                     .when(self.context_sidebar_visible(), |layout| {
-                        layout.child(self.render_context_right_sidebar_region(cx))
+                        // Keep the right sidebar as one root child. Splitting
+                        // the gutter and content here makes resize hit-testing
+                        // easy to regress on scroll-heavy Host Tools pages.
+                        layout.child(self.render_context_right_sidebar_frame(cx))
                     }),
             )
             .when(self.new_connection_form.is_some(), |root| {

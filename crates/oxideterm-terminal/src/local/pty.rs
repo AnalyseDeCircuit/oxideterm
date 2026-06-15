@@ -12,6 +12,8 @@ pub struct LocalPtySession {
     title: Option<String>,
     lifecycle: TerminalLifecycle,
     process: ProcessState,
+    #[cfg(windows)]
+    process_job: Option<WindowsTerminalJob>,
     graphics: TerminalGraphicsState,
     encoding: TerminalEncoding,
     input_encoder: TerminalInputEncoder,
@@ -130,10 +132,9 @@ impl LocalPtySession {
             0,
         )
         .context("failed to spawn local shell PTY")?;
-        #[cfg(not(target_os = "windows"))]
         let shell_pid = Some(pty.child().id());
-        #[cfg(target_os = "windows")]
-        let shell_pid = None;
+        #[cfg(windows)]
+        let process_job = WindowsTerminalJob::for_shell(shell_pid);
         #[cfg(not(target_os = "windows"))]
         let pty_master = pty.file().try_clone().ok();
         #[cfg(target_os = "windows")]
@@ -171,6 +172,8 @@ impl LocalPtySession {
             title: None,
             lifecycle: TerminalLifecycle::Running,
             process,
+            #[cfg(windows)]
+            process_job,
             graphics: TerminalGraphicsState::default(),
             encoding,
             input_encoder: TerminalInputEncoder::new(encoding),
@@ -423,6 +426,13 @@ impl LocalPtySession {
         }
 
         if self.lifecycle.is_running() {
+            #[cfg(windows)]
+            if let Some(job) = &self.process_job {
+                job.terminate();
+            }
+            #[cfg(not(windows))]
+            cleanup_local_pty_process_tree(self.process.info.shell_pid);
+
             let _ = self.notifier.0.send(LocalGraphicsMsg::Shutdown);
             self.detach_io_thread();
         }

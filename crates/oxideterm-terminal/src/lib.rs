@@ -31,6 +31,7 @@ mod data;
 mod local_graphics_event_loop;
 mod local_shell;
 mod process;
+mod process_lifecycle;
 mod search;
 mod session;
 mod shell_integration;
@@ -72,6 +73,10 @@ use local_graphics_event_loop::{
 };
 use local_shell::shell_args_for_profile;
 use process::{ProcessState, TerminalSignal, signal_process_group};
+#[cfg(windows)]
+use process_lifecycle::WindowsTerminalJob;
+#[cfg(not(windows))]
+use process_lifecycle::cleanup_local_pty_process_tree;
 use search::{append_grid_line_text, search_logical_line_matches, viewport_row_for_grid_line};
 
 // Local PTY pieces stay included in this module so crate-private terminal

@@ -28,6 +28,9 @@ pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 65_536;
 pub const RESOURCE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const RESOURCE_END_MARKER: &str = "===END===";
 
+// Keep process sampling on short, machine-readable `ps` output. A previous
+// `/proc` walker could emit a non-empty but unusable table, preventing fallback
+// and leaving the Host Tools process page empty on otherwise healthy Linux hosts.
 const METRICS_COMMAND_LINUX: &str = concat!(
     "echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat 2>/dev/null; ",
     "echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null; ",
@@ -36,27 +39,14 @@ const METRICS_COMMAND_LINUX: &str = concat!(
     "echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); ",
     "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; ",
     "echo '===TOPPROCS==='; ",
-    "top_ps_fallback() { ps ww -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,args= --sort=-pmem 2>/dev/null | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;cmd=$0;sub(\"^([[:space:]]*[^[:space:]]+){10}[[:space:]]*\", \"\", cmd);gsub(/\\t/,\" \",cmd);if(length(cmd)>240)cmd=substr(cmd,1,240);printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,cmd}'; }; ",
-    "if [ -d /proc ]; then ",
-    "cpu_file=${TMPDIR:-/tmp}/oxideterm-proc-cpu-$$; ps -eo pid=,pcpu= > \"$cpu_file\" 2>/dev/null || :; ",
-    "proc_file=${TMPDIR:-/tmp}/oxideterm-proc-list-$$; : > \"$proc_file\"; ",
     "mem_total=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo 2>/dev/null); ",
-    "for status in /proc/[0-9]*/status; do ",
-    "[ -r \"$status\" ] || continue; dir=${status%/status}; pid=${dir##*/}; ",
-    "name=$(awk -F: '/^Name:/{gsub(/^[ \\t]+/,\"\",$2); print $2; exit}' \"$status\" 2>/dev/null); ",
-    "ppid=$(awk '/^PPid:/{print $2; exit}' \"$status\" 2>/dev/null); ",
-    "uid=$(awk '/^Uid:/{print $2; exit}' \"$status\" 2>/dev/null); ",
-    "user=$(getent passwd \"$uid\" 2>/dev/null | awk -F: '{print $1; exit}'); [ -n \"$user\" ] || user=\"$uid\"; ",
-    "state=$(awk '/^State:/{print $2; exit}' \"$status\" 2>/dev/null); ",
-    "rss=$(awk '/^VmRSS:/{print $2; exit}' \"$status\" 2>/dev/null); rss=${rss:-0}; ",
-    "vsz=$(awk '/^VmSize:/{print $2; exit}' \"$status\" 2>/dev/null); vsz=${vsz:-0}; ",
-    "cpu=$(awk -v p=\"$pid\" '$1==p{print $2; exit}' \"$cpu_file\" 2>/dev/null); cpu=${cpu:-0}; ",
-    "mem=$(awk -v r=\"$rss\" -v t=\"$mem_total\" 'BEGIN{if(t>0)printf \"%.1f\",r*100/t; else printf \"0.0\"}'); ",
-    "cmd=$(tr '\\0' ' ' < \"$dir/cmdline\" 2>/dev/null | sed 's/[[:space:]]*$//' | cut -c1-240); [ -n \"$cmd\" ] || cmd=\"$name\"; ",
-    "printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t\\t%s\\t%s\\n\" \"$pid\" \"$ppid\" \"$user\" \"$state\" \"$cpu\" \"$mem\" \"$rss\" \"$vsz\" \"$name\" \"$cmd\" >> \"$proc_file\"; ",
-    "done; if [ -s \"$proc_file\" ]; then sort -k6 -rn \"$proc_file\" | head -200; else top_ps_fallback; fi; rm -f \"$cpu_file\" \"$proc_file\"; ",
+    "emit_full_ps_rows() { awk 'NR<=200 && $1 ~ /^[0-9]+$/ {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;cmd=$0;sub(\"^([[:space:]]*[^[:space:]]+){10}[[:space:]]*\", \"\", cmd);gsub(/\\t/,\" \",cmd);if(cmd==\"\")cmd=comm;if(length(cmd)>240)cmd=substr(cmd,1,240);printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,cmd}'; }; ",
+    "if ps ww -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,args= --sort=-pmem >/dev/null 2>&1; then ",
+    "ps ww -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,args= --sort=-pmem 2>/dev/null | emit_full_ps_rows; ",
+    "elif ps ww -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,args= >/dev/null 2>&1; then ",
+    "ps ww -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,args= 2>/dev/null | sort -k6 -rn | emit_full_ps_rows; ",
     "else ",
-    "top_ps_fallback; ",
+    "ps -o pid,vsz,comm 2>/dev/null | awk -v total=\"$mem_total\" 'NR>1 && NR<=201 && $1 ~ /^[0-9]+$/ {vsz=$2;mem=(total>0?vsz*100/total:0);gsub(/\\t/,\" \",$3);printf \"%s\\t\\t\\t\\t\\t%.1f\\t\\t%s\\t\\t%s\\t%s\\n\",$1,mem,vsz,$3,$3}'; ",
     "fi"
 );
 const METRICS_COMMAND_LINUX_GPU: &str = concat!(
@@ -736,11 +726,11 @@ mod tests {
         assert!(linux.contains("rocm-smi"));
         assert!(linux.contains("intel_gpu_top"));
         assert!(linux.contains("gpu_busy_percent"));
-        assert!(linux.contains("/proc/[0-9]*/status"));
-        assert!(linux.contains("getent passwd"));
-        assert!(linux.contains("top_ps_fallback()"));
-        assert!(linux.contains("[ -s \"$proc_file\" ]"));
         assert!(linux.contains("ps ww -eo"));
+        assert!(linux.contains("--sort=-pmem"));
+        assert!(linux.contains("sort -k6 -rn"));
+        assert!(linux.contains("ps -o pid,vsz,comm"));
+        assert!(linux.contains("emit_full_ps_rows()"));
         let nproc_marker = linux.find("===NPROC===").expect("nproc marker");
         let disk_marker = linux.find("===DISKS===").expect("disk marker");
         assert!(

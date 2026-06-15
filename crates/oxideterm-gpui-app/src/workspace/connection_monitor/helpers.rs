@@ -39,6 +39,31 @@ fn monitor_connection_label(connection: &MonitorConnectionOption) -> String {
     )
 }
 
+fn monitor_connection_can_switch(connections: &[MonitorConnectionOption]) -> bool {
+    // A single Host Tools connection is already identified by the monitor and
+    // process headers. Only expose switch affordances when another host exists.
+    connections.len() > 1
+}
+
+fn host_process_table_uses_separate_user_column(sidebar_width: f32) -> bool {
+    // The default Host Tools sidebar is too narrow for Program/User/PID/CPU/Mem
+    // plus action affordances. Merge Program and User until the user drags the
+    // sidebar wide enough for a btop-like separate User column.
+    sidebar_width >= HOST_PROCESS_SEPARATE_USER_COLUMN_MIN_WIDTH
+}
+
+fn host_process_identity_header_label(i18n: &I18n, separate_user_column: bool) -> String {
+    if separate_user_column {
+        return i18n.t("sidebar.host_processes.sort.command");
+    }
+
+    format!(
+        "{} / {}",
+        i18n.t("sidebar.host_processes.sort.command"),
+        i18n.t("sidebar.host_processes.sort.user")
+    )
+}
+
 fn monitor_connection_selected_index(
     connections: &[MonitorConnectionOption],
     selected_id: &str,

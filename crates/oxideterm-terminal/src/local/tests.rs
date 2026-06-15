@@ -2,6 +2,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    #[cfg(unix)]
+    use std::time::Duration;
+
     use alacritty_terminal::{
         event::VoidListener,
         term::Config,
@@ -95,6 +98,59 @@ mod tests {
             parse_lsof_cwd(lsof_output),
             Some(PathBuf::from("/Users/dominical/Documents/OxideTerm"))
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_pty_shutdown_cleans_background_child_processes() {
+        let marker_path = std::env::temp_dir().join(format!(
+            "oxideterm-pty-child-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let script = r#"
+marker=$1
+( trap "" TERM; while :; do sleep 5; done ) &
+child=$!
+printf '%s\n' "$child" > "$marker"
+wait
+"#;
+        let mut config = LocalPtyConfig::default();
+        config.shell = Some(ShellInfo::new("test-sh", "Test sh", "/bin/sh").with_args(vec![
+            "-c".to_string(),
+            script.to_string(),
+            "oxideterm-pty-test".to_string(),
+            marker_path.display().to_string(),
+        ]));
+        config.load_profile = false;
+
+        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            80,
+            24,
+            config,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            100,
+        )
+        .expect("spawn local PTY");
+
+        let child_pid = wait_for_child_pid(&marker_path);
+        assert!(
+            unix_process_is_running(child_pid),
+            "test child should be running before PTY shutdown"
+        );
+
+        session.shutdown();
+
+        assert_eventually(
+            Duration::from_secs(3),
+            || !unix_process_is_running(child_pid),
+            "background child should stop after PTY shutdown",
+        );
+        let _ = std::fs::remove_file(marker_path);
     }
 
     #[test]
@@ -665,5 +721,53 @@ mod tests {
 
         assert_eq!(fg, OXIDETERM_DARK_THEME.ansi[7]);
         assert_eq!(bg, OXIDETERM_DARK_THEME.ansi[15]);
+    }
+
+    #[cfg(unix)]
+    fn wait_for_child_pid(marker_path: &std::path::Path) -> u32 {
+        let mut pid = None;
+        assert_eventually(
+            Duration::from_secs(3),
+            || {
+                pid = std::fs::read_to_string(marker_path)
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u32>().ok());
+                pid.is_some()
+            },
+            "PTY script should write background child PID",
+        );
+        pid.unwrap()
+    }
+
+    #[cfg(unix)]
+    fn unix_process_is_running(pid: u32) -> bool {
+        let status = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        if status != 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+            return false;
+        }
+
+        let output = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output();
+        let Ok(output) = output else {
+            return true;
+        };
+        if !output.status.success() {
+            return false;
+        }
+
+        !String::from_utf8_lossy(&output.stdout).contains('Z')
+    }
+
+    #[cfg(unix)]
+    fn assert_eventually(timeout: Duration, mut predicate: impl FnMut() -> bool, message: &str) {
+        let started = std::time::Instant::now();
+        while started.elapsed() < timeout {
+            if predicate() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(predicate(), "{message}");
     }
 }

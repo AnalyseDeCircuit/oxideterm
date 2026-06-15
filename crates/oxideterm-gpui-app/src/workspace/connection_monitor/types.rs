@@ -10,7 +10,6 @@ use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_e
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{
     select_event_boundary, select_option_highlighted, select_option_action,
-    select_trigger_with_focus_visible,
 };
 use oxideterm_topology::{
     ConnectionTopologyLayout, ConnectionTopologySnapshot, TOPOLOGY_NODE_HEIGHT,
@@ -27,6 +26,7 @@ const HOST_PROCESS_USER_COLUMN_WIDTH: f32 = 64.0;
 const HOST_PROCESS_PID_COLUMN_WIDTH: f32 = 54.0;
 const HOST_PROCESS_CPU_COLUMN_WIDTH: f32 = 44.0;
 const HOST_PROCESS_MEMORY_COLUMN_WIDTH: f32 = 48.0;
+const HOST_PROCESS_SEPARATE_USER_COLUMN_MIN_WIDTH: f32 = 620.0;
 const HOST_PROCESS_TABLE_HEADER_TEXT_SIZE: f32 = 10.0;
 const HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE: f32 = 12.0;
 const HOST_PROCESS_TABLE_META_TEXT_SIZE: f32 = 10.0;

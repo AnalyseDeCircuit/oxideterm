@@ -1,17 +1,12 @@
-const CONTEXT_SIDEBAR_RESIZE_EDGE_OUTSET: f32 = 4.0;
-const CONTEXT_SIDEBAR_RESIZE_HIT_WIDTH: f32 = 10.0;
+const CONTEXT_SIDEBAR_RESIZE_GUTTER_WIDTH: f32 = 8.0;
 const CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH: f32 = 1.0;
 
-fn context_sidebar_resize_hitbox_left() -> f32 {
-    -CONTEXT_SIDEBAR_RESIZE_EDGE_OUTSET
+fn context_sidebar_resize_gutter_width() -> f32 {
+    CONTEXT_SIDEBAR_RESIZE_GUTTER_WIDTH
 }
 
-fn context_sidebar_resize_hitbox_width() -> f32 {
-    CONTEXT_SIDEBAR_RESIZE_HIT_WIDTH
-}
-
-fn context_sidebar_resize_divider_left() -> f32 {
-    CONTEXT_SIDEBAR_RESIZE_EDGE_OUTSET
+fn context_sidebar_content_width(total_width: f32) -> f32 {
+    (total_width - context_sidebar_resize_gutter_width()).max(0.0)
 }
 
 impl WorkspaceApp {
@@ -52,6 +47,26 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(super) fn render_context_right_sidebar_frame(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id("context-right-sidebar-frame")
+            .relative()
+            .flex_none()
+            .w(px(self.ai_sidebar_width))
+            .h_full()
+            .min_w_0()
+            .flex()
+            // The frame owns the full right-sidebar width. Keep the resize
+            // gutter and content panel together here so root layout changes
+            // cannot separate the hitbox from the width being resized.
+            .child(self.render_context_right_sidebar_resize_gutter(cx))
+            .child(self.render_context_right_sidebar_region(cx))
+            .into_any_element()
+    }
+
     pub(super) fn render_context_right_sidebar_region(
         &mut self,
         cx: &mut Context<Self>,
@@ -67,13 +82,10 @@ impl WorkspaceApp {
         };
         div()
             .relative()
-            .w(px(self.ai_sidebar_width))
+            .w(px(context_sidebar_content_width(self.ai_sidebar_width)))
             .flex_none()
             .h_full()
             .min_h_0()
-            // This outer shell must not clip overflow. The resize handle is
-            // intentionally wider than the visible divider and extends left
-            // into the workspace so users can grab the panel edge reliably.
             .child(
                 div()
                     .w_full()
@@ -81,14 +93,8 @@ impl WorkspaceApp {
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    // Only the actual panel clips its children. Keeping this
-                    // clipping one level below the shell prevents the edge
-                    // handle from being cut down to a hard-to-hit one-pixel
-                    // strip, which has regressed several times.
                     .overflow_hidden()
                     .bg(rgb(theme.bg))
-                    .border_l_1()
-                    .border_color(rgba((theme.border << 8) | 0x80))
                     .child(
                         div()
                             .w_full()
@@ -164,40 +170,46 @@ impl WorkspaceApp {
                             }),
                     ),
             )
+            .into_any_element()
+    }
+
+    pub(super) fn render_context_right_sidebar_resize_gutter(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .relative()
+            .flex_none()
+            .w(px(context_sidebar_resize_gutter_width()))
+            .h_full()
+            .cursor(CursorStyle::ResizeColumn)
+            // This gutter is a real flex child between the workspace and the
+            // right sidebar content. Do not turn it back into an absolutely
+            // positioned child of the sidebar: scroll-heavy Host Tools pages
+            // can occlude that internal hitbox, especially the process List.
+            .occlude()
+            .bg(rgb(theme.bg))
             .child(
                 div()
                     .absolute()
-                    .left(px(context_sidebar_resize_hitbox_left()))
+                    .left_0()
                     .top_0()
                     .bottom_0()
-                    .w(px(context_sidebar_resize_hitbox_width()))
-                    .cursor(CursorStyle::ResizeColumn)
-                    // This transparent hitbox straddles the real panel edge.
-                    // Do not move it fully inside the panel: Host Tools uses
-                    // scroll-heavy content that can otherwise steal the edge.
-                    .occlude()
-                    .bg(rgba(0x00000000))
-                    .child(
-                        div()
-                            .absolute()
-                            .left(px(context_sidebar_resize_divider_left()))
-                            .top_0()
-                            .bottom_0()
-                            .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
-                            .bg(if self.ai_sidebar_resizing {
-                                rgb(theme.accent)
-                            } else {
-                                rgba(0x00000000)
-                            }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                            this.start_ai_sidebar_resize(event, window, cx);
-                            window.prevent_default();
-                            cx.stop_propagation();
-                        }),
-                    ),
+                    .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
+                    .bg(if self.ai_sidebar_resizing {
+                        rgb(theme.accent)
+                    } else {
+                        rgba((theme.border << 8) | 0x80)
+                    }),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                    this.start_ai_sidebar_resize(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
             )
             .into_any_element()
     }
@@ -1408,20 +1420,37 @@ mod sidebar_resize_region_tests {
     use super::*;
 
     #[test]
-    fn context_sidebar_resize_hitbox_straddles_panel_edge() {
-        let hitbox_left = context_sidebar_resize_hitbox_left();
-        let hitbox_width = context_sidebar_resize_hitbox_width();
-        let hitbox_right = hitbox_left + hitbox_width;
-        let divider_left = context_sidebar_resize_divider_left();
+    fn context_sidebar_resize_gutter_is_layout_owned() {
+        let gutter_width = context_sidebar_resize_gutter_width();
 
-        // The right context sidebar is draggable only if the transparent
-        // hitbox crosses the panel's left edge. Keeping part of it outside the
-        // panel protects the resize affordance from scroll-heavy Host Tools
-        // content and prevents one-pixel-only regressions.
-        assert!(hitbox_left < 0.0);
-        assert!(hitbox_right > 0.0);
-        assert!(hitbox_width >= 8.0);
-        assert_eq!(divider_left, -hitbox_left);
-        assert!(divider_left < hitbox_width);
+        // The right context sidebar resize affordance must remain a frame-owned
+        // flex child, not an internal absolute overlay. Process pages use a
+        // GPUI List with interactive rows, and that content can steal an
+        // internal edge hitbox before resize starts.
+        assert!(gutter_width >= 8.0);
+        assert_eq!(
+            context_sidebar_content_width(360.0),
+            360.0 - gutter_width
+        );
+        assert_eq!(context_sidebar_content_width(0.0), 0.0);
+    }
+
+    #[test]
+    fn context_sidebar_frame_preserves_total_width_math() {
+        let gutter_width = context_sidebar_resize_gutter_width();
+        let minimum_sidebar_width = AI_SIDEBAR_MIN_WIDTH;
+        let maximum_sidebar_width = AI_SIDEBAR_MAX_WIDTH;
+
+        // The persisted/sidebar state width is the total frame width. Content
+        // width must be derived from it so dragging the gutter always resizes
+        // the same visual entity the user is touching.
+        assert_eq!(
+            gutter_width + context_sidebar_content_width(minimum_sidebar_width),
+            minimum_sidebar_width
+        );
+        assert_eq!(
+            gutter_width + context_sidebar_content_width(maximum_sidebar_width),
+            maximum_sidebar_width
+        );
     }
 }

@@ -1,6 +1,6 @@
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 
-const SYSTEM_HEALTH_SELECTOR_TRIGGER_HEIGHT: f32 = 38.0;
+const HOST_TOOLS_CONNECTION_ROW_HEIGHT: f32 = 32.0;
 const SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT: f32 = 36.0;
 const SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
 const SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS: usize = 4;
@@ -406,7 +406,14 @@ impl WorkspaceApp {
                     .gap_2()
                     .border_b_1()
                     .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_selector(&connections, selected_id, cx))
+                    .child(
+                        self.render_connection_switcher_row(
+                            &connections,
+                            selected_id,
+                            current.is_some(),
+                            cx,
+                        ),
+                    )
                     .child(self.render_host_process_search(cx))
                     .child(self.render_host_process_filter_row(cx))
                     .child(self.render_host_process_sort_row(rows.len(), cx)),
@@ -671,6 +678,7 @@ impl WorkspaceApp {
         let state = self.connection_monitor.host_process_list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
+        let separate_user_column = host_process_table_uses_separate_user_column(self.ai_sidebar_width);
         div()
             .w_full()
             .min_w_0()
@@ -681,7 +689,7 @@ impl WorkspaceApp {
             .overflow_hidden()
             // Processes are an operational table, not a card stack; keep the
             // header fixed while the GPUI List owns only the scrolling rows.
-            .child(self.render_host_process_table_header())
+            .child(self.render_host_process_table_header(separate_user_column))
             .child(
                 div()
                     .flex_1()
@@ -694,6 +702,7 @@ impl WorkspaceApp {
                             this.render_host_process_row(
                                 selected_id.as_str(),
                                 rows.get(index).cloned(),
+                                separate_user_column,
                                 cx,
                             )
                         })
@@ -702,7 +711,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_host_process_table_header(&self) -> AnyElement {
+    fn render_host_process_table_header(&self, separate_user_column: bool) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .flex_none()
@@ -723,15 +732,20 @@ impl WorkspaceApp {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_processes.sort.command")),
+                    .child(host_process_identity_header_label(
+                        &self.i18n,
+                        separate_user_column,
+                    )),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
-                    .truncate()
-                    .child(self.i18n.t("sidebar.host_processes.sort.user")),
-            )
+            .when(separate_user_column, |header| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
+                        .truncate()
+                        .child(self.i18n.t("sidebar.host_processes.sort.user")),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -761,6 +775,7 @@ impl WorkspaceApp {
         &self,
         connection_id: &str,
         process: Option<ResourceTopProcess>,
+        separate_user_column: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(process) = process else {
@@ -818,16 +833,30 @@ impl WorkspaceApp {
                             .font_family(mono_font.clone())
                             .child(process_display_name(&process)),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
-                            .child(user),
-                    )
+                    .when(!separate_user_column, |main| {
+                        main.child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex_1()
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(user.clone()),
+                        )
+                    })
+                    .when(separate_user_column, |main| {
+                        main.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(user.clone()),
+                        )
+                    })
                     .child(
                         div()
                             .flex_none()
@@ -922,7 +951,6 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|request| request.pid == process.pid);
         div()
-            .w_full()
             .flex_none()
             .flex()
             .items_center()
@@ -1611,8 +1639,14 @@ impl WorkspaceApp {
             .flex_col()
             .gap_2()
             .when(compact, |panel| panel.flex_1().min_h_0())
-            .child(self.render_connection_selector(&connections, selected_id, cx))
-            .child(self.render_monitor_panel_header(active_connection, is_running, !disabled, cx));
+            .child(self.render_monitor_panel_header(
+                &connections,
+                active_connection,
+                selected_id,
+                is_running,
+                !disabled,
+                cx,
+            ));
 
         if disabled || (!is_running && metrics.is_none()) {
             return panel
@@ -1950,74 +1984,132 @@ impl WorkspaceApp {
         panel.child(metric_body).into_any_element()
     }
 
-    fn render_connection_selector(
+    fn render_connection_switcher_row(
         &self,
         connections: &[MonitorConnectionOption],
         selected_id: &str,
+        is_running: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_label = connections
+        let Some(connection) = connections
             .iter()
             .find(|connection| connection.connection_id == selected_id)
-            .map(monitor_connection_label)
-            .unwrap_or_default();
-        let trigger = select_trigger_with_focus_visible(
-            &self.tokens,
-            selected_label,
-            false,
-            false,
-            // The monitor selector is pointer-opened today, but it should use
-            // the same modality gate as other native Select triggers.
-            browser_behavior::browser_focus_visible(
-                self.connection_monitor.selector_focus_origin.is_some(),
-                self.connection_monitor.selector_focus_origin,
-            ),
-        )
-        .font_family("monospace");
+            .or_else(|| connections.first())
+        else {
+            return div().into_any_element();
+        };
+
+        let theme = self.tokens.ui;
         let selected_index = monitor_connection_selected_index(connections, selected_id);
-        // The popup is painted inside this narrow panel, so reserve enough
-        // layout space while it is open instead of letting health cards overlap it.
-        let selector_bottom_margin = if self.connection_monitor.selector_open {
+        let can_switch = monitor_connection_can_switch(connections);
+        let focus_visible = browser_behavior::browser_focus_visible(
+            self.connection_monitor.selector_focus_origin.is_some(),
+            self.connection_monitor.selector_focus_origin,
+        );
+        // This is a host identity row first and a selector only when multiple
+        // live hosts exist. Keeping it visually inline avoids the old form-field
+        // dropdown sitting between the tabs and each Host Tools page.
+        let selector_bottom_margin = if can_switch && self.connection_monitor.selector_open {
             let visible_options = connections
                 .len()
                 .max(1)
                 .min(SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS) as f32;
-            SYSTEM_HEALTH_SELECTOR_TRIGGER_HEIGHT
-                + SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
+            SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
                 + (visible_options * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)
-                + SYSTEM_HEALTH_SELECTOR_GAP
+                + (SYSTEM_HEALTH_SELECTOR_GAP * 2.0)
         } else {
-            16.0
+            0.0
         };
-        let mut wrapper = div().relative().mb(px(selector_bottom_margin)).child(trigger.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
-                this.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Pointer);
-                if this.connection_monitor.selector_open {
-                    this.connection_monitor.selector_open = false;
-                    this.connection_monitor.selector_highlighted_index = None;
+        let mut trigger = div()
+            .h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_1()
+            .rounded(px(self.tokens.radii.md))
+            .when(can_switch, |row| row.cursor_pointer())
+            .when(can_switch && (self.connection_monitor.selector_open || focus_visible), |row| {
+                row.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA))
+            })
+            .when(can_switch, |row| {
+                row.hover(|hovered| hovered.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.connection_monitor.selector_focus_origin =
+                                Some(browser_behavior::BrowserFocusOrigin::Pointer);
+                            if this.connection_monitor.selector_open {
+                                this.connection_monitor.selector_open = false;
+                                this.connection_monitor.selector_highlighted_index = None;
+                            } else {
+                                let connections = this.monitor_connections();
+                                let selected_id = this
+                                    .connection_monitor
+                                    .selected_connection_id
+                                    .as_deref()
+                                    .unwrap_or_else(|| {
+                                        connections
+                                            .first()
+                                            .map(|connection| connection.connection_id.as_str())
+                                            .unwrap_or_default()
+                                    });
+                                this.connection_monitor.selector_highlighted_index = Some(
+                                    monitor_connection_selected_index(&connections, selected_id),
+                                );
+                                this.connection_monitor.selector_open = true;
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
+            })
+            .child(Self::render_lucide_icon(
+                LucideIcon::Server,
+                14.0,
+                if is_running {
+                    rgb(MONITOR_EMERALD)
                 } else {
-                    let connections = this.monitor_connections();
-                    let selected_id = this
-                        .connection_monitor
-                        .selected_connection_id
-                        .as_deref()
-                        .unwrap_or_else(|| {
-                            connections
-                                .first()
-                                .map(|connection| connection.connection_id.as_str())
-                                .unwrap_or_default()
-                        });
-                    this.connection_monitor.selector_highlighted_index =
-                        Some(monitor_connection_selected_index(&connections, selected_id));
-                    this.connection_monitor.selector_open = true;
-                }
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        ));
-        if self.connection_monitor.selector_open {
+                    rgb(theme.text_muted)
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .whitespace_nowrap()
+                    .text_size(px(13.0))
+                    .font_family("monospace")
+                    .text_color(rgb(theme.text))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "host-tools-connection-endpoint",
+                        connection.connection_id.as_str(),
+                        monitor_connection_label(connection),
+                        theme.text,
+                        cx,
+                    )),
+            );
+        if can_switch {
+            trigger = trigger.child(
+                div()
+                    .flex_none()
+                    .opacity(0.75)
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ChevronDown,
+                        14.0,
+                        rgb(theme.text_muted),
+                    )),
+            );
+        }
+
+        let mut wrapper = div()
+            .relative()
+            .mb(px(selector_bottom_margin))
+            .child(trigger);
+        if can_switch && self.connection_monitor.selector_open {
             let highlighted = self
                 .connection_monitor
                 .selector_highlighted_index
@@ -2025,7 +2117,7 @@ impl WorkspaceApp {
             let mut popup = select_event_boundary(
                 div()
                     .absolute()
-                    .top(px(SYSTEM_HEALTH_SELECTOR_TRIGGER_HEIGHT))
+                    .top(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT + SYSTEM_HEALTH_SELECTOR_GAP))
                     .left_0()
                     .right_0()
                     .overflow_hidden()
@@ -2096,7 +2188,10 @@ impl WorkspaceApp {
             return false;
         }
         let connections = self.monitor_connections();
-        if connections.is_empty() {
+        if !monitor_connection_can_switch(&connections) {
+            self.connection_monitor.selector_open = false;
+            self.connection_monitor.selector_highlighted_index = None;
+            self.connection_monitor.selector_focus_origin = None;
             return false;
         }
         let selected_id = self
@@ -2224,43 +2319,30 @@ impl WorkspaceApp {
 
     fn render_monitor_panel_header(
         &self,
+        connections: &[MonitorConnectionOption],
         connection: &MonitorConnectionOption,
+        selected_id: &str,
         is_running: bool,
         is_enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
-            .h(px(32.0))
+            .min_h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
             .w_full()
             .min_w_0()
             .flex()
-            .items_center()
+            .items_start()
             .gap_2()
             .px_1()
-            .child(Self::render_lucide_icon(
-                LucideIcon::Server,
-                14.0,
-                if is_running {
-                    rgb(MONITOR_EMERALD)
-                } else {
-                    rgb(theme.text_muted)
-                },
-            ))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.0))
-                    .truncate()
-                    .text_size(px(13.0))
-                    .font_family("monospace")
-                    .text_color(rgb(theme.text))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "system-health-connection-endpoint",
-                        connection.connection_id.as_str(),
-                        monitor_connection_label(connection),
-                        theme.text,
+                    .child(self.render_connection_switcher_row(
+                        connections,
+                        selected_id,
+                        is_running,
                         cx,
                     )),
             )
