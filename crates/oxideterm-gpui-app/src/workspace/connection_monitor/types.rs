@@ -16,8 +16,24 @@ use oxideterm_topology::{
     ConnectionTopologyLayout, ConnectionTopologySnapshot, TOPOLOGY_NODE_HEIGHT,
     TOPOLOGY_NODE_WIDTH, TopologyLayoutNode, TopologyViewStatus,
 };
+use oxideterm_ssh::SshCommandOutput;
 
 use super::*;
+
+const HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_PROCESS_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_PROCESS_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_PROCESS_USER_COLUMN_WIDTH: f32 = 64.0;
+const HOST_PROCESS_PID_COLUMN_WIDTH: f32 = 54.0;
+const HOST_PROCESS_CPU_COLUMN_WIDTH: f32 = 44.0;
+const HOST_PROCESS_MEMORY_COLUMN_WIDTH: f32 = 48.0;
+const HOST_PROCESS_TABLE_HEADER_TEXT_SIZE: f32 = 10.0;
+const HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE: f32 = 12.0;
+const HOST_PROCESS_TABLE_META_TEXT_SIZE: f32 = 10.0;
+const HOST_PROCESS_TABLE_VALUE_TEXT_SIZE: f32 = 11.0;
+const HOST_PROCESS_DETAIL_TEXT_SIZE: f32 = 11.0;
+const HOST_PROCESS_ACTION_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_PROCESS_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
@@ -155,30 +171,18 @@ impl MonitorConnectionOption {
     }
 }
 
-#[derive(Clone)]
-enum CompactMonitorRow {
-    Metric {
-        icon: LucideIcon,
-        label: String,
-        value: String,
-        value_color: u32,
-    },
-    Network {
-        rx: String,
-        tx: String,
-    },
-    Section {
-        icon: LucideIcon,
-        label: String,
-    },
-    Detail {
-        name: String,
-        value: String,
-        value_color: u32,
-    },
-    Retry {
-        connection_id: String,
-    },
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostProcessActionRequest {
+    connection_id: String,
+    pid: String,
+    command: String,
+    action: ProcessActionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostProcessActionDelivery {
+    request: HostProcessActionRequest,
+    result: Result<SshCommandOutput, String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -205,6 +209,20 @@ pub(super) struct ConnectionMonitorState {
     pub(super) profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
     compact_monitor_list_state: ListState,
     compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_process_search_query: String,
+    pub(in crate::workspace) host_process_search_focused: bool,
+    host_process_filter: ProcessFilter,
+    host_process_sort: ProcessSort,
+    host_process_sort_descending: bool,
+    pub(in crate::workspace) host_process_expanded_pid: Option<String>,
+    host_process_list_state: ListState,
+    host_process_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_process_renice_value: String,
+    pub(in crate::workspace) host_process_renice_focused: bool,
+    host_process_pending_confirm: Option<HostProcessActionRequest>,
+    host_process_action_running: Option<HostProcessActionRequest>,
+    host_process_action_rx: Option<std::sync::mpsc::Receiver<HostProcessActionDelivery>>,
+    host_process_action_polling: bool,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -238,6 +256,24 @@ impl ConnectionMonitorState {
                 ),
             ),
             compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_process_search_query: String::new(),
+            host_process_search_focused: false,
+            host_process_filter: ProcessFilter::All,
+            host_process_sort: ProcessSort::Memory,
+            host_process_sort_descending: true,
+            host_process_expanded_pid: None,
+            host_process_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_process_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_process_renice_value: "0".to_string(),
+            host_process_renice_focused: false,
+            host_process_pending_confirm: None,
+            host_process_action_running: None,
+            host_process_action_rx: None,
+            host_process_action_polling: false,
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

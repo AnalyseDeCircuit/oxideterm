@@ -71,7 +71,10 @@ impl WorkspaceApp {
             )
         }) || (self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-            && self.active_context_sidebar_tool == ContextSidebarTool::Monitor);
+            && matches!(
+                self.active_context_sidebar_tool,
+                ContextSidebarTool::Monitor | ContextSidebarTool::Processes
+            ));
         if !monitor_surface_visible {
             return;
         }

@@ -58,7 +58,63 @@
     },
     "active_sessions": "Phiên hoạt động",
     "no_sessions": "Không có phiên",
-    "add_new_connection": "Nhấn + để thêm kết nối"
+    "add_new_connection": "Nhấn + để thêm kết nối",
+    "host_processes": {
+      "search_placeholder": "Tìm tiến trình...",
+      "count_suffix": "tiến trình",
+      "sampling": "Đang lấy mẫu tiến trình...",
+      "empty": "Không có tiến trình phù hợp",
+      "unknown": "Không rõ",
+      "elapsed": "Thời gian chạy",
+      "filters": {
+        "all": "Tất cả",
+        "running": "Đang chạy",
+        "high_cpu": "CPU cao",
+        "high_memory": "Bộ nhớ cao"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "Bộ nhớ",
+        "pid": "PID",
+        "command": "Lệnh",
+        "user": "Người dùng"
+      },
+      "states": {
+        "running": "Đang chạy",
+        "sleeping": "Ngủ",
+        "waiting": "Đang chờ",
+        "stopped": "Đã dừng",
+        "zombie": "Zombie",
+        "idle": "Rảnh",
+        "unknown": "Không rõ"
+      },
+      "actions": {
+        "column": "Thao tác",
+        "term": "Kết thúc",
+        "kill": "Cưỡng bức",
+        "stop": "Tạm dừng",
+        "cont": "Tiếp tục",
+        "renice": "Ưu tiên",
+        "apply": "Điều chỉnh",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "Xác nhận thao tác tiến trình",
+        "cancel": "Hủy",
+        "term_desc": "Gửi TERM tới PID {{pid}} ({{command}})?",
+        "kill_desc": "Buộc dừng PID {{pid}} ({{command}}) bằng KILL. Không thể hoàn tác.",
+        "stop_desc": "Tạm dừng PID {{pid}} ({{command}}) bằng STOP?",
+        "cont_desc": "Tiếp tục PID {{pid}} ({{command}}) bằng CONT?",
+        "renice_desc": "Thay đổi độ ưu tiên của PID {{pid}} ({{command}})?"
+      },
+      "toast": {
+        "action_already_running": "Đang có một thao tác tiến trình chạy.",
+        "invalid_nice": "Nhập giá trị nice từ -20 đến 19.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "action_failed": "Thao tác tiến trình thất bại.",
+        "partial_support": "Quản lý tiến trình chỉ được hỗ trợ một phần trên {{os}}."
+      }
+    }
   },
   "sessions": {
     "tree": {

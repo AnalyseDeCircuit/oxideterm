@@ -131,50 +131,20 @@ fn connection_pool_keep_alive_tooltip(
 }
 
 fn threshold_color(value: Option<f64>) -> u32 {
-    match value {
-        None => 0x94a3b8,
-        Some(value) if value < 70.0 => MONITOR_EMERALD,
-        Some(value) if value < 90.0 => MONITOR_AMBER,
-        Some(_) => MONITOR_RED,
-    }
+    monitor_value_level_color(percent_level(value), 0x94a3b8)
 }
 
 fn rtt_color(value: Option<u64>) -> u32 {
-    match value {
-        None => 0x94a3b8,
-        Some(value) if value < 100 => MONITOR_EMERALD,
-        Some(value) if value < 300 => MONITOR_AMBER,
-        Some(_) => MONITOR_RED,
-    }
+    monitor_value_level_color(rtt_level(value), 0x94a3b8)
 }
 
-fn metrics_source_label_key(source: MetricsSource) -> &'static str {
-    match source {
-        MetricsSource::Full => "profiler.panel.source_full",
-        MetricsSource::Partial => "profiler.panel.source_partial",
-        MetricsSource::RttOnly => "profiler.panel.source_rtt_only",
-        MetricsSource::Failed => "profiler.panel.source_failed",
-        MetricsSource::Unsupported => "profiler.panel.source_unsupported",
+fn monitor_value_level_color(level: MonitorValueLevel, muted_color: u32) -> u32 {
+    match level {
+        MonitorValueLevel::Muted => muted_color,
+        MonitorValueLevel::Normal => MONITOR_EMERALD,
+        MonitorValueLevel::Warning => MONITOR_AMBER,
+        MonitorValueLevel::Critical => MONITOR_RED,
     }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{} {}", bytes, UNITS[unit])
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
-fn format_rate(bytes: u64) -> String {
-    format!("{}/s", format_bytes(bytes))
 }
 
 fn render_sparkline(values: Vec<Option<f64>>, color: u32) -> AnyElement {

@@ -58,7 +58,63 @@
     },
     "active_sessions": "Aktive Sitzungen",
     "no_sessions": "Keine Sitzungen",
-    "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen"
+    "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen",
+    "host_processes": {
+      "search_placeholder": "Prozesse suchen...",
+      "count_suffix": "Prozesse",
+      "sampling": "Prozesse werden erfasst...",
+      "empty": "Keine passenden Prozesse",
+      "unknown": "Unbekannt",
+      "elapsed": "Laufzeit",
+      "filters": {
+        "all": "Alle",
+        "running": "Laufend",
+        "high_cpu": "Hohe CPU",
+        "high_memory": "Hoher Speicher"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "Speicher",
+        "pid": "PID",
+        "command": "Befehl",
+        "user": "Benutzer"
+      },
+      "states": {
+        "running": "Laufend",
+        "sleeping": "Schlafend",
+        "waiting": "Wartend",
+        "stopped": "Gestoppt",
+        "zombie": "Zombie",
+        "idle": "Leerlauf",
+        "unknown": "Unbekannt"
+      },
+      "actions": {
+        "column": "Aktionen",
+        "term": "Beenden",
+        "kill": "Töten",
+        "stop": "Pause",
+        "cont": "Weiter",
+        "renice": "Priorität",
+        "apply": "Setzen",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "Prozessaktion bestätigen",
+        "cancel": "Abbrechen",
+        "term_desc": "TERM an PID {{pid}} ({{command}}) senden?",
+        "kill_desc": "PID {{pid}} ({{command}}) mit KILL erzwingen. Dies kann nicht rückgängig gemacht werden.",
+        "stop_desc": "PID {{pid}} ({{command}}) mit STOP pausieren?",
+        "cont_desc": "PID {{pid}} ({{command}}) mit CONT fortsetzen?",
+        "renice_desc": "Priorität für PID {{pid}} ({{command}}) ändern?"
+      },
+      "toast": {
+        "action_already_running": "Es läuft bereits eine Prozessaktion.",
+        "invalid_nice": "Geben Sie einen nice-Wert von -20 bis 19 ein.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "action_failed": "Prozessaktion fehlgeschlagen.",
+        "partial_support": "Prozessverwaltung wird unter {{os}} nur teilweise unterstützt."
+      }
+    }
   },
   "sessions": {
     "tree": {

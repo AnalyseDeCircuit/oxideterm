@@ -827,6 +827,7 @@ fn profiler_host_calls_map_node_ids_to_tauri_metrics_shape() {
             net_rx_bytes_per_sec: Some(100),
             net_tx_bytes_per_sec: Some(200),
             net_interfaces: Vec::new(),
+            gpus: Vec::new(),
             top_processes: Vec::new(),
             ssh_rtt_ms: Some(9),
             source: oxideterm_connection_monitor::MetricsSource::Full,

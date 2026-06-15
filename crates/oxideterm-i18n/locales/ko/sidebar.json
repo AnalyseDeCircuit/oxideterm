@@ -58,7 +58,63 @@
     },
     "active_sessions": "활성 세션",
     "no_sessions": "세션 없음",
-    "add_new_connection": "+를 클릭하여 새 연결 추가"
+    "add_new_connection": "+를 클릭하여 새 연결 추가",
+    "host_processes": {
+      "search_placeholder": "프로세스 검색...",
+      "count_suffix": "개 프로세스",
+      "sampling": "프로세스 샘플링 중...",
+      "empty": "일치하는 프로세스가 없습니다",
+      "unknown": "알 수 없음",
+      "elapsed": "실행 시간",
+      "filters": {
+        "all": "전체",
+        "running": "실행 중",
+        "high_cpu": "높은 CPU",
+        "high_memory": "높은 메모리"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "메모리",
+        "pid": "PID",
+        "command": "명령",
+        "user": "사용자"
+      },
+      "states": {
+        "running": "실행 중",
+        "sleeping": "대기",
+        "waiting": "대기 중",
+        "stopped": "중지됨",
+        "zombie": "좀비",
+        "idle": "유휴",
+        "unknown": "알 수 없음"
+      },
+      "actions": {
+        "column": "작업",
+        "term": "종료",
+        "kill": "강제",
+        "stop": "중지",
+        "cont": "재개",
+        "renice": "우선순위",
+        "apply": "조정",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "프로세스 작업 확인",
+        "cancel": "취소",
+        "term_desc": "PID {{pid}}({{command}})에 TERM을 보낼까요?",
+        "kill_desc": "PID {{pid}}({{command}})를 KILL로 강제 종료합니다. 되돌릴 수 없습니다.",
+        "stop_desc": "PID {{pid}}({{command}})를 STOP으로 일시 중지할까요?",
+        "cont_desc": "PID {{pid}}({{command}})를 CONT로 재개할까요?",
+        "renice_desc": "PID {{pid}}({{command}})의 우선순위를 변경할까요?"
+      },
+      "toast": {
+        "action_already_running": "프로세스 작업이 이미 실행 중입니다.",
+        "invalid_nice": "-20부터 19 사이의 nice 값을 입력하세요.",
+        "connection_missing": "선택한 연결을 사용할 수 없습니다.",
+        "action_failed": "프로세스 작업에 실패했습니다.",
+        "partial_support": "{{os}}의 프로세스 관리는 부분 지원입니다."
+      }
+    }
   },
   "sessions": {
     "tree": {

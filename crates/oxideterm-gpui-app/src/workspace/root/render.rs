@@ -11,6 +11,7 @@ impl Render for WorkspaceApp {
         self.poll_forwarding_worker_results(cx);
         self.poll_graphics_worker_results(window, cx);
         self.poll_connection_monitor_updates(false, cx);
+        self.poll_host_process_action_results(cx);
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
@@ -158,6 +159,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_tab_close_confirm_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_host_process_confirm_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -171,6 +175,9 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_active_text_input_navigation(&event.keystroke, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_process_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_native_plugin_confirm_key(event, cx) {
@@ -694,6 +701,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.tab_close_confirm.is_some(), |root| {
                 root.child(self.render_tab_close_confirm_dialog(cx))
+            })
+            .when_some(self.render_host_process_confirm_dialog(cx), |root, dialog| {
+                root.child(dialog)
             })
             .when_some(self.render_native_plugin_confirm_dialog(cx), |root, dialog| {
                 root.child(dialog)

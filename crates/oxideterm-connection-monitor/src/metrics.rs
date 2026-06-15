@@ -43,10 +43,37 @@ pub struct ResourceNetInterface {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResourceGpu {
+    pub index: u32,
+    pub name: String,
+    pub utilization_percent: Option<f64>,
+    pub memory_used: Option<u64>,
+    pub memory_total: Option<u64>,
+    pub memory_percent: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceTopProcess {
     pub pid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ppid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<f64>,
     pub memory_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rss_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vsz_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed: Option<String>,
     pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_command: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,6 +101,8 @@ pub struct ResourceMetrics {
     pub net_rx_bytes_per_sec: Option<u64>,
     pub net_tx_bytes_per_sec: Option<u64>,
     pub net_interfaces: Vec<ResourceNetInterface>,
+    #[serde(default)]
+    pub gpus: Vec<ResourceGpu>,
     pub top_processes: Vec<ResourceTopProcess>,
     pub ssh_rtt_ms: Option<u64>,
     pub source: MetricsSource,
@@ -104,6 +133,7 @@ impl ResourceMetrics {
             net_rx_bytes_per_sec: None,
             net_tx_bytes_per_sec: None,
             net_interfaces: Vec::new(),
+            gpus: Vec::new(),
             top_processes: Vec::new(),
             ssh_rtt_ms: None,
             source,
@@ -193,6 +223,7 @@ pub fn parse_resource_metrics(
     let disk = parse_root_disk_usage(&disks).or_else(|| parse_disk_usage_legacy(output));
     let load = parse_loadavg(output);
     let nproc = parse_nproc(output);
+    let gpus = parse_gpus(output);
     let top_processes = parse_top_processes(output);
     let has_memory = mem.is_some();
 
@@ -336,6 +367,7 @@ pub fn parse_resource_metrics(
         net_rx_bytes_per_sec: net_rx_rate,
         net_tx_bytes_per_sec: net_tx_rate,
         net_interfaces,
+        gpus,
         top_processes,
         ssh_rtt_ms: None,
         source,
@@ -642,6 +674,26 @@ pub fn parse_top_processes(output: &str) -> Vec<ResourceTopProcess> {
     section
         .lines()
         .filter_map(|line| {
+            let parts = line.split('\t').collect::<Vec<_>>();
+            if parts.len() >= 11 {
+                let memory_percent = parts[5].trim().parse::<f64>().ok()?;
+                let rss_bytes = parse_process_kib(parts[6]);
+                let vsz_bytes = parse_process_kib(parts[7]);
+                return Some(ResourceTopProcess {
+                    pid: parts[0].trim().to_string(),
+                    ppid: clean_process_field(parts[1]),
+                    user: clean_process_field(parts[2]),
+                    state: clean_process_field(parts[3]),
+                    cpu_percent: parts[4].trim().parse::<f64>().ok(),
+                    memory_percent,
+                    rss_bytes,
+                    vsz_bytes,
+                    elapsed: clean_process_field(parts[8]),
+                    command: parts[9].trim().to_string(),
+                    full_command: clean_process_field(parts[10]),
+                });
+            }
+
             let parts = line.splitn(3, '\t').collect::<Vec<_>>();
             if parts.len() < 3 {
                 return None;
@@ -649,11 +701,154 @@ pub fn parse_top_processes(output: &str) -> Vec<ResourceTopProcess> {
             let memory_percent = parts[1].trim().parse::<f64>().ok()?;
             Some(ResourceTopProcess {
                 pid: parts[0].trim().to_string(),
+                ppid: None,
+                user: None,
+                state: None,
+                cpu_percent: None,
                 memory_percent,
+                rss_bytes: None,
+                vsz_bytes: None,
+                elapsed: None,
                 command: parts[2].trim().to_string(),
+                full_command: None,
             })
         })
         .collect()
+}
+
+pub fn parse_gpus(output: &str) -> Vec<ResourceGpu> {
+    let Some(section) = extract_section(output, "GPUS") else {
+        return parse_intel_gpu_top(output).into_iter().collect();
+    };
+    let mut gpus = section
+        .lines()
+        .filter_map(|line| parse_gpu_line(line.trim()))
+        .collect::<Vec<_>>();
+    if !gpus
+        .iter()
+        .any(|gpu| gpu.name.to_ascii_lowercase().contains("intel"))
+        && let Some(intel_gpu) = parse_intel_gpu_top(output)
+    {
+        gpus.push(intel_gpu);
+    }
+    gpus
+}
+
+fn parse_gpu_line(line: &str) -> Option<ResourceGpu> {
+    if line.is_empty() {
+        return None;
+    }
+    let fields = if line.contains('\t') {
+        line.split('\t')
+            .map(str::trim)
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+        if parts.len() < 5 {
+            return None;
+        }
+        vec![
+            parts[0].to_string(),
+            parts[1..parts.len().saturating_sub(3)].join(", "),
+            parts[parts.len() - 3].to_string(),
+            parts[parts.len() - 2].to_string(),
+            parts[parts.len() - 1].to_string(),
+        ]
+    };
+    if fields.len() < 5 {
+        return None;
+    }
+
+    let memory_used = parse_gpu_mib(&fields[3]);
+    let memory_total = parse_gpu_mib(&fields[4]);
+    Some(ResourceGpu {
+        index: fields[0].parse().ok()?,
+        name: fields[1].to_string(),
+        utilization_percent: parse_gpu_percent(&fields[2]),
+        memory_used,
+        memory_total,
+        memory_percent: match (memory_used, memory_total) {
+            (Some(used), Some(total)) => percent(used, total),
+            _ => None,
+        },
+    })
+}
+
+fn parse_gpu_percent(value: &str) -> Option<f64> {
+    let trimmed = value.trim().trim_end_matches('%').trim();
+    if trimmed.eq_ignore_ascii_case("N/A") {
+        return None;
+    }
+    trimmed
+        .parse::<f64>()
+        .ok()
+        .map(|value| value.clamp(0.0, 100.0))
+}
+
+fn parse_gpu_mib(value: &str) -> Option<u64> {
+    let trimmed = value
+        .trim()
+        .trim_end_matches("MiB")
+        .trim_end_matches("Mib")
+        .trim_end_matches("MB")
+        .trim();
+    if trimmed.eq_ignore_ascii_case("N/A") {
+        return None;
+    }
+    trimmed.parse::<f64>().ok().map(|mib| {
+        if mib <= 0.0 {
+            0
+        } else {
+            (mib * 1024.0 * 1024.0).round() as u64
+        }
+    })
+}
+
+fn parse_intel_gpu_top(output: &str) -> Option<ResourceGpu> {
+    let section = extract_section(output, "GPUS_INTEL_TOP")?;
+    let utilization = parse_max_intel_busy_percent(section)?;
+    Some(ResourceGpu {
+        index: 0,
+        name: "Intel GPU".to_string(),
+        utilization_percent: Some(utilization),
+        memory_used: None,
+        memory_total: None,
+        memory_percent: None,
+    })
+}
+
+fn parse_max_intel_busy_percent(section: &str) -> Option<f64> {
+    let mut max_busy: Option<f64> = None;
+    let mut rest = section;
+    while let Some(position) = rest.find("\"busy\"") {
+        rest = &rest[position + "\"busy\"".len()..];
+        let Some(colon) = rest.find(':') else {
+            continue;
+        };
+        let after_colon = rest[colon + 1..].trim_start();
+        let number = after_colon
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+            .collect::<String>();
+        if let Ok(value) = number.parse::<f64>() {
+            let clamped = value.clamp(0.0, 100.0);
+            max_busy = Some(match max_busy {
+                Some(current) => current.max(clamped),
+                None => clamped,
+            });
+        }
+    }
+    max_busy
+}
+
+fn clean_process_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty() && trimmed != "-").then(|| trimmed.to_string())
+}
+
+fn parse_process_kib(value: &str) -> Option<u64> {
+    value.trim().parse::<u64>().ok().map(|kib| kib * 1024)
 }
 
 fn percent(used: u64, total: u64) -> Option<f64> {
@@ -691,6 +886,8 @@ Inter-|   Receive                                                |  Transmit
 ===DISKS===
 /	53687091200	107374182400	50
 /data	10737418240	53687091200	20
+===GPUS===
+0	NVIDIA A100-SXM4-40GB	76	20480	40960
 ===TOPPROCS===
 123	12.5	postgres
 456	8.0	rust-analyzer
@@ -713,6 +910,11 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(metrics.disk_total, Some(107_374_182_400));
         assert_eq!(metrics.disk_percent, Some(50.0));
         assert_eq!(metrics.disks.len(), 2);
+        assert_eq!(metrics.gpus.len(), 1);
+        assert_eq!(metrics.gpus[0].utilization_percent, Some(76.0));
+        assert_eq!(metrics.gpus[0].memory_used, Some(20_480 * 1024 * 1024));
+        assert_eq!(metrics.gpus[0].memory_total, Some(40_960 * 1024 * 1024));
+        assert_eq!(metrics.gpus[0].memory_percent, Some(50.0));
         assert_eq!(metrics.top_processes.len(), 2);
         assert_eq!(metrics.net_interfaces.len(), 1);
         assert_eq!(metrics.load_avg_1, Some(0.52));
@@ -720,6 +922,118 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(metrics.cpu_per_core.len(), 2);
         assert_eq!(metrics.net_rx_bytes_per_sec, None);
         assert_eq!(metrics.net_tx_bytes_per_sec, None);
+    }
+
+    #[test]
+    fn parses_extended_process_snapshot_fields() {
+        let output = r#"===TOPPROCS===
+1363656	1	www-data	S	12.3	4.5	262144	524288	01:02:03	node	/usr/bin/node /srv/app/server.js
+===END==="#;
+
+        let processes = parse_top_processes(output);
+
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0].pid, "1363656");
+        assert_eq!(processes[0].ppid.as_deref(), Some("1"));
+        assert_eq!(processes[0].user.as_deref(), Some("www-data"));
+        assert_eq!(processes[0].state.as_deref(), Some("S"));
+        assert_eq!(processes[0].cpu_percent, Some(12.3));
+        assert_eq!(processes[0].memory_percent, 4.5);
+        assert_eq!(processes[0].rss_bytes, Some(262144 * 1024));
+        assert_eq!(processes[0].vsz_bytes, Some(524288 * 1024));
+        assert_eq!(processes[0].elapsed.as_deref(), Some("01:02:03"));
+        assert_eq!(processes[0].command, "node");
+        assert_eq!(
+            processes[0].full_command.as_deref(),
+            Some("/usr/bin/node /srv/app/server.js")
+        );
+    }
+
+    #[test]
+    fn parses_proc_process_snapshot_with_user_and_command() {
+        let output = r#"===TOPPROCS===
+1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
+===END==="#;
+
+        let processes = parse_top_processes(output);
+
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0].pid, "1362735");
+        assert_eq!(processes[0].user.as_deref(), Some("lips"));
+        assert_eq!(processes[0].state.as_deref(), Some("R"));
+        assert_eq!(processes[0].cpu_percent, Some(1.5));
+        assert_eq!(processes[0].memory_percent, 1.0);
+        assert_eq!(processes[0].elapsed, None);
+        assert_eq!(processes[0].command, "node");
+        assert_eq!(
+            processes[0].full_command.as_deref(),
+            Some("/usr/bin/node /srv/app/server.js")
+        );
+    }
+
+    #[test]
+    fn parses_nvidia_smi_csv_gpu_snapshot() {
+        let output = r#"===GPUS===
+0, NVIDIA RTX 6000 Ada Generation, 97, 12000, 49140
+1, NVIDIA L40S, N/A, 512, 46068
+===END==="#;
+
+        let gpus = parse_gpus(output);
+
+        assert_eq!(gpus.len(), 2);
+        assert_eq!(gpus[0].index, 0);
+        assert_eq!(gpus[0].name, "NVIDIA RTX 6000 Ada Generation");
+        assert_eq!(gpus[0].utilization_percent, Some(97.0));
+        assert_eq!(gpus[0].memory_used, Some(12_000 * 1024 * 1024));
+        assert_eq!(gpus[0].memory_total, Some(49_140 * 1024 * 1024));
+        assert_eq!(gpus[1].index, 1);
+        assert_eq!(gpus[1].utilization_percent, None);
+        assert_eq!(
+            gpus[1].memory_percent,
+            percent(512 * 1024 * 1024, 46_068 * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn parses_sysfs_and_windows_gpu_snapshot_rows() {
+        let output = r#"===GPUS===
+0	AMD GPU	83	2048.5	16384
+1, Intel Arc A770, 12.5, 4096, 16384
+===END==="#;
+
+        let gpus = parse_gpus(output);
+
+        assert_eq!(gpus.len(), 2);
+        assert_eq!(gpus[0].name, "AMD GPU");
+        assert_eq!(gpus[0].utilization_percent, Some(83.0));
+        assert_eq!(
+            gpus[0].memory_used,
+            Some((2048.5_f64 * 1024.0 * 1024.0).round() as u64)
+        );
+        assert_eq!(gpus[1].name, "Intel Arc A770");
+        assert_eq!(gpus[1].utilization_percent, Some(12.5));
+        assert_eq!(gpus[1].memory_percent, Some(25.0));
+    }
+
+    #[test]
+    fn parses_intel_gpu_top_json_fallback() {
+        let output = r#"===GPUS_INTEL_TOP===
+[
+  {
+    "engines": {
+      "Render/3D/0": {"busy": 42.5, "unit": "%"},
+      "Blitter/0": {"busy": 8.0, "unit": "%"}
+    }
+  }
+]
+===END==="#;
+
+        let gpus = parse_gpus(output);
+
+        assert_eq!(gpus.len(), 1);
+        assert_eq!(gpus[0].name, "Intel GPU");
+        assert_eq!(gpus[0].utilization_percent, Some(42.5));
+        assert_eq!(gpus[0].memory_used, None);
     }
 
     #[test]

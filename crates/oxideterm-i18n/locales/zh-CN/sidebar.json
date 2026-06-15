@@ -58,7 +58,63 @@
     },
     "active_sessions": "活动会话",
     "no_sessions": "暂无会话",
-    "add_new_connection": "点击 + 添加新连接"
+    "add_new_connection": "点击 + 添加新连接",
+    "host_processes": {
+      "search_placeholder": "搜索进程...",
+      "count_suffix": "个进程",
+      "sampling": "正在采样进程...",
+      "empty": "没有匹配的进程",
+      "unknown": "未知",
+      "elapsed": "运行时间",
+      "filters": {
+        "all": "全部",
+        "running": "运行中",
+        "high_cpu": "高 CPU",
+        "high_memory": "高内存"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "内存",
+        "pid": "PID",
+        "command": "命令",
+        "user": "用户"
+      },
+      "states": {
+        "running": "运行中",
+        "sleeping": "睡眠",
+        "waiting": "等待",
+        "stopped": "已停止",
+        "zombie": "僵尸",
+        "idle": "空闲",
+        "unknown": "未知"
+      },
+      "actions": {
+        "column": "操作",
+        "term": "终止",
+        "kill": "强杀",
+        "stop": "暂停",
+        "cont": "恢复",
+        "renice": "优先级",
+        "apply": "调整",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "确认进程操作",
+        "cancel": "取消",
+        "term_desc": "要向 PID {{pid}}（{{command}}）发送 TERM 吗？",
+        "kill_desc": "要用 KILL 强制结束 PID {{pid}}（{{command}}）吗？此操作不可撤销。",
+        "stop_desc": "要用 STOP 暂停 PID {{pid}}（{{command}}）吗？",
+        "cont_desc": "要用 CONT 恢复 PID {{pid}}（{{command}}）吗？",
+        "renice_desc": "要调整 PID {{pid}}（{{command}}）的优先级吗？"
+      },
+      "toast": {
+        "action_already_running": "已有进程操作正在执行。",
+        "invalid_nice": "请输入 -20 到 19 之间的 nice 值。",
+        "connection_missing": "所选连接已不可用。",
+        "action_failed": "进程操作失败。",
+        "partial_support": "{{os}} 上的进程管理为部分支持。"
+      }
+    }
   },
   "sessions": {
     "tree": {

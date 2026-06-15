@@ -58,7 +58,63 @@
     },
     "active_sessions": "使用中的工作階段",
     "no_sessions": "無工作階段",
-    "add_new_connection": "按 + 新增連線"
+    "add_new_connection": "按 + 新增連線",
+    "host_processes": {
+      "search_placeholder": "搜尋程序...",
+      "count_suffix": "個程序",
+      "sampling": "正在取樣程序...",
+      "empty": "沒有符合的程序",
+      "unknown": "未知",
+      "elapsed": "執行時間",
+      "filters": {
+        "all": "全部",
+        "running": "執行中",
+        "high_cpu": "高 CPU",
+        "high_memory": "高記憶體"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "記憶體",
+        "pid": "PID",
+        "command": "命令",
+        "user": "使用者"
+      },
+      "states": {
+        "running": "執行中",
+        "sleeping": "睡眠",
+        "waiting": "等待",
+        "stopped": "已停止",
+        "zombie": "殭屍",
+        "idle": "閒置",
+        "unknown": "未知"
+      },
+      "actions": {
+        "column": "操作",
+        "term": "終止",
+        "kill": "強制",
+        "stop": "暫停",
+        "cont": "恢復",
+        "renice": "優先級",
+        "apply": "調整",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "確認程序操作",
+        "cancel": "取消",
+        "term_desc": "要向 PID {{pid}}（{{command}}）傳送 TERM 嗎？",
+        "kill_desc": "要用 KILL 強制結束 PID {{pid}}（{{command}}）嗎？此操作無法復原。",
+        "stop_desc": "要用 STOP 暫停 PID {{pid}}（{{command}}）嗎？",
+        "cont_desc": "要用 CONT 恢復 PID {{pid}}（{{command}}）嗎？",
+        "renice_desc": "要調整 PID {{pid}}（{{command}}）的優先權嗎？"
+      },
+      "toast": {
+        "action_already_running": "已有程序操作正在執行。",
+        "invalid_nice": "請輸入 -20 到 19 之間的 nice 值。",
+        "connection_missing": "所選連線已無法使用。",
+        "action_failed": "程序操作失敗。",
+        "partial_support": "{{os}} 上的程序管理為部分支援。"
+      }
+    }
   },
   "sessions": {
     "tree": {

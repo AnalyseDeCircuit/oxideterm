@@ -62,8 +62,17 @@ use gpui::{
 use gpui_component::scroll::ScrollableElement;
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
-    ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
-    MetricsSource, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
+    CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
+    ConnectionPoolMonitorStats, MetricsSource, MonitorListRow, MonitorMetricKind,
+    MonitorSectionKind, MonitorValueLevel, ProcessActionKind, ProcessCommandCapability,
+    ProcessFilter, ProcessSort, ProfilerRegistry, ProfilerUpdate, ResourceMetrics,
+    ResourceTopProcess, build_process_action_command, compact_monitor_row_signature,
+    compact_monitor_rows, disk_list_rows, format_bytes, format_rate, gpu_list_rows,
+    gpu_memory_percent, gpu_memory_summary, gpu_utilization_percent, interface_list_rows,
+    metrics_source_label_key, percent_level, process_action_failure_message,
+    process_action_succeeded, process_action_success_message, process_display_command,
+    process_display_name, process_row_signature, process_state_label_key,
+    resource_metrics_is_rtt_only, rtt_level, top_process_list_rows, visible_process_rows,
 };
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,

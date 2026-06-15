@@ -58,7 +58,63 @@
     },
     "active_sessions": "アクティブなセッション",
     "no_sessions": "セッションなし",
-    "add_new_connection": "+ をクリックして新しい接続を追加"
+    "add_new_connection": "+ をクリックして新しい接続を追加",
+    "host_processes": {
+      "search_placeholder": "プロセスを検索...",
+      "count_suffix": "件のプロセス",
+      "sampling": "プロセスをサンプリング中...",
+      "empty": "一致するプロセスはありません",
+      "unknown": "不明",
+      "elapsed": "実行時間",
+      "filters": {
+        "all": "すべて",
+        "running": "実行中",
+        "high_cpu": "高 CPU",
+        "high_memory": "高メモリ"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "メモリ",
+        "pid": "PID",
+        "command": "コマンド",
+        "user": "ユーザー"
+      },
+      "states": {
+        "running": "実行中",
+        "sleeping": "スリープ",
+        "waiting": "待機",
+        "stopped": "停止",
+        "zombie": "ゾンビ",
+        "idle": "アイドル",
+        "unknown": "不明"
+      },
+      "actions": {
+        "column": "操作",
+        "term": "終了",
+        "kill": "強制",
+        "stop": "一時停止",
+        "cont": "再開",
+        "renice": "優先度",
+        "apply": "変更",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "プロセス操作の確認",
+        "cancel": "キャンセル",
+        "term_desc": "PID {{pid}}（{{command}}）に TERM を送信しますか？",
+        "kill_desc": "PID {{pid}}（{{command}}）を KILL で強制終了します。元に戻せません。",
+        "stop_desc": "PID {{pid}}（{{command}}）を STOP で一時停止しますか？",
+        "cont_desc": "PID {{pid}}（{{command}}）を CONT で再開しますか？",
+        "renice_desc": "PID {{pid}}（{{command}}）の優先度を変更しますか？"
+      },
+      "toast": {
+        "action_already_running": "プロセス操作を実行中です。",
+        "invalid_nice": "nice 値は -20 から 19 の範囲で入力してください。",
+        "connection_missing": "選択した接続は利用できません。",
+        "action_failed": "プロセス操作に失敗しました。",
+        "partial_support": "{{os}} のプロセス管理は部分対応です。"
+      }
+    }
   },
   "sessions": {
     "tree": {

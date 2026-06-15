@@ -58,7 +58,63 @@
     },
     "active_sessions": "Sessões ativas",
     "no_sessions": "Nenhuma sessão",
-    "add_new_connection": "Clique em + para adicionar uma conexão"
+    "add_new_connection": "Clique em + para adicionar uma conexão",
+    "host_processes": {
+      "search_placeholder": "Buscar processos...",
+      "count_suffix": "processos",
+      "sampling": "Amostrando processos...",
+      "empty": "Nenhum processo correspondente",
+      "unknown": "Desconhecido",
+      "elapsed": "Tempo",
+      "filters": {
+        "all": "Todos",
+        "running": "Em execução",
+        "high_cpu": "CPU alta",
+        "high_memory": "Memória alta"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "Memória",
+        "pid": "PID",
+        "command": "Comando",
+        "user": "Usuário"
+      },
+      "states": {
+        "running": "Em execução",
+        "sleeping": "Dormindo",
+        "waiting": "Aguardando",
+        "stopped": "Parado",
+        "zombie": "Zumbi",
+        "idle": "Ocioso",
+        "unknown": "Desconhecido"
+      },
+      "actions": {
+        "column": "Ações",
+        "term": "Encerrar",
+        "kill": "Forçar",
+        "stop": "Pausar",
+        "cont": "Retomar",
+        "renice": "Prioridade",
+        "apply": "Ajustar",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "Confirmar ação do processo",
+        "cancel": "Cancelar",
+        "term_desc": "Enviar TERM para o PID {{pid}} ({{command}})?",
+        "kill_desc": "Forçar o PID {{pid}} ({{command}}) com KILL. Isso não pode ser desfeito.",
+        "stop_desc": "Pausar o PID {{pid}} ({{command}}) com STOP?",
+        "cont_desc": "Retomar o PID {{pid}} ({{command}}) com CONT?",
+        "renice_desc": "Alterar a prioridade do PID {{pid}} ({{command}})?"
+      },
+      "toast": {
+        "action_already_running": "Uma ação de processo já está em execução.",
+        "invalid_nice": "Informe um valor nice entre -20 e 19.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "action_failed": "A ação do processo falhou.",
+        "partial_support": "O gerenciamento de processos é parcial em {{os}}."
+      }
+    }
   },
   "sessions": {
     "tree": {

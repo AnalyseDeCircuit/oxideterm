@@ -396,8 +396,15 @@ impl WorkspaceApp {
             .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor)
             || (self.context_sidebar_visible()
                 && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-                && self.active_context_sidebar_tool == ContextSidebarTool::Monitor);
+                && matches!(
+                    self.active_context_sidebar_tool,
+                    ContextSidebarTool::Monitor | ContextSidebarTool::Processes
+                ));
         if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
+            return;
+        }
+
+        if self.handle_host_process_search_key(event, cx) {
             return;
         }
 

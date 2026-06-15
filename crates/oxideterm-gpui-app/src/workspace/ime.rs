@@ -35,6 +35,8 @@ pub(super) enum WorkspaceImeTarget {
     Search,
     TerminalCommandBar,
     TerminalCastSearch,
+    HostProcessSearch,
+    HostProcessRenice,
     QuickCommand(QuickCommandInput),
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
@@ -81,6 +83,8 @@ impl WorkspaceImeTarget {
             Self::Search => 1,
             Self::TerminalCommandBar => 2,
             Self::TerminalCastSearch => 3,
+            Self::HostProcessSearch => 6,
+            Self::HostProcessRenice => 7,
             Self::QuickCommand(input) => 500 + input.anchor_key(),
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
@@ -420,6 +424,13 @@ impl WorkspaceApp {
 
         if self.shortcuts_modal.open {
             return Some(WorkspaceImeTarget::ShortcutsModalSearch);
+        }
+
+        if self.connection_monitor.host_process_search_focused {
+            return Some(WorkspaceImeTarget::HostProcessSearch);
+        }
+        if self.connection_monitor.host_process_renice_focused {
+            return Some(WorkspaceImeTarget::HostProcessRenice);
         }
 
         if self.terminal_quick_commands_open
@@ -1114,6 +1125,14 @@ impl WorkspaceApp {
                 .as_ref()
                 .filter(|player| player.search_focused)
                 .map(|player| player.search_query.clone()),
+            WorkspaceImeTarget::HostProcessSearch => self
+                .connection_monitor
+                .host_process_search_focused
+                .then(|| self.connection_monitor.host_process_search_query.clone()),
+            WorkspaceImeTarget::HostProcessRenice => self
+                .connection_monitor
+                .host_process_renice_focused
+                .then(|| self.connection_monitor.host_process_renice_value.clone()),
             WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
@@ -1772,6 +1791,29 @@ impl WorkspaceApp {
                 {
                     replace_utf16(&mut player.search_query, replacement_range, text);
                     self.update_terminal_cast_search(cx);
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostProcessSearch => {
+                if self.connection_monitor.host_process_search_focused {
+                    replace_utf16(
+                        &mut self.connection_monitor.host_process_search_query,
+                        replacement_range,
+                        text,
+                    );
+                    self.connection_monitor.host_process_expanded_pid = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostProcessRenice => {
+                if self.connection_monitor.host_process_renice_focused {
+                    replace_utf16(
+                        &mut self.connection_monitor.host_process_renice_value,
+                        replacement_range,
+                        text,
+                    );
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

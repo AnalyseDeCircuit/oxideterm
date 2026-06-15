@@ -58,7 +58,63 @@
     },
     "active_sessions": "Active Sessions",
     "no_sessions": "No Sessions",
-    "add_new_connection": "Click + to add a new connection"
+    "add_new_connection": "Click + to add a new connection",
+    "host_processes": {
+      "search_placeholder": "Search processes...",
+      "count_suffix": "processes",
+      "sampling": "Sampling processes...",
+      "empty": "No processes match",
+      "unknown": "Unknown",
+      "elapsed": "Elapsed",
+      "filters": {
+        "all": "All",
+        "running": "Running",
+        "high_cpu": "High CPU",
+        "high_memory": "High Memory"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "Memory",
+        "pid": "PID",
+        "command": "Command",
+        "user": "User"
+      },
+      "states": {
+        "running": "Running",
+        "sleeping": "Sleeping",
+        "waiting": "Waiting",
+        "stopped": "Stopped",
+        "zombie": "Zombie",
+        "idle": "Idle",
+        "unknown": "Unknown"
+      },
+      "actions": {
+        "column": "Actions",
+        "term": "End",
+        "kill": "Kill",
+        "stop": "Pause",
+        "cont": "Resume",
+        "renice": "Priority",
+        "apply": "Set",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "Confirm process action",
+        "cancel": "Cancel",
+        "term_desc": "Send TERM to PID {{pid}} ({{command}})?",
+        "kill_desc": "Force kill PID {{pid}} ({{command}}) with KILL. This cannot be undone.",
+        "stop_desc": "Pause PID {{pid}} ({{command}}) with STOP?",
+        "cont_desc": "Resume PID {{pid}} ({{command}}) with CONT?",
+        "renice_desc": "Change priority for PID {{pid}} ({{command}})?"
+      },
+      "toast": {
+        "action_already_running": "A process action is already running.",
+        "invalid_nice": "Enter a nice value from -20 to 19.",
+        "connection_missing": "The selected connection is no longer available.",
+        "action_failed": "Process action failed.",
+        "partial_support": "Process management is partial on {{os}}."
+      }
+    }
   },
   "sessions": {
     "tree": {

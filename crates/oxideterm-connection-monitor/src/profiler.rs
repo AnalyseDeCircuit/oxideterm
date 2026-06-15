@@ -28,8 +28,67 @@ pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 65_536;
 pub const RESOURCE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const RESOURCE_END_MARKER: &str = "===END===";
 
-const METRICS_COMMAND_LINUX: &str = "echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat 2>/dev/null; echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null; echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ((ps -eo pid=,%mem=,comm= --sort=-%mem 2>/dev/null | head -10 | awk '{gsub(/\\t/,\" \",$3); printf \"%s\\t%.1f\\t%s\\n\",$1,$2,$3}') || (ps -o pid,vsz,comm 2>/dev/null | awk 'NR>1 {print $2,$1,$3}' | sort -rn | head -10 | awk -v total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null) '{pct=(total>0?$1*100/total:0); printf \"%s\\t%.1f\\t%s\\n\",$2,pct,$3}'))";
-const METRICS_COMMAND_MACOS: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ps -A -o pid=,%mem=,comm= 2>/dev/null | sort -k2 -rn | head -10 | awk '{printf \"%s\\t%.1f\\t%s\\n\",$1,$2,$3}'";
+const METRICS_COMMAND_LINUX: &str = concat!(
+    "echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat 2>/dev/null; ",
+    "echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null; ",
+    "echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; ",
+    "echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; ",
+    "echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); ",
+    "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; ",
+    "echo '===TOPPROCS==='; ",
+    "top_ps_fallback() { ps ww -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,args= --sort=-pmem 2>/dev/null | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;cmd=$0;sub(\"^([[:space:]]*[^[:space:]]+){10}[[:space:]]*\", \"\", cmd);gsub(/\\t/,\" \",cmd);if(length(cmd)>240)cmd=substr(cmd,1,240);printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,cmd}'; }; ",
+    "if [ -d /proc ]; then ",
+    "cpu_file=${TMPDIR:-/tmp}/oxideterm-proc-cpu-$$; ps -eo pid=,pcpu= > \"$cpu_file\" 2>/dev/null || :; ",
+    "proc_file=${TMPDIR:-/tmp}/oxideterm-proc-list-$$; : > \"$proc_file\"; ",
+    "mem_total=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo 2>/dev/null); ",
+    "for status in /proc/[0-9]*/status; do ",
+    "[ -r \"$status\" ] || continue; dir=${status%/status}; pid=${dir##*/}; ",
+    "name=$(awk -F: '/^Name:/{gsub(/^[ \\t]+/,\"\",$2); print $2; exit}' \"$status\" 2>/dev/null); ",
+    "ppid=$(awk '/^PPid:/{print $2; exit}' \"$status\" 2>/dev/null); ",
+    "uid=$(awk '/^Uid:/{print $2; exit}' \"$status\" 2>/dev/null); ",
+    "user=$(getent passwd \"$uid\" 2>/dev/null | awk -F: '{print $1; exit}'); [ -n \"$user\" ] || user=\"$uid\"; ",
+    "state=$(awk '/^State:/{print $2; exit}' \"$status\" 2>/dev/null); ",
+    "rss=$(awk '/^VmRSS:/{print $2; exit}' \"$status\" 2>/dev/null); rss=${rss:-0}; ",
+    "vsz=$(awk '/^VmSize:/{print $2; exit}' \"$status\" 2>/dev/null); vsz=${vsz:-0}; ",
+    "cpu=$(awk -v p=\"$pid\" '$1==p{print $2; exit}' \"$cpu_file\" 2>/dev/null); cpu=${cpu:-0}; ",
+    "mem=$(awk -v r=\"$rss\" -v t=\"$mem_total\" 'BEGIN{if(t>0)printf \"%.1f\",r*100/t; else printf \"0.0\"}'); ",
+    "cmd=$(tr '\\0' ' ' < \"$dir/cmdline\" 2>/dev/null | sed 's/[[:space:]]*$//' | cut -c1-240); [ -n \"$cmd\" ] || cmd=\"$name\"; ",
+    "printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t\\t%s\\t%s\\n\" \"$pid\" \"$ppid\" \"$user\" \"$state\" \"$cpu\" \"$mem\" \"$rss\" \"$vsz\" \"$name\" \"$cmd\" >> \"$proc_file\"; ",
+    "done; if [ -s \"$proc_file\" ]; then sort -k6 -rn \"$proc_file\" | head -200; else top_ps_fallback; fi; rm -f \"$cpu_file\" \"$proc_file\"; ",
+    "else ",
+    "top_ps_fallback; ",
+    "fi"
+);
+const METRICS_COMMAND_LINUX_GPU: &str = concat!(
+    "echo '===GPUS==='; ",
+    "if command -v nvidia-smi >/dev/null 2>&1; then ",
+    "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; ",
+    "else ",
+    "idx=0; ",
+    "for dev in /sys/class/drm/card*/device; do ",
+    "[ -d \"$dev\" ] || continue; ",
+    "vendor=$(cat \"$dev/vendor\" 2>/dev/null); ",
+    "case \"$vendor\" in 0x1002|0x8086) ;; *) continue ;; esac; ",
+    "util=$(cat \"$dev/gpu_busy_percent\" 2>/dev/null || true); ",
+    "total=$(cat \"$dev/mem_info_vram_total\" 2>/dev/null || true); ",
+    "used=$(cat \"$dev/mem_info_vram_used\" 2>/dev/null || true); ",
+    "[ -n \"$util$used$total\" ] || continue; ",
+    "if [ -r \"$dev/product_name\" ]; then name=$(cat \"$dev/product_name\" 2>/dev/null); elif [ \"$vendor\" = \"0x8086\" ]; then name='Intel GPU'; else name='AMD GPU'; fi; ",
+    "used_mib=$(awk -v v=\"$used\" 'BEGIN{if(v~/^[0-9]+$/)printf \"%.0f\",v/1048576; else printf \"\"}'); ",
+    "total_mib=$(awk -v v=\"$total\" 'BEGIN{if(v~/^[0-9]+$/)printf \"%.0f\",v/1048576; else printf \"\"}'); ",
+    "printf \"%s,%s,%s,%s,%s\\n\" \"$idx\" \"$name\" \"$util\" \"$used_mib\" \"$total_mib\"; ",
+    "idx=$((idx+1)); ",
+    "done; ",
+    "if [ \"$idx\" -eq 0 ] && command -v rocm-smi >/dev/null 2>&1; then ",
+    "rocm-smi --showuse --showmemuse --showproductname --csv 2>/dev/null | awk -F, 'NR>1 {gsub(/^ +| +$/, \"\", $0); idx=$1; name=$2; util=$3; mem=$4; gsub(/[^0-9.]/, \"\", idx); gsub(/^ +| +$/, \"\", name); gsub(/[^0-9.]/, \"\", util); gsub(/[^0-9.]/, \"\", mem); if(idx!=\"\") printf \"%s,%s,%s,,\\n\", idx, name, util}'; ",
+    "fi; ",
+    "fi; ",
+    "echo '===GPUS_INTEL_TOP==='; ",
+    "if command -v intel_gpu_top >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then ",
+    "timeout 3 intel_gpu_top -J -s 1000 -n 2 -o - 2>/dev/null || true; ",
+    "fi"
+);
+const METRICS_COMMAND_MACOS: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ps axww -o pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,command= 2>/dev/null | sort -k6 -rn | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;$1=$2=$3=$4=$5=$6=$7=$8=$9=$10=\"\";sub(/^ +/,\"\");gsub(/\\t/,\" \");printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,$0}'";
 const METRICS_COMMAND_UNSUPPORTED: &str =
     "echo '===UNSUPPORTED==='; uname -s 2>/dev/null || echo unknown";
 const PORT_CMD_LINUX: &str = "echo '===PORTS==='; ((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); echo '===PORTS_END==='; echo '===DOCKER==='; ((docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null || sudo -n docker ps --format '{{.ID}}\t{{.Names}}\t{{.Ports}}' 2>/dev/null) || true); echo '===DOCKER_END==='";
@@ -301,8 +360,17 @@ pub fn build_sample_command(os_type: &str) -> String {
         "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => PORT_CMD_FREEBSD,
         _ => PORT_CMD_LINUX,
     };
+    let gpu_metrics = match os_type {
+        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
+            Some(METRICS_COMMAND_LINUX_GPU)
+        }
+        _ => None,
+    };
 
-    format!("{metrics}; {port_cmd}; echo '===END==='\n")
+    match gpu_metrics {
+        Some(gpu_metrics) => format!("{metrics}; {gpu_metrics}; {port_cmd}; echo '===END==='\n"),
+        None => format!("{metrics}; {port_cmd}; echo '===END==='\n"),
+    }
 }
 
 fn build_windows_sample_command() -> String {
@@ -334,11 +402,43 @@ fn build_windows_sample_command() -> String {
         "Get-NetAdapterStatistics|ForEach-Object{",
         "Write-Output ($_.Name+': '+$_.ReceivedBytes+' 0 0 0 0 0 0 0 '+$_.SentBytes)",
         "};",
+        "Write-Output '===GPUS===';",
+        "$gpuControllers=@(Get-CimInstance Win32_VideoController);",
+        "$gpuUtil=@{};$gpuMem=@{};",
+        "try{",
+        "$samples=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage').CounterSamples;",
+        "foreach($sample in $samples){",
+        "$instance=$sample.InstanceName;",
+        "$phys=0;",
+        "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
+        "$gpuUtil[$phys]=[double]($gpuUtil[$phys])+[double]$sample.CookedValue",
+        "}",
+        "}catch{};",
+        "try{",
+        "$memSamples=(Get-Counter '\\GPU Adapter Memory(*)\\Dedicated Usage').CounterSamples;",
+        "foreach($sample in $memSamples){",
+        "$instance=$sample.InstanceName;",
+        "$phys=0;",
+        "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
+        "$gpuMem[$phys]=[double]($gpuMem[$phys])+[double]$sample.CookedValue",
+        "}",
+        "}catch{};",
+        "for($i=0;$i -lt $gpuControllers.Count;$i++){",
+        "$gpu=$gpuControllers[$i];",
+        "$name=($gpu.Name -replace ',', ' ');",
+        "$total=if($gpu.AdapterRAM){[Math]::Round(([double]$gpu.AdapterRAM)/1MB)}else{''};",
+        "$used=if($gpuMem.ContainsKey($i)){[Math]::Round(([double]$gpuMem[$i])/1MB)}else{''};",
+        "$util=if($gpuUtil.ContainsKey($i)){[Math]::Min(100,[Math]::Round([double]$gpuUtil[$i],1))}else{''};",
+        "Write-Output ($i+','+$name+','+$util+','+$used+','+$total)",
+        "};",
         "Write-Output '===TOPPROCS===';",
         "$memTotal=if($os){[double]$os.TotalVisibleMemorySize*1024}else{0};",
-        "Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 10|ForEach-Object{",
+        "Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 200|ForEach-Object{",
         "$pct=if($memTotal -gt 0){[Math]::Round(($_.WorkingSet64*100)/$memTotal,1)}else{0};",
-        "Write-Output ($_.Id+[char]9+$pct+[char]9+$_.ProcessName)",
+        "$cpu=if($_.CPU -ne $null){[Math]::Round($_.CPU,1)}else{0};",
+        "$rss=[UInt64]$_.WorkingSet64;$vsz=[UInt64]$_.VirtualMemorySize64;",
+        "$elapsed=if($_.StartTime){((Get-Date)-$_.StartTime).ToString()}else{''};",
+        "Write-Output ($_.Id+[char]9+''+[char]9+''+[char]9+''+[char]9+$cpu+[char]9+$pct+[char]9+[Math]::Round($rss/1024)+[char]9+[Math]::Round($vsz/1024)+[char]9+$elapsed+[char]9+$_.ProcessName+[char]9+$_.Path)",
         "};",
         "Write-Output '===PORTS===';",
         "Get-NetTCPConnection -State Listen|ForEach-Object{",
@@ -631,6 +731,16 @@ mod tests {
         assert!(linux.contains("===STAT==="));
         assert!(linux.contains("===DISKS==="));
         assert!(linux.contains("===TOPPROCS==="));
+        assert!(linux.contains("===GPUS==="));
+        assert!(linux.contains("nvidia-smi"));
+        assert!(linux.contains("rocm-smi"));
+        assert!(linux.contains("intel_gpu_top"));
+        assert!(linux.contains("gpu_busy_percent"));
+        assert!(linux.contains("/proc/[0-9]*/status"));
+        assert!(linux.contains("getent passwd"));
+        assert!(linux.contains("top_ps_fallback()"));
+        assert!(linux.contains("[ -s \"$proc_file\" ]"));
+        assert!(linux.contains("ps ww -eo"));
         let nproc_marker = linux.find("===NPROC===").expect("nproc marker");
         let disk_marker = linux.find("===DISKS===").expect("disk marker");
         assert!(
@@ -638,8 +748,14 @@ mod tests {
             "nproc should be sampled before disk summaries"
         );
         assert!(linux.contains("ss -tlnp"));
-        assert!(build_sample_command("Darwin").contains("lsof -iTCP"));
-        assert!(build_sample_command("Windows").contains("Get-NetTCPConnection"));
+        let macos = build_sample_command("Darwin");
+        assert!(macos.contains("lsof -iTCP"));
+        assert!(macos.contains("ps axww -o"));
+        let windows = build_sample_command("Windows");
+        assert!(windows.contains("Get-NetTCPConnection"));
+        assert!(windows.contains("Win32_VideoController"));
+        assert!(windows.contains("\\GPU Engine(*)\\Utilization Percentage"));
+        assert!(windows.contains("\\GPU Adapter Memory(*)\\Dedicated Usage"));
         let freebsd = build_sample_command("FreeBSD");
         assert!(freebsd.contains("sockstat"));
         assert!(freebsd.contains("===UNSUPPORTED==="));

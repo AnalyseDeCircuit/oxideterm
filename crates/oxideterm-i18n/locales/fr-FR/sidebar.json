@@ -58,7 +58,63 @@
     },
     "active_sessions": "Sessions actives",
     "no_sessions": "Aucune session",
-    "add_new_connection": "Cliquez sur + pour ajouter une connexion"
+    "add_new_connection": "Cliquez sur + pour ajouter une connexion",
+    "host_processes": {
+      "search_placeholder": "Rechercher des processus...",
+      "count_suffix": "processus",
+      "sampling": "Échantillonnage des processus...",
+      "empty": "Aucun processus correspondant",
+      "unknown": "Inconnu",
+      "elapsed": "Durée",
+      "filters": {
+        "all": "Tous",
+        "running": "En cours",
+        "high_cpu": "CPU élevé",
+        "high_memory": "Mémoire élevée"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "Mémoire",
+        "pid": "PID",
+        "command": "Commande",
+        "user": "Utilisateur"
+      },
+      "states": {
+        "running": "En cours",
+        "sleeping": "En veille",
+        "waiting": "En attente",
+        "stopped": "Arrêté",
+        "zombie": "Zombie",
+        "idle": "Inactif",
+        "unknown": "Inconnu"
+      },
+      "actions": {
+        "column": "Actions",
+        "term": "Terminer",
+        "kill": "Forcer",
+        "stop": "Pause",
+        "cont": "Reprendre",
+        "renice": "Priorité",
+        "apply": "Définir",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "Confirmer l’action de processus",
+        "cancel": "Annuler",
+        "term_desc": "Envoyer TERM au PID {{pid}} ({{command}}) ?",
+        "kill_desc": "Forcer l’arrêt du PID {{pid}} ({{command}}) avec KILL. Cette action est irréversible.",
+        "stop_desc": "Mettre en pause le PID {{pid}} ({{command}}) avec STOP ?",
+        "cont_desc": "Reprendre le PID {{pid}} ({{command}}) avec CONT ?",
+        "renice_desc": "Modifier la priorité du PID {{pid}} ({{command}}) ?"
+      },
+      "toast": {
+        "action_already_running": "Une action de processus est déjà en cours.",
+        "invalid_nice": "Saisissez une valeur nice entre -20 et 19.",
+        "connection_missing": "La connexion sélectionnée n’est plus disponible.",
+        "action_failed": "L’action de processus a échoué.",
+        "partial_support": "La gestion des processus est partielle sur {{os}}."
+      }
+    }
   },
   "sessions": {
     "tree": {

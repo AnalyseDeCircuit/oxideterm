@@ -238,6 +238,35 @@ impl WorkspaceApp {
 
     fn ai_sidebar_width_from_cursor(&self, cursor_x: Pixels, window: &Window) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
-        (window_width - f32::from(cursor_x)).clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH)
+        ai_sidebar_width_from_cursor_value(f32::from(cursor_x), window_width)
+    }
+}
+
+fn ai_sidebar_width_from_cursor_value(cursor_x: f32, window_width: f32) -> f32 {
+    // The context sidebar is anchored to the right edge, so dragging left must
+    // increase width and dragging right must decrease width. Keep this math in
+    // a pure helper so regressions do not require constructing a GPUI Window.
+    (window_width - cursor_x).clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH)
+}
+
+#[cfg(test)]
+mod sidebar_resize_state_tests {
+    use super::*;
+
+    #[test]
+    fn ai_sidebar_width_from_cursor_uses_right_edge_distance() {
+        assert_eq!(ai_sidebar_width_from_cursor_value(700.0, 1000.0), 300.0);
+    }
+
+    #[test]
+    fn ai_sidebar_width_from_cursor_clamps_to_sidebar_limits() {
+        assert_eq!(
+            ai_sidebar_width_from_cursor_value(995.0, 1000.0),
+            AI_SIDEBAR_MIN_WIDTH
+        );
+        assert_eq!(
+            ai_sidebar_width_from_cursor_value(0.0, 2000.0),
+            AI_SIDEBAR_MAX_WIDTH
+        );
     }
 }

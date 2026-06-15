@@ -1,4 +1,18 @@
-const CONTEXT_SIDEBAR_RESIZE_HIT_SLOP: f32 = 2.0;
+const CONTEXT_SIDEBAR_RESIZE_EDGE_OUTSET: f32 = 4.0;
+const CONTEXT_SIDEBAR_RESIZE_HIT_WIDTH: f32 = 10.0;
+const CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH: f32 = 1.0;
+
+fn context_sidebar_resize_hitbox_left() -> f32 {
+    -CONTEXT_SIDEBAR_RESIZE_EDGE_OUTSET
+}
+
+fn context_sidebar_resize_hitbox_width() -> f32 {
+    CONTEXT_SIDEBAR_RESIZE_HIT_WIDTH
+}
+
+fn context_sidebar_resize_divider_left() -> f32 {
+    CONTEXT_SIDEBAR_RESIZE_EDGE_OUTSET
+}
 
 impl WorkspaceApp {
     pub(super) fn render_sidebar_region(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -57,104 +71,119 @@ impl WorkspaceApp {
             .flex_none()
             .h_full()
             .min_h_0()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .bg(rgb(theme.bg))
-            .border_l_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
+            // This outer shell must not clip overflow. The resize handle is
+            // intentionally wider than the visible divider and extends left
+            // into the workspace so users can grab the panel edge reliably.
             .child(
                 div()
                     .w_full()
-                    .flex_none()
-                    .h(px(42.0))
+                    .h_full()
+                    .min_h_0()
                     .flex()
-                    .items_center()
-                    .px_3()
-                    // The context-sidebar titlebar is fixed chrome. Give it
-                    // its own hitbox so wheel/drag events cannot fall through
-                    // to a scrollable tool body underneath.
-                    .occlude()
-                    .border_b_1()
-                    .border_color(rgba((theme.border << 8) | 0x4d))
-                    .child(self.render_context_sidebar_panel_title(
-                        title_key, title_role, icon, cx,
-                    ))
+                    .flex_col()
+                    // Only the actual panel clips its children. Keeping this
+                    // clipping one level below the shell prevents the edge
+                    // handle from being cut down to a hard-to-hit one-pixel
+                    // strip, which has regressed several times.
+                    .overflow_hidden()
+                    .bg(rgb(theme.bg))
+                    .border_l_1()
+                    .border_color(rgba((theme.border << 8) | 0x80))
                     .child(
                         div()
-                            .id("context-sidebar-collapse")
-                            .size(px(28.0))
+                            .w_full()
+                            .flex_none()
+                            .h(px(42.0))
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.md))
-                            .cursor_pointer()
-                            .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::PanelRightClose,
-                                16.0,
-                                rgb(theme.text_muted),
+                            .px_3()
+                            // The context-sidebar titlebar is fixed chrome.
+                            // Give it its own hitbox so wheel/drag events
+                            // cannot fall through to a scrollable tool body.
+                            .occlude()
+                            .border_b_1()
+                            .border_color(rgba((theme.border << 8) | 0x4d))
+                            .child(self.render_context_sidebar_panel_title(
+                                title_key, title_role, icon, cx,
                             ))
-                            .on_mouse_move(cx.listener({
-                                let label = self.i18n.t("sidebar.tooltips.collapse");
-                                move |this, event: &MouseMoveEvent, _window, cx| {
-                                    this.queue_workspace_tooltip(
-                                        "context-sidebar-collapse",
-                                        label.clone(),
-                                        f32::from(event.position.x) + 12.0,
-                                        f32::from(event.position.y) + 16.0,
-                                        cx,
-                                    );
-                                }
-                            }))
-                            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                                if !*hovered {
-                                    this.clear_workspace_tooltip("context-sidebar-collapse", cx);
-                                }
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.collapse_context_sidebar(cx);
-                                }),
+                            .child(
+                                div()
+                                    .id("context-sidebar-collapse")
+                                    .size(px(28.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(self.tokens.radii.md))
+                                    .cursor_pointer()
+                                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::PanelRightClose,
+                                        16.0,
+                                        rgb(theme.text_muted),
+                                    ))
+                                    .on_mouse_move(cx.listener({
+                                        let label = self.i18n.t("sidebar.tooltips.collapse");
+                                        move |this, event: &MouseMoveEvent, _window, cx| {
+                                            this.queue_workspace_tooltip(
+                                                "context-sidebar-collapse",
+                                                label.clone(),
+                                                f32::from(event.position.x) + 12.0,
+                                                f32::from(event.position.y) + 16.0,
+                                                cx,
+                                            );
+                                        }
+                                    }))
+                                    .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                                        if !*hovered {
+                                            this.clear_workspace_tooltip(
+                                                "context-sidebar-collapse",
+                                                cx,
+                                            );
+                                        }
+                                    }))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.collapse_context_sidebar(cx);
+                                        }),
+                                    ),
                             ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(match self.active_context_sidebar_panel {
+                                ContextSidebarPanel::Assistant => self.render_ai_sidebar_content(cx),
+                                ContextSidebarPanel::HostTools => {
+                                    self.render_host_tools_context_panel(cx)
+                                }
+                            }),
                     ),
             )
             .child(
                 div()
-                    .w_full()
-                    .min_w_0()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .child(match self.active_context_sidebar_panel {
-                        ContextSidebarPanel::Assistant => self.render_ai_sidebar_content(cx),
-                        ContextSidebarPanel::HostTools => self.render_host_tools_context_panel(cx),
-                    }),
-            )
-            .child(
-                div()
                     .absolute()
-                    .left(px(-CONTEXT_SIDEBAR_RESIZE_HIT_SLOP))
+                    .left(px(context_sidebar_resize_hitbox_left()))
                     .top_0()
                     .bottom_0()
-                    .w(px(
-                        self.tokens.metrics.sidebar_resize_handle_width
-                            + CONTEXT_SIDEBAR_RESIZE_HIT_SLOP,
-                    ))
+                    .w(px(context_sidebar_resize_hitbox_width()))
                     .cursor(CursorStyle::ResizeColumn)
-                    // Keep the resize hitbox wider than the visible divider.
-                    // GPUI paints this element inside the panel, so only a
-                    // 1px child may become visible at the real sidebar edge.
+                    // This transparent hitbox straddles the real panel edge.
+                    // Do not move it fully inside the panel: Host Tools uses
+                    // scroll-heavy content that can otherwise steal the edge.
                     .occlude()
                     .bg(rgba(0x00000000))
                     .child(
                         div()
                             .absolute()
-                            .left(px(CONTEXT_SIDEBAR_RESIZE_HIT_SLOP))
+                            .left(px(context_sidebar_resize_divider_left()))
                             .top_0()
                             .bottom_0()
-                            .w(px(1.0))
+                            .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
                             .bg(if self.ai_sidebar_resizing {
                                 rgb(theme.accent)
                             } else {
@@ -1372,4 +1401,27 @@ pub(super) enum SidebarActionKind {
     ToggleSessionView,
     AutoRoute,
     NewConnection,
+}
+
+#[cfg(test)]
+mod sidebar_resize_region_tests {
+    use super::*;
+
+    #[test]
+    fn context_sidebar_resize_hitbox_straddles_panel_edge() {
+        let hitbox_left = context_sidebar_resize_hitbox_left();
+        let hitbox_width = context_sidebar_resize_hitbox_width();
+        let hitbox_right = hitbox_left + hitbox_width;
+        let divider_left = context_sidebar_resize_divider_left();
+
+        // The right context sidebar is draggable only if the transparent
+        // hitbox crosses the panel's left edge. Keeping part of it outside the
+        // panel protects the resize affordance from scroll-heavy Host Tools
+        // content and prevents one-pixel-only regressions.
+        assert!(hitbox_left < 0.0);
+        assert!(hitbox_right > 0.0);
+        assert!(hitbox_width >= 8.0);
+        assert_eq!(divider_left, -hitbox_left);
+        assert!(divider_left < hitbox_width);
+    }
 }
