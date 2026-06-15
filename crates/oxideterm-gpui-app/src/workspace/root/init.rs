@@ -115,6 +115,7 @@ impl WorkspaceApp {
             node_disconnect_confirm: None,
             panes: HashMap::new(),
             tab_scroll_handle: ScrollHandle::new(),
+            host_tools_tab_scroll_handle: ScrollHandle::new(),
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,

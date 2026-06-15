@@ -21,40 +21,54 @@ impl WorkspaceApp {
             .bg(rgb(theme.bg))
             .text_color(rgb(theme.text))
             .child(self.render_host_tools_context_tabs(cx))
-            .child(match self.active_context_sidebar_tool {
-                ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
-                ContextSidebarTool::Processes => self.render_host_tool_placeholder(
-                    "sidebar.panels.processes",
-                    LucideIcon::ListChecks,
-                    cx,
-                ),
-                ContextSidebarTool::Services => self.render_host_tool_placeholder(
-                    "sidebar.panels.services",
-                    LucideIcon::Wrench,
-                    cx,
-                ),
-                ContextSidebarTool::Logs => self.render_host_tool_placeholder(
-                    "sidebar.panels.logs",
-                    LucideIcon::FileText,
-                    cx,
-                ),
-                ContextSidebarTool::Tmux => self.render_host_tool_placeholder(
-                    "sidebar.panels.tmux_management",
-                    LucideIcon::Terminal,
-                    cx,
-                ),
-                ContextSidebarTool::Docker => self.render_host_tool_placeholder(
-                    "sidebar.panels.docker_management",
-                    LucideIcon::Layers,
-                    cx,
-                ),
-            })
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    // Only the secondary tab strip may own horizontal scroll.
+                    // Keep tool bodies clipped to the companion-sidebar width.
+                    .overflow_hidden()
+                    .child(match self.active_context_sidebar_tool {
+                        ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
+                        ContextSidebarTool::Processes => self.render_host_tool_placeholder(
+                            "sidebar.panels.processes",
+                            LucideIcon::ListChecks,
+                            cx,
+                        ),
+                        ContextSidebarTool::Services => self.render_host_tool_placeholder(
+                            "sidebar.panels.services",
+                            LucideIcon::Wrench,
+                            cx,
+                        ),
+                        ContextSidebarTool::Logs => self.render_host_tool_placeholder(
+                            "sidebar.panels.logs",
+                            LucideIcon::FileText,
+                            cx,
+                        ),
+                        ContextSidebarTool::Tmux => self.render_host_tool_placeholder(
+                            "sidebar.panels.tmux_management",
+                            LucideIcon::Terminal,
+                            cx,
+                        ),
+                        ContextSidebarTool::Docker => self.render_host_tool_placeholder(
+                            "sidebar.panels.docker_management",
+                            LucideIcon::Layers,
+                            cx,
+                        ),
+                    }),
+            )
             .into_any_element()
     }
 
     fn render_host_tools_monitor_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .id("system-health-context-panel")
+            .w_full()
+            .min_w_0()
             .flex_1()
             .min_h_0()
             .overflow_hidden()
@@ -76,72 +90,116 @@ impl WorkspaceApp {
     }
 
     fn render_host_tools_context_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
+        let mut tabs = div()
+            .id("host-tools-tab-scroll-viewport")
             .flex_none()
+            .w_full()
             .h(px(HOST_TOOLS_TAB_STRIP_HEIGHT))
-            .min_w(px(0.0))
-            // Host Tools tabs are fixed secondary chrome. The fixed height
-            // keeps horizontal overflow scoped to this row instead of the
-            // whole sidebar body.
+            .min_w_0()
+            .relative()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .px_3()
+            .py_2()
+            // Match the main tabbar scroll model: the strip clips its own
+            // children and maps wheel movement to horizontal offset, while the
+            // Host Tools body remains width-clipped below it.
             .occlude()
-            .overflow_x_scrollbar()
+            .overflow_hidden()
+            .track_scroll(&self.host_tools_tab_scroll_handle)
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                this.handle_host_tools_tab_scroll(event, window, cx);
+            }))
             .border_b_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-            .child(
-                div()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .px_3()
-                    .py_2()
-                    // Host Tools can grow beyond the companion sidebar width;
-                    // keep each tab intact and let the strip scroll horizontally.
-                    .child(self.render_host_tools_context_tab(
-                        ContextSidebarTool::Monitor,
-                        LucideIcon::Activity,
-                        "sidebar.panels.host_monitor",
-                        true,
-                        cx,
-                    ))
-                    // These entries reserve the host-tools IA before their backends land.
-                    .child(self.render_host_tools_context_tab(
-                        ContextSidebarTool::Processes,
-                        LucideIcon::ListChecks,
-                        "sidebar.panels.processes",
-                        false,
-                        cx,
-                    ))
-                    .child(self.render_host_tools_context_tab(
-                        ContextSidebarTool::Services,
-                        LucideIcon::Wrench,
-                        "sidebar.panels.services",
-                        false,
-                        cx,
-                    ))
-                    .child(self.render_host_tools_context_tab(
-                        ContextSidebarTool::Logs,
-                        LucideIcon::FileText,
-                        "sidebar.panels.logs",
-                        false,
-                        cx,
-                    ))
-                    .child(self.render_host_tools_context_tab(
-                        ContextSidebarTool::Tmux,
-                        LucideIcon::Terminal,
-                        "sidebar.panels.tmux",
-                        false,
-                        cx,
-                    ))
-                    .child(self.render_host_tools_context_tab(
-                        ContextSidebarTool::Docker,
-                        LucideIcon::Layers,
-                        "sidebar.panels.docker",
-                        false,
-                        cx,
-                    )),
-            )
-            .into_any_element()
+            .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA));
+
+        tabs = tabs
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Monitor,
+                LucideIcon::Activity,
+                "sidebar.panels.host_monitor",
+                true,
+                cx,
+            ))
+            // These entries reserve the host-tools IA before their backends land.
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Processes,
+                LucideIcon::ListChecks,
+                "sidebar.panels.processes",
+                false,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Services,
+                LucideIcon::Wrench,
+                "sidebar.panels.services",
+                false,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Logs,
+                LucideIcon::FileText,
+                "sidebar.panels.logs",
+                false,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Tmux,
+                LucideIcon::Terminal,
+                "sidebar.panels.tmux",
+                false,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Docker,
+                LucideIcon::Layers,
+                "sidebar.panels.docker",
+                false,
+                cx,
+            ));
+
+        tabs.into_any_element()
+    }
+
+    fn handle_host_tools_tab_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        if max_scroll <= 1.0 {
+            if self.host_tools_tab_scroll_handle.offset().x != px(0.0) {
+                self.host_tools_tab_scroll_handle
+                    .set_offset(Point::new(px(0.0), px(0.0)));
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+
+        let delta = event.delta.pixel_delta(px(HOST_TOOLS_TAB_STRIP_HEIGHT));
+        let delta_x = f32::from(delta.x);
+        let delta_y = f32::from(delta.y);
+        let scroll_delta = if delta_y != 0.0 { delta_y } else { delta_x };
+        if scroll_delta == 0.0 {
+            return;
+        }
+
+        let current_scroll_x =
+            f32::from(-self.host_tools_tab_scroll_handle.offset().x).clamp(0.0, max_scroll);
+        let next_scroll_x = (current_scroll_x - scroll_delta).clamp(0.0, max_scroll);
+        if (next_scroll_x - current_scroll_x).abs() < 0.01 {
+            cx.stop_propagation();
+            return;
+        }
+
+        self.host_tools_tab_scroll_handle
+            .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
+        cx.notify();
+        cx.stop_propagation();
     }
 
     fn render_host_tools_context_tab(
@@ -471,7 +529,6 @@ impl WorkspaceApp {
                         .id("host-tools-monitor-metrics-scroll")
                         .flex_1()
                         .min_h_0()
-                        .overflow_y_scroll()
                         .child(self.render_compact_system_health_metrics(
                             metrics,
                             is_rtt_only,
@@ -1092,139 +1149,259 @@ impl WorkspaceApp {
         connection_id: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let rows = Arc::new(self.compact_monitor_rows(
+            metrics,
+            is_rtt_only,
+            can_retry_sampling.then_some(connection_id),
+        ));
+        self.sync_compact_monitor_list_state(&rows);
+        let state = self.connection_monitor.compact_monitor_list_state.clone();
+        let spec = self.compact_monitor_list_spec();
+        let workspace = cx.entity();
+
+        div()
+            .size_full()
+            .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                let rows = rows.clone();
+                workspace.update(cx, |this, cx| {
+                    this.render_compact_monitor_virtual_row(rows.get(index).cloned(), cx)
+                })
+            }))
+            .into_any_element()
+    }
+
+    fn compact_monitor_rows(
+        &self,
+        metrics: &ResourceMetrics,
+        is_rtt_only: bool,
+        retry_connection_id: Option<String>,
+    ) -> Vec<CompactMonitorRow> {
         let theme = self.tokens.ui;
-        let mut body = div().flex().flex_col().gap_2().pb_2();
+        let mut rows = Vec::new();
 
         if !is_rtt_only {
-            let mut resource_card = self.render_compact_monitor_card_shell();
-            let mut resource_rows = 0usize;
             if let Some(cpu) = metrics.cpu_percent {
-                resource_rows += 1;
-                resource_card = resource_card.child(self.render_compact_monitor_row(
-                    LucideIcon::Cpu,
-                    self.i18n.t("profiler.panel.cpu"),
-                    format!("{cpu:.1}%"),
-                    threshold_color(Some(cpu)),
-                ));
+                rows.push(CompactMonitorRow::Metric {
+                    icon: LucideIcon::Cpu,
+                    label: self.i18n.t("profiler.panel.cpu"),
+                    value: format!("{cpu:.1}%"),
+                    value_color: threshold_color(Some(cpu)),
+                });
             }
             if metrics.memory_used.is_some() && metrics.memory_total.is_some() {
-                resource_rows += 1;
-                resource_card = resource_card.child(self.render_compact_monitor_row(
-                    LucideIcon::MemoryStick,
-                    self.i18n.t("profiler.panel.memory"),
-                    format!(
+                rows.push(CompactMonitorRow::Metric {
+                    icon: LucideIcon::MemoryStick,
+                    label: self.i18n.t("profiler.panel.memory"),
+                    value: format!(
                         "{} / {}",
                         format_bytes(metrics.memory_used.unwrap_or_default()),
                         format_bytes(metrics.memory_total.unwrap_or_default())
                     ),
-                    threshold_color(metrics.memory_percent),
-                ));
+                    value_color: threshold_color(metrics.memory_percent),
+                });
             }
             if metrics.swap_used.is_some() && metrics.swap_total.is_some() {
-                resource_rows += 1;
-                resource_card = resource_card.child(self.render_compact_monitor_row(
-                    LucideIcon::MemoryStick,
-                    self.i18n.t("profiler.panel.swap"),
-                    format!(
+                rows.push(CompactMonitorRow::Metric {
+                    icon: LucideIcon::MemoryStick,
+                    label: self.i18n.t("profiler.panel.swap"),
+                    value: format!(
                         "{} / {}",
                         format_bytes(metrics.swap_used.unwrap_or_default()),
                         format_bytes(metrics.swap_total.unwrap_or_default())
                     ),
-                    threshold_color(metrics.swap_percent),
-                ));
+                    value_color: threshold_color(metrics.swap_percent),
+                });
             }
             if metrics.disk_used.is_some() && metrics.disk_total.is_some() {
-                resource_rows += 1;
-                resource_card = resource_card.child(self.render_compact_monitor_row(
-                    LucideIcon::HardDrive,
-                    self.i18n.t("profiler.panel.disk"),
-                    format!(
+                rows.push(CompactMonitorRow::Metric {
+                    icon: LucideIcon::HardDrive,
+                    label: self.i18n.t("profiler.panel.disk"),
+                    value: format!(
                         "{} / {}",
                         format_bytes(metrics.disk_used.unwrap_or_default()),
                         format_bytes(metrics.disk_total.unwrap_or_default())
                     ),
-                    threshold_color(metrics.disk_percent),
-                ));
+                    value_color: threshold_color(metrics.disk_percent),
+                });
             }
             if let Some(load) = metrics.load_avg_1 {
-                resource_rows += 1;
-                resource_card = resource_card.child(self.render_compact_monitor_row(
-                    LucideIcon::Gauge,
-                    self.i18n.t("profiler.panel.load_avg"),
-                    format!(
+                rows.push(CompactMonitorRow::Metric {
+                    icon: LucideIcon::Gauge,
+                    label: self.i18n.t("profiler.panel.load_avg"),
+                    value: format!(
                         "{load:.2} / {:.2} / {:.2}",
                         metrics.load_avg_5.unwrap_or_default(),
                         metrics.load_avg_15.unwrap_or_default()
                     ),
-                    theme.text,
-                ));
+                    value_color: theme.text,
+                });
             }
-            if resource_rows > 0 {
-                body = body.child(resource_card);
+            if metrics.net_rx_bytes_per_sec.is_some() || metrics.net_tx_bytes_per_sec.is_some() {
+                rows.push(CompactMonitorRow::Network {
+                    rx: format_rate(metrics.net_rx_bytes_per_sec.unwrap_or_default()),
+                    tx: format_rate(metrics.net_tx_bytes_per_sec.unwrap_or_default()),
+                });
             }
+            self.push_compact_disk_rows(metrics, &mut rows);
+            self.push_compact_interface_rows(metrics, &mut rows);
+            self.push_compact_process_rows(metrics, &mut rows);
         }
 
-        if !is_rtt_only
-            && (metrics.net_rx_bytes_per_sec.is_some() || metrics.net_tx_bytes_per_sec.is_some())
-        {
-            body = body.child(
-                self.render_compact_monitor_card_shell()
-                    .child(self.render_compact_monitor_row(
-                        LucideIcon::ArrowDown,
-                        self.i18n.t("profiler.panel.network"),
-                        format_rate(metrics.net_rx_bytes_per_sec.unwrap_or_default()),
-                        MONITOR_EMERALD,
-                    ))
-                    .child(self.render_compact_monitor_row(
-                        LucideIcon::ArrowUp,
-                        self.i18n.t("profiler.panel.network"),
-                        format_rate(metrics.net_tx_bytes_per_sec.unwrap_or_default()),
-                        MONITOR_AMBER,
-                    )),
-            );
+        rows.push(CompactMonitorRow::Metric {
+            icon: LucideIcon::Activity,
+            label: self.i18n.t("profiler.panel.rtt"),
+            value: metrics
+                .ssh_rtt_ms
+                .map(|rtt| format!("{rtt} ms"))
+                .unwrap_or_else(|| "—".to_string()),
+            value_color: rtt_color(metrics.ssh_rtt_ms),
+        });
+        rows.push(CompactMonitorRow::Metric {
+            icon: LucideIcon::Info,
+            label: self.i18n.t("profiler.panel.source"),
+            value: self.i18n.t(metrics_source_label_key(metrics.source)),
+            value_color: theme.text_muted,
+        });
+        if let Some(connection_id) = retry_connection_id {
+            rows.push(CompactMonitorRow::Retry { connection_id });
         }
-
-        body = body.child(
-            self.render_compact_monitor_card_shell()
-                .child(self.render_compact_monitor_row(
-                    LucideIcon::Activity,
-                    self.i18n.t("profiler.panel.rtt"),
-                    metrics
-                        .ssh_rtt_ms
-                        .map(|rtt| format!("{rtt} ms"))
-                        .unwrap_or_else(|| "—".to_string()),
-                    rtt_color(metrics.ssh_rtt_ms),
-                ))
-                .child(self.render_compact_monitor_row(
-                    LucideIcon::Info,
-                    self.i18n.t("profiler.panel.source"),
-                    self.i18n.t(metrics_source_label_key(metrics.source)),
-                    theme.text_muted,
-                )),
-        );
-
-        if can_retry_sampling {
-            body = body.child(self.render_retry_sampling_button(connection_id, cx));
-        }
-
-        body.into_any_element()
+        rows
     }
 
-    fn render_compact_monitor_card_shell(&self) -> gpui::Div {
+    fn push_compact_disk_rows(&self, metrics: &ResourceMetrics, rows: &mut Vec<CompactMonitorRow>) {
+        if metrics.disks.is_empty() {
+            return;
+        }
         let theme = self.tokens.ui;
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
-            .bg(rgb(theme.bg_panel))
-            .px_3()
-            .py_2()
-            .flex()
-            .flex_col()
-            .gap_2()
+        rows.push(CompactMonitorRow::Section {
+            icon: LucideIcon::HardDrive,
+            label: self.i18n.t("profiler.panel.mounts"),
+        });
+        for disk in metrics.disks.iter().take(8) {
+            rows.push(CompactMonitorRow::Detail {
+                name: disk.mount_point.clone(),
+                value: disk
+                    .percent
+                    .map(|percent| format!("{percent:.0}%"))
+                    .unwrap_or_else(|| "—".to_string()),
+                value_color: theme.text_muted,
+            });
+        }
     }
 
-    fn render_compact_monitor_row(
+    fn push_compact_interface_rows(
+        &self,
+        metrics: &ResourceMetrics,
+        rows: &mut Vec<CompactMonitorRow>,
+    ) {
+        if metrics.net_interfaces.is_empty() {
+            return;
+        }
+        let theme = self.tokens.ui;
+        rows.push(CompactMonitorRow::Section {
+            icon: LucideIcon::Wifi,
+            label: self.i18n.t("profiler.panel.interfaces"),
+        });
+        for iface in metrics.net_interfaces.iter().take(8) {
+            let rx = iface
+                .rx_bytes_per_sec
+                .map(format_rate)
+                .unwrap_or_else(|| "—".to_string());
+            let tx = iface
+                .tx_bytes_per_sec
+                .map(format_rate)
+                .unwrap_or_else(|| "—".to_string());
+            rows.push(CompactMonitorRow::Detail {
+                name: iface.name.clone(),
+                value: format!("rx {rx} / tx {tx}"),
+                value_color: theme.text_muted,
+            });
+        }
+    }
+
+    fn push_compact_process_rows(
+        &self,
+        metrics: &ResourceMetrics,
+        rows: &mut Vec<CompactMonitorRow>,
+    ) {
+        if metrics.top_processes.is_empty() {
+            return;
+        }
+        rows.push(CompactMonitorRow::Section {
+            icon: LucideIcon::Activity,
+            label: self.i18n.t("profiler.panel.top_processes"),
+        });
+        for process in metrics.top_processes.iter().take(8) {
+            rows.push(CompactMonitorRow::Detail {
+                name: format!("{} {}", process.pid, process.command),
+                value: format!("{:.1}%", process.memory_percent),
+                value_color: threshold_color(Some(process.memory_percent)),
+            });
+        }
+    }
+
+    fn sync_compact_monitor_list_state(&self, rows: &[CompactMonitorRow]) {
+        let signatures = rows
+            .iter()
+            .map(compact_monitor_row_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.connection_monitor.compact_monitor_list_state,
+            &mut self
+                .connection_monitor
+                .compact_monitor_list_cache
+                .borrow_mut(),
+            "host-tools-monitor-compact",
+            &signatures,
+            self.compact_monitor_list_spec(),
+        );
+    }
+
+    fn compact_monitor_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
+            COMPACT_MONITOR_LIST_OVERSCAN,
+        )
+    }
+
+    fn render_compact_monitor_virtual_row(
+        &self,
+        row: Option<CompactMonitorRow>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(row) = row else {
+            return div().into_any_element();
+        };
+        match row {
+            CompactMonitorRow::Metric {
+                icon,
+                label,
+                value,
+                value_color,
+            } => self.render_compact_monitor_metric_row(icon, label, value, value_color),
+            CompactMonitorRow::Network { rx, tx } => {
+                self.render_compact_monitor_network_row(rx, tx)
+            }
+            CompactMonitorRow::Section { icon, label } => {
+                self.render_compact_monitor_section_row(icon, label)
+            }
+            CompactMonitorRow::Detail {
+                name,
+                value,
+                value_color,
+            } => self.render_compact_monitor_detail_row(name, value, value_color),
+            CompactMonitorRow::Retry { connection_id } => div()
+                .w_full()
+                .h(px(COMPACT_MONITOR_RETRY_ROW_HEIGHT))
+                .flex()
+                .items_center()
+                .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+                .child(self.render_retry_sampling_button(connection_id, cx))
+                .into_any_element(),
+        }
+    }
+
+    fn render_compact_monitor_metric_row(
         &self,
         icon: LucideIcon,
         label: String,
@@ -1232,33 +1409,157 @@ impl WorkspaceApp {
         value_color: u32,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        // Compact sidebar rows are deliberately plain text, not selectable
-        // StyledText, because they repaint while the user scrolls.
+        // Compact metric rows stay flat so labels keep room in the narrow
+        // companion panel while the GPUI List owns the hot scroll surface.
         div()
+            .w_full()
+            .h(px(COMPACT_MONITOR_METRIC_ROW_HEIGHT))
+            .min_w_0()
+            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
             .flex()
             .items_center()
             .justify_between()
             .gap_2()
-            .min_w(px(0.0))
             .text_size(px(12.0))
             .child(
                 div()
-                    .min_w(px(0.0))
+                    .min_w_0()
+                    .flex_1()
                     .flex()
                     .items_center()
-                    .gap_1()
+                    .gap(px(6.0))
                     .text_color(rgb(theme.text_muted))
                     .child(Self::render_lucide_icon(icon, 13.0, rgb(theme.text_muted)))
-                    .child(div().min_w(px(0.0)).truncate().child(label)),
+                    .child(div().min_w_0().truncate().child(label)),
             )
             .child(
                 div()
                     .flex_none()
-                    .max_w(px(180.0))
+                    .max_w(relative(COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO))
                     .truncate()
                     .font_family("monospace")
+                    .text_align(gpui::TextAlign::Right)
                     .text_color(rgb(value_color))
                     .child(value),
+            )
+            .into_any_element()
+    }
+
+    fn render_compact_monitor_network_row(&self, rx: String, tx: String) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .h(px(COMPACT_MONITOR_METRIC_ROW_HEIGHT))
+            .min_w_0()
+            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .text_size(px(12.0))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Wifi,
+                        13.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(div().min_w_0().truncate().child(self.i18n.t("profiler.panel.network"))),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(relative(COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .font_family("monospace")
+                    .child(
+                        div()
+                            .flex_none()
+                            .truncate()
+                            .text_color(rgb(MONITOR_EMERALD))
+                            .child(format!("↓ {rx}")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .truncate()
+                            .text_color(rgb(MONITOR_AMBER))
+                            .child(format!("↑ {tx}")),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_compact_monitor_section_row(&self, icon: LucideIcon, label: String) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .w_full()
+            .h(px(COMPACT_MONITOR_SECTION_ROW_HEIGHT))
+            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .min_w_0()
+            .text_size(px(12.0))
+            .text_color(rgb(theme.text_muted))
+            .child(Self::render_lucide_icon(icon, 13.0, rgb(theme.text_muted)))
+            .child(div().min_w_0().truncate().child(label))
+            .into_any_element()
+    }
+
+    fn render_compact_monitor_detail_row(
+        &self,
+        name: String,
+        value: String,
+        value_color: u32,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        // Detail rows are plain measured list items, not selectable dashboard
+        // widgets, so scroll stays owned by the GPUI List surface.
+        div()
+            .w_full()
+            .h(px(COMPACT_MONITOR_DETAIL_ROW_HEIGHT))
+            .flex()
+            .items_center()
+            .min_w_0()
+            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+            .text_size(px(11.0))
+            .font_family("monospace")
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .pl(px(COMPACT_MONITOR_DETAIL_INDENT))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_color(rgb(theme.text))
+                            .child(name),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(relative(COMPACT_MONITOR_DETAIL_VALUE_MAX_WIDTH_RATIO))
+                            .truncate()
+                            .text_align(gpui::TextAlign::Right)
+                            .text_color(rgb(value_color))
+                            .child(value),
+                    ),
             )
             .into_any_element()
     }
@@ -1673,4 +1974,45 @@ impl WorkspaceApp {
             )
             .into_any_element()
     }
+}
+
+fn compact_monitor_row_signature(row: &CompactMonitorRow) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    match row {
+        CompactMonitorRow::Metric {
+            label,
+            value,
+            value_color,
+            ..
+        } => {
+            "metric".hash(&mut hasher);
+            label.hash(&mut hasher);
+            value.hash(&mut hasher);
+            value_color.hash(&mut hasher);
+        }
+        CompactMonitorRow::Network { rx, tx } => {
+            "network".hash(&mut hasher);
+            rx.hash(&mut hasher);
+            tx.hash(&mut hasher);
+        }
+        CompactMonitorRow::Section { label, .. } => {
+            "section".hash(&mut hasher);
+            label.hash(&mut hasher);
+        }
+        CompactMonitorRow::Detail {
+            name,
+            value,
+            value_color,
+        } => {
+            "detail".hash(&mut hasher);
+            name.hash(&mut hasher);
+            value.hash(&mut hasher);
+            value_color.hash(&mut hasher);
+        }
+        CompactMonitorRow::Retry { connection_id } => {
+            "retry".hash(&mut hasher);
+            connection_id.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }

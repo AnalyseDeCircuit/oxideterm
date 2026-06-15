@@ -21,6 +21,18 @@ use super::*;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
+// The compact sidebar must stay on GPUI List scrolling; ordinary Div overflow
+// repaints too much of the Host Tools panel during trackpad scrolling.
+const COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT: f32 = 34.0;
+const COMPACT_MONITOR_LIST_OVERSCAN: usize = 8;
+const COMPACT_MONITOR_METRIC_ROW_HEIGHT: f32 = 32.0;
+const COMPACT_MONITOR_SECTION_ROW_HEIGHT: f32 = 32.0;
+const COMPACT_MONITOR_DETAIL_ROW_HEIGHT: f32 = 28.0;
+const COMPACT_MONITOR_RETRY_ROW_HEIGHT: f32 = 44.0;
+const COMPACT_MONITOR_ROW_SIDE_PADDING: f32 = 24.0;
+const COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO: f32 = 0.58;
+const COMPACT_MONITOR_DETAIL_VALUE_MAX_WIDTH_RATIO: f32 = 0.55;
+const COMPACT_MONITOR_DETAIL_INDENT: f32 = 22.0;
 const MONITOR_CONTENT_MAX_WIDTH: f32 = 1024.0;
 const MONITOR_PAGE_PADDING: f32 = 32.0;
 const MONITOR_SECTION_GAP: f32 = 32.0;
@@ -143,6 +155,32 @@ impl MonitorConnectionOption {
     }
 }
 
+#[derive(Clone)]
+enum CompactMonitorRow {
+    Metric {
+        icon: LucideIcon,
+        label: String,
+        value: String,
+        value_color: u32,
+    },
+    Network {
+        rx: String,
+        tx: String,
+    },
+    Section {
+        icon: LucideIcon,
+        label: String,
+    },
+    Detail {
+        name: String,
+        value: String,
+        value_color: u32,
+    },
+    Retry {
+        connection_id: String,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionRuntimeSection {
     Overview,
@@ -165,6 +203,8 @@ pub(super) struct ConnectionMonitorState {
     pub(super) profiler_registry: ProfilerRegistry,
     pub(super) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
     pub(super) profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
+    compact_monitor_list_state: ListState,
+    compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -189,6 +229,15 @@ impl ConnectionMonitorState {
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
             profiler_update_rx,
+            compact_monitor_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
+                    COMPACT_MONITOR_LIST_OVERSCAN,
+                ),
+            ),
+            compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

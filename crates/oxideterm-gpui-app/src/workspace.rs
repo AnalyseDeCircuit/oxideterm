@@ -530,6 +530,7 @@ pub(crate) struct WorkspaceApp {
     node_disconnect_confirm: Option<NodeDisconnectConfirm>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
     tab_scroll_handle: ScrollHandle,
+    host_tools_tab_scroll_handle: ScrollHandle,
     next_tab_id: u64,
     next_pane_id: u64,
     next_session_id: u64,
