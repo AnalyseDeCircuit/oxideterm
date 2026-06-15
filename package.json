@@ -142,7 +142,7 @@
     "tailwindcss": "^4.3.0",
     "typescript": "~5.9.3",
     "vite": "^7.3.5",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "pnpm": {
     "overrides": {
