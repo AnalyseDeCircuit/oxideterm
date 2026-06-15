@@ -101,6 +101,7 @@ pub enum SelectAnchorId {
     AiContextPopover,
     NewConnectionGroup,
     NewConnectionManagedKey,
+    NewConnectionJumpSavedConnection,
     NewConnectionJumpManagedKey,
     NewConnectionPrivilegeKind,
     NewConnectionUpstreamProxyPolicy,
@@ -185,6 +186,7 @@ impl SelectAnchorId {
             self,
             Self::NewConnectionGroup
                 | Self::NewConnectionManagedKey
+                | Self::NewConnectionJumpSavedConnection
                 | Self::NewConnectionJumpManagedKey
                 | Self::NewConnectionPrivilegeKind
                 | Self::NewConnectionUpstreamProxyPolicy

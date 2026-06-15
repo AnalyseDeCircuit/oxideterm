@@ -3,6 +3,9 @@ impl WorkspaceApp {
         match select_id {
             NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
+            NewConnectionSelect::JumpSavedConnection => {
+                SelectAnchorId::NewConnectionJumpSavedConnection
+            }
             NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
             NewConnectionSelect::PrivilegeKind => SelectAnchorId::NewConnectionPrivilegeKind,
             NewConnectionSelect::UpstreamProxyPolicy => {
@@ -65,6 +68,8 @@ impl WorkspaceApp {
         self.select_anchors.remove(&SelectAnchorId::NewConnectionGroup);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionManagedKey);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionJumpSavedConnection);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
         self.select_anchors
@@ -876,6 +881,68 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn render_jump_saved_connection_select(
+        &self,
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.connection_store.connection_infos();
+        let selected_label = if selected_id.trim().is_empty() {
+            self.i18n.t("ssh.form.proxy_jump_saved_connection_custom")
+        } else {
+            connections
+                .iter()
+                .find(|connection| connection.id == selected_id)
+                .map(|connection| {
+                    format!(
+                        "{} · {}@{}:{}",
+                        connection.name, connection.username, connection.host, connection.port
+                    )
+                })
+                .unwrap_or_else(|| selected_id.to_string())
+        };
+        let workspace = cx.entity();
+        let trigger = self
+            .new_connection_select_trigger(
+                NewConnectionSelect::JumpSavedConnection,
+                selected_label,
+                selected_id.trim().is_empty(),
+                false,
+            )
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        form.field_focused = false;
+                        form.selected_field = None;
+                    }
+                    this.ime_marked_text = None;
+                    this.open_new_connection_select_from_pointer(
+                        NewConnectionSelect::JumpSavedConnection,
+                    );
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+
+        form_field(
+            &self.tokens,
+            self.i18n.t("ssh.form.proxy_jump_saved_connection"),
+            select_anchor_probe(
+                SelectAnchorId::NewConnectionJumpSavedConnection,
+                trigger,
+                move |anchor, _window, cx| {
+                    let _ = workspace.update(cx, |this, cx| {
+                        this.update_select_anchor(anchor, cx);
+                    });
+                },
+            ),
+        )
+        .into_any_element()
+    }
+
     fn set_new_connection_managed_key(
         &mut self,
         select_id: NewConnectionSelect,
@@ -896,6 +963,7 @@ impl WorkspaceApp {
                     form.focused_field = NewConnectionField::JumpManagedKeyId;
                 }
                 NewConnectionSelect::Group
+                | NewConnectionSelect::JumpSavedConnection
                 | NewConnectionSelect::PrivilegeKind
                 | NewConnectionSelect::UpstreamProxyPolicy
                 | NewConnectionSelect::UpstreamProxyProtocol
@@ -905,6 +973,45 @@ impl WorkspaceApp {
                 | NewConnectionSelect::SerialStopBits
                 | NewConnectionSelect::SerialParity
                 | NewConnectionSelect::SerialFlowControl => return,
+            }
+            form.field_focused = false;
+            form.selected_field = None;
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn clear_new_connection_jump_saved_connection(&mut self, cx: &mut Context<Self>) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            if let Some(jump_form) = form.jump_server_form.as_mut() {
+                jump_form.saved_connection_id.clear();
+            }
+            form.field_focused = false;
+            form.selected_field = None;
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_jump_saved_connection(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let selected_connection = self
+            .connection_store
+            .connection_infos()
+            .into_iter()
+            .find(|connection| connection.id == connection_id);
+        if let (Some(form), Some(connection)) =
+            (self.new_connection_form.as_mut(), selected_connection.as_ref())
+        {
+            if let Some(jump_form) = form.jump_server_form.as_mut() {
+                jump_form.apply_saved_connection(connection);
             }
             form.field_focused = false;
             form.selected_field = None;

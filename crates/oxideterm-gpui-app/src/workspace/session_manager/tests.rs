@@ -195,6 +195,7 @@ mod tests {
         };
         form.proxy_hops
             .push(crate::workspace::new_connection::NewConnectionProxyHop {
+                saved_connection_id: String::new(),
                 host: "jump.example.com".to_string(),
                 port: "2222".to_string(),
                 username: "ops".to_string(),
@@ -232,6 +233,7 @@ mod tests {
         };
         form.proxy_hops
             .push(crate::workspace::new_connection::NewConnectionProxyHop {
+                saved_connection_id: String::new(),
                 host: "jump.example.com".to_string(),
                 port: "22".to_string(),
                 username: "ops".to_string(),

@@ -517,6 +517,10 @@ impl WorkspaceApp {
                         SelectAnchorId::NewConnectionManagedKey
                     )
                     | (
+                        Some(NewConnectionSelect::JumpSavedConnection),
+                        SelectAnchorId::NewConnectionJumpSavedConnection
+                    )
+                    | (
                         Some(NewConnectionSelect::JumpManagedKey),
                         SelectAnchorId::NewConnectionJumpManagedKey
                     )
@@ -1339,6 +1343,7 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::AiContextPopover
             | SelectAnchorId::NewConnectionGroup
             | SelectAnchorId::NewConnectionManagedKey
+            | SelectAnchorId::NewConnectionJumpSavedConnection
             | SelectAnchorId::NewConnectionJumpManagedKey
             | SelectAnchorId::NewConnectionSerialPort
             | SelectAnchorId::NewConnectionSerialDataBits

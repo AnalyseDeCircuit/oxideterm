@@ -75,6 +75,51 @@ impl WorkspaceApp {
                     );
                 }
             }
+            NewConnectionSelect::JumpSavedConnection => {
+                let selected_connection_id = self
+                    .new_connection_form
+                    .as_ref()
+                    .and_then(|form| form.jump_server_form.as_ref())
+                    .map(|jump_form| jump_form.saved_connection_id.as_str())
+                    .unwrap_or_default();
+                popup = popup.child(
+                    select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n.t("ssh.form.proxy_jump_saved_connection_custom"),
+                            selected_connection_id.is_empty(),
+                        ),
+                        false,
+                        false,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.clear_new_connection_jump_saved_connection(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+                for connection in self.connection_store.connection_infos() {
+                    let selected = connection.id == selected_connection_id;
+                    let connection_id = connection.id.clone();
+                    let label = format!(
+                        "{} · {}@{}:{}",
+                        connection.name, connection.username, connection.host, connection.port
+                    );
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_jump_saved_connection(
+                                    connection_id.clone(),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
             NewConnectionSelect::ManagedKey | NewConnectionSelect::JumpManagedKey => {
                 let current_key_id = self
                     .new_connection_form
@@ -451,6 +496,17 @@ impl WorkspaceApp {
                         .flex()
                         .flex_col()
                         .gap_4()
+                        .child(self.render_jump_saved_connection_select(
+                            &jump_form.saved_connection_id,
+                            cx,
+                        ))
+                        .child(self.render_connection_hint(
+                            if self.connection_store.connection_infos().is_empty() {
+                                self.i18n.t("ssh.form.proxy_jump_saved_connection_empty")
+                            } else {
+                                self.i18n.t("ssh.form.proxy_jump_saved_connection_hint")
+                            },
+                        ))
                         .child(
                             div()
                                 .flex()

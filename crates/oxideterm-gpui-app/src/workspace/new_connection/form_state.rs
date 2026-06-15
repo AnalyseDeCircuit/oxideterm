@@ -1,7 +1,8 @@
 use std::fmt;
 
 use oxideterm_connections::{
-    PrivilegeCredentialKind, SavedPrivilegeCredential, SavedUpstreamProxyProtocol,
+    AuthType, ConnectionInfo, PrivilegeCredentialKind, SavedPrivilegeCredential,
+    SavedUpstreamProxyProtocol,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,6 +77,7 @@ pub(in crate::workspace) fn new_connection_form_mode(
 pub(in crate::workspace) enum NewConnectionSelect {
     Group,
     ManagedKey,
+    JumpSavedConnection,
     JumpManagedKey,
     PrivilegeKind,
     UpstreamProxyPolicy,
@@ -180,6 +182,7 @@ impl Default for PrivilegeCredentialDraft {
 
 #[derive(Clone)]
 pub(in crate::workspace) struct NewConnectionProxyHop {
+    pub(in crate::workspace) saved_connection_id: String,
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: String,
     pub(in crate::workspace) username: String,
@@ -196,6 +199,7 @@ impl fmt::Debug for NewConnectionProxyHop {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("NewConnectionProxyHop")
+            .field("saved_connection_id", &self.saved_connection_id)
             .field("host", &self.host)
             .field("port", &self.port)
             .field("username", &self.username)
@@ -213,6 +217,7 @@ impl fmt::Debug for NewConnectionProxyHop {
 impl NewConnectionProxyHop {
     pub(in crate::workspace) fn new() -> Self {
         Self {
+            saved_connection_id: String::new(),
             host: String::new(),
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: String::new(),
@@ -228,6 +233,28 @@ impl NewConnectionProxyHop {
 
     pub(in crate::workspace) fn complete(&self) -> bool {
         !self.host.trim().is_empty() && !self.username.trim().is_empty()
+    }
+
+    pub(in crate::workspace) fn apply_saved_connection(&mut self, connection: &ConnectionInfo) {
+        self.saved_connection_id = connection.id.clone();
+        self.host = connection.host.clone();
+        self.port = connection.port.to_string();
+        self.username = connection.username.clone();
+        self.auth_tab = match connection.auth_type {
+            AuthType::Password => SshAuthTab::Password,
+            AuthType::Key => SshAuthTab::SshKey,
+            AuthType::ManagedKey => SshAuthTab::ManagedKey,
+            AuthType::Certificate => SshAuthTab::Certificate,
+            AuthType::Agent => SshAuthTab::Agent,
+        };
+        // ConnectionInfo is metadata-only. Keep keychain-backed passwords and
+        // passphrases out of the form when reusing a saved connection as a hop.
+        self.password.clear();
+        self.passphrase.clear();
+        self.key_path = connection.key_path.clone().unwrap_or_default();
+        self.cert_path = connection.cert_path.clone().unwrap_or_default();
+        self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
+        self.agent_forwarding = connection.agent_forwarding;
     }
 }
 
@@ -877,11 +904,12 @@ pub(in crate::workspace) fn text_from_keystroke(keystroke: &gpui::Keystroke) -> 
 #[cfg(test)]
 mod tests {
     use gpui::{Keystroke, Modifiers};
+    use oxideterm_connections::{AuthType, ConnectionInfo, SavedUpstreamProxyPolicy};
 
     use super::{
-        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionTransport,
-        SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, TELNET_DEFAULT_PORT_TEXT,
-        apply_transport_default_port, backspace_current_connection_field,
+        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
+        NewConnectionTransport, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthTab,
+        TELNET_DEFAULT_PORT_TEXT, apply_transport_default_port, backspace_current_connection_field,
         insert_text_into_current_connection_field, new_connection_form_mode, next_connection_field,
         select_current_connection_field, text_from_keystroke,
     };
@@ -1095,5 +1123,46 @@ mod tests {
         assert!(
             !NewConnectionFormMode::SavedConnectionPrompt.submits_saved_connection_properties()
         );
+    }
+
+    #[test]
+    fn jump_hop_uses_saved_connection_metadata_without_secrets() {
+        let connection = ConnectionInfo {
+            id: "conn-1".to_string(),
+            name: "Bastion".to_string(),
+            group: Some("Prod".to_string()),
+            host: "bastion.example.com".to_string(),
+            port: 2222,
+            username: "jump".to_string(),
+            auth_type: AuthType::Certificate,
+            key_path: Some("~/.ssh/id_ed25519".to_string()),
+            cert_path: Some("~/.ssh/id_ed25519-cert.pub".to_string()),
+            managed_key_id: None,
+            managed_key_name: None,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            created_at: "2026-06-15T00:00:00Z".to_string(),
+            last_used_at: None,
+            color: None,
+            tags: Vec::new(),
+            agent_forwarding: true,
+            post_connect_command: None,
+        };
+        let mut hop = NewConnectionProxyHop::new();
+        hop.password = "old-password".to_string();
+        hop.passphrase = "old-passphrase".to_string();
+
+        hop.apply_saved_connection(&connection);
+
+        assert_eq!(hop.saved_connection_id, "conn-1");
+        assert_eq!(hop.host, "bastion.example.com");
+        assert_eq!(hop.port, "2222");
+        assert_eq!(hop.username, "jump");
+        assert_eq!(hop.auth_tab, SshAuthTab::Certificate);
+        assert_eq!(hop.key_path, "~/.ssh/id_ed25519");
+        assert_eq!(hop.cert_path, "~/.ssh/id_ed25519-cert.pub");
+        assert!(hop.password.is_empty());
+        assert!(hop.passphrase.is_empty());
+        assert!(hop.agent_forwarding);
     }
 }
