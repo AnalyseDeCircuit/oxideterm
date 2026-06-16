@@ -45,7 +45,10 @@
       "event_log": "事件日誌",
       "notifications": "通知中心",
       "saved_connections": "已儲存的連線",
-      "forwarding": "連接埠轉發"
+      "forwarding": "連接埠轉發",
+      "ports": "連接埠",
+      "schedules": "排程任務",
+      "filesystems": "磁碟"
     },
     "tooltips": {
       "settings": "設定",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "工作階段名稱",
         "rename_window_placeholder": "視窗名稱",
         "send_command_placeholder": "要傳送的命令"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "搜尋排程任務...",
+      "count_suffix": "個任務",
+      "loading": "正在掃描排程任務...",
+      "empty": "沒有符合的排程任務",
+      "unavailable": "此主機不支援排程任務工具。",
+      "error": "排程任務命令失敗：{{error}}",
+      "capability": {
+        "full": "完整支援",
+        "partial": "部分支援",
+        "unknown": "支援未知"
+      },
+      "filters": {
+        "all": "全部",
+        "enabled": "已啟用",
+        "disabled": "已停用",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "失敗"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "未知"
+      },
+      "enabled": {
+        "enabled": "已啟用",
+        "disabled": "已停用",
+        "static": "靜態",
+        "masked": "已遮罩",
+        "unknown": "未知"
+      },
+      "active": {
+        "active": "作用中",
+        "inactive": "非作用中",
+        "failed": "失敗",
+        "unknown": "未知"
+      },
+      "columns": {
+        "task": "任務",
+        "source": "來源",
+        "state": "狀態",
+        "enabled": "啟用",
+        "next": "下次",
+        "last": "上次",
+        "user": "使用者",
+        "schedule": "排程",
+        "command": "命令",
+        "result": "結果",
+        "description": "描述",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "重新整理排程任務",
+        "diagnostic": "開啟診斷終端",
+        "logs": "檢視日誌",
+        "follow_logs": "跟隨日誌",
+        "enable": "啟用",
+        "disable": "停用",
+        "run_now": "立即執行"
+      },
+      "diagnostic_title": "排程任務診斷",
+      "follow_title": "排程任務日誌：{{name}}",
+      "logs": {
+        "title": "日誌：{{name}}",
+        "loading": "正在載入日誌...",
+        "empty": "沒有最近日誌。",
+        "close": "關閉日誌"
+      },
+      "confirm": {
+        "title": "確認排程任務操作",
+        "cancel": "取消",
+        "enable_desc": "啟用排程任務 {{name}} 嗎？Unit：{{unit}}。",
+        "disable_desc": "停用排程任務 {{name}} 嗎？後續自動執行可能會停止。Unit：{{unit}}。",
+        "run_now_desc": "現在執行排程任務 {{name}} 嗎？Unit：{{unit}}。"
+      },
+      "toast": {
+        "snapshot_already_running": "排程任務掃描正在執行。",
+        "snapshot_loaded": "已載入 {{count}} 個排程任務。",
+        "snapshot_failed": "掃描排程任務失敗：{{reason}}",
+        "unavailable": "此主機不支援排程任務工具。",
+        "connection_missing": "所選連線已不可用。",
+        "exec_terminal_missing": "沒有可用於診斷的即時 SSH 終端路由。",
+        "diagnostic_opened": "已開啟排程任務診斷。",
+        "follow_opened": "已開啟 {{name}} 的排程任務日誌跟隨。",
+        "logs_already_running": "排程任務日誌正在載入。",
+        "logs_failed": "載入排程任務日誌失敗。",
+        "action_already_running": "已有排程任務操作正在執行。",
+        "action_failed": "排程任務操作失敗。",
+        "enable_succeeded": "已啟用 {{name}}。",
+        "disable_succeeded": "已停用 {{name}}。",
+        "run_now_started": "已啟動 {{name}}。",
+        "partial_support": "{{os}} 上的排程任務支援為部分支援。",
+        "unknown_error": "未知排程任務錯誤。"
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "搜尋連接埠...",
+      "count_suffix": "個連接埠",
+      "loading": "正在掃描連接埠...",
+      "empty": "沒有符合的連接埠",
+      "unavailable": "此主機無法使用連接埠工具。",
+      "error": "連接埠命令失敗：{{error}}",
+      "capability": {
+        "full": "完整支援",
+        "partial": "部分支援",
+        "unknown": "支援狀態未知"
+      },
+      "filters": {
+        "all": "全部",
+        "listening": "監聽",
+        "connected": "已連線",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "高風險"
+      },
+      "columns": {
+        "local": "本機位址",
+        "protocol": "協定",
+        "state": "狀態",
+        "pid": "PID",
+        "process": "行程",
+        "remote": "遠端位址",
+        "user": "使用者",
+        "command": "命令",
+        "source": "來源",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "監聽中",
+        "established": "已建立",
+        "open": "開放",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "重新整理連接埠",
+        "diagnostic": "開啟診斷終端",
+        "copy_endpoint": "複製位址",
+        "jump_process": "查找行程"
+      },
+      "diagnostic_title": "連接埠診斷",
+      "toast": {
+        "snapshot_already_running": "連接埠掃描正在執行。",
+        "snapshot_loaded": "已載入 {{count}} 個連接埠。",
+        "snapshot_failed": "連接埠掃描失敗：{{reason}}",
+        "unavailable": "此主機無法使用連接埠工具。",
+        "connection_missing": "所選連線已不可用。",
+        "exec_terminal_missing": "沒有可用的 SSH 終端路由可用於診斷。",
+        "diagnostic_opened": "已開啟連接埠診斷。",
+        "copied_endpoint": "已複製 {{endpoint}}。",
+        "partial_support": "{{os}} 上的連接埠檢查為部分支援。",
+        "unknown_error": "未知的連接埠掃描錯誤。"
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "搜尋檔案系統...",
+      "count_suffix": "項",
+      "loading": "正在掃描磁碟...",
+      "empty": "沒有相符的檔案系統項目",
+      "unavailable": "此主機沒有可用的檔案系統工具。",
+      "error": "檔案系統命令失敗：{{error}}",
+      "capability": {
+        "full": "完整支援",
+        "partial": "部分支援",
+        "unknown": "支援狀態未知"
+      },
+      "filters": {
+        "all": "全部",
+        "mounts": "掛載點",
+        "read_only": "唯讀",
+        "high_usage": "高使用量",
+        "inode_pressure": "Inode 壓力",
+        "large_items": "大型項目",
+        "blocks": "區塊裝置"
+      },
+      "columns": {
+        "path": "路徑",
+        "kind": "類型",
+        "usage": "使用量",
+        "inode": "Inode",
+        "fs": "檔案系統",
+        "size": "大小",
+        "read_only": "唯讀",
+        "device": "裝置",
+        "used_available": "已用 / 可用",
+        "source": "來源",
+        "detail": "詳細資料",
+        "options": "選項"
+      },
+      "kinds": {
+        "mount": "掛載點",
+        "large_dir": "大型目錄",
+        "large_file": "大型檔案",
+        "block": "區塊裝置",
+        "unknown": "未知"
+      },
+      "read_only": {
+        "yes": "是",
+        "no": "否"
+      },
+      "actions": {
+        "refresh": "重新整理磁碟",
+        "diagnostic": "開啟診斷終端",
+        "copy_path": "複製路徑"
+      },
+      "diagnostic_title": "磁碟診斷",
+      "toast": {
+        "snapshot_already_running": "磁碟掃描已在執行。",
+        "snapshot_loaded": "已載入 {{count}} 個檔案系統項目。",
+        "snapshot_failed": "磁碟掃描失敗：{{reason}}",
+        "unavailable": "此主機沒有可用的檔案系統工具。",
+        "connection_missing": "選取的連線已不可用。",
+        "exec_terminal_missing": "沒有可用於診斷的即時 SSH 終端路由。",
+        "diagnostic_opened": "已開啟磁碟診斷。",
+        "copied_path": "已複製 {{path}}。",
+        "partial_support": "{{os}} 上的檔案系統檢查為部分支援。",
+        "unknown_error": "未知檔案系統掃描錯誤。"
       }
     }
   },

@@ -45,7 +45,10 @@
       "event_log": "事件日志",
       "notifications": "通知中心",
       "saved_connections": "保存的连接",
-      "forwarding": "端口转发"
+      "forwarding": "端口转发",
+      "ports": "端口",
+      "schedules": "计划任务",
+      "filesystems": "磁盘"
     },
     "tooltips": {
       "settings": "设置",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "会话名称",
         "rename_window_placeholder": "窗口名称",
         "send_command_placeholder": "要发送的命令"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "搜索计划任务...",
+      "count_suffix": "个任务",
+      "loading": "正在扫描计划任务...",
+      "empty": "没有匹配的计划任务",
+      "unavailable": "此主机不支持计划任务工具。",
+      "error": "计划任务命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "部分支持",
+        "unknown": "支持未知"
+      },
+      "filters": {
+        "all": "全部",
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "失败"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "未知"
+      },
+      "enabled": {
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "static": "静态",
+        "masked": "已屏蔽",
+        "unknown": "未知"
+      },
+      "active": {
+        "active": "活跃",
+        "inactive": "非活跃",
+        "failed": "失败",
+        "unknown": "未知"
+      },
+      "columns": {
+        "task": "任务",
+        "source": "来源",
+        "state": "状态",
+        "enabled": "启用",
+        "next": "下次",
+        "last": "上次",
+        "user": "用户",
+        "schedule": "计划",
+        "command": "命令",
+        "result": "结果",
+        "description": "描述",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "刷新计划任务",
+        "diagnostic": "打开诊断终端",
+        "logs": "查看日志",
+        "follow_logs": "跟随日志",
+        "enable": "启用",
+        "disable": "禁用",
+        "run_now": "立即运行"
+      },
+      "diagnostic_title": "计划任务诊断",
+      "follow_title": "计划任务日志：{{name}}",
+      "logs": {
+        "title": "日志：{{name}}",
+        "loading": "正在加载日志...",
+        "empty": "没有最近日志。",
+        "close": "关闭日志"
+      },
+      "confirm": {
+        "title": "确认计划任务操作",
+        "cancel": "取消",
+        "enable_desc": "启用计划任务 {{name}} 吗？Unit：{{unit}}。",
+        "disable_desc": "禁用计划任务 {{name}} 吗？后续自动运行可能会停止。Unit：{{unit}}。",
+        "run_now_desc": "现在运行计划任务 {{name}} 吗？Unit：{{unit}}。"
+      },
+      "toast": {
+        "snapshot_already_running": "计划任务扫描正在运行。",
+        "snapshot_loaded": "已加载 {{count}} 个计划任务。",
+        "snapshot_failed": "扫描计划任务失败：{{reason}}",
+        "unavailable": "此主机不支持计划任务工具。",
+        "connection_missing": "所选连接不再可用。",
+        "exec_terminal_missing": "没有可用于诊断的实时 SSH 终端路由。",
+        "diagnostic_opened": "已打开计划任务诊断。",
+        "follow_opened": "已打开 {{name}} 的计划任务日志跟随。",
+        "logs_already_running": "计划任务日志正在加载。",
+        "logs_failed": "加载计划任务日志失败。",
+        "action_already_running": "已有计划任务操作正在运行。",
+        "action_failed": "计划任务操作失败。",
+        "enable_succeeded": "已启用 {{name}}。",
+        "disable_succeeded": "已禁用 {{name}}。",
+        "run_now_started": "已启动 {{name}}。",
+        "partial_support": "{{os}} 上的计划任务支持为部分支持。",
+        "unknown_error": "未知计划任务错误。"
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "搜索端口...",
+      "count_suffix": "个端口",
+      "loading": "正在扫描端口...",
+      "empty": "没有匹配的端口",
+      "unavailable": "此主机不可用端口工具。",
+      "error": "端口命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "部分支持",
+        "unknown": "支持状态未知"
+      },
+      "filters": {
+        "all": "全部",
+        "listening": "监听",
+        "connected": "已连接",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "高风险"
+      },
+      "columns": {
+        "local": "本地地址",
+        "protocol": "协议",
+        "state": "状态",
+        "pid": "PID",
+        "process": "进程",
+        "remote": "远端地址",
+        "user": "用户",
+        "command": "命令",
+        "source": "来源",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "监听中",
+        "established": "已建立",
+        "open": "开放",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "刷新端口",
+        "diagnostic": "打开诊断终端",
+        "copy_endpoint": "复制地址",
+        "jump_process": "查找进程"
+      },
+      "diagnostic_title": "端口诊断",
+      "toast": {
+        "snapshot_already_running": "端口扫描正在运行。",
+        "snapshot_loaded": "已加载 {{count}} 个端口。",
+        "snapshot_failed": "端口扫描失败：{{reason}}",
+        "unavailable": "此主机不可用端口工具。",
+        "connection_missing": "所选连接已不可用。",
+        "exec_terminal_missing": "没有可用的 SSH 终端路由用于诊断。",
+        "diagnostic_opened": "已打开端口诊断。",
+        "copied_endpoint": "已复制 {{endpoint}}。",
+        "partial_support": "{{os}} 上的端口检查为部分支持。",
+        "unknown_error": "未知端口扫描错误。"
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "搜索文件系统...",
+      "count_suffix": "项",
+      "loading": "正在扫描磁盘...",
+      "empty": "没有匹配的文件系统条目",
+      "unavailable": "此主机没有可用的文件系统工具。",
+      "error": "文件系统命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "部分支持",
+        "unknown": "支持状态未知"
+      },
+      "filters": {
+        "all": "全部",
+        "mounts": "挂载点",
+        "read_only": "只读",
+        "high_usage": "高占用",
+        "inode_pressure": "Inode 压力",
+        "large_items": "大项",
+        "blocks": "块设备"
+      },
+      "columns": {
+        "path": "路径",
+        "kind": "类型",
+        "usage": "占用",
+        "inode": "Inode",
+        "fs": "文件系统",
+        "size": "大小",
+        "read_only": "只读",
+        "device": "设备",
+        "used_available": "已用 / 可用",
+        "source": "来源",
+        "detail": "详情",
+        "options": "选项"
+      },
+      "kinds": {
+        "mount": "挂载点",
+        "large_dir": "大目录",
+        "large_file": "大文件",
+        "block": "块设备",
+        "unknown": "未知"
+      },
+      "read_only": {
+        "yes": "是",
+        "no": "否"
+      },
+      "actions": {
+        "refresh": "刷新磁盘",
+        "diagnostic": "打开诊断终端",
+        "copy_path": "复制路径"
+      },
+      "diagnostic_title": "磁盘诊断",
+      "toast": {
+        "snapshot_already_running": "磁盘扫描已在运行。",
+        "snapshot_loaded": "已加载 {{count}} 个文件系统条目。",
+        "snapshot_failed": "磁盘扫描失败：{{reason}}",
+        "unavailable": "此主机没有可用的文件系统工具。",
+        "connection_missing": "选中的连接已不可用。",
+        "exec_terminal_missing": "没有可用于诊断的实时 SSH 终端路由。",
+        "diagnostic_opened": "已打开磁盘诊断。",
+        "copied_path": "已复制 {{path}}。",
+        "partial_support": "{{os}} 上的文件系统检查为部分支持。",
+        "unknown_error": "未知文件系统扫描错误。"
       }
     }
   },

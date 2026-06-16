@@ -80,6 +80,46 @@ const HOST_TMUX_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 128 * 1024;
 const HOST_TMUX_ACTION_TIMEOUT: Duration = Duration::from_secs(8);
 const HOST_TMUX_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
 const HOST_TMUX_INPUT_DIALOG_WIDTH: f32 = 460.0;
+const HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_PORT_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_PORT_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_PORT_PROTOCOL_COLUMN_WIDTH: f32 = 46.0;
+const HOST_PORT_STATE_COLUMN_WIDTH: f32 = 78.0;
+const HOST_PORT_PID_COLUMN_WIDTH: f32 = 58.0;
+const HOST_PORT_PROCESS_COLUMN_WIDTH: f32 = 96.0;
+const HOST_PORT_REMOTE_COLUMN_WIDTH: f32 = 132.0;
+const HOST_PORT_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 680.0;
+const HOST_PORT_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_PORT_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 256 * 1024;
+const HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_SCHEDULE_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_SCHEDULE_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_SCHEDULE_SOURCE_COLUMN_WIDTH: f32 = 74.0;
+const HOST_SCHEDULE_STATE_COLUMN_WIDTH: f32 = 78.0;
+const HOST_SCHEDULE_ENABLED_COLUMN_WIDTH: f32 = 72.0;
+const HOST_SCHEDULE_NEXT_COLUMN_WIDTH: f32 = 112.0;
+const HOST_SCHEDULE_LAST_COLUMN_WIDTH: f32 = 112.0;
+const HOST_SCHEDULE_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 720.0;
+const HOST_SCHEDULE_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
+const HOST_SCHEDULE_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 256 * 1024;
+const HOST_SCHEDULE_ACTION_TIMEOUT: Duration = Duration::from_secs(12);
+const HOST_SCHEDULE_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
+const HOST_SCHEDULE_LOGS_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_SCHEDULE_LOGS_MAX_OUTPUT_SIZE: usize = 128 * 1024;
+const HOST_SCHEDULE_LOGS_DIALOG_WIDTH: f32 = 760.0;
+const HOST_SCHEDULE_LOGS_DIALOG_MAX_HEIGHT: f32 = 520.0;
+const HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_FILESYSTEM_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_FILESYSTEM_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_FILESYSTEM_KIND_COLUMN_WIDTH: f32 = 74.0;
+const HOST_FILESYSTEM_USAGE_COLUMN_WIDTH: f32 = 70.0;
+const HOST_FILESYSTEM_INODE_COLUMN_WIDTH: f32 = 64.0;
+const HOST_FILESYSTEM_FS_COLUMN_WIDTH: f32 = 74.0;
+const HOST_FILESYSTEM_RO_COLUMN_WIDTH: f32 = 48.0;
+const HOST_FILESYSTEM_SIZE_COLUMN_WIDTH: f32 = 104.0;
+const HOST_FILESYSTEM_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 720.0;
+const HOST_FILESYSTEM_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(15);
+const HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 512 * 1024;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
@@ -341,6 +381,74 @@ struct HostTmuxActionDelivery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct HostPortSnapshotRequest {
+    connection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostPortSnapshotDelivery {
+    request: HostPortSnapshotRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleSnapshotRequest {
+    connection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleSnapshotDelivery {
+    request: HostScheduleSnapshotRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostFilesystemSnapshotRequest {
+    connection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostFilesystemSnapshotDelivery {
+    request: HostFilesystemSnapshotRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleActionRequest {
+    connection_id: String,
+    task_id: String,
+    task_name: String,
+    unit: String,
+    action: ScheduledTaskActionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleActionDelivery {
+    request: HostScheduleActionRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleLogsRequest {
+    connection_id: String,
+    task: ResourceScheduledTask,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleLogsDelivery {
+    request: HostScheduleLogsRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostScheduleLogsDialog {
+    request: HostScheduleLogsRequest,
+    output: Option<String>,
+    error: Option<String>,
+    loading: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum HostTmuxInputDialogKind {
     RenameSession { target: String },
     RenameWindow { target: String },
@@ -449,6 +557,49 @@ pub(super) struct ConnectionMonitorState {
     host_tmux_action_polling: bool,
     host_tmux_list_state: ListState,
     host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_port_search_query: String,
+    pub(in crate::workspace) host_port_search_focused: bool,
+    host_port_filter: PortFilter,
+    pub(in crate::workspace) host_port_expanded_index: Option<usize>,
+    host_port_snapshot_connection_id: Option<String>,
+    host_port_snapshot: Option<ResourcePortSnapshot>,
+    host_port_snapshot_rx: Option<std::sync::mpsc::Receiver<HostPortSnapshotDelivery>>,
+    host_port_snapshot_running: Option<HostPortSnapshotRequest>,
+    host_port_snapshot_polling: bool,
+    host_port_last_error: Option<String>,
+    host_port_list_state: ListState,
+    host_port_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_schedule_search_query: String,
+    pub(in crate::workspace) host_schedule_search_focused: bool,
+    host_schedule_filter: ScheduledTaskFilter,
+    pub(in crate::workspace) host_schedule_expanded_index: Option<usize>,
+    host_schedule_snapshot_connection_id: Option<String>,
+    host_schedule_snapshot: Option<ResourceScheduledTaskSnapshot>,
+    host_schedule_snapshot_rx: Option<std::sync::mpsc::Receiver<HostScheduleSnapshotDelivery>>,
+    host_schedule_snapshot_running: Option<HostScheduleSnapshotRequest>,
+    host_schedule_snapshot_polling: bool,
+    host_schedule_last_error: Option<String>,
+    host_schedule_pending_confirm: Option<HostScheduleActionRequest>,
+    host_schedule_action_running: Option<HostScheduleActionRequest>,
+    host_schedule_action_rx: Option<std::sync::mpsc::Receiver<HostScheduleActionDelivery>>,
+    host_schedule_action_polling: bool,
+    host_schedule_logs_dialog: Option<HostScheduleLogsDialog>,
+    host_schedule_logs_rx: Option<std::sync::mpsc::Receiver<HostScheduleLogsDelivery>>,
+    host_schedule_logs_polling: bool,
+    host_schedule_list_state: ListState,
+    host_schedule_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_filesystem_search_query: String,
+    pub(in crate::workspace) host_filesystem_search_focused: bool,
+    host_filesystem_filter: FilesystemFilter,
+    pub(in crate::workspace) host_filesystem_expanded_index: Option<usize>,
+    host_filesystem_snapshot_connection_id: Option<String>,
+    host_filesystem_snapshot: Option<ResourceFilesystemSnapshot>,
+    host_filesystem_snapshot_rx: Option<std::sync::mpsc::Receiver<HostFilesystemSnapshotDelivery>>,
+    host_filesystem_snapshot_running: Option<HostFilesystemSnapshotRequest>,
+    host_filesystem_snapshot_polling: bool,
+    host_filesystem_last_error: Option<String>,
+    host_filesystem_list_state: ListState,
+    host_filesystem_list_cache: RefCell<VirtualListSignatureCache>,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -569,6 +720,61 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_TMUX_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_tmux_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_port_search_query: String::new(),
+            host_port_search_focused: false,
+            host_port_filter: PortFilter::All,
+            host_port_expanded_index: None,
+            host_port_snapshot_connection_id: None,
+            host_port_snapshot: None,
+            host_port_snapshot_rx: None,
+            host_port_snapshot_running: None,
+            host_port_snapshot_polling: false,
+            host_port_last_error: None,
+            host_port_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_port_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_schedule_search_query: String::new(),
+            host_schedule_search_focused: false,
+            host_schedule_filter: ScheduledTaskFilter::All,
+            host_schedule_expanded_index: None,
+            host_schedule_snapshot_connection_id: None,
+            host_schedule_snapshot: None,
+            host_schedule_snapshot_rx: None,
+            host_schedule_snapshot_running: None,
+            host_schedule_snapshot_polling: false,
+            host_schedule_last_error: None,
+            host_schedule_pending_confirm: None,
+            host_schedule_action_running: None,
+            host_schedule_action_rx: None,
+            host_schedule_action_polling: false,
+            host_schedule_logs_dialog: None,
+            host_schedule_logs_rx: None,
+            host_schedule_logs_polling: false,
+            host_schedule_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_schedule_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_filesystem_search_query: String::new(),
+            host_filesystem_search_focused: false,
+            host_filesystem_filter: FilesystemFilter::All,
+            host_filesystem_expanded_index: None,
+            host_filesystem_snapshot_connection_id: None,
+            host_filesystem_snapshot: None,
+            host_filesystem_snapshot_rx: None,
+            host_filesystem_snapshot_running: None,
+            host_filesystem_snapshot_polling: false,
+            host_filesystem_last_error: None,
+            host_filesystem_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_filesystem_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

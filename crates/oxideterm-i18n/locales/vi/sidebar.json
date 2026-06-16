@@ -45,7 +45,10 @@
       "event_log": "Nhật ký sự kiện",
       "notifications": "Thông báo",
       "saved_connections": "Kết nối đã lưu",
-      "forwarding": "Chuyển tiếp cổng"
+      "forwarding": "Chuyển tiếp cổng",
+      "ports": "Cổng",
+      "schedules": "Tác vụ đã lên lịch",
+      "filesystems": "Ổ đĩa"
     },
     "tooltips": {
       "settings": "Cài đặt",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "Tên phiên",
         "rename_window_placeholder": "Tên cửa sổ",
         "send_command_placeholder": "Lệnh cần gửi"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "Search tác vụ đã lên lịchs...",
+      "count_suffix": "tasks",
+      "loading": "Scanning tác vụ đã lên lịchs...",
+      "empty": "No tác vụ đã lên lịchs match",
+      "unavailable": "Tác vụ đã lên lịch tools are not available on this host.",
+      "error": "Tác vụ đã lên lịch command failed: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ một phần",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "filters": {
+        "all": "Tất cả",
+        "enabled": "Đã bật",
+        "disabled": "Đã tắt",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "Lỗi"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "static": "Static",
+        "masked": "Masked",
+        "unknown": "Unknown"
+      },
+      "active": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "columns": {
+        "task": "Tác vụ",
+        "source": "Nguồn",
+        "state": "Trạng thái",
+        "enabled": "Bật",
+        "next": "Lần tới",
+        "last": "Lần cuối",
+        "user": "Người dùng",
+        "schedule": "Lịch",
+        "command": "Lệnh",
+        "result": "Kết quả",
+        "description": "Mô tả",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "Làm mới tác vụ",
+        "diagnostic": "Mở terminal chẩn đoán",
+        "logs": "Xem log",
+        "follow_logs": "Theo dõi log",
+        "enable": "Bật",
+        "disable": "Tắt",
+        "run_now": "Chạy ngay"
+      },
+      "diagnostic_title": "Tác vụ đã lên lịch diagnostics",
+      "follow_title": "Tác vụ đã lên lịch logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm tác vụ đã lên lịch action",
+        "cancel": "Hủy",
+        "enable_desc": "Bật tác vụ đã lên lịch {{name}}? Unit: {{unit}}.",
+        "disable_desc": "Tắt tác vụ đã lên lịch {{name}}? Các lần chạy sau có thể dừng. Unit: {{unit}}.",
+        "run_now_desc": "Run tác vụ đã lên lịch {{name}} now? Unit: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Schedule scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} scheduled tasks.",
+        "snapshot_failed": "Failed to scan scheduled tasks: {{reason}}",
+        "unavailable": "Scheduled task tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened schedule diagnostics.",
+        "follow_opened": "Opened schedule log follow for {{name}}.",
+        "logs_already_running": "Schedule logs are already loading.",
+        "logs_failed": "Failed to load schedule logs.",
+        "action_already_running": "A scheduled task action is already running.",
+        "action_failed": "Scheduled task action failed.",
+        "enable_succeeded": "Đã bật {{name}}.",
+        "disable_succeeded": "Đã tắt {{name}}.",
+        "run_now_started": "Started {{name}}.",
+        "partial_support": "Scheduled task support is partial on {{os}}.",
+        "unknown_error": "Unknown scheduled task error."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "Tìm cổng...",
+      "count_suffix": "cổng",
+      "loading": "Đang quét cổng...",
+      "empty": "Không có cổng khớp",
+      "unavailable": "Công cụ cổng không khả dụng trên máy này.",
+      "error": "Lệnh cổng thất bại: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ một phần",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "filters": {
+        "all": "Tất cả",
+        "listening": "Đang lắng nghe",
+        "connected": "Đã kết nối",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "Rủi ro cao"
+      },
+      "columns": {
+        "local": "Địa chỉ cục bộ",
+        "protocol": "Giao thức",
+        "state": "Trạng thái",
+        "pid": "PID",
+        "process": "Tiến trình",
+        "remote": "Địa chỉ từ xa",
+        "user": "Người dùng",
+        "command": "Lệnh",
+        "source": "Nguồn",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "Đang lắng nghe",
+        "established": "Đã thiết lập",
+        "open": "Mở",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "Không rõ"
+      },
+      "actions": {
+        "refresh": "Làm mới cổng",
+        "diagnostic": "Mở terminal chẩn đoán",
+        "copy_endpoint": "Sao chép địa chỉ",
+        "jump_process": "Tìm tiến trình"
+      },
+      "diagnostic_title": "Chẩn đoán cổng",
+      "toast": {
+        "snapshot_already_running": "Đang quét cổng rồi.",
+        "snapshot_loaded": "Đã tải {{count}} cổng.",
+        "snapshot_failed": "Quét cổng thất bại: {{reason}}",
+        "unavailable": "Công cụ cổng không khả dụng trên máy này.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH đang hoạt động để chẩn đoán.",
+        "diagnostic_opened": "Đã mở chẩn đoán cổng.",
+        "copied_endpoint": "Đã sao chép {{endpoint}}.",
+        "partial_support": "Kiểm tra cổng chỉ được hỗ trợ một phần trên {{os}}.",
+        "unknown_error": "Lỗi quét cổng không xác định."
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "Tìm hệ thống tệp...",
+      "count_suffix": "mục",
+      "loading": "Đang quét ổ đĩa...",
+      "empty": "Không có mục hệ thống tệp phù hợp",
+      "unavailable": "Công cụ hệ thống tệp không khả dụng trên máy chủ này.",
+      "error": "Lệnh hệ thống tệp thất bại: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ một phần",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "filters": {
+        "all": "Tất cả",
+        "mounts": "Điểm gắn",
+        "read_only": "Chỉ đọc",
+        "high_usage": "Mức dùng cao",
+        "inode_pressure": "Áp lực inode",
+        "large_items": "Mục lớn",
+        "blocks": "Thiết bị khối"
+      },
+      "columns": {
+        "path": "Đường dẫn",
+        "kind": "Loại",
+        "usage": "Mức dùng",
+        "inode": "Inode",
+        "fs": "FS",
+        "size": "Kích thước",
+        "read_only": "RO",
+        "device": "Thiết bị",
+        "used_available": "Đã dùng / còn trống",
+        "source": "Nguồn",
+        "detail": "Chi tiết",
+        "options": "Tùy chọn"
+      },
+      "kinds": {
+        "mount": "Điểm gắn",
+        "large_dir": "Thư mục lớn",
+        "large_file": "Tệp lớn",
+        "block": "Thiết bị khối",
+        "unknown": "Không rõ"
+      },
+      "read_only": {
+        "yes": "Có",
+        "no": "Không"
+      },
+      "actions": {
+        "refresh": "Làm mới ổ đĩa",
+        "diagnostic": "Mở terminal chẩn đoán",
+        "copy_path": "Sao chép đường dẫn"
+      },
+      "diagnostic_title": "Chẩn đoán ổ đĩa",
+      "toast": {
+        "snapshot_already_running": "Quá trình quét ổ đĩa đang chạy.",
+        "snapshot_loaded": "Đã tải {{count}} mục hệ thống tệp.",
+        "snapshot_failed": "Quét ổ đĩa thất bại: {{reason}}",
+        "unavailable": "Công cụ hệ thống tệp không khả dụng trên máy chủ này.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH đang hoạt động cho chẩn đoán.",
+        "diagnostic_opened": "Đã mở chẩn đoán ổ đĩa.",
+        "copied_path": "Đã sao chép {{path}}.",
+        "partial_support": "Kiểm tra hệ thống tệp chỉ được hỗ trợ một phần trên {{os}}.",
+        "unknown_error": "Lỗi quét hệ thống tệp không xác định."
       }
     }
   },

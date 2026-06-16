@@ -404,6 +404,8 @@ impl WorkspaceApp {
                         | ContextSidebarTool::Logs
                         | ContextSidebarTool::Tmux
                         | ContextSidebarTool::Docker
+                        | ContextSidebarTool::Ports
+                        | ContextSidebarTool::Schedules
                 ));
         if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
             return;
@@ -422,6 +424,12 @@ impl WorkspaceApp {
             return;
         }
         if self.handle_host_tmux_search_key(event, cx) {
+            return;
+        }
+        if self.handle_host_port_search_key(event, cx) {
+            return;
+        }
+        if self.handle_host_schedule_search_key(event, cx) {
             return;
         }
         if self.handle_host_tmux_input_dialog_key(event, cx) {

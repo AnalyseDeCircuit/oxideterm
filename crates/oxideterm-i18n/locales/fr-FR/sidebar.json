@@ -45,7 +45,10 @@
       "event_log": "Journal d'événements",
       "notifications": "Notifications",
       "saved_connections": "Connexions enregistrées",
-      "forwarding": "Redirection de ports"
+      "forwarding": "Redirection de ports",
+      "ports": "Ports",
+      "schedules": "Tâches planifiées",
+      "filesystems": "Disques"
     },
     "tooltips": {
       "settings": "Paramètres",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "Nom de session",
         "rename_window_placeholder": "Nom de fenêtre",
         "send_command_placeholder": "Commande à envoyer"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "Search tâche planifiées...",
+      "count_suffix": "tasks",
+      "loading": "Scanning tâche planifiées...",
+      "empty": "No tâche planifiées match",
+      "unavailable": "Tâches planifiées tools are not available on this host.",
+      "error": "Tâches planifiées command failed: {{error}}",
+      "capability": {
+        "full": "Prise en charge complète",
+        "partial": "Prise en charge partielle",
+        "unknown": "Prise en charge inconnue"
+      },
+      "filters": {
+        "all": "Tout",
+        "enabled": "Activées",
+        "disabled": "Désactivées",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "Échec"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "static": "Static",
+        "masked": "Masked",
+        "unknown": "Unknown"
+      },
+      "active": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "columns": {
+        "task": "Tâche",
+        "source": "Source",
+        "state": "État",
+        "enabled": "Activée",
+        "next": "Prochaine",
+        "last": "Dernière",
+        "user": "Utilisateur",
+        "schedule": "Planification",
+        "command": "Commande",
+        "result": "Résultat",
+        "description": "Description",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "Actualiser les tâches",
+        "diagnostic": "Ouvrir le terminal de diagnostic",
+        "logs": "Voir les logs",
+        "follow_logs": "Suivre les logs",
+        "enable": "Activer",
+        "disable": "Désactiver",
+        "run_now": "Exécuter maintenant"
+      },
+      "diagnostic_title": "Tâches planifiées diagnostics",
+      "follow_title": "Tâches planifiées logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm tâche planifiée action",
+        "cancel": "Annuler",
+        "enable_desc": "Activer la tâche planifiée {{name}} ? Unit : {{unit}}.",
+        "disable_desc": "Désactiver la tâche planifiée {{name}} ? Les prochaines exécutions peuvent s’arrêter. Unit : {{unit}}.",
+        "run_now_desc": "Run tâche planifiée {{name}} now? Unit: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Schedule scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} scheduled tasks.",
+        "snapshot_failed": "Failed to scan scheduled tasks: {{reason}}",
+        "unavailable": "Scheduled task tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened schedule diagnostics.",
+        "follow_opened": "Opened schedule log follow for {{name}}.",
+        "logs_already_running": "Schedule logs are already loading.",
+        "logs_failed": "Failed to load schedule logs.",
+        "action_already_running": "A scheduled task action is already running.",
+        "action_failed": "Scheduled task action failed.",
+        "enable_succeeded": "{{name}} activée.",
+        "disable_succeeded": "{{name}} désactivée.",
+        "run_now_started": "Started {{name}}.",
+        "partial_support": "Scheduled task support is partial on {{os}}.",
+        "unknown_error": "Unknown scheduled task error."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "Rechercher des ports...",
+      "count_suffix": "ports",
+      "loading": "Analyse des ports...",
+      "empty": "Aucun port correspondant",
+      "unavailable": "Les outils de ports ne sont pas disponibles sur cet hôte.",
+      "error": "La commande de ports a échoué : {{error}}",
+      "capability": {
+        "full": "Prise en charge complète",
+        "partial": "Prise en charge partielle",
+        "unknown": "Prise en charge inconnue"
+      },
+      "filters": {
+        "all": "Tous",
+        "listening": "En écoute",
+        "connected": "Connectés",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "Risque élevé"
+      },
+      "columns": {
+        "local": "Adresse locale",
+        "protocol": "Protocole",
+        "state": "État",
+        "pid": "PID",
+        "process": "Processus",
+        "remote": "Adresse distante",
+        "user": "Utilisateur",
+        "command": "Commande",
+        "source": "Source",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "En écoute",
+        "established": "Établi",
+        "open": "Ouvert",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "Inconnu"
+      },
+      "actions": {
+        "refresh": "Actualiser les ports",
+        "diagnostic": "Ouvrir le terminal de diagnostic",
+        "copy_endpoint": "Copier l’adresse",
+        "jump_process": "Trouver le processus"
+      },
+      "diagnostic_title": "Diagnostic des ports",
+      "toast": {
+        "snapshot_already_running": "Une analyse des ports est déjà en cours.",
+        "snapshot_loaded": "{{count}} ports chargés.",
+        "snapshot_failed": "Échec de l’analyse des ports : {{reason}}",
+        "unavailable": "Les outils de ports ne sont pas disponibles sur cet hôte.",
+        "connection_missing": "La connexion sélectionnée n’est plus disponible.",
+        "exec_terminal_missing": "Aucune route de terminal SSH active pour le diagnostic.",
+        "diagnostic_opened": "Diagnostic des ports ouvert.",
+        "copied_endpoint": "{{endpoint}} copié.",
+        "partial_support": "L’inspection des ports est partielle sur {{os}}.",
+        "unknown_error": "Erreur inconnue d’analyse des ports."
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "Rechercher des systèmes de fichiers...",
+      "count_suffix": "éléments",
+      "loading": "Analyse des disques...",
+      "empty": "Aucune entrée de système de fichiers correspondante",
+      "unavailable": "Les outils de système de fichiers ne sont pas disponibles sur cet hôte.",
+      "error": "La commande de système de fichiers a échoué : {{error}}",
+      "capability": {
+        "full": "Prise en charge complète",
+        "partial": "Prise en charge partielle",
+        "unknown": "Prise en charge inconnue"
+      },
+      "filters": {
+        "all": "Tout",
+        "mounts": "Montages",
+        "read_only": "Lecture seule",
+        "high_usage": "Utilisation élevée",
+        "inode_pressure": "Pression inode",
+        "large_items": "Gros éléments",
+        "blocks": "Blocs"
+      },
+      "columns": {
+        "path": "Chemin",
+        "kind": "Type",
+        "usage": "Utilisation",
+        "inode": "Inode",
+        "fs": "FS",
+        "size": "Taille",
+        "read_only": "RO",
+        "device": "Périphérique",
+        "used_available": "Utilisé / disponible",
+        "source": "Source",
+        "detail": "Détail",
+        "options": "Options"
+      },
+      "kinds": {
+        "mount": "Montage",
+        "large_dir": "Grand dossier",
+        "large_file": "Gros fichier",
+        "block": "Périphérique bloc",
+        "unknown": "Inconnu"
+      },
+      "read_only": {
+        "yes": "Oui",
+        "no": "Non"
+      },
+      "actions": {
+        "refresh": "Actualiser les disques",
+        "diagnostic": "Ouvrir le terminal de diagnostic",
+        "copy_path": "Copier le chemin"
+      },
+      "diagnostic_title": "Diagnostic des disques",
+      "toast": {
+        "snapshot_already_running": "L’analyse des disques est déjà en cours.",
+        "snapshot_loaded": "{{count}} entrées de système de fichiers chargées.",
+        "snapshot_failed": "Échec de l’analyse des disques : {{reason}}",
+        "unavailable": "Les outils de système de fichiers ne sont pas disponibles sur cet hôte.",
+        "connection_missing": "La connexion sélectionnée n’est plus disponible.",
+        "exec_terminal_missing": "Aucune route de terminal SSH active n’est disponible pour le diagnostic.",
+        "diagnostic_opened": "Diagnostic des disques ouvert.",
+        "copied_path": "{{path}} copié.",
+        "partial_support": "L’inspection du système de fichiers est partielle sur {{os}}.",
+        "unknown_error": "Erreur inconnue d’analyse du système de fichiers."
       }
     }
   },

@@ -904,6 +904,11 @@ impl WorkspaceApp {
                             workspace.poll_host_logs_snapshot_results(cx);
                             workspace.poll_host_tmux_snapshot_results(cx);
                             workspace.poll_host_tmux_action_results(cx);
+                            workspace.poll_host_ports_snapshot_results(cx);
+                            workspace.poll_host_schedules_snapshot_results(cx);
+                            workspace.poll_host_filesystems_snapshot_results(cx);
+                            workspace.poll_host_schedule_logs_results(cx);
+                            workspace.poll_host_schedule_action_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_start_sftp_remote_load(cx);

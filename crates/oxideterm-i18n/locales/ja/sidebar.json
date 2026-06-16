@@ -45,7 +45,10 @@
       "event_log": "イベントログ",
       "notifications": "通知",
       "saved_connections": "保存済み接続",
-      "forwarding": "ポート転送"
+      "forwarding": "ポート転送",
+      "ports": "ポート",
+      "schedules": "スケジュール",
+      "filesystems": "ディスク"
     },
     "tooltips": {
       "settings": "設定",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "セッション名",
         "rename_window_placeholder": "ウィンドウ名",
         "send_command_placeholder": "送信するコマンド"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "スケジュールタスクを検索...",
+      "count_suffix": "件",
+      "loading": "スケジュールタスクをスキャン中...",
+      "empty": "一致するスケジュールタスクはありません",
+      "unavailable": "スケジュール tools are not available on this host.",
+      "error": "スケジュール command failed: {{error}}",
+      "capability": {
+        "full": "完全サポート",
+        "partial": "部分サポート",
+        "unknown": "サポート不明"
+      },
+      "filters": {
+        "all": "すべて",
+        "enabled": "有効",
+        "disabled": "無効",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "失敗"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "static": "Static",
+        "masked": "Masked",
+        "unknown": "Unknown"
+      },
+      "active": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "columns": {
+        "task": "タスク",
+        "source": "ソース",
+        "state": "状態",
+        "enabled": "有効",
+        "next": "次回",
+        "last": "前回",
+        "user": "ユーザー",
+        "schedule": "スケジュール",
+        "command": "コマンド",
+        "result": "結果",
+        "description": "説明",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "スケジュールを更新",
+        "diagnostic": "診断ターミナルを開く",
+        "logs": "ログを表示",
+        "follow_logs": "ログを追跡",
+        "enable": "有効化",
+        "disable": "無効化",
+        "run_now": "今すぐ実行"
+      },
+      "diagnostic_title": "スケジュール diagnostics",
+      "follow_title": "スケジュール logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm スケジュールタスク action",
+        "cancel": "キャンセル",
+        "enable_desc": "スケジュールタスク {{name}} を有効化しますか？Unit: {{unit}}。",
+        "disable_desc": "スケジュールタスク {{name}} を無効化しますか？今後の実行が停止する可能性があります。Unit: {{unit}}。",
+        "run_now_desc": "Run スケジュールタスク {{name}} now? Unit: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Schedule scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} scheduled tasks.",
+        "snapshot_failed": "Failed to scan scheduled tasks: {{reason}}",
+        "unavailable": "Scheduled task tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened schedule diagnostics.",
+        "follow_opened": "Opened schedule log follow for {{name}}.",
+        "logs_already_running": "Schedule logs are already loading.",
+        "logs_failed": "Failed to load schedule logs.",
+        "action_already_running": "A scheduled task action is already running.",
+        "action_failed": "Scheduled task action failed.",
+        "enable_succeeded": "{{name}} を有効化しました。",
+        "disable_succeeded": "{{name}} を無効化しました。",
+        "run_now_started": "Started {{name}}.",
+        "partial_support": "Scheduled task support is partial on {{os}}.",
+        "unknown_error": "Unknown scheduled task error."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "ポートを検索...",
+      "count_suffix": "ポート",
+      "loading": "ポートをスキャン中...",
+      "empty": "一致するポートがありません",
+      "unavailable": "このホストではポートツールを使用できません。",
+      "error": "ポートコマンドに失敗しました: {{error}}",
+      "capability": {
+        "full": "完全対応",
+        "partial": "部分対応",
+        "unknown": "対応状況不明"
+      },
+      "filters": {
+        "all": "すべて",
+        "listening": "待受",
+        "connected": "接続済み",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "高リスク"
+      },
+      "columns": {
+        "local": "ローカルアドレス",
+        "protocol": "プロトコル",
+        "state": "状態",
+        "pid": "PID",
+        "process": "プロセス",
+        "remote": "リモートアドレス",
+        "user": "ユーザー",
+        "command": "コマンド",
+        "source": "ソース",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "待受中",
+        "established": "確立済み",
+        "open": "オープン",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "不明"
+      },
+      "actions": {
+        "refresh": "ポートを更新",
+        "diagnostic": "診断ターミナルを開く",
+        "copy_endpoint": "アドレスをコピー",
+        "jump_process": "プロセスを検索"
+      },
+      "diagnostic_title": "ポート診断",
+      "toast": {
+        "snapshot_already_running": "ポートスキャンは実行中です。",
+        "snapshot_loaded": "{{count}} 件のポートを読み込みました。",
+        "snapshot_failed": "ポートスキャンに失敗しました: {{reason}}",
+        "unavailable": "このホストではポートツールを使用できません。",
+        "connection_missing": "選択した接続は利用できません。",
+        "exec_terminal_missing": "診断に使える SSH ターミナル経路がありません。",
+        "diagnostic_opened": "ポート診断を開きました。",
+        "copied_endpoint": "{{endpoint}} をコピーしました。",
+        "partial_support": "{{os}} ではポート検査は部分対応です。",
+        "unknown_error": "不明なポートスキャンエラーです。"
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "ファイルシステムを検索...",
+      "count_suffix": "件",
+      "loading": "ディスクをスキャン中...",
+      "empty": "一致するファイルシステム項目はありません",
+      "unavailable": "このホストではファイルシステムツールを利用できません。",
+      "error": "ファイルシステムコマンドに失敗しました: {{error}}",
+      "capability": {
+        "full": "完全サポート",
+        "partial": "部分サポート",
+        "unknown": "サポート状況不明"
+      },
+      "filters": {
+        "all": "すべて",
+        "mounts": "マウント",
+        "read_only": "読み取り専用",
+        "high_usage": "高使用率",
+        "inode_pressure": "Inode 圧迫",
+        "large_items": "大きい項目",
+        "blocks": "ブロック"
+      },
+      "columns": {
+        "path": "パス",
+        "kind": "種類",
+        "usage": "使用率",
+        "inode": "Inode",
+        "fs": "FS",
+        "size": "サイズ",
+        "read_only": "RO",
+        "device": "デバイス",
+        "used_available": "使用済み / 空き",
+        "source": "ソース",
+        "detail": "詳細",
+        "options": "オプション"
+      },
+      "kinds": {
+        "mount": "マウント",
+        "large_dir": "大きいディレクトリ",
+        "large_file": "大きいファイル",
+        "block": "ブロックデバイス",
+        "unknown": "不明"
+      },
+      "read_only": {
+        "yes": "はい",
+        "no": "いいえ"
+      },
+      "actions": {
+        "refresh": "ディスクを更新",
+        "diagnostic": "診断ターミナルを開く",
+        "copy_path": "パスをコピー"
+      },
+      "diagnostic_title": "ディスク診断",
+      "toast": {
+        "snapshot_already_running": "ディスクスキャンはすでに実行中です。",
+        "snapshot_loaded": "{{count}} 件のファイルシステム項目を読み込みました。",
+        "snapshot_failed": "ディスクスキャンに失敗しました: {{reason}}",
+        "unavailable": "このホストではファイルシステムツールを利用できません。",
+        "connection_missing": "選択した接続は利用できなくなりました。",
+        "exec_terminal_missing": "診断に使えるライブ SSH ターミナル経路がありません。",
+        "diagnostic_opened": "ディスク診断を開きました。",
+        "copied_path": "{{path}} をコピーしました。",
+        "partial_support": "{{os}} でのファイルシステム検査は部分サポートです。",
+        "unknown_error": "不明なファイルシステムスキャンエラーです。"
       }
     }
   },

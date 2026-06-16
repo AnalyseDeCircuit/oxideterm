@@ -47,6 +47,9 @@ impl WorkspaceApp {
                         ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
                         ContextSidebarTool::Tmux => self.render_host_tmux_panel(cx),
                         ContextSidebarTool::Docker => self.render_host_docker_panel(cx),
+                        ContextSidebarTool::Ports => self.render_host_ports_panel(cx),
+                        ContextSidebarTool::Schedules => self.render_host_schedules_panel(cx),
+                        ContextSidebarTool::Filesystems => self.render_host_filesystems_panel(cx),
                     }),
             )
             .into_any_element()
@@ -145,6 +148,27 @@ impl WorkspaceApp {
                 ContextSidebarTool::Docker,
                 LucideIcon::Layers,
                 "sidebar.panels.docker",
+                true,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Ports,
+                LucideIcon::Network,
+                "sidebar.panels.ports",
+                true,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Schedules,
+                LucideIcon::Clock,
+                "sidebar.panels.schedules",
+                true,
+                cx,
+            ))
+            .child(self.render_host_tools_context_tab(
+                ContextSidebarTool::Filesystems,
+                LucideIcon::HardDrive,
+                "sidebar.panels.filesystems",
                 true,
                 cx,
             ))
@@ -335,6 +359,22 @@ impl WorkspaceApp {
                                 this.clear_ime_selection();
                                 this.ime_marked_text = None;
                             }
+                            if tool != ContextSidebarTool::Ports {
+                                this.connection_monitor.host_port_search_focused = false;
+                                this.clear_ime_selection();
+                                this.ime_marked_text = None;
+                            }
+                            if tool != ContextSidebarTool::Schedules {
+                                this.connection_monitor.host_schedule_search_focused = false;
+                                this.connection_monitor.host_schedule_pending_confirm = None;
+                                this.clear_ime_selection();
+                                this.ime_marked_text = None;
+                            }
+                            if tool != ContextSidebarTool::Filesystems {
+                                this.connection_monitor.host_filesystem_search_focused = false;
+                                this.clear_ime_selection();
+                                this.ime_marked_text = None;
+                            }
                             // Switching Host Tools pages should eagerly attach
                             // the selected connection profiler. Waiting for the
                             // heartbeat made data appear only after another
@@ -346,6 +386,15 @@ impl WorkspaceApp {
                             }
                             if tool == ContextSidebarTool::Tmux {
                                 this.request_host_tmux_snapshot_for_selected_connection(cx);
+                            }
+                            if tool == ContextSidebarTool::Ports {
+                                this.request_host_ports_snapshot_for_selected_connection(cx);
+                            }
+                            if tool == ContextSidebarTool::Schedules {
+                                this.request_host_schedules_snapshot_for_selected_connection(cx);
+                            }
+                            if tool == ContextSidebarTool::Filesystems {
+                                this.request_host_filesystems_snapshot_for_selected_connection(cx);
                             }
                             cx.notify();
                         }
@@ -757,6 +806,270 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_host_ports_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let connections = self.monitor_connections();
+        if connections.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::WifiOff,
+                self.tokens.ui.text_muted,
+                self.i18n.t("profiler.panel.no_connection"),
+                cx,
+            );
+        }
+
+        let selected_id = self
+            .connection_monitor
+            .selected_connection_id
+            .as_deref()
+            .unwrap_or(connections[0].connection_id.as_str());
+        let snapshot = self
+            .connection_monitor
+            .host_port_snapshot
+            .as_ref()
+            .filter(|_| {
+                self.connection_monitor
+                    .host_port_snapshot_connection_id
+                    .as_deref()
+                    == Some(selected_id)
+            });
+        let rows = snapshot
+            .map(|snapshot| {
+                visible_port_rows(
+                    &snapshot.entries,
+                    &self.connection_monitor.host_port_search_query,
+                    self.connection_monitor.host_port_filter,
+                )
+            })
+            .unwrap_or_default();
+        let status = snapshot
+            .map(|snapshot| snapshot.status.clone())
+            .unwrap_or_default();
+        self.sync_host_port_list_state(&rows, selected_id);
+
+        div()
+            .id("host-ports-panel")
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pt_3()
+                    .pb_2()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher_row(
+                        &connections,
+                        selected_id,
+                        !self.connection_monitor.host_port_snapshot_polling,
+                        cx,
+                    ))
+                    .child(self.render_host_port_search(cx))
+                    .child(self.render_host_port_filter_row(cx))
+                    .child(self.render_host_port_status_row(
+                        rows.len(),
+                        selected_id.to_string(),
+                        status.clone(),
+                        cx,
+                    )),
+            )
+            .child(self.render_host_port_list(
+                rows,
+                self.connection_monitor.host_port_snapshot_polling,
+                status,
+                selected_id,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_schedules_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let connections = self.monitor_connections();
+        if connections.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::WifiOff,
+                self.tokens.ui.text_muted,
+                self.i18n.t("profiler.panel.no_connection"),
+                cx,
+            );
+        }
+
+        let selected_id = self
+            .connection_monitor
+            .selected_connection_id
+            .as_deref()
+            .unwrap_or(connections[0].connection_id.as_str());
+        let snapshot = self
+            .connection_monitor
+            .host_schedule_snapshot
+            .as_ref()
+            .filter(|_| {
+                self.connection_monitor
+                    .host_schedule_snapshot_connection_id
+                    .as_deref()
+                    == Some(selected_id)
+            });
+        let rows = snapshot
+            .map(|snapshot| {
+                visible_scheduled_task_rows(
+                    &snapshot.entries,
+                    &self.connection_monitor.host_schedule_search_query,
+                    self.connection_monitor.host_schedule_filter,
+                )
+            })
+            .unwrap_or_default();
+        let status = snapshot
+            .map(|snapshot| snapshot.status.clone())
+            .unwrap_or_default();
+        self.sync_host_schedule_list_state(&rows, selected_id);
+
+        div()
+            .id("host-schedules-panel")
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pt_3()
+                    .pb_2()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher_row(
+                        &connections,
+                        selected_id,
+                        !self.connection_monitor.host_schedule_snapshot_polling,
+                        cx,
+                    ))
+                    .child(self.render_host_schedule_search(cx))
+                    .child(self.render_host_schedule_filter_row(cx))
+                    .child(self.render_host_schedule_status_row(
+                        rows.len(),
+                        selected_id.to_string(),
+                        status.clone(),
+                        cx,
+                    )),
+            )
+            .child(self.render_host_schedule_list(
+                rows,
+                self.connection_monitor.host_schedule_snapshot_polling,
+                status,
+                selected_id,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_filesystems_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let connections = self.monitor_connections();
+        if connections.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::HardDrive,
+                self.tokens.ui.text_muted,
+                self.i18n.t("profiler.panel.no_connection"),
+                cx,
+            );
+        }
+
+        let selected_id = self
+            .connection_monitor
+            .selected_connection_id
+            .as_deref()
+            .unwrap_or(connections[0].connection_id.as_str());
+        let snapshot = self
+            .connection_monitor
+            .host_filesystem_snapshot
+            .as_ref()
+            .filter(|_| {
+                self.connection_monitor
+                    .host_filesystem_snapshot_connection_id
+                    .as_deref()
+                    == Some(selected_id)
+            });
+        let rows = snapshot
+            .map(|snapshot| {
+                visible_filesystem_rows(
+                    &snapshot.entries,
+                    &self.connection_monitor.host_filesystem_search_query,
+                    self.connection_monitor.host_filesystem_filter,
+                )
+            })
+            .unwrap_or_default();
+        let status = snapshot
+            .map(|snapshot| snapshot.status.clone())
+            .unwrap_or_default();
+        self.sync_host_filesystem_list_state(&rows, selected_id);
+
+        div()
+            .id("host-filesystems-panel")
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pt_3()
+                    .pb_2()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher_row(
+                        &connections,
+                        selected_id,
+                        !self.connection_monitor.host_filesystem_snapshot_polling,
+                        cx,
+                    ))
+                    .child(self.render_host_filesystem_search(cx))
+                    .child(self.render_host_filesystem_filter_row(cx))
+                    .child(self.render_host_filesystem_status_row(
+                        rows.len(),
+                        selected_id.to_string(),
+                        status.clone(),
+                        cx,
+                    )),
+            )
+            .child(self.render_host_filesystem_list(
+                rows,
+                self.connection_monitor.host_filesystem_snapshot_polling,
+                status,
+                selected_id,
+                cx,
+            ))
+            .into_any_element()
+    }
+
     fn render_host_docker_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::HostDockerSearch;
         let focused = self.connection_monitor.host_docker_search_focused;
@@ -787,6 +1100,8 @@ impl WorkspaceApp {
                     this.connection_monitor.host_service_search_focused = false;
                     this.connection_monitor.host_log_search_focused = false;
                     this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
+                    this.connection_monitor.host_filesystem_search_focused = false;
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
@@ -880,6 +1195,9 @@ impl WorkspaceApp {
                     this.connection_monitor.host_docker_search_focused = false;
                     this.connection_monitor.host_log_search_focused = false;
                     this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
+                    this.connection_monitor.host_schedule_search_focused = false;
+                    this.connection_monitor.host_filesystem_search_focused = false;
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
@@ -990,6 +1308,9 @@ impl WorkspaceApp {
                     this.connection_monitor.host_docker_search_focused = false;
                     this.connection_monitor.host_service_search_focused = false;
                     this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
+                    this.connection_monitor.host_schedule_search_focused = false;
+                    this.connection_monitor.host_filesystem_search_focused = false;
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
@@ -1195,6 +1516,9 @@ impl WorkspaceApp {
                     this.connection_monitor.host_docker_search_focused = false;
                     this.connection_monitor.host_service_search_focused = false;
                     this.connection_monitor.host_log_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
+                    this.connection_monitor.host_schedule_search_focused = false;
+                    this.connection_monitor.host_filesystem_search_focused = false;
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
@@ -1313,6 +1637,648 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_host_port_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = WorkspaceImeTarget::HostPortSearch;
+        let focused = self.connection_monitor.host_port_search_focused;
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &self.connection_monitor.host_port_search_query,
+                    placeholder: self.i18n.t("sidebar.host_ports.search_placeholder"),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .h(px(34.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.connection_monitor.host_port_search_focused = true;
+                    this.connection_monitor.host_process_search_focused = false;
+                    this.connection_monitor.host_process_renice_focused = false;
+                    this.connection_monitor.host_docker_search_focused = false;
+                    this.connection_monitor.host_service_search_focused = false;
+                    this.connection_monitor.host_log_search_focused = false;
+                    this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_schedule_search_focused = false;
+                    this.connection_monitor.host_filesystem_search_focused = false;
+                    this.ime_marked_text = None;
+                    this.new_connection_caret_visible = true;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+            })),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_host_schedule_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = WorkspaceImeTarget::HostScheduleSearch;
+        let focused = self.connection_monitor.host_schedule_search_focused;
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &self.connection_monitor.host_schedule_search_query,
+                    placeholder: self.i18n.t("sidebar.host_schedules.search_placeholder"),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .h(px(34.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.connection_monitor.host_schedule_search_focused = true;
+                    this.connection_monitor.host_process_search_focused = false;
+                    this.connection_monitor.host_process_renice_focused = false;
+                    this.connection_monitor.host_docker_search_focused = false;
+                    this.connection_monitor.host_service_search_focused = false;
+                    this.connection_monitor.host_log_search_focused = false;
+                    this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
+                    this.connection_monitor.host_filesystem_search_focused = false;
+                    this.ime_marked_text = None;
+                    this.new_connection_caret_visible = true;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+            })),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_host_filesystem_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = WorkspaceImeTarget::HostFilesystemSearch;
+        let focused = self.connection_monitor.host_filesystem_search_focused;
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &self.connection_monitor.host_filesystem_search_query,
+                    placeholder: self.i18n.t("sidebar.host_filesystems.search_placeholder"),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .h(px(34.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.connection_monitor.host_filesystem_search_focused = true;
+                    this.connection_monitor.host_process_search_focused = false;
+                    this.connection_monitor.host_process_renice_focused = false;
+                    this.connection_monitor.host_docker_search_focused = false;
+                    this.connection_monitor.host_service_search_focused = false;
+                    this.connection_monitor.host_log_search_focused = false;
+                    this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
+                    this.connection_monitor.host_schedule_search_focused = false;
+                    this.ime_marked_text = None;
+                    this.new_connection_caret_visible = true;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+            })),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_host_port_filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut row = div()
+            .id("host-port-filter-scroll")
+            .flex()
+            .items_center()
+            .gap_1()
+            .overflow_x_scroll();
+        for filter in [
+            PortFilter::All,
+            PortFilter::Listening,
+            PortFilter::Connected,
+            PortFilter::Tcp,
+            PortFilter::Udp,
+            PortFilter::Risky,
+        ] {
+            row = row.child(self.render_host_port_filter_chip(filter, cx));
+        }
+        row.into_any_element()
+    }
+
+    fn render_host_schedule_filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut row = div()
+            .id("host-schedule-filter-scroll")
+            .flex()
+            .items_center()
+            .gap_1()
+            .overflow_x_scroll();
+        for filter in [
+            ScheduledTaskFilter::All,
+            ScheduledTaskFilter::Enabled,
+            ScheduledTaskFilter::Disabled,
+            ScheduledTaskFilter::Systemd,
+            ScheduledTaskFilter::Cron,
+            ScheduledTaskFilter::Launchd,
+            ScheduledTaskFilter::Windows,
+            ScheduledTaskFilter::Failed,
+        ] {
+            row = row.child(self.render_host_schedule_filter_chip(filter, cx));
+        }
+        row.into_any_element()
+    }
+
+    fn render_host_filesystem_filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut row = div()
+            .id("host-filesystem-filter-scroll")
+            .flex()
+            .items_center()
+            .gap_1()
+            .overflow_x_scroll();
+        for filter in [
+            FilesystemFilter::All,
+            FilesystemFilter::Mounts,
+            FilesystemFilter::ReadOnly,
+            FilesystemFilter::HighUsage,
+            FilesystemFilter::InodePressure,
+            FilesystemFilter::LargeItems,
+            FilesystemFilter::Blocks,
+        ] {
+            row = row.child(self.render_host_filesystem_filter_chip(filter, cx));
+        }
+        row.into_any_element()
+    }
+
+    fn render_host_port_filter_chip(
+        &self,
+        filter: PortFilter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.connection_monitor.host_port_filter == filter;
+        div()
+            .flex_none()
+            .h(px(24.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded(px(12.0))
+            .cursor_pointer()
+            .bg(if active {
+                rgb(theme.bg_hover)
+            } else {
+                rgba(0x00000000)
+            })
+            .text_size(px(11.0))
+            .text_color(if active {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
+            })
+            .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
+            .child(self.i18n.t(port_filter_label_key(filter)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.connection_monitor.host_port_filter != filter {
+                        this.connection_monitor.host_port_filter = filter;
+                        this.connection_monitor.host_port_expanded_index = None;
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_schedule_filter_chip(
+        &self,
+        filter: ScheduledTaskFilter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.connection_monitor.host_schedule_filter == filter;
+        div()
+            .flex_none()
+            .h(px(24.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded(px(12.0))
+            .cursor_pointer()
+            .bg(if active {
+                rgb(theme.bg_hover)
+            } else {
+                rgba(0x00000000)
+            })
+            .text_size(px(11.0))
+            .text_color(if active {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
+            })
+            .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
+            .child(self.i18n.t(scheduled_task_filter_label_key(filter)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.connection_monitor.host_schedule_filter != filter {
+                        this.connection_monitor.host_schedule_filter = filter;
+                        this.connection_monitor.host_schedule_expanded_index = None;
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_filter_chip(
+        &self,
+        filter: FilesystemFilter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.connection_monitor.host_filesystem_filter == filter;
+        div()
+            .flex_none()
+            .h(px(24.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded(px(12.0))
+            .cursor_pointer()
+            .bg(if active {
+                rgb(theme.bg_hover)
+            } else {
+                rgba(0x00000000)
+            })
+            .text_size(px(11.0))
+            .text_color(if active {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
+            })
+            .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
+            .child(self.i18n.t(filesystem_filter_label_key(filter)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.connection_monitor.host_filesystem_filter != filter {
+                        this.connection_monitor.host_filesystem_filter = filter;
+                        this.connection_monitor.host_filesystem_expanded_index = None;
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_port_status_row(
+        &self,
+        visible_count: usize,
+        selected_id: String,
+        status: ResourcePortStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let capability_label = match status {
+            ResourcePortStatus::Available {
+                capability: PortCommandCapability::Full,
+                ..
+            } => self.i18n.t("sidebar.host_ports.capability.full"),
+            ResourcePortStatus::Available {
+                capability: PortCommandCapability::Partial,
+                ..
+            } => self.i18n.t("sidebar.host_ports.capability.partial"),
+            _ => self.i18n.t("sidebar.host_ports.capability.unknown"),
+        };
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .min_w_0()
+            .text_size(px(11.0))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(format!(
+                        "{} {} · {}",
+                        visible_count,
+                        self.i18n.t("sidebar.host_ports.count_suffix"),
+                        capability_label
+                    )),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::Terminal,
+                        13.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 24.0,
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                        },
+                        self.i18n.t("sidebar.host_ports.actions.diagnostic"),
+                        "host-port-diagnostic",
+                        true,
+                        cx.listener({
+                            let selected_id = selected_id.clone();
+                            move |this, _event, window, cx| {
+                                this.open_host_port_diagnostic_terminal(
+                                    selected_id.clone(),
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                        cx.entity(),
+                    ))
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::RefreshCw,
+                        13.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 24.0,
+                            disabled: self.connection_monitor.host_port_snapshot_polling,
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                        },
+                        self.i18n.t("sidebar.host_ports.actions.refresh"),
+                        "host-port-refresh",
+                        true,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.request_host_ports_snapshot(selected_id.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                        cx.entity(),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_schedule_status_row(
+        &self,
+        visible_count: usize,
+        selected_id: String,
+        status: ResourceScheduledTaskStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let capability_label = match status {
+            ResourceScheduledTaskStatus::Available {
+                capability: ScheduledTaskCapability::Full,
+                ..
+            } => self.i18n.t("sidebar.host_schedules.capability.full"),
+            ResourceScheduledTaskStatus::Available {
+                capability: ScheduledTaskCapability::Partial,
+                ..
+            } => self.i18n.t("sidebar.host_schedules.capability.partial"),
+            _ => self.i18n.t("sidebar.host_schedules.capability.unknown"),
+        };
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .min_w_0()
+            .text_size(px(11.0))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(format!(
+                        "{} {} · {}",
+                        visible_count,
+                        self.i18n.t("sidebar.host_schedules.count_suffix"),
+                        capability_label
+                    )),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::Terminal,
+                        13.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 24.0,
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                        },
+                        self.i18n.t("sidebar.host_schedules.actions.diagnostic"),
+                        "host-schedule-diagnostic",
+                        true,
+                        cx.listener({
+                            let selected_id = selected_id.clone();
+                            move |this, _event, window, cx| {
+                                this.open_host_schedule_diagnostic_terminal(
+                                    selected_id.clone(),
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                        cx.entity(),
+                    ))
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::RefreshCw,
+                        13.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 24.0,
+                            disabled: self.connection_monitor.host_schedule_snapshot_polling,
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                        },
+                        self.i18n.t("sidebar.host_schedules.actions.refresh"),
+                        "host-schedule-refresh",
+                        true,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.request_host_schedules_snapshot(selected_id.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                        cx.entity(),
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_status_row(
+        &self,
+        visible_count: usize,
+        selected_id: String,
+        status: ResourceFilesystemStatus,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let capability_label = match status {
+            ResourceFilesystemStatus::Available {
+                capability: FilesystemCommandCapability::Full,
+                ..
+            } => self.i18n.t("sidebar.host_filesystems.capability.full"),
+            ResourceFilesystemStatus::Available {
+                capability: FilesystemCommandCapability::Partial,
+                ..
+            } => self.i18n.t("sidebar.host_filesystems.capability.partial"),
+            _ => self.i18n.t("sidebar.host_filesystems.capability.unknown"),
+        };
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .min_w_0()
+            .text_size(px(11.0))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(format!(
+                        "{} {} · {}",
+                        visible_count,
+                        self.i18n.t("sidebar.host_filesystems.count_suffix"),
+                        capability_label
+                    )),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::Terminal,
+                        13.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 24.0,
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                        },
+                        self.i18n.t("sidebar.host_filesystems.actions.diagnostic"),
+                        "host-filesystem-diagnostic",
+                        true,
+                        cx.listener({
+                            let selected_id = selected_id.clone();
+                            move |this, _event, window, cx| {
+                                this.open_host_filesystem_diagnostic_terminal(
+                                    selected_id.clone(),
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                        cx.entity(),
+                    ))
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::RefreshCw,
+                        13.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 24.0,
+                            disabled: self.connection_monitor.host_filesystem_snapshot_polling,
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                        },
+                        self.i18n.t("sidebar.host_filesystems.actions.refresh"),
+                        "host-filesystem-refresh",
+                        true,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.request_host_filesystems_snapshot(selected_id.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                        cx.entity(),
+                    )),
+            )
+            .into_any_element()
+    }
+
     fn render_host_service_list(
         &self,
         rows: Vec<ResourceService>,
@@ -1387,6 +2353,177 @@ impl WorkspaceApp {
                             this.render_host_service_row(
                                 selected_id.as_str(),
                                 rows.get(index).cloned(),
+                                cx,
+                            )
+                        })
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_schedule_list(
+        &self,
+        rows: Vec<ResourceScheduledTask>,
+        loading: bool,
+        status: ResourceScheduledTaskStatus,
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if loading && rows.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::Clock,
+                self.tokens.ui.text_muted,
+                self.i18n.t("sidebar.host_schedules.loading"),
+                cx,
+            );
+        }
+        match status {
+            ResourceScheduledTaskStatus::Unavailable => {
+                return monitor_center_state(
+                    self,
+                    LucideIcon::Clock,
+                    self.tokens.ui.text_muted,
+                    self.i18n.t("sidebar.host_schedules.unavailable"),
+                    cx,
+                );
+            }
+            ResourceScheduledTaskStatus::Error { message } => {
+                return monitor_center_state(
+                    self,
+                    LucideIcon::AlertTriangle,
+                    MONITOR_RED,
+                    self.i18n_replace("sidebar.host_schedules.error", &[("error", message)]),
+                    cx,
+                );
+            }
+            ResourceScheduledTaskStatus::Unknown
+            | ResourceScheduledTaskStatus::Available { .. } => {}
+        }
+        if rows.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::Clock,
+                self.tokens.ui.text_muted,
+                self.i18n.t("sidebar.host_schedules.empty"),
+                cx,
+            );
+        }
+
+        let rows = Arc::new(rows);
+        let selected_id = Arc::new(selected_id.to_string());
+        let state = self.connection_monitor.host_schedule_list_state.clone();
+        let spec = TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8);
+        let workspace = cx.entity();
+        let show_context_columns = self.ai_sidebar_width >= HOST_SCHEDULE_CONTEXT_COLUMNS_MIN_WIDTH;
+        div()
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(self.render_host_schedule_table_header(show_context_columns))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                        let rows = rows.clone();
+                        let selected_id = selected_id.clone();
+                        workspace.update(cx, |this, cx| {
+                            this.render_host_schedule_row(
+                                selected_id.as_str(),
+                                index,
+                                rows.get(index).cloned(),
+                                show_context_columns,
+                                cx,
+                            )
+                        })
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_list(
+        &self,
+        rows: Vec<ResourceFilesystemEntry>,
+        loading: bool,
+        status: ResourceFilesystemStatus,
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if loading && rows.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::HardDrive,
+                self.tokens.ui.text_muted,
+                self.i18n.t("sidebar.host_filesystems.loading"),
+                cx,
+            );
+        }
+        match status {
+            ResourceFilesystemStatus::Unavailable => {
+                return monitor_center_state(
+                    self,
+                    LucideIcon::HardDrive,
+                    self.tokens.ui.text_muted,
+                    self.i18n.t("sidebar.host_filesystems.unavailable"),
+                    cx,
+                );
+            }
+            ResourceFilesystemStatus::Error { message } => {
+                return monitor_center_state(
+                    self,
+                    LucideIcon::AlertTriangle,
+                    MONITOR_RED,
+                    self.i18n_replace("sidebar.host_filesystems.error", &[("error", message)]),
+                    cx,
+                );
+            }
+            ResourceFilesystemStatus::Unknown | ResourceFilesystemStatus::Available { .. } => {}
+        }
+        if rows.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::HardDrive,
+                self.tokens.ui.text_muted,
+                self.i18n.t("sidebar.host_filesystems.empty"),
+                cx,
+            );
+        }
+
+        let rows = Arc::new(rows);
+        let selected_id = Arc::new(selected_id.to_string());
+        let state = self.connection_monitor.host_filesystem_list_state.clone();
+        let spec = TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8);
+        let workspace = cx.entity();
+        let show_context_columns = self.ai_sidebar_width >= HOST_FILESYSTEM_CONTEXT_COLUMNS_MIN_WIDTH;
+        div()
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(self.render_host_filesystem_table_header(show_context_columns))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                        let rows = rows.clone();
+                        let selected_id = selected_id.clone();
+                        workspace.update(cx, |this, cx| {
+                            this.render_host_filesystem_row(
+                                selected_id.as_str(),
+                                index,
+                                rows.get(index).cloned(),
+                                show_context_columns,
                                 cx,
                             )
                         })
@@ -1564,6 +2701,1348 @@ impl WorkspaceApp {
                             )
                         })
                     })),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_port_list(
+        &self,
+        rows: Vec<ResourcePortEntry>,
+        loading: bool,
+        status: ResourcePortStatus,
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if loading && rows.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::Network,
+                self.tokens.ui.text_muted,
+                self.i18n.t("sidebar.host_ports.loading"),
+                cx,
+            );
+        }
+        match status {
+            ResourcePortStatus::Unavailable => {
+                return monitor_center_state(
+                    self,
+                    LucideIcon::Network,
+                    self.tokens.ui.text_muted,
+                    self.i18n.t("sidebar.host_ports.unavailable"),
+                    cx,
+                );
+            }
+            ResourcePortStatus::Error { message } => {
+                return monitor_center_state(
+                    self,
+                    LucideIcon::AlertTriangle,
+                    MONITOR_RED,
+                    self.i18n_replace("sidebar.host_ports.error", &[("error", message)]),
+                    cx,
+                );
+            }
+            ResourcePortStatus::Unknown | ResourcePortStatus::Available { .. } => {}
+        }
+        if rows.is_empty() {
+            return monitor_center_state(
+                self,
+                LucideIcon::Network,
+                self.tokens.ui.text_muted,
+                self.i18n.t("sidebar.host_ports.empty"),
+                cx,
+            );
+        }
+
+        let rows = Arc::new(rows);
+        let selected_id = Arc::new(selected_id.to_string());
+        let state = self.connection_monitor.host_port_list_state.clone();
+        let spec = TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8);
+        let workspace = cx.entity();
+        let show_context_columns = self.ai_sidebar_width >= HOST_PORT_CONTEXT_COLUMNS_MIN_WIDTH;
+        div()
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(self.render_host_port_table_header(show_context_columns))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
+                        let rows = rows.clone();
+                        let selected_id = selected_id.clone();
+                        workspace.update(cx, |this, cx| {
+                            this.render_host_port_row(
+                                selected_id.as_str(),
+                                index,
+                                rows.get(index).cloned(),
+                                show_context_columns,
+                                cx,
+                            )
+                        })
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_schedule_table_header(&self, show_context_columns: bool) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex_none()
+            .w_full()
+            .min_w_0()
+            .h(px(HOST_SCHEDULE_TABLE_HEADER_HEIGHT))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg))
+            .text_size(px(HOST_PROCESS_TABLE_HEADER_TEXT_SIZE))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_schedules.columns.task")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_SCHEDULE_SOURCE_COLUMN_WIDTH))
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_schedules.columns.source")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_SCHEDULE_STATE_COLUMN_WIDTH))
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_schedules.columns.state")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_SCHEDULE_ENABLED_COLUMN_WIDTH))
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_schedules.columns.enabled")),
+            )
+            .when(show_context_columns, |header| {
+                header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SCHEDULE_NEXT_COLUMN_WIDTH))
+                            .truncate()
+                            .child(self.i18n.t("sidebar.host_schedules.columns.next")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SCHEDULE_LAST_COLUMN_WIDTH))
+                            .truncate()
+                            .child(self.i18n.t("sidebar.host_schedules.columns.last")),
+                    )
+            })
+            .into_any_element()
+    }
+
+    fn render_host_port_table_header(&self, show_context_columns: bool) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex_none()
+            .w_full()
+            .min_w_0()
+            .h(px(HOST_PORT_TABLE_HEADER_HEIGHT))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg))
+            .text_size(px(HOST_PROCESS_TABLE_HEADER_TEXT_SIZE))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_ports.columns.local")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_PORT_PROTOCOL_COLUMN_WIDTH))
+                    .child(self.i18n.t("sidebar.host_ports.columns.protocol")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_PORT_STATE_COLUMN_WIDTH))
+                    .child(self.i18n.t("sidebar.host_ports.columns.state")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_PORT_PID_COLUMN_WIDTH))
+                    .flex()
+                    .justify_end()
+                    .child(self.i18n.t("sidebar.host_ports.columns.pid")),
+            )
+            .when(show_context_columns, |header| {
+                header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PORT_PROCESS_COLUMN_WIDTH))
+                            .truncate()
+                            .child(self.i18n.t("sidebar.host_ports.columns.process")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PORT_REMOTE_COLUMN_WIDTH))
+                            .truncate()
+                            .child(self.i18n.t("sidebar.host_ports.columns.remote")),
+                    )
+            })
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_table_header(&self, show_context_columns: bool) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .flex_none()
+            .w_full()
+            .min_w_0()
+            .h(px(HOST_FILESYSTEM_TABLE_HEADER_HEIGHT))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg))
+            .text_size(px(HOST_PROCESS_TABLE_HEADER_TEXT_SIZE))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_filesystems.columns.path")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
+                    .truncate()
+                    .child(self.i18n.t("sidebar.host_filesystems.columns.kind")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
+                    .flex()
+                    .justify_end()
+                    .child(self.i18n.t("sidebar.host_filesystems.columns.usage")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
+                    .flex()
+                    .justify_end()
+                    .child(self.i18n.t("sidebar.host_filesystems.columns.inode")),
+            )
+            .when(show_context_columns, |header| {
+                header
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_FS_COLUMN_WIDTH))
+                            .truncate()
+                            .child(self.i18n.t("sidebar.host_filesystems.columns.fs")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_SIZE_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .child(self.i18n.t("sidebar.host_filesystems.columns.size")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_RO_COLUMN_WIDTH))
+                            .truncate()
+                            .child(self.i18n.t("sidebar.host_filesystems.columns.read_only")),
+                    )
+            })
+            .into_any_element()
+    }
+
+    fn render_host_schedule_row(
+        &self,
+        connection_id: &str,
+        index: usize,
+        entry: Option<ResourceScheduledTask>,
+        show_context_columns: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(entry) = entry else {
+            return div().into_any_element();
+        };
+        let expanded = self.connection_monitor.host_schedule_expanded_index == Some(index);
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let source = host_schedule_source_display(&self.i18n, &entry.source);
+        let active = host_schedule_active_display(&self.i18n, &entry.active);
+        let enabled = host_schedule_enabled_display(&self.i18n, &entry.enabled);
+        let next = host_schedule_blank_dash(&entry.next_run);
+        let last = host_schedule_blank_dash(&entry.last_run);
+
+        div()
+            .w_full()
+            .min_w_0()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgb(theme.bg_hover)))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(HOST_SCHEDULE_TABLE_MAIN_ROW_HEIGHT))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    // The task name is the identity column. Keep it as the
+                    // first-level flex child so fixed metadata/actions cannot
+                    // collapse it during right-sidebar resizing.
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
+                            .text_color(rgb(theme.text))
+                            .font_family(mono_font.clone())
+                            .child(host_schedule_blank_dash(&entry.name)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SCHEDULE_SOURCE_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font.clone())
+                            .child(source.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SCHEDULE_STATE_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(host_schedule_active_color(
+                                &entry.active,
+                                theme.text_muted,
+                            )))
+                            .font_family(mono_font.clone())
+                            .child(active.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SCHEDULE_ENABLED_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(host_schedule_enabled_color(
+                                &entry.enabled,
+                                theme.text_muted,
+                            )))
+                            .font_family(mono_font.clone())
+                            .child(enabled.clone()),
+                    )
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_SCHEDULE_NEXT_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(next.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_SCHEDULE_LAST_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(last.clone()),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pb_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font)
+                            .child(if show_context_columns {
+                                format!(
+                                    "{} · {}",
+                                    self.i18n.t("sidebar.host_schedules.columns.schedule"),
+                                    host_schedule_blank_dash(&entry.schedule)
+                                )
+                            } else {
+                                format!(
+                                    "{} · {} · {}",
+                                    source,
+                                    next,
+                                    host_schedule_blank_dash(&entry.command)
+                                )
+                            }),
+                    )
+                    .child(self.render_host_schedule_inline_actions(connection_id, &entry, cx)),
+            )
+            .when(expanded, |row| row.child(self.render_host_schedule_detail(&entry)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.connection_monitor.host_schedule_expanded_index == Some(index) {
+                        this.connection_monitor.host_schedule_expanded_index = None;
+                    } else {
+                        this.connection_monitor.host_schedule_expanded_index = Some(index);
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_port_row(
+        &self,
+        connection_id: &str,
+        index: usize,
+        entry: Option<ResourcePortEntry>,
+        show_context_columns: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(entry) = entry else {
+            return div().into_any_element();
+        };
+        let expanded = self.connection_monitor.host_port_expanded_index == Some(index);
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let local = host_port_endpoint_label(&entry.local_address, &entry.local_port);
+        let remote = host_port_endpoint_label(&entry.remote_address, &entry.remote_port);
+        let process = host_port_blank_dash(host_port_process_label(&entry).as_str());
+        let pid = host_port_blank_dash(&entry.pid);
+        let state = host_port_state_display(&self.i18n, &entry.state);
+
+        div()
+            .w_full()
+            .min_w_0()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgb(theme.bg_hover)))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(HOST_PORT_TABLE_MAIN_ROW_HEIGHT))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    // Keep the endpoint identity as the first-level flex child.
+                    // Buttons and secondary metadata live outside this row so
+                    // resizing the companion sidebar cannot collapse the address into `...`.
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
+                            .text_color(rgb(if port_is_risky_exposure(&entry) {
+                                MONITOR_AMBER
+                            } else {
+                                theme.text
+                            }))
+                            .font_family(mono_font.clone())
+                            .child(local.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PORT_PROTOCOL_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font.clone())
+                            .child(entry.protocol.to_uppercase()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PORT_STATE_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(host_port_state_color(&entry.state, theme.text_muted)))
+                            .font_family(mono_font.clone())
+                            .child(state),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_PORT_PID_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font.clone())
+                            .child(pid.clone()),
+                    )
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PORT_PROCESS_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(process.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_PORT_REMOTE_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(remote.clone()),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pb_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font)
+                            .child(if show_context_columns {
+                                format!(
+                                    "{} · {}",
+                                    self.i18n.t("sidebar.host_ports.columns.source"),
+                                    host_port_blank_dash(&entry.source)
+                                )
+                            } else {
+                                format!("{} · {}", process, remote)
+                            }),
+                    )
+                    .child(self.render_host_port_inline_actions(connection_id, &entry, cx)),
+            )
+            .when(expanded, |row| row.child(self.render_host_port_detail(&entry)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.connection_monitor.host_port_expanded_index == Some(index) {
+                        this.connection_monitor.host_port_expanded_index = None;
+                    } else {
+                        this.connection_monitor.host_port_expanded_index = Some(index);
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_row(
+        &self,
+        connection_id: &str,
+        index: usize,
+        entry: Option<ResourceFilesystemEntry>,
+        show_context_columns: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(entry) = entry else {
+            return div().into_any_element();
+        };
+        let expanded = self.connection_monitor.host_filesystem_expanded_index == Some(index);
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let kind = host_filesystem_kind_display(&self.i18n, &entry.kind);
+        let usage = host_filesystem_usage_label(&entry);
+        let inode = host_filesystem_percent_dash(&entry.inode_percent);
+        let size = host_filesystem_size_label(&entry.size_bytes);
+        let read_only = host_filesystem_read_only_display(&self.i18n, entry.read_only);
+
+        div()
+            .w_full()
+            .min_w_0()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgb(theme.bg_hover)))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(HOST_FILESYSTEM_TABLE_MAIN_ROW_HEIGHT))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    // Path is the identity column. Keep it first-level flex so
+                    // fixed filesystem metadata cannot collapse it during sidebar resize.
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
+                            .text_color(rgb(host_filesystem_path_color(&entry, theme.text)))
+                            .font_family(mono_font.clone())
+                            .child(host_filesystem_blank_dash(&entry.path)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font.clone())
+                            .child(kind.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(host_filesystem_percent_color(
+                                &entry.used_percent,
+                                theme.text_muted,
+                            )))
+                            .font_family(mono_font.clone())
+                            .child(usage.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(host_filesystem_percent_color(
+                                &entry.inode_percent,
+                                theme.text_muted,
+                            )))
+                            .font_family(mono_font.clone())
+                            .child(inode.clone()),
+                    )
+                    .when(show_context_columns, |row| {
+                        row.child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_FILESYSTEM_FS_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(host_filesystem_blank_dash(&entry.fs_type)),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_FILESYSTEM_SIZE_COLUMN_WIDTH))
+                                .flex()
+                                .justify_end()
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(theme.text_muted))
+                                .font_family(mono_font.clone())
+                                .child(size.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(HOST_FILESYSTEM_RO_COLUMN_WIDTH))
+                                .truncate()
+                                .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                                .text_color(rgb(if entry.read_only {
+                                    MONITOR_AMBER
+                                } else {
+                                    theme.text_muted
+                                }))
+                                .font_family(mono_font.clone())
+                                .child(read_only.clone()),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pb_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font)
+                            .child(host_filesystem_meta_label(&self.i18n, &entry, show_context_columns)),
+                    )
+                    .child(self.render_host_filesystem_inline_actions(connection_id, &entry, cx)),
+            )
+            .when(expanded, |row| row.child(self.render_host_filesystem_detail(&entry)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.connection_monitor.host_filesystem_expanded_index == Some(index) {
+                        this.connection_monitor.host_filesystem_expanded_index = None;
+                    } else {
+                        this.connection_monitor.host_filesystem_expanded_index = Some(index);
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_schedule_inline_actions(
+        &self,
+        connection_id: &str,
+        entry: &ResourceScheduledTask,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let logs_task = entry.clone();
+        let follow_task = entry.clone();
+        let run_task = entry.clone();
+        let toggle_task = entry.clone();
+        let can_run_now = entry.unit.ends_with(".service") || entry.source == "windows";
+        let can_toggle_enabled = entry.source == "systemd" || entry.source == "windows";
+        let should_enable = !host_schedule_enabled_is_enabled(&entry.enabled);
+        let action_running = self
+            .connection_monitor
+            .host_schedule_action_running
+            .as_ref()
+            .is_some_and(|request| request.task_id == entry.id);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(4.0))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::FileText,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_schedules.actions.logs"),
+                "host-schedule-logs",
+                true,
+                cx.listener({
+                    let connection_id = connection_id.to_string();
+                    move |this, _event, _window, cx| {
+                        this.request_host_schedule_logs(
+                            connection_id.clone(),
+                            logs_task.clone(),
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
+            ))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Activity,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_schedules.actions.follow_logs"),
+                "host-schedule-follow",
+                true,
+                cx.listener({
+                    let connection_id = connection_id.to_string();
+                    move |this, _event, window, cx| {
+                        this.open_host_schedule_follow_terminal(
+                            connection_id.clone(),
+                            follow_task.clone(),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
+            ))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Play,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    disabled: !can_run_now || action_running,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: if can_run_now && !action_running {
+                        1.0
+                    } else {
+                        0.45
+                    },
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_schedules.actions.run_now"),
+                "host-schedule-run-now",
+                true,
+                cx.listener({
+                    let connection_id = connection_id.to_string();
+                    move |this, _event, _window, cx| {
+                        if can_run_now {
+                            this.request_host_schedule_run_now(
+                                connection_id.clone(),
+                                run_task.clone(),
+                                cx,
+                            );
+                        }
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
+            ))
+            .child(self.workspace_tooltip_icon_button(
+                if should_enable {
+                    LucideIcon::CheckCircle
+                } else {
+                    LucideIcon::ShieldOff
+                },
+                12.0,
+                rgb(if should_enable {
+                    theme.text
+                } else {
+                    MONITOR_RED
+                }),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    disabled: !can_toggle_enabled || action_running,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: if can_toggle_enabled && !action_running {
+                        1.0
+                    } else {
+                        0.45
+                    },
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t(if should_enable {
+                    "sidebar.host_schedules.actions.enable"
+                } else {
+                    "sidebar.host_schedules.actions.disable"
+                }),
+                "host-schedule-toggle-enabled",
+                true,
+                cx.listener({
+                    let connection_id = connection_id.to_string();
+                    move |this, _event, _window, cx| {
+                        if can_toggle_enabled && !action_running {
+                            this.request_host_schedule_toggle_enabled(
+                                connection_id.clone(),
+                                toggle_task.clone(),
+                                should_enable,
+                                cx,
+                            );
+                        }
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_port_inline_actions(
+        &self,
+        connection_id: &str,
+        entry: &ResourcePortEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let endpoint = host_port_endpoint_label(&entry.local_address, &entry.local_port);
+        let pid = entry.pid.clone();
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(4.0))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Copy,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_ports.actions.copy_endpoint"),
+                "host-port-copy-endpoint",
+                true,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.copy_host_port_endpoint(endpoint.clone(), cx);
+                    cx.stop_propagation();
+                }),
+                cx.entity(),
+            ))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Terminal,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_ports.actions.diagnostic"),
+                "host-port-row-diagnostic",
+                true,
+                cx.listener({
+                    let connection_id = connection_id.to_string();
+                    move |this, _event, window, cx| {
+                        this.open_host_port_diagnostic_terminal(
+                            connection_id.clone(),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
+            ))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Search,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    disabled: pid.is_empty(),
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: if pid.is_empty() { 0.45 } else { 1.0 },
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_ports.actions.jump_process"),
+                "host-port-jump-process",
+                true,
+                cx.listener(move |this, _event, _window, cx| {
+                    if !pid.is_empty() {
+                        this.jump_host_port_to_process(pid.clone(), cx);
+                    }
+                    cx.stop_propagation();
+                }),
+                cx.entity(),
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_schedule_detail(&self, entry: &ResourceScheduledTask) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        div()
+            .mx_3()
+            .mb_2()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg_panel))
+            .overflow_x_scrollbar()
+            .child(
+                div()
+                    .p_3()
+                    .min_w(px(640.0))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .font_family(mono_font)
+                    .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
+                    .text_color(rgb(theme.text))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.task"),
+                        host_schedule_blank_dash(&entry.name)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.source"),
+                        host_schedule_source_display(&self.i18n, &entry.source)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.state"),
+                        host_schedule_active_display(&self.i18n, &entry.active)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.enabled"),
+                        host_schedule_enabled_display(&self.i18n, &entry.enabled)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.next"),
+                        host_schedule_blank_dash(&entry.next_run)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.last"),
+                        host_schedule_blank_dash(&entry.last_run)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.result"),
+                        host_schedule_blank_dash(&entry.last_result)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.user"),
+                        host_schedule_blank_dash(&entry.user)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_schedules.columns.unit"),
+                        host_schedule_blank_dash(&entry.unit)
+                    ))
+                    .child(
+                        div()
+                            .pt_2()
+                            .whitespace_nowrap()
+                            .child(format!(
+                                "{}: {}",
+                                self.i18n.t("sidebar.host_schedules.columns.schedule"),
+                                host_schedule_blank_dash(&entry.schedule)
+                            )),
+                    )
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .child(format!(
+                                "{}: {}",
+                                self.i18n.t("sidebar.host_schedules.columns.command"),
+                                host_schedule_blank_dash(&entry.command)
+                            )),
+                    )
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .child(format!(
+                                "{}: {}",
+                                self.i18n.t("sidebar.host_schedules.columns.description"),
+                                host_schedule_blank_dash(&entry.description)
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_inline_actions(
+        &self,
+        connection_id: &str,
+        entry: &ResourceFilesystemEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let path = entry.path.clone();
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(4.0))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Copy,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_filesystems.actions.copy_path"),
+                "host-filesystem-copy-path",
+                true,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.copy_host_filesystem_path(path.clone(), cx);
+                    cx.stop_propagation();
+                }),
+                cx.entity(),
+            ))
+            .child(self.workspace_tooltip_icon_button(
+                LucideIcon::Terminal,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                self.i18n.t("sidebar.host_filesystems.actions.diagnostic"),
+                "host-filesystem-row-diagnostic",
+                true,
+                cx.listener({
+                    let connection_id = connection_id.to_string();
+                    move |this, _event, window, cx| {
+                        this.open_host_filesystem_diagnostic_terminal(
+                            connection_id.clone(),
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }
+                }),
+                cx.entity(),
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_port_detail(&self, entry: &ResourcePortEntry) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        div()
+            .mx_3()
+            .mb_2()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg_panel))
+            .overflow_x_scrollbar()
+            .child(
+                div()
+                    .p_3()
+                    .min_w(px(620.0))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .font_family(mono_font)
+                    .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
+                    .text_color(rgb(theme.text))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_ports.columns.local"),
+                        host_port_endpoint_label(&entry.local_address, &entry.local_port)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_ports.columns.remote"),
+                        host_port_endpoint_label(&entry.remote_address, &entry.remote_port)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_ports.columns.process"),
+                        host_port_blank_dash(host_port_process_label(entry).as_str())
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_ports.columns.user"),
+                        host_port_blank_dash(&entry.user)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_ports.columns.source"),
+                        host_port_blank_dash(&entry.source)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_ports.columns.inode"),
+                        host_port_blank_dash(&entry.inode)
+                    ))
+                    .child(
+                        div()
+                            .pt_2()
+                            .whitespace_nowrap()
+                            .child(format!(
+                                "{}: {}",
+                                self.i18n.t("sidebar.host_ports.columns.command"),
+                                host_port_blank_dash(&entry.command)
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_filesystem_detail(&self, entry: &ResourceFilesystemEntry) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        div()
+            .mx_3()
+            .mb_2()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg_panel))
+            .overflow_x_scrollbar()
+            .child(
+                div()
+                    .p_3()
+                    .min_w(px(700.0))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .font_family(mono_font)
+                    .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
+                    .text_color(rgb(theme.text))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.path"),
+                        host_filesystem_blank_dash(&entry.path)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.kind"),
+                        host_filesystem_kind_display(&self.i18n, &entry.kind)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.device"),
+                        host_filesystem_blank_dash(&entry.device)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.fs"),
+                        host_filesystem_blank_dash(&entry.fs_type)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.size"),
+                        host_filesystem_size_label(&entry.size_bytes)
+                    ))
+                    .child(format!(
+                        "{}: {} / {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.used_available"),
+                        host_filesystem_size_label(&entry.used_bytes),
+                        host_filesystem_size_label(&entry.available_bytes)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.usage"),
+                        host_filesystem_percent_dash(&entry.used_percent)
+                    ))
+                    .child(format!(
+                        "{}: {} / {} / {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.inode"),
+                        host_filesystem_blank_dash(&entry.inode_used),
+                        host_filesystem_blank_dash(&entry.inode_available),
+                        host_filesystem_percent_dash(&entry.inode_percent)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.read_only"),
+                        host_filesystem_read_only_display(&self.i18n, entry.read_only)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.source"),
+                        host_filesystem_blank_dash(&entry.source)
+                    ))
+                    .child(format!(
+                        "{}: {}",
+                        self.i18n.t("sidebar.host_filesystems.columns.detail"),
+                        host_filesystem_blank_dash(&entry.detail)
+                    ))
+                    .child(
+                        div()
+                            .pt_2()
+                            .whitespace_nowrap()
+                            .child(format!(
+                                "{}: {}",
+                                self.i18n.t("sidebar.host_filesystems.columns.options"),
+                                host_filesystem_blank_dash(&entry.options)
+                            )),
+                    ),
             )
             .into_any_element()
     }
@@ -3501,6 +5980,7 @@ impl WorkspaceApp {
                     this.connection_monitor.host_service_search_focused = false;
                     this.connection_monitor.host_log_search_focused = false;
                     this.connection_monitor.host_tmux_search_focused = false;
+                    this.connection_monitor.host_port_search_focused = false;
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle);
@@ -4403,6 +6883,79 @@ impl WorkspaceApp {
         );
     }
 
+    fn sync_host_port_list_state(&self, rows: &[ResourcePortEntry], selected_id: &str) {
+        let signatures = rows.iter().map(port_row_signature).collect::<Vec<_>>();
+        let identity = format!(
+            "host-ports:{selected_id}:{}:{}:{}",
+            self.connection_monitor.host_port_search_query,
+            self.connection_monitor.host_port_filter as u8,
+            self.connection_monitor
+                .host_port_expanded_index
+                .unwrap_or(usize::MAX)
+        );
+        sync_tauri_variable_list_state_by_signatures(
+            &self.connection_monitor.host_port_list_state,
+            &mut self.connection_monitor.host_port_list_cache.borrow_mut(),
+            &identity,
+            &signatures,
+            TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    fn sync_host_schedule_list_state(&self, rows: &[ResourceScheduledTask], selected_id: &str) {
+        let signatures = rows
+            .iter()
+            .map(scheduled_task_row_signature)
+            .collect::<Vec<_>>();
+        let identity = format!(
+            "host-schedules:{selected_id}:{}:{}:{}",
+            self.connection_monitor.host_schedule_search_query,
+            self.connection_monitor.host_schedule_filter as u8,
+            self.connection_monitor
+                .host_schedule_expanded_index
+                .unwrap_or(usize::MAX)
+        );
+        sync_tauri_variable_list_state_by_signatures(
+            &self.connection_monitor.host_schedule_list_state,
+            &mut self
+                .connection_monitor
+                .host_schedule_list_cache
+                .borrow_mut(),
+            &identity,
+            &signatures,
+            TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    fn sync_host_filesystem_list_state(
+        &self,
+        rows: &[ResourceFilesystemEntry],
+        selected_id: &str,
+    ) {
+        let signatures = rows
+            .iter()
+            .map(filesystem_row_signature)
+            .collect::<Vec<_>>();
+        let identity = format!(
+            "host-filesystems:{selected_id}:{}:{}:{}",
+            self.connection_monitor.host_filesystem_search_query,
+            self.connection_monitor.host_filesystem_filter as u8,
+            self.connection_monitor
+                .host_filesystem_expanded_index
+                .unwrap_or(usize::MAX)
+        );
+        sync_tauri_variable_list_state_by_signatures(
+            &self.connection_monitor.host_filesystem_list_state,
+            &mut self
+                .connection_monitor
+                .host_filesystem_list_cache
+                .borrow_mut(),
+            &identity,
+            &signatures,
+            TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
     fn host_docker_action_command(
         &self,
         connection_id: &str,
@@ -4547,6 +7100,98 @@ impl WorkspaceApp {
         build_tmux_new_session_command(&os_type, None).map(|command| (command, os_type))
     }
 
+    fn host_port_snapshot_command(
+        &self,
+        connection_id: &str,
+    ) -> (oxideterm_connection_monitor::PortCaptureCommand, String) {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        (build_port_snapshot_command(&os_type), os_type)
+    }
+
+    fn host_port_diagnostic_command(&self, connection_id: &str) -> (String, String) {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        (build_port_diagnostic_command(&os_type), os_type)
+    }
+
+    fn host_schedule_snapshot_command(
+        &self,
+        connection_id: &str,
+    ) -> (oxideterm_connection_monitor::ScheduledTaskCaptureCommand, String) {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        (build_scheduled_task_snapshot_command(&os_type), os_type)
+    }
+
+    fn host_schedule_logs_command(
+        &self,
+        connection_id: &str,
+        task: &ResourceScheduledTask,
+        follow: bool,
+        limit: usize,
+    ) -> Result<(oxideterm_connection_monitor::ScheduledTaskCaptureCommand, String), String> {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        build_scheduled_task_logs_command(&os_type, task, follow, limit)
+            .map(|command| (command, os_type))
+    }
+
+    fn host_schedule_action_command(
+        &self,
+        connection_id: &str,
+        action: ScheduledTaskActionKind,
+    ) -> Result<(oxideterm_connection_monitor::ScheduledTaskActionCommand, String), String> {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        build_scheduled_task_action_command(&os_type, action).map(|command| (command, os_type))
+    }
+
+    fn host_schedule_diagnostic_command(&self, connection_id: &str) -> (String, String) {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        (build_scheduled_task_diagnostic_command(&os_type), os_type)
+    }
+
+    fn host_filesystem_snapshot_command(
+        &self,
+        connection_id: &str,
+    ) -> (oxideterm_connection_monitor::FilesystemCaptureCommand, String) {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        (build_filesystem_snapshot_command(&os_type), os_type)
+    }
+
+    fn host_filesystem_diagnostic_command(&self, connection_id: &str) -> (String, String) {
+        let os_type = self
+            .ssh_registry
+            .get(connection_id)
+            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
+            .unwrap_or_else(|| "Linux".to_string());
+        (build_filesystem_diagnostic_command(&os_type), os_type)
+    }
+
     fn refresh_host_docker_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
         self.connection_monitor
             .profiler_registry
@@ -4646,6 +7291,60 @@ impl WorkspaceApp {
         }
         if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
             self.connection_monitor.host_tmux_search_focused = false;
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn handle_host_port_search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.connection_monitor.host_port_search_focused {
+            return false;
+        }
+        if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
+            self.connection_monitor.host_port_search_focused = false;
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn handle_host_schedule_search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.connection_monitor.host_schedule_search_focused {
+            return false;
+        }
+        if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
+            self.connection_monitor.host_schedule_search_focused = false;
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn handle_host_filesystem_search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.connection_monitor.host_filesystem_search_focused {
+            return false;
+        }
+        if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
+            self.connection_monitor.host_filesystem_search_focused = false;
             self.ime_marked_text = None;
             self.clear_ime_selection();
             cx.notify();
@@ -5013,6 +7712,337 @@ impl WorkspaceApp {
                 .map_err(|error| error.to_string());
             let _ = tx.send(HostTmuxSnapshotDelivery { request, result });
         });
+        cx.notify();
+    }
+
+    fn request_host_ports_snapshot_for_selected_connection(&mut self, cx: &mut Context<Self>) {
+        let connections = self.monitor_connections();
+        let Some(connection_id) = self
+            .connection_monitor
+            .selected_connection_id
+            .clone()
+            .or_else(|| connections.first().map(|connection| connection.connection_id.clone()))
+        else {
+            return;
+        };
+        self.request_host_ports_snapshot(connection_id, cx);
+    }
+
+    fn request_host_ports_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+        if self.connection_monitor.host_port_snapshot_polling {
+            self.push_host_port_toast(
+                self.i18n
+                    .t("sidebar.host_ports.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            );
+            return;
+        }
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+            self.push_host_port_toast(
+                self.i18n.t("sidebar.host_ports.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let (command, os_type) = self.host_port_snapshot_command(&connection_id);
+        if command.capability == PortCommandCapability::Partial {
+            self.push_host_port_toast(
+                self.i18n_replace(
+                    "sidebar.host_ports.toast.partial_support",
+                    &[("os", os_type.clone())],
+                ),
+                TerminalNoticeVariant::Warning,
+            );
+        }
+
+        let request = HostPortSnapshotRequest {
+            connection_id: connection_id.clone(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.connection_monitor.host_port_snapshot_connection_id = Some(connection_id);
+        self.connection_monitor.host_port_snapshot_running = Some(request.clone());
+        self.connection_monitor.host_port_snapshot_rx = Some(rx);
+        self.connection_monitor.host_port_snapshot_polling = true;
+        self.connection_monitor.host_port_last_error = None;
+        // Port sampling is a troubleshooting snapshot, not a monitor metric.
+        // Keep it out of the high-frequency profiler loop.
+        self.forwarding_runtime.handle().spawn(async move {
+            let result = handle
+                .run_command_capture(
+                    &command.command,
+                    HOST_PORT_SNAPSHOT_TIMEOUT,
+                    HOST_PORT_SNAPSHOT_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HostPortSnapshotDelivery { request, result });
+        });
+        cx.notify();
+    }
+
+    fn request_host_schedules_snapshot_for_selected_connection(&mut self, cx: &mut Context<Self>) {
+        let connections = self.monitor_connections();
+        let Some(connection_id) = self
+            .connection_monitor
+            .selected_connection_id
+            .clone()
+            .or_else(|| connections.first().map(|connection| connection.connection_id.clone()))
+        else {
+            return;
+        };
+        self.request_host_schedules_snapshot(connection_id, cx);
+    }
+
+    fn request_host_schedules_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+        if self.connection_monitor.host_schedule_snapshot_polling {
+            self.push_host_schedule_toast(
+                self.i18n
+                    .t("sidebar.host_schedules.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            );
+            return;
+        }
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+            self.push_host_schedule_toast(
+                self.i18n.t("sidebar.host_schedules.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let (command, os_type) = self.host_schedule_snapshot_command(&connection_id);
+        if command.capability == ScheduledTaskCapability::Partial {
+            self.push_host_schedule_toast(
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.partial_support",
+                    &[("os", os_type.clone())],
+                ),
+                TerminalNoticeVariant::Warning,
+            );
+        }
+
+        let request = HostScheduleSnapshotRequest {
+            connection_id: connection_id.clone(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.connection_monitor.host_schedule_snapshot_connection_id = Some(connection_id);
+        self.connection_monitor.host_schedule_snapshot_running = Some(request.clone());
+        self.connection_monitor.host_schedule_snapshot_rx = Some(rx);
+        self.connection_monitor.host_schedule_snapshot_polling = true;
+        self.connection_monitor.host_schedule_last_error = None;
+        // Scheduled tasks are inventory data, not high-frequency metrics.
+        // Keep the sampler out of the profiler loop to avoid expensive cron/systemd scans.
+        self.forwarding_runtime.handle().spawn(async move {
+            let result = handle
+                .run_command_capture(
+                    &command.command,
+                    HOST_SCHEDULE_SNAPSHOT_TIMEOUT,
+                    HOST_SCHEDULE_SNAPSHOT_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HostScheduleSnapshotDelivery { request, result });
+        });
+        cx.notify();
+    }
+
+    fn request_host_filesystems_snapshot_for_selected_connection(&mut self, cx: &mut Context<Self>) {
+        let connections = self.monitor_connections();
+        let Some(connection_id) = self
+            .connection_monitor
+            .selected_connection_id
+            .clone()
+            .or_else(|| connections.first().map(|connection| connection.connection_id.clone()))
+        else {
+            return;
+        };
+        self.request_host_filesystems_snapshot(connection_id, cx);
+    }
+
+    fn request_host_filesystems_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+        if self.connection_monitor.host_filesystem_snapshot_polling {
+            self.push_host_filesystem_toast(
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            );
+            return;
+        }
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+            self.push_host_filesystem_toast(
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let (command, os_type) = self.host_filesystem_snapshot_command(&connection_id);
+        if command.capability == FilesystemCommandCapability::Partial {
+            self.push_host_filesystem_toast(
+                self.i18n_replace(
+                    "sidebar.host_filesystems.toast.partial_support",
+                    &[("os", os_type.clone())],
+                ),
+                TerminalNoticeVariant::Warning,
+            );
+        }
+
+        let request = HostFilesystemSnapshotRequest {
+            connection_id: connection_id.clone(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.connection_monitor.host_filesystem_snapshot_connection_id = Some(connection_id);
+        self.connection_monitor.host_filesystem_snapshot_running = Some(request.clone());
+        self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
+        self.connection_monitor.host_filesystem_snapshot_polling = true;
+        self.connection_monitor.host_filesystem_last_error = None;
+        // Filesystem scans can touch du/find, so they stay manual snapshot work
+        // instead of joining the high-frequency resource profiler loop.
+        self.forwarding_runtime.handle().spawn(async move {
+            let result = handle
+                .run_command_capture(
+                    &command.command,
+                    HOST_FILESYSTEM_SNAPSHOT_TIMEOUT,
+                    HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HostFilesystemSnapshotDelivery { request, result });
+        });
+        cx.notify();
+    }
+
+    fn request_host_schedule_logs(
+        &mut self,
+        connection_id: String,
+        task: ResourceScheduledTask,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_monitor.host_schedule_logs_polling {
+            self.push_host_schedule_toast(
+                self.i18n
+                    .t("sidebar.host_schedules.toast.logs_already_running"),
+                TerminalNoticeVariant::Warning,
+            );
+            return;
+        }
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+            self.push_host_schedule_toast(
+                self.i18n.t("sidebar.host_schedules.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let (command, os_type) =
+            match self.host_schedule_logs_command(&connection_id, &task, false, 200) {
+                Ok(command) => command,
+                Err(error) => {
+                    self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
+                    cx.notify();
+                    return;
+                }
+            };
+        if command.capability == ScheduledTaskCapability::Partial {
+            self.push_host_schedule_toast(
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.partial_support",
+                    &[("os", os_type.clone())],
+                ),
+                TerminalNoticeVariant::Warning,
+            );
+        }
+        let request = HostScheduleLogsRequest {
+            connection_id,
+            task,
+        };
+        self.connection_monitor.host_schedule_logs_dialog = Some(HostScheduleLogsDialog {
+            request: request.clone(),
+            output: None,
+            error: None,
+            loading: true,
+        });
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.connection_monitor.host_schedule_logs_rx = Some(rx);
+        self.connection_monitor.host_schedule_logs_polling = true;
+        self.forwarding_runtime.handle().spawn(async move {
+            let result = handle
+                .run_command_capture(
+                    &command.command,
+                    HOST_SCHEDULE_LOGS_TIMEOUT,
+                    HOST_SCHEDULE_LOGS_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HostScheduleLogsDelivery { request, result });
+        });
+        cx.notify();
+    }
+
+    fn request_host_schedule_run_now(
+        &mut self,
+        connection_id: String,
+        task: ResourceScheduledTask,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_monitor.host_schedule_action_running.is_some() {
+            self.push_host_schedule_toast(
+                self.i18n
+                    .t("sidebar.host_schedules.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            );
+            return;
+        }
+        self.connection_monitor.host_schedule_pending_confirm = Some(HostScheduleActionRequest {
+            connection_id,
+            task_id: task.id.clone(),
+            task_name: task.name.clone(),
+            unit: task.unit.clone(),
+            action: ScheduledTaskActionKind::RunNow {
+                id: task.id,
+                unit: task.unit,
+            },
+        });
+        self.reset_standard_confirm_focus();
+        cx.notify();
+    }
+
+    fn request_host_schedule_toggle_enabled(
+        &mut self,
+        connection_id: String,
+        task: ResourceScheduledTask,
+        enable: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_monitor.host_schedule_action_running.is_some() {
+            self.push_host_schedule_toast(
+                self.i18n
+                    .t("sidebar.host_schedules.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            );
+            return;
+        }
+        let action = if enable {
+            ScheduledTaskActionKind::Enable {
+                id: task.id.clone(),
+                source: task.source.clone(),
+            }
+        } else {
+            ScheduledTaskActionKind::Disable {
+                id: task.id.clone(),
+                source: task.source.clone(),
+            }
+        };
+        self.connection_monitor.host_schedule_pending_confirm = Some(HostScheduleActionRequest {
+            connection_id,
+            task_id: task.id,
+            task_name: task.name,
+            unit: task.unit,
+            action,
+        });
+        self.reset_standard_confirm_focus();
         cx.notify();
     }
 
@@ -5597,6 +8627,240 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn copy_host_port_endpoint(&mut self, endpoint: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(endpoint.clone()));
+        self.push_host_port_toast(
+            self.i18n_replace(
+                "sidebar.host_ports.toast.copied_endpoint",
+                &[("endpoint", endpoint)],
+            ),
+            TerminalNoticeVariant::Success,
+        );
+        cx.notify();
+    }
+
+    fn jump_host_port_to_process(&mut self, pid: String, cx: &mut Context<Self>) {
+        self.active_context_sidebar_tool = ContextSidebarTool::Processes;
+        self.connection_monitor.host_process_search_query = pid;
+        self.connection_monitor.host_process_search_focused = false;
+        self.connection_monitor.host_port_search_focused = false;
+        self.clear_ime_selection();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn open_host_port_diagnostic_terminal(
+        &mut self,
+        connection_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (command, _os_type) = self.host_port_diagnostic_command(&connection_id);
+        let title = self.i18n.t("sidebar.host_ports.diagnostic_title");
+        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
+            self.push_host_port_toast(
+                self.i18n
+                    .t("sidebar.host_ports.toast.exec_terminal_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+            self.push_host_port_toast(
+                self.i18n
+                    .t("sidebar.host_ports.toast.exec_terminal_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        match self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            node_id,
+            Some(command),
+            node.config,
+            title,
+            node.saved_connection_id,
+            None,
+            None,
+            window,
+            cx,
+        ) {
+            Ok(()) => self.push_host_port_toast(
+                self.i18n.t("sidebar.host_ports.toast.diagnostic_opened"),
+                TerminalNoticeVariant::Success,
+            ),
+            Err(error) => self.push_host_port_toast(error.to_string(), TerminalNoticeVariant::Error),
+        }
+        cx.notify();
+    }
+
+    fn copy_host_filesystem_path(&mut self, path: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+        self.push_host_filesystem_toast(
+            self.i18n_replace("sidebar.host_filesystems.toast.copied_path", &[("path", path)]),
+            TerminalNoticeVariant::Success,
+        );
+        cx.notify();
+    }
+
+    fn open_host_filesystem_diagnostic_terminal(
+        &mut self,
+        connection_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (command, _os_type) = self.host_filesystem_diagnostic_command(&connection_id);
+        let title = self.i18n.t("sidebar.host_filesystems.diagnostic_title");
+        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
+            self.push_host_filesystem_toast(
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.exec_terminal_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+            self.push_host_filesystem_toast(
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.exec_terminal_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        match self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            node_id,
+            Some(command),
+            node.config,
+            title,
+            node.saved_connection_id,
+            None,
+            None,
+            window,
+            cx,
+        ) {
+            Ok(()) => self.push_host_filesystem_toast(
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.diagnostic_opened"),
+                TerminalNoticeVariant::Success,
+            ),
+            Err(error) => {
+                self.push_host_filesystem_toast(error.to_string(), TerminalNoticeVariant::Error)
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_host_schedule_follow_terminal(
+        &mut self,
+        connection_id: String,
+        task: ResourceScheduledTask,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (command, os_type) =
+            match self.host_schedule_logs_command(&connection_id, &task, true, 200) {
+                Ok(command) => command,
+                Err(error) => {
+                    self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
+                    cx.notify();
+                    return;
+                }
+            };
+        if command.capability == ScheduledTaskCapability::Partial {
+            self.push_host_schedule_toast(
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.partial_support",
+                    &[("os", os_type.clone())],
+                ),
+                TerminalNoticeVariant::Warning,
+            );
+        }
+        let title = self.i18n_replace(
+            "sidebar.host_schedules.follow_title",
+            &[("name", task.name.clone())],
+        );
+        self.open_host_schedule_terminal_command(
+            connection_id,
+            task.name,
+            command.command,
+            title,
+            "sidebar.host_schedules.toast.follow_opened",
+            window,
+            cx,
+        );
+    }
+
+    fn open_host_schedule_diagnostic_terminal(
+        &mut self,
+        connection_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (command, _os_type) = self.host_schedule_diagnostic_command(&connection_id);
+        let title = self.i18n.t("sidebar.host_schedules.diagnostic_title");
+        self.open_host_schedule_terminal_command(
+            connection_id,
+            self.i18n.t("sidebar.host_schedules.diagnostic_title"),
+            command,
+            title,
+            "sidebar.host_schedules.toast.diagnostic_opened",
+            window,
+            cx,
+        );
+    }
+
+    fn open_host_schedule_terminal_command(
+        &mut self,
+        connection_id: String,
+        name: String,
+        command: String,
+        title: String,
+        opened_toast_key: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
+            self.push_host_schedule_toast(
+                self.i18n
+                    .t("sidebar.host_schedules.toast.exec_terminal_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+            self.push_host_schedule_toast(
+                self.i18n
+                    .t("sidebar.host_schedules.toast.exec_terminal_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        match self.queue_ssh_terminal_tab_for_node_with_mark_used(
+            node_id,
+            Some(command),
+            node.config,
+            title,
+            node.saved_connection_id,
+            None,
+            None,
+            window,
+            cx,
+        ) {
+            Ok(()) => self.push_host_schedule_toast(
+                self.i18n_replace(opened_toast_key, &[("name", name)]),
+                TerminalNoticeVariant::Success,
+            ),
+            Err(error) => {
+                self.push_host_schedule_toast(error.to_string(), TerminalNoticeVariant::Error)
+            }
+        }
+        cx.notify();
+    }
 
     pub(super) fn handle_host_process_confirm_key(
         &mut self,
@@ -5694,6 +8958,34 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn handle_host_schedule_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self
+            .connection_monitor
+            .host_schedule_pending_confirm
+            .is_none()
+        {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.connection_monitor.host_schedule_pending_confirm = None;
+                self.clear_standard_confirm_focus();
+                cx.notify();
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_host_schedule_action(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
     pub(super) fn handle_host_tmux_input_dialog_key(
         &mut self,
         event: &KeyDownEvent,
@@ -5751,6 +9043,14 @@ impl WorkspaceApp {
         };
         self.clear_standard_confirm_focus();
         self.start_host_tmux_action(request, cx);
+    }
+
+    fn confirm_host_schedule_action(&mut self, cx: &mut Context<Self>) {
+        let Some(request) = self.connection_monitor.host_schedule_pending_confirm.take() else {
+            return;
+        };
+        self.clear_standard_confirm_focus();
+        self.start_host_schedule_action(request, cx);
     }
 
     fn submit_host_tmux_input_dialog(&mut self, cx: &mut Context<Self>) {
@@ -6024,6 +9324,61 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn start_host_schedule_action(
+        &mut self,
+        request: HostScheduleActionRequest,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            self.push_host_schedule_toast(
+                self.i18n.t("sidebar.host_schedules.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            );
+            cx.notify();
+            return;
+        };
+        let (command, os_type) =
+            match self.host_schedule_action_command(&request.connection_id, request.action.clone())
+            {
+                Ok(command) => command,
+                Err(error) => {
+                    self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
+                    cx.notify();
+                    return;
+                }
+            };
+        if command.capability == ScheduledTaskCapability::Partial {
+            self.push_host_schedule_toast(
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.partial_support",
+                    &[("os", os_type.clone())],
+                ),
+                TerminalNoticeVariant::Warning,
+            );
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let delivery_request = request.clone();
+        self.connection_monitor.host_schedule_action_running = Some(request);
+        self.connection_monitor.host_schedule_action_rx = Some(rx);
+        self.connection_monitor.host_schedule_action_polling = true;
+        self.forwarding_runtime.handle().spawn(async move {
+            let result = handle
+                .run_command_capture(
+                    &command.command,
+                    HOST_SCHEDULE_ACTION_TIMEOUT,
+                    HOST_SCHEDULE_ACTION_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HostScheduleActionDelivery {
+                request: delivery_request,
+                result,
+            });
+        });
+        cx.notify();
+    }
+
     pub(super) fn poll_host_process_action_results(&mut self, cx: &mut Context<Self>) {
         if !self.connection_monitor.host_process_action_polling {
             return;
@@ -6232,6 +9587,166 @@ impl WorkspaceApp {
                         "sidebar.host_tmux.toast.snapshot_failed",
                         &[("reason", reason)],
                     ),
+                    TerminalNoticeVariant::Error,
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn poll_host_ports_snapshot_results(&mut self, cx: &mut Context<Self>) {
+        if !self.connection_monitor.host_port_snapshot_polling {
+            return;
+        }
+        let Some(rx) = self.connection_monitor.host_port_snapshot_rx.take() else {
+            self.connection_monitor.host_port_snapshot_polling = false;
+            self.connection_monitor.host_port_snapshot_running = None;
+            return;
+        };
+        match rx.try_recv() {
+            Ok(delivery) => {
+                self.finish_host_ports_snapshot(delivery, cx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.connection_monitor.host_port_snapshot_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.connection_monitor.host_port_snapshot_polling = false;
+                self.connection_monitor.host_port_snapshot_running = None;
+                let reason = self.i18n.t("sidebar.host_ports.toast.unknown_error");
+                self.connection_monitor.host_port_last_error = Some(reason.clone());
+                self.push_host_port_toast(
+                    self.i18n_replace(
+                        "sidebar.host_ports.toast.snapshot_failed",
+                        &[("reason", reason)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn poll_host_schedules_snapshot_results(&mut self, cx: &mut Context<Self>) {
+        if !self.connection_monitor.host_schedule_snapshot_polling {
+            return;
+        }
+        let Some(rx) = self.connection_monitor.host_schedule_snapshot_rx.take() else {
+            self.connection_monitor.host_schedule_snapshot_polling = false;
+            self.connection_monitor.host_schedule_snapshot_running = None;
+            return;
+        };
+        match rx.try_recv() {
+            Ok(delivery) => {
+                self.finish_host_schedules_snapshot(delivery, cx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.connection_monitor.host_schedule_snapshot_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.connection_monitor.host_schedule_snapshot_polling = false;
+                self.connection_monitor.host_schedule_snapshot_running = None;
+                let reason = self.i18n.t("sidebar.host_schedules.toast.unknown_error");
+                self.connection_monitor.host_schedule_last_error = Some(reason.clone());
+                self.push_host_schedule_toast(
+                    self.i18n_replace(
+                        "sidebar.host_schedules.toast.snapshot_failed",
+                        &[("reason", reason)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn poll_host_filesystems_snapshot_results(&mut self, cx: &mut Context<Self>) {
+        if !self.connection_monitor.host_filesystem_snapshot_polling {
+            return;
+        }
+        let Some(rx) = self.connection_monitor.host_filesystem_snapshot_rx.take() else {
+            self.connection_monitor.host_filesystem_snapshot_polling = false;
+            self.connection_monitor.host_filesystem_snapshot_running = None;
+            return;
+        };
+        match rx.try_recv() {
+            Ok(delivery) => {
+                self.finish_host_filesystems_snapshot(delivery, cx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.connection_monitor.host_filesystem_snapshot_polling = false;
+                self.connection_monitor.host_filesystem_snapshot_running = None;
+                let reason = self.i18n.t("sidebar.host_filesystems.toast.unknown_error");
+                self.connection_monitor.host_filesystem_last_error = Some(reason.clone());
+                self.push_host_filesystem_toast(
+                    self.i18n_replace(
+                        "sidebar.host_filesystems.toast.snapshot_failed",
+                        &[("reason", reason)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn poll_host_schedule_logs_results(&mut self, cx: &mut Context<Self>) {
+        if !self.connection_monitor.host_schedule_logs_polling {
+            return;
+        }
+        let Some(rx) = self.connection_monitor.host_schedule_logs_rx.take() else {
+            self.connection_monitor.host_schedule_logs_polling = false;
+            return;
+        };
+        match rx.try_recv() {
+            Ok(delivery) => {
+                self.connection_monitor.host_schedule_logs_polling = false;
+                self.finish_host_schedule_logs(delivery, cx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.connection_monitor.host_schedule_logs_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.connection_monitor.host_schedule_logs_polling = false;
+                if let Some(dialog) = self
+                    .connection_monitor
+                    .host_schedule_logs_dialog
+                    .as_mut()
+                {
+                    dialog.loading = false;
+                    dialog.error = Some(self.i18n.t("sidebar.host_schedules.toast.logs_failed"));
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn poll_host_schedule_action_results(&mut self, cx: &mut Context<Self>) {
+        if !self.connection_monitor.host_schedule_action_polling {
+            return;
+        }
+        let Some(rx) = self.connection_monitor.host_schedule_action_rx.take() else {
+            self.connection_monitor.host_schedule_action_polling = false;
+            self.connection_monitor.host_schedule_action_running = None;
+            return;
+        };
+        match rx.try_recv() {
+            Ok(delivery) => {
+                self.connection_monitor.host_schedule_action_polling = false;
+                self.connection_monitor.host_schedule_action_running = None;
+                self.finish_host_schedule_action(delivery, cx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.connection_monitor.host_schedule_action_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.connection_monitor.host_schedule_action_polling = false;
+                self.connection_monitor.host_schedule_action_running = None;
+                self.push_host_schedule_toast(
+                    self.i18n.t("sidebar.host_schedules.toast.action_failed"),
                     TerminalNoticeVariant::Error,
                 );
                 cx.notify();
@@ -6649,6 +10164,402 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn finish_host_ports_snapshot(
+        &mut self,
+        delivery: HostPortSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_monitor
+            .host_port_snapshot_running
+            .as_ref()
+            .is_some_and(|running| running != &delivery.request)
+        {
+            cx.notify();
+            return;
+        }
+        self.connection_monitor.host_port_snapshot_polling = false;
+        self.connection_monitor.host_port_snapshot_running = None;
+        self.connection_monitor.host_port_snapshot_rx = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_port_snapshot(&output.stdout);
+                let visible_count = visible_port_rows(
+                    &snapshot.entries,
+                    &self.connection_monitor.host_port_search_query,
+                    self.connection_monitor.host_port_filter,
+                )
+                .len();
+                match &snapshot.status {
+                    ResourcePortStatus::Available { .. } => {
+                        self.connection_monitor.host_port_last_error = None;
+                        self.push_host_port_toast(
+                            self.i18n_replace(
+                                "sidebar.host_ports.toast.snapshot_loaded",
+                                &[("count", visible_count.to_string())],
+                            ),
+                            TerminalNoticeVariant::Success,
+                        );
+                    }
+                    ResourcePortStatus::Unavailable => {
+                        self.connection_monitor.host_port_last_error =
+                            Some(self.i18n.t("sidebar.host_ports.unavailable"));
+                        self.push_host_port_toast(
+                            self.i18n.t("sidebar.host_ports.toast.unavailable"),
+                            TerminalNoticeVariant::Warning,
+                        );
+                    }
+                    ResourcePortStatus::Error { message } => {
+                        self.connection_monitor.host_port_last_error = Some(message.clone());
+                        self.push_host_port_toast(
+                            self.i18n_replace(
+                                "sidebar.host_ports.toast.snapshot_failed",
+                                &[("reason", message.clone())],
+                            ),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
+                    ResourcePortStatus::Unknown => {}
+                }
+                self.connection_monitor.host_port_snapshot_connection_id =
+                    Some(delivery.request.connection_id);
+                self.connection_monitor.host_port_snapshot = Some(snapshot);
+            }
+            Ok(output) => {
+                let reason = host_port_capture_failure_message(
+                    &output.stdout,
+                    &output.stderr,
+                    output.exit_code,
+                    self.i18n.t("sidebar.host_ports.toast.unknown_error"),
+                );
+                self.connection_monitor.host_port_last_error = Some(reason.clone());
+                self.connection_monitor.host_port_snapshot_connection_id =
+                    Some(delivery.request.connection_id);
+                self.connection_monitor.host_port_snapshot = Some(ResourcePortSnapshot {
+                    status: ResourcePortStatus::Error {
+                        message: reason.clone(),
+                    },
+                    entries: Vec::new(),
+                });
+                self.push_host_port_toast(
+                    self.i18n_replace(
+                        "sidebar.host_ports.toast.snapshot_failed",
+                        &[("reason", reason)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+            Err(error) => {
+                self.connection_monitor.host_port_last_error = Some(error.clone());
+                self.connection_monitor.host_port_snapshot_connection_id =
+                    Some(delivery.request.connection_id);
+                self.connection_monitor.host_port_snapshot = Some(ResourcePortSnapshot {
+                    status: ResourcePortStatus::Error {
+                        message: error.clone(),
+                    },
+                    entries: Vec::new(),
+                });
+                self.push_host_port_toast(
+                    self.i18n_replace(
+                        "sidebar.host_ports.toast.snapshot_failed",
+                        &[("reason", error)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+        }
+        cx.notify();
+    }
+
+    fn finish_host_schedules_snapshot(
+        &mut self,
+        delivery: HostScheduleSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_monitor
+            .host_schedule_snapshot_running
+            .as_ref()
+            .is_some_and(|running| running != &delivery.request)
+        {
+            cx.notify();
+            return;
+        }
+        self.connection_monitor.host_schedule_snapshot_polling = false;
+        self.connection_monitor.host_schedule_snapshot_running = None;
+        self.connection_monitor.host_schedule_snapshot_rx = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_scheduled_task_snapshot(&output.stdout);
+                let visible_count = visible_scheduled_task_rows(
+                    &snapshot.entries,
+                    &self.connection_monitor.host_schedule_search_query,
+                    self.connection_monitor.host_schedule_filter,
+                )
+                .len();
+                match &snapshot.status {
+                    ResourceScheduledTaskStatus::Available { .. } => {
+                        self.connection_monitor.host_schedule_last_error = None;
+                        self.push_host_schedule_toast(
+                            self.i18n_replace(
+                                "sidebar.host_schedules.toast.snapshot_loaded",
+                                &[("count", visible_count.to_string())],
+                            ),
+                            TerminalNoticeVariant::Success,
+                        );
+                    }
+                    ResourceScheduledTaskStatus::Unavailable => {
+                        self.connection_monitor.host_schedule_last_error =
+                            Some(self.i18n.t("sidebar.host_schedules.unavailable"));
+                        self.push_host_schedule_toast(
+                            self.i18n.t("sidebar.host_schedules.toast.unavailable"),
+                            TerminalNoticeVariant::Warning,
+                        );
+                    }
+                    ResourceScheduledTaskStatus::Error { message } => {
+                        self.connection_monitor.host_schedule_last_error = Some(message.clone());
+                        self.push_host_schedule_toast(
+                            self.i18n_replace(
+                                "sidebar.host_schedules.toast.snapshot_failed",
+                                &[("reason", message.clone())],
+                            ),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
+                    ResourceScheduledTaskStatus::Unknown => {}
+                }
+                self.connection_monitor.host_schedule_snapshot_connection_id =
+                    Some(delivery.request.connection_id);
+                self.connection_monitor.host_schedule_snapshot = Some(snapshot);
+            }
+            Ok(output) => {
+                let reason = host_schedule_capture_failure_message(
+                    &output.stdout,
+                    &output.stderr,
+                    output.exit_code,
+                    self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
+                );
+                self.connection_monitor.host_schedule_last_error = Some(reason.clone());
+                self.connection_monitor.host_schedule_snapshot_connection_id =
+                    Some(delivery.request.connection_id);
+                self.connection_monitor.host_schedule_snapshot = Some(ResourceScheduledTaskSnapshot {
+                    status: ResourceScheduledTaskStatus::Error {
+                        message: reason.clone(),
+                    },
+                    entries: Vec::new(),
+                });
+                self.push_host_schedule_toast(
+                    self.i18n_replace(
+                        "sidebar.host_schedules.toast.snapshot_failed",
+                        &[("reason", reason)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+            Err(error) => {
+                self.connection_monitor.host_schedule_last_error = Some(error.clone());
+                self.connection_monitor.host_schedule_snapshot_connection_id =
+                    Some(delivery.request.connection_id);
+                self.connection_monitor.host_schedule_snapshot = Some(ResourceScheduledTaskSnapshot {
+                    status: ResourceScheduledTaskStatus::Error {
+                        message: error.clone(),
+                    },
+                    entries: Vec::new(),
+                });
+                self.push_host_schedule_toast(
+                    self.i18n_replace(
+                        "sidebar.host_schedules.toast.snapshot_failed",
+                        &[("reason", error)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+        }
+        cx.notify();
+    }
+
+    fn finish_host_filesystems_snapshot(
+        &mut self,
+        delivery: HostFilesystemSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_monitor
+            .host_filesystem_snapshot_running
+            .as_ref()
+            .is_some_and(|running| running != &delivery.request)
+        {
+            cx.notify();
+            return;
+        }
+        self.connection_monitor.host_filesystem_snapshot_polling = false;
+        self.connection_monitor.host_filesystem_snapshot_running = None;
+        self.connection_monitor.host_filesystem_snapshot_rx = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_filesystem_snapshot(&output.stdout);
+                let visible_count = visible_filesystem_rows(
+                    &snapshot.entries,
+                    &self.connection_monitor.host_filesystem_search_query,
+                    self.connection_monitor.host_filesystem_filter,
+                )
+                .len();
+                match &snapshot.status {
+                    ResourceFilesystemStatus::Available { .. } => {
+                        self.connection_monitor.host_filesystem_last_error = None;
+                        self.push_host_filesystem_toast(
+                            self.i18n_replace(
+                                "sidebar.host_filesystems.toast.snapshot_loaded",
+                                &[("count", visible_count.to_string())],
+                            ),
+                            TerminalNoticeVariant::Success,
+                        );
+                    }
+                    ResourceFilesystemStatus::Unavailable => {
+                        self.connection_monitor.host_filesystem_last_error =
+                            Some(self.i18n.t("sidebar.host_filesystems.unavailable"));
+                        self.push_host_filesystem_toast(
+                            self.i18n.t("sidebar.host_filesystems.toast.unavailable"),
+                            TerminalNoticeVariant::Warning,
+                        );
+                    }
+                    ResourceFilesystemStatus::Error { message } => {
+                        self.connection_monitor.host_filesystem_last_error = Some(message.clone());
+                        self.push_host_filesystem_toast(
+                            self.i18n_replace(
+                                "sidebar.host_filesystems.toast.snapshot_failed",
+                                &[("reason", message.clone())],
+                            ),
+                            TerminalNoticeVariant::Error,
+                        );
+                    }
+                    ResourceFilesystemStatus::Unknown => {}
+                }
+                self.connection_monitor
+                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
+                self.connection_monitor.host_filesystem_snapshot = Some(snapshot);
+            }
+            Ok(output) => {
+                let reason = host_filesystem_capture_failure_message(
+                    &output.stdout,
+                    &output.stderr,
+                    output.exit_code,
+                    self.i18n.t("sidebar.host_filesystems.toast.unknown_error"),
+                );
+                self.connection_monitor.host_filesystem_last_error = Some(reason.clone());
+                self.connection_monitor
+                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
+                self.connection_monitor.host_filesystem_snapshot = Some(ResourceFilesystemSnapshot {
+                    status: ResourceFilesystemStatus::Error {
+                        message: reason.clone(),
+                    },
+                    entries: Vec::new(),
+                });
+                self.push_host_filesystem_toast(
+                    self.i18n_replace(
+                        "sidebar.host_filesystems.toast.snapshot_failed",
+                        &[("reason", reason)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+            Err(error) => {
+                self.connection_monitor.host_filesystem_last_error = Some(error.clone());
+                self.connection_monitor
+                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
+                self.connection_monitor.host_filesystem_snapshot = Some(ResourceFilesystemSnapshot {
+                    status: ResourceFilesystemStatus::Error {
+                        message: error.clone(),
+                    },
+                    entries: Vec::new(),
+                });
+                self.push_host_filesystem_toast(
+                    self.i18n_replace(
+                        "sidebar.host_filesystems.toast.snapshot_failed",
+                        &[("reason", error)],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+        }
+        cx.notify();
+    }
+
+    fn finish_host_schedule_logs(
+        &mut self,
+        delivery: HostScheduleLogsDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self
+            .connection_monitor
+            .host_schedule_logs_dialog
+            .as_mut()
+            .filter(|dialog| dialog.request == delivery.request)
+        else {
+            cx.notify();
+            return;
+        };
+        dialog.loading = false;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let logs = if output.stdout.trim().is_empty() {
+                    self.i18n.t("sidebar.host_schedules.logs.empty")
+                } else {
+                    output.stdout
+                };
+                dialog.output = Some(logs);
+                dialog.error = None;
+            }
+            Ok(output) => {
+                dialog.output = None;
+                dialog.error = Some(host_schedule_capture_failure_message(
+                    &output.stdout,
+                    &output.stderr,
+                    output.exit_code,
+                    self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
+                ));
+            }
+            Err(error) => {
+                dialog.output = None;
+                dialog.error = Some(error);
+            }
+        }
+        cx.notify();
+    }
+
+    fn finish_host_schedule_action(
+        &mut self,
+        delivery: HostScheduleActionDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                self.push_host_schedule_toast(
+                    self.i18n_replace(
+                        host_schedule_action_success_key(&delivery.request.action),
+                        &[("name", delivery.request.task_name.clone())],
+                    ),
+                    TerminalNoticeVariant::Success,
+                );
+            }
+            Ok(output) => {
+                self.push_host_schedule_toast(
+                    host_schedule_capture_failure_message(
+                        &output.stdout,
+                        &output.stderr,
+                        output.exit_code,
+                        self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+            }
+            Err(error) => {
+                self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
+            }
+        }
+        self.request_host_schedules_snapshot(delivery.request.connection_id, cx);
+    }
+
     fn finish_host_tmux_action(
         &mut self,
         delivery: HostTmuxActionDelivery,
@@ -6715,6 +10626,36 @@ impl WorkspaceApp {
     }
 
     fn push_host_tmux_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title: message,
+            description: None,
+            status_text: None,
+            progress: None,
+            variant,
+        });
+    }
+
+    fn push_host_port_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title: message,
+            description: None,
+            status_text: None,
+            progress: None,
+            variant,
+        });
+    }
+
+    fn push_host_schedule_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
+        let _ = self.terminal_notice_tx.send(TerminalNotice {
+            title: message,
+            description: None,
+            status_text: None,
+            progress: None,
+            variant,
+        });
+    }
+
+    fn push_host_filesystem_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
         let _ = self.terminal_notice_tx.send(TerminalNotice {
             title: message,
             description: None,
@@ -7457,6 +11398,239 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn render_host_schedule_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let request = self
+            .connection_monitor
+            .host_schedule_pending_confirm
+            .as_ref()?;
+        let title = self.i18n.t("sidebar.host_schedules.confirm.title");
+        let description = self.i18n_replace(
+            host_schedule_confirm_description_key(&request.action),
+            &[
+                ("name", request.task_name.clone()),
+                (
+                    "unit",
+                    host_schedule_blank_dash(&request.unit),
+                ),
+            ],
+        );
+        Some(confirm_dialog_with_focus(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Default,
+                title: div().child(title).into_any_element(),
+                description: Some(div().child(description).into_any_element()),
+                cancel_label: div()
+                    .child(self.i18n.t("sidebar.host_schedules.confirm.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t(host_schedule_confirm_label_key(&request.action)))
+                    .into_any_element(),
+            },
+            self.standard_confirm_focus(),
+            cx.listener(|this, _event, _window, cx| {
+                this.connection_monitor.host_schedule_pending_confirm = None;
+                this.clear_standard_confirm_focus();
+                cx.notify();
+            }),
+            cx.listener(|this, _event, _window, cx| {
+                this.confirm_host_schedule_action(cx);
+            }),
+        )
+        .into_any_element())
+    }
+
+    pub(super) fn render_host_schedule_logs_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let dialog = self.connection_monitor.host_schedule_logs_dialog.as_ref()?;
+        let theme = self.tokens.ui;
+        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let follow_connection_id = dialog.request.connection_id.clone();
+        let follow_task = dialog.request.task.clone();
+        let follow_logs_disabled = self
+            .host_schedule_logs_command(&follow_connection_id, &follow_task, true, 200)
+            .is_err()
+            || self
+                .node_router
+                .node_id_for_connection(&follow_connection_id)
+                .is_none();
+        let content = if dialog.loading {
+            div()
+                .p_4()
+                .text_color(rgb(theme.text_muted))
+                .child(self.i18n.t("sidebar.host_schedules.logs.loading"))
+                .into_any_element()
+        } else if let Some(error) = dialog.error.as_ref() {
+            div()
+                .p_4()
+                .text_color(rgb(MONITOR_RED))
+                .child(error.clone())
+                .into_any_element()
+        } else {
+            let output = dialog.output.clone().unwrap_or_default();
+            let mut lines = div()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap(px(1.0))
+                .font_family(mono_font)
+                .text_size(px(11.0))
+                .text_color(rgb(theme.text));
+            for (index, line) in output.lines().enumerate() {
+                let line = if line.is_empty() {
+                    " ".to_string()
+                } else {
+                    line.to_string()
+                };
+                lines = lines.child(
+                    div()
+                        .id(("host-schedule-log-line", index))
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .child(line),
+                );
+            }
+            lines.into_any_element()
+        };
+
+        Some(
+            oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.connection_monitor.host_schedule_logs_dialog = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(oxideterm_gpui_ui::modal::overlay_content_boundary(
+                    oxideterm_gpui_ui::modal::dialog_content(&self.tokens)
+                        .w(px(HOST_SCHEDULE_LOGS_DIALOG_WIDTH))
+                        .max_h(px(HOST_SCHEDULE_LOGS_DIALOG_MAX_HEIGHT))
+                        .child(
+                            div()
+                                .flex_none()
+                                .px_4()
+                                .py_3()
+                                .border_b_1()
+                                .border_color(rgb(theme.border))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .text_size(px(14.0))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(theme.text))
+                                                .child(self.i18n_replace(
+                                                    "sidebar.host_schedules.logs.title",
+                                                    &[("name", dialog.request.task.name.clone())],
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .truncate()
+                                                .text_size(px(11.0))
+                                                .text_color(rgb(theme.text_muted))
+                                                .child(dialog.request.task.id.clone()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(self.workspace_tooltip_icon_button(
+                                            LucideIcon::Activity,
+                                            14.0,
+                                            rgb(theme.text),
+                                            oxideterm_gpui_ui::button::IconButtonOptions {
+                                                size: 24.0,
+                                                disabled: follow_logs_disabled,
+                                                has_background: true,
+                                                background: Some(rgb(theme.bg_hover)),
+                                                hover_background: Some(rgb(theme.bg_panel)),
+                                                idle_opacity: 1.0,
+                                                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
+                                                    24.0,
+                                                )
+                                            },
+                                            self.i18n
+                                                .t("sidebar.host_schedules.actions.follow_logs"),
+                                            "host-schedule-logs-follow",
+                                            true,
+                                            cx.listener({
+                                                let connection_id = follow_connection_id.clone();
+                                                let task = follow_task.clone();
+                                                move |this, _event, window, cx| {
+                                                    this.connection_monitor.host_schedule_logs_dialog =
+                                                        None;
+                                                    this.open_host_schedule_follow_terminal(
+                                                        connection_id.clone(),
+                                                        task.clone(),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                    cx.stop_propagation();
+                                                }
+                                            }),
+                                            cx.entity(),
+                                        ))
+                                        .child(self.workspace_tooltip_icon_button(
+                                            LucideIcon::X,
+                                            14.0,
+                                            rgb(theme.text_muted),
+                                            oxideterm_gpui_ui::button::IconButtonOptions {
+                                                size: 24.0,
+                                                has_background: true,
+                                                background: Some(rgb(theme.bg_hover)),
+                                                hover_background: Some(rgb(theme.bg_panel)),
+                                                idle_opacity: 1.0,
+                                                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
+                                                    24.0,
+                                                )
+                                            },
+                                            self.i18n.t("sidebar.host_schedules.logs.close"),
+                                            "host-schedule-logs-close",
+                                            true,
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.connection_monitor.host_schedule_logs_dialog =
+                                                    None;
+                                                cx.stop_propagation();
+                                                cx.notify();
+                                            }),
+                                            cx.entity(),
+                                        )),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("host-schedule-logs-scroll")
+                                .flex_1()
+                                .min_h_0()
+                                .max_h(px(HOST_SCHEDULE_LOGS_DIALOG_MAX_HEIGHT - 84.0))
+                                .overflow_y_scroll()
+                                .overflow_x_scrollbar()
+                                .child(content),
+                        ),
+                ))
+                .into_any_element(),
+        )
+    }
+
     fn render_system_health_panel(&self, compact: bool, cx: &mut Context<Self>) -> AnyElement {
         let connections = self.monitor_connections();
         if connections.is_empty() {
@@ -8082,12 +12256,22 @@ impl WorkspaceApp {
                             this.connection_monitor.selector_focus_origin = None;
                             this.connection_monitor.host_tmux_pending_confirm = None;
                             this.connection_monitor.host_tmux_input_dialog = None;
+                            this.connection_monitor.host_schedule_pending_confirm = None;
                             this.sync_connection_monitor_selection(cx);
                             if this.active_context_sidebar_tool == ContextSidebarTool::Logs {
                                 this.request_host_logs_snapshot(connection_id.clone(), cx);
                             }
                             if this.active_context_sidebar_tool == ContextSidebarTool::Tmux {
                                 this.request_host_tmux_snapshot(connection_id.clone(), cx);
+                            }
+                            if this.active_context_sidebar_tool == ContextSidebarTool::Ports {
+                                this.request_host_ports_snapshot(connection_id.clone(), cx);
+                            }
+                            if this.active_context_sidebar_tool == ContextSidebarTool::Schedules {
+                                this.request_host_schedules_snapshot(connection_id.clone(), cx);
+                            }
+                            if this.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
+                                this.request_host_filesystems_snapshot(connection_id.clone(), cx);
                             }
                             cx.stop_propagation();
                         }),
@@ -8231,12 +12415,22 @@ impl WorkspaceApp {
                         Some(browser_behavior::BrowserFocusOrigin::Keyboard);
                     self.connection_monitor.host_tmux_pending_confirm = None;
                     self.connection_monitor.host_tmux_input_dialog = None;
+                    self.connection_monitor.host_schedule_pending_confirm = None;
                     self.sync_connection_monitor_selection(cx);
                     if self.active_context_sidebar_tool == ContextSidebarTool::Logs {
                         self.request_host_logs_snapshot(connection.connection_id.clone(), cx);
                     }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Tmux {
                         self.request_host_tmux_snapshot(connection.connection_id.clone(), cx);
+                    }
+                    if self.active_context_sidebar_tool == ContextSidebarTool::Ports {
+                        self.request_host_ports_snapshot(connection.connection_id.clone(), cx);
+                    }
+                    if self.active_context_sidebar_tool == ContextSidebarTool::Schedules {
+                        self.request_host_schedules_snapshot(connection.connection_id.clone(), cx);
+                    }
+                    if self.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
+                        self.request_host_filesystems_snapshot(connection.connection_id.clone(), cx);
                     }
                 }
                 true
@@ -9292,6 +13486,276 @@ fn tmux_time_label(timestamp: &str) -> String {
     }
 }
 
+fn host_port_endpoint_label(address: &str, port: &str) -> String {
+    host_port_blank_dash(&port_endpoint(address, port))
+}
+
+fn host_port_blank_dash(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        "—".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn host_port_process_label(entry: &ResourcePortEntry) -> String {
+    if !entry.process_name.trim().is_empty() {
+        return entry.process_name.clone();
+    }
+    if !entry.command.trim().is_empty() {
+        return entry.command.clone();
+    }
+    entry.pid.clone()
+}
+
+fn host_port_state_display(i18n: &I18n, state: &str) -> String {
+    let key = port_state_label_key(state);
+    if key == "sidebar.host_ports.states.unknown" && !state.trim().is_empty() {
+        state.trim().to_string()
+    } else {
+        i18n.t(key)
+    }
+}
+
+fn host_port_state_color(state: &str, muted_color: u32) -> u32 {
+    match state.trim().to_lowercase().as_str() {
+        "listen" | "listening" | "udp" | "unconn" | "open" => MONITOR_EMERALD,
+        "estab" | "established" => MONITOR_BLUE,
+        "syn-sent" | "syn-recv" | "close-wait" => MONITOR_AMBER,
+        "time-wait" | "time_wait" => muted_color,
+        _ => muted_color,
+    }
+}
+
+fn host_filesystem_blank_dash(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        "—".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn host_filesystem_kind_display(i18n: &I18n, kind: &str) -> String {
+    let key = filesystem_kind_label_key(kind);
+    if key == "sidebar.host_filesystems.kinds.unknown" && !kind.trim().is_empty() {
+        kind.trim().to_string()
+    } else {
+        i18n.t(key)
+    }
+}
+
+fn host_filesystem_read_only_display(i18n: &I18n, read_only: bool) -> String {
+    i18n.t(filesystem_read_only_label_key(read_only))
+}
+
+fn host_filesystem_usage_label(entry: &ResourceFilesystemEntry) -> String {
+    if entry.kind == "mount" {
+        return host_filesystem_percent_dash(&entry.used_percent);
+    }
+    host_filesystem_size_label(&entry.size_bytes)
+}
+
+fn host_filesystem_percent_dash(value: &str) -> String {
+    let trimmed = value.trim().trim_end_matches('%');
+    if trimmed.is_empty() {
+        "—".to_string()
+    } else {
+        format!("{trimmed}%")
+    }
+}
+
+fn host_filesystem_size_label(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        return "—".to_string();
+    }
+    match trimmed.parse::<u64>() {
+        Ok(bytes) => format_bytes(bytes),
+        Err(_) => trimmed.to_string(),
+    }
+}
+
+fn host_filesystem_path_color(entry: &ResourceFilesystemEntry, default_color: u32) -> u32 {
+    if entry.read_only {
+        return MONITOR_AMBER;
+    }
+    host_filesystem_percent_color(&entry.used_percent, default_color)
+}
+
+fn host_filesystem_percent_color(value: &str, muted_color: u32) -> u32 {
+    match host_filesystem_percent_value(value) {
+        percent if percent >= 90 => MONITOR_RED,
+        percent if percent >= 85 => MONITOR_AMBER,
+        percent if percent > 0 => MONITOR_EMERALD,
+        _ => muted_color,
+    }
+}
+
+fn host_filesystem_percent_value(value: &str) -> u32 {
+    value
+        .trim()
+        .trim_end_matches('%')
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .parse::<u32>()
+        .unwrap_or(0)
+}
+
+fn host_filesystem_meta_label(
+    i18n: &I18n,
+    entry: &ResourceFilesystemEntry,
+    show_context_columns: bool,
+) -> String {
+    if show_context_columns {
+        return format!(
+            "{} · {}",
+            i18n.t("sidebar.host_filesystems.columns.source"),
+            host_filesystem_blank_dash(&entry.source)
+        );
+    }
+    let device_or_detail = if !entry.device.trim().is_empty() {
+        entry.device.as_str()
+    } else if !entry.detail.trim().is_empty() {
+        entry.detail.as_str()
+    } else {
+        entry.source.as_str()
+    };
+    format!(
+        "{} · {}",
+        host_filesystem_blank_dash(device_or_detail),
+        host_filesystem_blank_dash(&entry.options)
+    )
+}
+
+fn host_filesystem_capture_failure_message(
+    stdout: &str,
+    stderr: &str,
+    exit_code: Option<i32>,
+    fallback: String,
+) -> String {
+    let reason = stderr
+        .lines()
+        .chain(stdout.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(fallback.as_str());
+    match exit_code {
+        Some(code) => format!("{reason} (exit {code})"),
+        None => reason.to_string(),
+    }
+}
+
+fn host_schedule_blank_dash(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        "—".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn host_schedule_source_display(i18n: &I18n, source: &str) -> String {
+    let key = scheduled_task_source_label_key(source);
+    if key == "sidebar.host_schedules.sources.unknown" && !source.trim().is_empty() {
+        source.trim().to_string()
+    } else {
+        i18n.t(key)
+    }
+}
+
+fn host_schedule_enabled_display(i18n: &I18n, enabled: &str) -> String {
+    let key = scheduled_task_enabled_label_key(enabled);
+    if key == "sidebar.host_schedules.enabled.unknown" && !enabled.trim().is_empty() {
+        enabled.trim().to_string()
+    } else {
+        i18n.t(key)
+    }
+}
+
+fn host_schedule_active_display(i18n: &I18n, active: &str) -> String {
+    let key = scheduled_task_active_label_key(active);
+    if key == "sidebar.host_schedules.active.unknown" && !active.trim().is_empty() {
+        active.trim().to_string()
+    } else {
+        i18n.t(key)
+    }
+}
+
+fn host_schedule_active_color(active: &str, muted_color: u32) -> u32 {
+    match active.trim().to_lowercase().as_str() {
+        "active" | "running" | "loaded" | "ready" => MONITOR_EMERALD,
+        "failed" | "error" => MONITOR_RED,
+        "activating" | "waiting" | "queued" => MONITOR_AMBER,
+        _ => muted_color,
+    }
+}
+
+fn host_schedule_enabled_color(enabled: &str, muted_color: u32) -> u32 {
+    match enabled.trim().to_lowercase().as_str() {
+        "enabled" => MONITOR_EMERALD,
+        "masked" => MONITOR_RED,
+        "static" | "generated" | "indirect" | "transient" => MONITOR_AMBER,
+        "disabled" => muted_color,
+        _ => muted_color,
+    }
+}
+
+fn host_schedule_enabled_is_enabled(enabled: &str) -> bool {
+    matches!(
+        enabled.trim().to_lowercase().as_str(),
+        "enabled" | "true" | "yes" | "static"
+    )
+}
+
+fn host_schedule_confirm_description_key(action: &ScheduledTaskActionKind) -> &'static str {
+    match action {
+        ScheduledTaskActionKind::RunNow { .. } => "sidebar.host_schedules.confirm.run_now_desc",
+        ScheduledTaskActionKind::Enable { .. } => "sidebar.host_schedules.confirm.enable_desc",
+        ScheduledTaskActionKind::Disable { .. } => "sidebar.host_schedules.confirm.disable_desc",
+    }
+}
+
+fn host_schedule_confirm_label_key(action: &ScheduledTaskActionKind) -> &'static str {
+    match action {
+        ScheduledTaskActionKind::RunNow { .. } => "sidebar.host_schedules.actions.run_now",
+        ScheduledTaskActionKind::Enable { .. } => "sidebar.host_schedules.actions.enable",
+        ScheduledTaskActionKind::Disable { .. } => "sidebar.host_schedules.actions.disable",
+    }
+}
+
+fn host_schedule_action_success_key(action: &ScheduledTaskActionKind) -> &'static str {
+    match action {
+        ScheduledTaskActionKind::RunNow { .. } => {
+            "sidebar.host_schedules.toast.run_now_started"
+        }
+        ScheduledTaskActionKind::Enable { .. } => "sidebar.host_schedules.toast.enable_succeeded",
+        ScheduledTaskActionKind::Disable { .. } => {
+            "sidebar.host_schedules.toast.disable_succeeded"
+        }
+    }
+}
+
+fn host_schedule_capture_failure_message(
+    stdout: &str,
+    stderr: &str,
+    exit_code: Option<i32>,
+    fallback: String,
+) -> String {
+    let reason = stderr
+        .lines()
+        .chain(stdout.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(fallback.as_str());
+    match exit_code {
+        Some(code) => format!("{reason} (exit {code})"),
+        None => reason.to_string(),
+    }
+}
+
 fn host_log_blank_dash(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -9332,6 +13796,24 @@ fn log_level_color(level: &str, muted_color: u32) -> u32 {
 }
 
 fn host_log_capture_failure_message(
+    stdout: &str,
+    stderr: &str,
+    exit_code: Option<i32>,
+    fallback: String,
+) -> String {
+    let reason = stderr
+        .lines()
+        .chain(stdout.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(fallback.as_str());
+    match exit_code {
+        Some(code) => format!("{reason} (exit {code})"),
+        None => reason.to_string(),
+    }
+}
+
+fn host_port_capture_failure_message(
     stdout: &str,
     stderr: &str,
     exit_code: Option<i32>,

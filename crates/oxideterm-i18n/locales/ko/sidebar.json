@@ -45,7 +45,10 @@
       "event_log": "이벤트 로그",
       "notifications": "알림",
       "saved_connections": "저장된 연결",
-      "forwarding": "포트 포워딩"
+      "forwarding": "포트 포워딩",
+      "ports": "포트",
+      "schedules": "예약 작업",
+      "filesystems": "디스크"
     },
     "tooltips": {
       "settings": "설정",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "세션 이름",
         "rename_window_placeholder": "창 이름",
         "send_command_placeholder": "보낼 명령"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "예약 작업 검색...",
+      "count_suffix": "개",
+      "loading": "예약 작업 스캔 중...",
+      "empty": "일치하는 예약 작업이 없습니다",
+      "unavailable": "예약 작업 tools are not available on this host.",
+      "error": "예약 작업 command failed: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "부분 지원",
+        "unknown": "지원 알 수 없음"
+      },
+      "filters": {
+        "all": "전체",
+        "enabled": "활성화됨",
+        "disabled": "비활성화됨",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "실패"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "static": "Static",
+        "masked": "Masked",
+        "unknown": "Unknown"
+      },
+      "active": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "columns": {
+        "task": "작업",
+        "source": "소스",
+        "state": "상태",
+        "enabled": "활성화",
+        "next": "다음",
+        "last": "마지막",
+        "user": "사용자",
+        "schedule": "일정",
+        "command": "명령",
+        "result": "결과",
+        "description": "설명",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "예약 작업 새로고침",
+        "diagnostic": "진단 터미널 열기",
+        "logs": "로그 보기",
+        "follow_logs": "로그 팔로우",
+        "enable": "활성화",
+        "disable": "비활성화",
+        "run_now": "지금 실행"
+      },
+      "diagnostic_title": "예약 작업 diagnostics",
+      "follow_title": "예약 작업 logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm 예약 작업 action",
+        "cancel": "취소",
+        "enable_desc": "예약 작업 {{name}}을 활성화할까요? Unit: {{unit}}.",
+        "disable_desc": "예약 작업 {{name}}을 비활성화할까요? 이후 자동 실행이 중지될 수 있습니다. Unit: {{unit}}.",
+        "run_now_desc": "Run 예약 작업 {{name}} now? Unit: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Schedule scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} scheduled tasks.",
+        "snapshot_failed": "Failed to scan scheduled tasks: {{reason}}",
+        "unavailable": "Scheduled task tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened schedule diagnostics.",
+        "follow_opened": "Opened schedule log follow for {{name}}.",
+        "logs_already_running": "Schedule logs are already loading.",
+        "logs_failed": "Failed to load schedule logs.",
+        "action_already_running": "A scheduled task action is already running.",
+        "action_failed": "Scheduled task action failed.",
+        "enable_succeeded": "{{name}}을 활성화했습니다.",
+        "disable_succeeded": "{{name}}을 비활성화했습니다.",
+        "run_now_started": "Started {{name}}.",
+        "partial_support": "Scheduled task support is partial on {{os}}.",
+        "unknown_error": "Unknown scheduled task error."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "포트 검색...",
+      "count_suffix": "개 포트",
+      "loading": "포트 스캔 중...",
+      "empty": "일치하는 포트가 없습니다",
+      "unavailable": "이 호스트에서 포트 도구를 사용할 수 없습니다.",
+      "error": "포트 명령 실패: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "부분 지원",
+        "unknown": "지원 상태 알 수 없음"
+      },
+      "filters": {
+        "all": "전체",
+        "listening": "수신 대기",
+        "connected": "연결됨",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "고위험"
+      },
+      "columns": {
+        "local": "로컬 주소",
+        "protocol": "프로토콜",
+        "state": "상태",
+        "pid": "PID",
+        "process": "프로세스",
+        "remote": "원격 주소",
+        "user": "사용자",
+        "command": "명령",
+        "source": "소스",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "수신 대기",
+        "established": "연결됨",
+        "open": "열림",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "알 수 없음"
+      },
+      "actions": {
+        "refresh": "포트 새로고침",
+        "diagnostic": "진단 터미널 열기",
+        "copy_endpoint": "주소 복사",
+        "jump_process": "프로세스 찾기"
+      },
+      "diagnostic_title": "포트 진단",
+      "toast": {
+        "snapshot_already_running": "포트 스캔이 이미 실행 중입니다.",
+        "snapshot_loaded": "{{count}}개 포트를 불러왔습니다.",
+        "snapshot_failed": "포트 스캔 실패: {{reason}}",
+        "unavailable": "이 호스트에서 포트 도구를 사용할 수 없습니다.",
+        "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
+        "exec_terminal_missing": "진단에 사용할 수 있는 SSH 터미널 경로가 없습니다.",
+        "diagnostic_opened": "포트 진단을 열었습니다.",
+        "copied_endpoint": "{{endpoint}} 복사됨.",
+        "partial_support": "{{os}}에서는 포트 검사가 부분 지원됩니다.",
+        "unknown_error": "알 수 없는 포트 스캔 오류입니다."
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "파일 시스템 검색...",
+      "count_suffix": "개 항목",
+      "loading": "디스크 스캔 중...",
+      "empty": "일치하는 파일 시스템 항목이 없습니다",
+      "unavailable": "이 호스트에서 파일 시스템 도구를 사용할 수 없습니다.",
+      "error": "파일 시스템 명령 실패: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "부분 지원",
+        "unknown": "지원 상태 알 수 없음"
+      },
+      "filters": {
+        "all": "전체",
+        "mounts": "마운트",
+        "read_only": "읽기 전용",
+        "high_usage": "높은 사용량",
+        "inode_pressure": "Inode 압박",
+        "large_items": "큰 항목",
+        "blocks": "블록"
+      },
+      "columns": {
+        "path": "경로",
+        "kind": "종류",
+        "usage": "사용량",
+        "inode": "Inode",
+        "fs": "FS",
+        "size": "크기",
+        "read_only": "RO",
+        "device": "장치",
+        "used_available": "사용 / 사용 가능",
+        "source": "소스",
+        "detail": "세부 정보",
+        "options": "옵션"
+      },
+      "kinds": {
+        "mount": "마운트",
+        "large_dir": "큰 디렉터리",
+        "large_file": "큰 파일",
+        "block": "블록 장치",
+        "unknown": "알 수 없음"
+      },
+      "read_only": {
+        "yes": "예",
+        "no": "아니요"
+      },
+      "actions": {
+        "refresh": "디스크 새로고침",
+        "diagnostic": "진단 터미널 열기",
+        "copy_path": "경로 복사"
+      },
+      "diagnostic_title": "디스크 진단",
+      "toast": {
+        "snapshot_already_running": "디스크 스캔이 이미 실행 중입니다.",
+        "snapshot_loaded": "파일 시스템 항목 {{count}}개를 불러왔습니다.",
+        "snapshot_failed": "디스크 스캔 실패: {{reason}}",
+        "unavailable": "이 호스트에서 파일 시스템 도구를 사용할 수 없습니다.",
+        "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
+        "exec_terminal_missing": "진단에 사용할 수 있는 실시간 SSH 터미널 경로가 없습니다.",
+        "diagnostic_opened": "디스크 진단을 열었습니다.",
+        "copied_path": "{{path}}을(를) 복사했습니다.",
+        "partial_support": "{{os}}에서는 파일 시스템 검사가 부분 지원됩니다.",
+        "unknown_error": "알 수 없는 파일 시스템 스캔 오류입니다."
       }
     }
   },

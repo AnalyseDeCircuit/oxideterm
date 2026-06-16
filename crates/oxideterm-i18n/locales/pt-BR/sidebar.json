@@ -45,7 +45,10 @@
       "event_log": "Registro de eventos",
       "notifications": "Notificações",
       "saved_connections": "Conexões salvas",
-      "forwarding": "Redirecionamento de portas"
+      "forwarding": "Redirecionamento de portas",
+      "ports": "Portas",
+      "schedules": "Tarefas agendadas",
+      "filesystems": "Discos"
     },
     "tooltips": {
       "settings": "Configurações",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "Nome da sessão",
         "rename_window_placeholder": "Nome da janela",
         "send_command_placeholder": "Comando a enviar"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "Search tarefa agendadas...",
+      "count_suffix": "tasks",
+      "loading": "Scanning tarefa agendadas...",
+      "empty": "No tarefa agendadas match",
+      "unavailable": "Tarefas agendadas tools are not available on this host.",
+      "error": "Tarefas agendadas command failed: {{error}}",
+      "capability": {
+        "full": "Suporte completo",
+        "partial": "Suporte parcial",
+        "unknown": "Suporte desconhecido"
+      },
+      "filters": {
+        "all": "Tudo",
+        "enabled": "Habilitadas",
+        "disabled": "Desabilitadas",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "Falhas"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "static": "Static",
+        "masked": "Masked",
+        "unknown": "Unknown"
+      },
+      "active": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "columns": {
+        "task": "Tarefa",
+        "source": "Origem",
+        "state": "Estado",
+        "enabled": "Habilitada",
+        "next": "Próxima",
+        "last": "Última",
+        "user": "Usuário",
+        "schedule": "Agenda",
+        "command": "Comando",
+        "result": "Resultado",
+        "description": "Descrição",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "Atualizar tarefas",
+        "diagnostic": "Abrir terminal de diagnóstico",
+        "logs": "Ver logs",
+        "follow_logs": "Acompanhar logs",
+        "enable": "Habilitar",
+        "disable": "Desabilitar",
+        "run_now": "Executar agora"
+      },
+      "diagnostic_title": "Tarefas agendadas diagnostics",
+      "follow_title": "Tarefas agendadas logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm tarefa agendada action",
+        "cancel": "Cancelar",
+        "enable_desc": "Habilitar a tarefa agendada {{name}}? Unit: {{unit}}.",
+        "disable_desc": "Desabilitar a tarefa agendada {{name}}? Execuções futuras podem parar. Unit: {{unit}}.",
+        "run_now_desc": "Run tarefa agendada {{name}} now? Unit: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Schedule scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} scheduled tasks.",
+        "snapshot_failed": "Failed to scan scheduled tasks: {{reason}}",
+        "unavailable": "Scheduled task tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened schedule diagnostics.",
+        "follow_opened": "Opened schedule log follow for {{name}}.",
+        "logs_already_running": "Schedule logs are already loading.",
+        "logs_failed": "Failed to load schedule logs.",
+        "action_already_running": "A scheduled task action is already running.",
+        "action_failed": "Scheduled task action failed.",
+        "enable_succeeded": "{{name}} habilitada.",
+        "disable_succeeded": "{{name}} desabilitada.",
+        "run_now_started": "Started {{name}}.",
+        "partial_support": "Scheduled task support is partial on {{os}}.",
+        "unknown_error": "Unknown scheduled task error."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "Buscar portas...",
+      "count_suffix": "portas",
+      "loading": "Escaneando portas...",
+      "empty": "Nenhuma porta corresponde",
+      "unavailable": "As ferramentas de portas não estão disponíveis neste host.",
+      "error": "Comando de portas falhou: {{error}}",
+      "capability": {
+        "full": "Suporte completo",
+        "partial": "Suporte parcial",
+        "unknown": "Suporte desconhecido"
+      },
+      "filters": {
+        "all": "Todas",
+        "listening": "Escutando",
+        "connected": "Conectadas",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "Alto risco"
+      },
+      "columns": {
+        "local": "Endereço local",
+        "protocol": "Protocolo",
+        "state": "Estado",
+        "pid": "PID",
+        "process": "Processo",
+        "remote": "Endereço remoto",
+        "user": "Usuário",
+        "command": "Comando",
+        "source": "Origem",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "Escutando",
+        "established": "Estabelecida",
+        "open": "Aberta",
+        "time_wait": "TIME_WAIT",
+        "close_wait": "CLOSE_WAIT",
+        "unknown": "Desconhecido"
+      },
+      "actions": {
+        "refresh": "Atualizar portas",
+        "diagnostic": "Abrir terminal de diagnóstico",
+        "copy_endpoint": "Copiar endereço",
+        "jump_process": "Encontrar processo"
+      },
+      "diagnostic_title": "Diagnóstico de portas",
+      "toast": {
+        "snapshot_already_running": "A varredura de portas já está em execução.",
+        "snapshot_loaded": "{{count}} portas carregadas.",
+        "snapshot_failed": "Falha ao escanear portas: {{reason}}",
+        "unavailable": "As ferramentas de portas não estão disponíveis neste host.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa disponível para diagnóstico.",
+        "diagnostic_opened": "Diagnóstico de portas aberto.",
+        "copied_endpoint": "{{endpoint}} copiado.",
+        "partial_support": "A inspeção de portas é parcial em {{os}}.",
+        "unknown_error": "Erro desconhecido na varredura de portas."
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "Buscar sistemas de arquivos...",
+      "count_suffix": "itens",
+      "loading": "Escaneando discos...",
+      "empty": "Nenhuma entrada de sistema de arquivos corresponde",
+      "unavailable": "As ferramentas de sistema de arquivos não estão disponíveis neste host.",
+      "error": "Falha no comando de sistema de arquivos: {{error}}",
+      "capability": {
+        "full": "Suporte completo",
+        "partial": "Suporte parcial",
+        "unknown": "Suporte desconhecido"
+      },
+      "filters": {
+        "all": "Tudo",
+        "mounts": "Montagens",
+        "read_only": "Somente leitura",
+        "high_usage": "Alto uso",
+        "inode_pressure": "Pressão de inodes",
+        "large_items": "Itens grandes",
+        "blocks": "Blocos"
+      },
+      "columns": {
+        "path": "Caminho",
+        "kind": "Tipo",
+        "usage": "Uso",
+        "inode": "Inode",
+        "fs": "FS",
+        "size": "Tamanho",
+        "read_only": "RO",
+        "device": "Dispositivo",
+        "used_available": "Usado / disponível",
+        "source": "Origem",
+        "detail": "Detalhe",
+        "options": "Opções"
+      },
+      "kinds": {
+        "mount": "Montagem",
+        "large_dir": "Diretório grande",
+        "large_file": "Arquivo grande",
+        "block": "Dispositivo de bloco",
+        "unknown": "Desconhecido"
+      },
+      "read_only": {
+        "yes": "Sim",
+        "no": "Não"
+      },
+      "actions": {
+        "refresh": "Atualizar discos",
+        "diagnostic": "Abrir terminal de diagnóstico",
+        "copy_path": "Copiar caminho"
+      },
+      "diagnostic_title": "Diagnóstico de discos",
+      "toast": {
+        "snapshot_already_running": "A varredura de discos já está em execução.",
+        "snapshot_loaded": "{{count}} entradas de sistema de arquivos carregadas.",
+        "snapshot_failed": "Falha ao escanear discos: {{reason}}",
+        "unavailable": "As ferramentas de sistema de arquivos não estão disponíveis neste host.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa está disponível para diagnóstico.",
+        "diagnostic_opened": "Diagnóstico de discos aberto.",
+        "copied_path": "{{path}} copiado.",
+        "partial_support": "A inspeção do sistema de arquivos é parcial em {{os}}.",
+        "unknown_error": "Erro desconhecido na varredura do sistema de arquivos."
       }
     }
   },

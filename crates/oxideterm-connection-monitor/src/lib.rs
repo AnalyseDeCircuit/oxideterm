@@ -7,10 +7,13 @@
 //! SSH registries feed it snapshots; GPUI surfaces render it.
 
 mod docker;
+mod filesystem;
 mod log;
 mod metrics;
+mod port;
 mod process;
 mod profiler;
+mod scheduled_task;
 mod service;
 mod stats;
 mod summary;
@@ -23,6 +26,13 @@ pub use docker::{
     docker_action_failure_message, docker_action_succeeded, docker_action_success_message,
     docker_row_signature, docker_sample_command, docker_state_label_key, parse_docker_snapshot,
     visible_docker_rows,
+};
+pub use filesystem::{
+    FilesystemCaptureCommand, FilesystemCommandCapability, FilesystemFilter,
+    ResourceFilesystemEntry, ResourceFilesystemSnapshot, ResourceFilesystemStatus,
+    build_filesystem_diagnostic_command, build_filesystem_snapshot_command,
+    filesystem_filter_label_key, filesystem_kind_label_key, filesystem_read_only_label_key,
+    filesystem_row_signature, parse_filesystem_snapshot, visible_filesystem_rows,
 };
 pub use log::{
     LogCaptureCommand, LogCommandCapability, LogPreset, ResourceLogEntry, ResourceLogSnapshot,
@@ -37,6 +47,12 @@ pub use metrics::{
     parse_net_snapshot, parse_nproc, parse_resource_metrics, parse_top_processes,
     previous_sample_from_metrics, push_history,
 };
+pub use port::{
+    PortCaptureCommand, PortCommandCapability, PortFilter, ResourcePortEntry, ResourcePortSnapshot,
+    ResourcePortStatus, build_port_diagnostic_command, build_port_snapshot_command,
+    parse_port_snapshot, port_endpoint, port_filter_label_key, port_is_risky_exposure,
+    port_row_signature, port_state_label_key, visible_port_rows,
+};
 pub use process::{
     ProcessActionCommand, ProcessActionKind, ProcessCommandCapability, ProcessFilter, ProcessSort,
     build_process_action_command, process_action_failure_message, process_action_succeeded,
@@ -50,6 +66,16 @@ pub use profiler::{
     RESOURCE_MAX_OUTPUT_SIZE, RESOURCE_SAMPLE_INTERVAL, RESOURCE_SAMPLE_TIMEOUT,
     ResourceSampleShell, ResourceSampler, ResourceSamplerFuture, build_sample_command,
     shell_init_command,
+};
+pub use scheduled_task::{
+    ResourceScheduledTask, ResourceScheduledTaskSnapshot, ResourceScheduledTaskStatus,
+    ScheduledTaskActionCommand, ScheduledTaskActionKind, ScheduledTaskCapability,
+    ScheduledTaskCaptureCommand, ScheduledTaskFilter, build_scheduled_task_action_command,
+    build_scheduled_task_diagnostic_command, build_scheduled_task_logs_command,
+    build_scheduled_task_snapshot_command, parse_scheduled_task_snapshot,
+    scheduled_task_active_label_key, scheduled_task_enabled_label_key,
+    scheduled_task_filter_label_key, scheduled_task_row_signature, scheduled_task_source_label_key,
+    visible_scheduled_task_rows,
 };
 pub use service::{
     ResourceService, ResourceServiceSnapshot, ResourceServiceStatus, ServiceActionCommand,

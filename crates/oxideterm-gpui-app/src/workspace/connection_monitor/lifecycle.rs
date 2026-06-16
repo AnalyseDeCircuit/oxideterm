@@ -79,6 +79,9 @@ impl WorkspaceApp {
                     | ContextSidebarTool::Logs
                     | ContextSidebarTool::Tmux
                     | ContextSidebarTool::Docker
+                    | ContextSidebarTool::Ports
+                    | ContextSidebarTool::Schedules
+                    | ContextSidebarTool::Filesystems
             ));
         if !monitor_surface_visible {
             return;

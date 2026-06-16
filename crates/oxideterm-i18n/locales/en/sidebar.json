@@ -45,7 +45,10 @@
       "event_log": "Event Log",
       "notifications": "Notifications",
       "saved_connections": "Saved Connections",
-      "forwarding": "Port Forwarding"
+      "forwarding": "Port Forwarding",
+      "ports": "Ports",
+      "schedules": "Schedules",
+      "filesystems": "Disks"
     },
     "tooltips": {
       "settings": "Settings",
@@ -371,6 +374,233 @@
         "rename_session_placeholder": "Session name",
         "rename_window_placeholder": "Window name",
         "send_command_placeholder": "Command to send"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "Search schedules...",
+      "count_suffix": "tasks",
+      "loading": "Scanning schedules...",
+      "empty": "No scheduled tasks match",
+      "unavailable": "Scheduled task tools are not available on this host.",
+      "error": "Scheduled task command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Partial support",
+        "unknown": "Support unknown"
+      },
+      "filters": {
+        "all": "All",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "Failed"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "static": "Static",
+        "masked": "Masked",
+        "unknown": "Unknown"
+      },
+      "active": {
+        "active": "Active",
+        "inactive": "Inactive",
+        "failed": "Failed",
+        "unknown": "Unknown"
+      },
+      "columns": {
+        "task": "Task",
+        "source": "Source",
+        "state": "State",
+        "enabled": "Enabled",
+        "next": "Next",
+        "last": "Last",
+        "user": "User",
+        "schedule": "Schedule",
+        "command": "Command",
+        "result": "Result",
+        "description": "Description",
+        "unit": "Unit"
+      },
+      "actions": {
+        "refresh": "Refresh schedules",
+        "diagnostic": "Open diagnostic terminal",
+        "logs": "View logs",
+        "follow_logs": "Follow logs",
+        "enable": "Enable",
+        "disable": "Disable",
+        "run_now": "Run now"
+      },
+      "diagnostic_title": "Schedule diagnostics",
+      "follow_title": "Schedule logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm scheduled task action",
+        "cancel": "Cancel",
+        "enable_desc": "Enable scheduled task {{name}}? Unit: {{unit}}.",
+        "disable_desc": "Disable scheduled task {{name}}? Unit: {{unit}}. Future runs may stop.",
+        "run_now_desc": "Run scheduled task {{name}} now? Unit: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Schedule scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} scheduled tasks.",
+        "snapshot_failed": "Failed to scan scheduled tasks: {{reason}}",
+        "unavailable": "Scheduled task tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened schedule diagnostics.",
+        "follow_opened": "Opened schedule log follow for {{name}}.",
+        "logs_already_running": "Schedule logs are already loading.",
+        "logs_failed": "Failed to load schedule logs.",
+        "action_already_running": "A scheduled task action is already running.",
+        "action_failed": "Scheduled task action failed.",
+        "enable_succeeded": "Enabled {{name}}.",
+        "disable_succeeded": "Disabled {{name}}.",
+        "run_now_started": "Started {{name}}.",
+        "partial_support": "Scheduled task support is partial on {{os}}.",
+        "unknown_error": "Unknown scheduled task error."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "Search ports...",
+      "count_suffix": "ports",
+      "loading": "Scanning ports...",
+      "empty": "No ports match",
+      "unavailable": "Port tools are not available on this host.",
+      "error": "Port command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Partial support",
+        "unknown": "Support unknown"
+      },
+      "filters": {
+        "all": "All",
+        "listening": "Listening",
+        "connected": "Connected",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "High risk"
+      },
+      "columns": {
+        "local": "Local address",
+        "protocol": "Protocol",
+        "state": "State",
+        "pid": "PID",
+        "process": "Process",
+        "remote": "Remote address",
+        "user": "User",
+        "command": "Command",
+        "source": "Source",
+        "inode": "Inode"
+      },
+      "states": {
+        "listening": "Listening",
+        "established": "Established",
+        "open": "Open",
+        "time_wait": "Time wait",
+        "close_wait": "Close wait",
+        "unknown": "Unknown"
+      },
+      "actions": {
+        "refresh": "Refresh ports",
+        "diagnostic": "Open diagnostic terminal",
+        "copy_endpoint": "Copy address",
+        "jump_process": "Find process"
+      },
+      "diagnostic_title": "Port diagnostics",
+      "toast": {
+        "snapshot_already_running": "Port scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} ports.",
+        "snapshot_failed": "Failed to scan ports: {{reason}}",
+        "unavailable": "Port tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened port diagnostics.",
+        "copied_endpoint": "Copied {{endpoint}}.",
+        "partial_support": "Port inspection is partial on {{os}}.",
+        "unknown_error": "Unknown port scan error."
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "Search filesystems...",
+      "count_suffix": "items",
+      "loading": "Scanning disks...",
+      "empty": "No filesystem entries match",
+      "unavailable": "Filesystem tools are not available on this host.",
+      "error": "Filesystem command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Partial support",
+        "unknown": "Support unknown"
+      },
+      "filters": {
+        "all": "All",
+        "mounts": "Mounts",
+        "read_only": "Read-only",
+        "high_usage": "High usage",
+        "inode_pressure": "Inode pressure",
+        "large_items": "Large items",
+        "blocks": "Blocks"
+      },
+      "columns": {
+        "path": "Path",
+        "kind": "Kind",
+        "usage": "Usage",
+        "inode": "Inode",
+        "fs": "FS",
+        "size": "Size",
+        "read_only": "RO",
+        "device": "Device",
+        "used_available": "Used / available",
+        "source": "Source",
+        "detail": "Detail",
+        "options": "Options"
+      },
+      "kinds": {
+        "mount": "Mount",
+        "large_dir": "Large dir",
+        "large_file": "Large file",
+        "block": "Block",
+        "unknown": "Unknown"
+      },
+      "read_only": {
+        "yes": "Yes",
+        "no": "No"
+      },
+      "actions": {
+        "refresh": "Refresh disks",
+        "diagnostic": "Open diagnostic terminal",
+        "copy_path": "Copy path"
+      },
+      "diagnostic_title": "Disk diagnostics",
+      "toast": {
+        "snapshot_already_running": "Disk scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} filesystem entries.",
+        "snapshot_failed": "Failed to scan disks: {{reason}}",
+        "unavailable": "Filesystem tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
+        "diagnostic_opened": "Opened disk diagnostics.",
+        "copied_path": "Copied {{path}}.",
+        "partial_support": "Filesystem inspection is partial on {{os}}.",
+        "unknown_error": "Unknown filesystem scan error."
       }
     }
   },
