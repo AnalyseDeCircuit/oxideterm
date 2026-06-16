@@ -248,6 +248,130 @@
         "action_failed": "服务操作失败。",
         "partial_support": "{{os}} 上的服务管理为部分支持。"
       }
+    },
+    "host_logs": {
+      "search_placeholder": "搜索日志...",
+      "count_suffix": "条日志",
+      "loading": "正在加载日志...",
+      "empty": "没有匹配的日志",
+      "unavailable": "此主机上日志不可用。",
+      "error": "日志命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "部分支持",
+        "unknown": "支持状态未知"
+      },
+      "presets": {
+        "all": "全部",
+        "errors": "错误",
+        "auth": "SSH/认证",
+        "kernel": "内核",
+        "system": "系统"
+      },
+      "columns": {
+        "time": "时间",
+        "level": "级别",
+        "source": "来源",
+        "unit": "单元",
+        "message": "消息"
+      },
+      "levels": {
+        "error": "错误",
+        "warning": "警告",
+        "info": "信息",
+        "debug": "调试",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "刷新日志",
+        "follow": "追踪日志"
+      },
+      "follow_title": "主机日志：{{preset}}",
+      "toast": {
+        "snapshot_already_running": "已有日志快照正在执行。",
+        "snapshot_loaded": "已加载 {{count}} 条日志。",
+        "snapshot_failed": "日志加载失败：{{reason}}",
+        "unavailable": "此主机上日志不可用。",
+        "connection_missing": "所选连接已不可用。",
+        "exec_terminal_missing": "主机日志没有可用的实时 SSH 终端路由。",
+        "follow_opened": "正在追踪 {{preset}} 日志。",
+        "partial_support": "{{os}} 上的主机日志为部分支持。",
+        "unknown_error": "未知错误"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "搜索 tmux...",
+      "count_suffix": "个会话",
+      "loading": "正在加载 tmux 会话...",
+      "empty": "没有匹配的 tmux 会话",
+      "unavailable": "此主机上 tmux 不可用。",
+      "error": "tmux 命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "部分支持",
+        "unknown": "支持状态未知"
+      },
+      "columns": {
+        "session": "会话",
+        "attached": "连接",
+        "windows": "窗口",
+        "panes": "Pane",
+        "activity": "活动",
+        "created": "创建"
+      },
+      "attached": {
+        "yes": "已连接",
+        "no": "未连接"
+      },
+      "actions": {
+        "new_session": "新建会话",
+        "refresh": "刷新 tmux",
+        "attach": "连接",
+        "kill_session": "杀死会话",
+        "rename_session": "重命名会话",
+        "rename_window": "重命名窗口",
+        "kill_window": "杀掉窗口",
+        "kill_pane": "杀掉 Pane",
+        "send_command": "发送命令"
+      },
+      "active_window": "活动 #{{index}} {{name}}",
+      "no_active_window": "无活动窗口",
+      "attach_title": "tmux：{{name}}",
+      "new_session_title": "新建 tmux 会话",
+      "new_session_name": "新会话",
+      "confirm": {
+        "title": "确认 tmux 操作",
+        "cancel": "取消",
+        "kill_session_desc": "要杀死 tmux 会话 {{id}}（{{name}}）吗？此会话中的所有窗口和 pane 都会被终止。",
+        "kill_window_desc": "要杀掉会话 {{name}} 中的 tmux 窗口 {{target}} 吗？该窗口内所有 Pane 都会被终止。",
+        "kill_pane_desc": "要杀掉会话 {{name}} 中的 tmux Pane {{target}} 吗？其中运行的命令会被终止。",
+        "action_desc": "要对会话 {{name}} 中的 {{target}} 执行 tmux 操作吗？"
+      },
+      "toast": {
+        "snapshot_already_running": "已有 tmux 快照正在执行。",
+        "snapshot_loaded": "已加载 {{count}} 个 tmux 会话。",
+        "snapshot_failed": "tmux 会话加载失败：{{reason}}",
+        "unavailable": "此主机上 tmux 不可用。",
+        "connection_missing": "所选连接已不可用。",
+        "exec_terminal_missing": "tmux 没有可用的实时 SSH 终端路由。",
+        "attach_opened": "正在连接到 {{name}}。",
+        "new_session_opened": "正在打开 {{name}}。",
+        "action_already_running": "已有 tmux 操作正在执行。",
+        "action_failed": "tmux 操作失败。",
+        "unknown_error": "未知错误",
+        "input_required": "继续前请输入内容。"
+      },
+      "input": {
+        "rename_session_title": "重命名会话",
+        "rename_window_title": "重命名窗口",
+        "send_command_title": "向 Pane 发送命令",
+        "rename_session_desc": "为会话 {{target}} 设置新名称。",
+        "rename_window_desc": "为会话 {{name}} 中的窗口 {{target}} 设置新名称。",
+        "send_command_desc": "向会话 {{name}} 中的 Pane {{target}} 发送一条命令并回车。",
+        "rename_session_placeholder": "会话名称",
+        "rename_window_placeholder": "窗口名称",
+        "send_command_placeholder": "要发送的命令"
+      }
     }
   },
   "sessions": {

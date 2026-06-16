@@ -248,6 +248,130 @@
         "action_failed": "Dienstaktion fehlgeschlagen.",
         "partial_support": "Dienstverwaltung wird auf {{os}} teilweise unterstützt."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "Logs suchen...",
+      "count_suffix": "Logs",
+      "loading": "Logs werden geladen...",
+      "empty": "Keine passenden Logs",
+      "unavailable": "Host-Logs sind auf diesem Host nicht verfügbar.",
+      "error": "Log-Befehl fehlgeschlagen: {{error}}",
+      "capability": {
+        "full": "Voll unterstützt",
+        "partial": "Teilweise unterstützt",
+        "unknown": "Unterstützung unbekannt"
+      },
+      "presets": {
+        "all": "Alle",
+        "errors": "Fehler",
+        "auth": "SSH/Auth",
+        "kernel": "Kernel",
+        "system": "System"
+      },
+      "columns": {
+        "time": "Zeit",
+        "level": "Stufe",
+        "source": "Quelle",
+        "unit": "Unit",
+        "message": "Nachricht"
+      },
+      "levels": {
+        "error": "Fehler",
+        "warning": "Warnung",
+        "info": "Info",
+        "debug": "Debug",
+        "unknown": "Unbekannt"
+      },
+      "actions": {
+        "refresh": "Logs aktualisieren",
+        "follow": "Logs verfolgen"
+      },
+      "follow_title": "Host-Logs: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "Ein Log-Snapshot läuft bereits.",
+        "snapshot_loaded": "{{count}} Log-Einträge geladen.",
+        "snapshot_failed": "Logs konnten nicht geladen werden: {{reason}}",
+        "unavailable": "Host-Logs sind auf diesem Host nicht verfügbar.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "exec_terminal_missing": "Für Host-Logs ist keine aktive SSH-Terminalroute verfügbar.",
+        "follow_opened": "{{preset}}-Logs werden verfolgt.",
+        "partial_support": "Host-Logs werden auf {{os}} teilweise unterstützt.",
+        "unknown_error": "Unbekannter Fehler"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "tmux suchen...",
+      "count_suffix": "Sitzungen",
+      "loading": "tmux-Sitzungen werden geladen...",
+      "empty": "Keine passenden tmux-Sitzungen",
+      "unavailable": "tmux ist auf diesem Host nicht verfügbar.",
+      "error": "tmux-Befehl fehlgeschlagen: {{error}}",
+      "capability": {
+        "full": "Voll unterstützt",
+        "partial": "Teilweise unterstützt",
+        "unknown": "Unterstützung unbekannt"
+      },
+      "columns": {
+        "session": "Sitzung",
+        "attached": "Verbunden",
+        "windows": "Fenster",
+        "panes": "Panes",
+        "activity": "Aktivität",
+        "created": "Erstellt"
+      },
+      "attached": {
+        "yes": "Verbunden",
+        "no": "Getrennt"
+      },
+      "actions": {
+        "new_session": "Neue Sitzung",
+        "refresh": "tmux aktualisieren",
+        "attach": "Verbinden",
+        "kill_session": "Sitzung beenden",
+        "rename_session": "Sitzung umbenennen",
+        "rename_window": "Fenster umbenennen",
+        "kill_window": "Fenster beenden",
+        "kill_pane": "Pane beenden",
+        "send_command": "Befehl senden"
+      },
+      "active_window": "Aktiv #{{index}} {{name}}",
+      "no_active_window": "Kein aktives Fenster",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "Neue tmux-Sitzung",
+      "new_session_name": "neue Sitzung",
+      "confirm": {
+        "title": "tmux-Aktion bestätigen",
+        "cancel": "Abbrechen",
+        "kill_session_desc": "tmux-Sitzung {{id}} ({{name}}) beenden? Alle Fenster und Panes in dieser Sitzung werden beendet.",
+        "kill_window_desc": "tmux-Fenster {{target}} in Sitzung {{name}} beenden? Alle Panes in diesem Fenster werden beendet.",
+        "kill_pane_desc": "tmux-Pane {{target}} in Sitzung {{name}} beenden? Der laufende Befehl wird beendet.",
+        "action_desc": "tmux-Aktion für {{target}} in Sitzung {{name}} ausführen?"
+      },
+      "toast": {
+        "snapshot_already_running": "Ein tmux-Snapshot läuft bereits.",
+        "snapshot_loaded": "{{count}} tmux-Sitzungen geladen.",
+        "snapshot_failed": "tmux-Sitzungen konnten nicht geladen werden: {{reason}}",
+        "unavailable": "tmux ist auf diesem Host nicht verfügbar.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "exec_terminal_missing": "Für tmux ist keine aktive SSH-Terminalroute verfügbar.",
+        "attach_opened": "Verbindung zu {{name}} wird geöffnet.",
+        "new_session_opened": "{{name}} wird geöffnet.",
+        "action_already_running": "Es läuft bereits eine tmux-Aktion.",
+        "action_failed": "tmux-Aktion fehlgeschlagen.",
+        "unknown_error": "Unbekannter Fehler",
+        "input_required": "Gib vor dem Fortfahren einen Wert ein."
+      },
+      "input": {
+        "rename_session_title": "Sitzung umbenennen",
+        "rename_window_title": "Fenster umbenennen",
+        "send_command_title": "Befehl an Pane senden",
+        "rename_session_desc": "Neuen Namen für Sitzung {{target}} festlegen.",
+        "rename_window_desc": "Neuen Namen für Fenster {{target}} in Sitzung {{name}} festlegen.",
+        "send_command_desc": "Einen Befehl plus Enter an Pane {{target}} in Sitzung {{name}} senden.",
+        "rename_session_placeholder": "Sitzungsname",
+        "rename_window_placeholder": "Fenstername",
+        "send_command_placeholder": "Zu sendender Befehl"
+      }
     }
   },
   "sessions": {

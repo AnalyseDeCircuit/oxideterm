@@ -248,6 +248,130 @@
         "action_failed": "La acción de servicio falló.",
         "partial_support": "La gestión de servicios es parcial en {{os}}."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "Buscar registros...",
+      "count_suffix": "registros",
+      "loading": "Cargando registros...",
+      "empty": "No hay registros coincidentes",
+      "unavailable": "Los registros del host no están disponibles en este host.",
+      "error": "Error del comando de registros: {{error}}",
+      "capability": {
+        "full": "Compatibilidad completa",
+        "partial": "Compatibilidad parcial",
+        "unknown": "Compatibilidad desconocida"
+      },
+      "presets": {
+        "all": "Todos",
+        "errors": "Errores",
+        "auth": "SSH/Auth",
+        "kernel": "Kernel",
+        "system": "Sistema"
+      },
+      "columns": {
+        "time": "Hora",
+        "level": "Nivel",
+        "source": "Origen",
+        "unit": "Unidad",
+        "message": "Mensaje"
+      },
+      "levels": {
+        "error": "Error",
+        "warning": "Aviso",
+        "info": "Info",
+        "debug": "Debug",
+        "unknown": "Desconocido"
+      },
+      "actions": {
+        "refresh": "Actualizar registros",
+        "follow": "Seguir registros"
+      },
+      "follow_title": "Registros del host: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "Ya hay una captura de registros en curso.",
+        "snapshot_loaded": "{{count}} entradas de registro cargadas.",
+        "snapshot_failed": "No se pudieron cargar los registros: {{reason}}",
+        "unavailable": "Los registros del host no están disponibles en este host.",
+        "connection_missing": "La conexión seleccionada ya no está disponible.",
+        "exec_terminal_missing": "No hay una ruta de terminal SSH activa para los registros del host.",
+        "follow_opened": "Siguiendo registros de {{preset}}.",
+        "partial_support": "Los registros del host son parciales en {{os}}.",
+        "unknown_error": "Error desconocido"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "Buscar tmux...",
+      "count_suffix": "sesiones",
+      "loading": "Cargando sesiones tmux...",
+      "empty": "No hay sesiones tmux coincidentes",
+      "unavailable": "tmux no está disponible en este host.",
+      "error": "Error del comando tmux: {{error}}",
+      "capability": {
+        "full": "Compatibilidad completa",
+        "partial": "Compatibilidad parcial",
+        "unknown": "Compatibilidad desconocida"
+      },
+      "columns": {
+        "session": "Sesión",
+        "attached": "Adjunta",
+        "windows": "Ventanas",
+        "panes": "Panes",
+        "activity": "Actividad",
+        "created": "Creada"
+      },
+      "attached": {
+        "yes": "Adjunta",
+        "no": "Separada"
+      },
+      "actions": {
+        "new_session": "Nueva sesión",
+        "refresh": "Actualizar tmux",
+        "attach": "Adjuntar",
+        "kill_session": "Matar sesión",
+        "rename_session": "Renombrar sesión",
+        "rename_window": "Renombrar ventana",
+        "kill_window": "Matar ventana",
+        "kill_pane": "Matar pane",
+        "send_command": "Enviar comando"
+      },
+      "active_window": "Activa #{{index}} {{name}}",
+      "no_active_window": "Sin ventana activa",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "Nueva sesión tmux",
+      "new_session_name": "nueva sesión",
+      "confirm": {
+        "title": "Confirmar acción tmux",
+        "cancel": "Cancelar",
+        "kill_session_desc": "¿Matar la sesión tmux {{id}} ({{name}})? Todas las ventanas y panes de esta sesión se terminarán.",
+        "kill_window_desc": "¿Matar la ventana tmux {{target}} en la sesión {{name}}? Se terminarán todos los panes de esa ventana.",
+        "kill_pane_desc": "¿Matar el pane tmux {{target}} en la sesión {{name}}? Se terminará el comando en ejecución.",
+        "action_desc": "¿Ejecutar la acción de tmux sobre {{target}} en la sesión {{name}}?"
+      },
+      "toast": {
+        "snapshot_already_running": "Ya hay una captura tmux en curso.",
+        "snapshot_loaded": "{{count}} sesiones tmux cargadas.",
+        "snapshot_failed": "No se pudieron cargar las sesiones tmux: {{reason}}",
+        "unavailable": "tmux no está disponible en este host.",
+        "connection_missing": "La conexión seleccionada ya no está disponible.",
+        "exec_terminal_missing": "No hay una ruta de terminal SSH activa para tmux.",
+        "attach_opened": "Adjuntando a {{name}}.",
+        "new_session_opened": "Abriendo {{name}}.",
+        "action_already_running": "Ya hay una acción tmux en ejecución.",
+        "action_failed": "La acción tmux falló.",
+        "unknown_error": "Error desconocido",
+        "input_required": "Introduce un valor antes de continuar."
+      },
+      "input": {
+        "rename_session_title": "Renombrar sesión",
+        "rename_window_title": "Renombrar ventana",
+        "send_command_title": "Enviar comando al pane",
+        "rename_session_desc": "Define un nuevo nombre para la sesión {{target}}.",
+        "rename_window_desc": "Define un nuevo nombre para la ventana {{target}} en la sesión {{name}}.",
+        "send_command_desc": "Envía un comando y luego Enter al pane {{target}} en la sesión {{name}}.",
+        "rename_session_placeholder": "Nombre de sesión",
+        "rename_window_placeholder": "Nombre de ventana",
+        "send_command_placeholder": "Comando a enviar"
+      }
     }
   },
   "sessions": {

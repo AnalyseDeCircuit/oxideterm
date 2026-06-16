@@ -76,6 +76,8 @@ impl WorkspaceApp {
                 ContextSidebarTool::Monitor
                     | ContextSidebarTool::Processes
                     | ContextSidebarTool::Services
+                    | ContextSidebarTool::Logs
+                    | ContextSidebarTool::Tmux
                     | ContextSidebarTool::Docker
             ));
         if !monitor_surface_visible {

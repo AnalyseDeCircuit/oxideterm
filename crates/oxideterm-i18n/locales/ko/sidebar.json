@@ -248,6 +248,130 @@
         "action_failed": "서비스 작업 실패.",
         "partial_support": "{{os}}에서는 서비스 관리가 부분 지원됩니다."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "로그 검색...",
+      "count_suffix": "개 로그",
+      "loading": "로그를 불러오는 중...",
+      "empty": "일치하는 로그가 없습니다",
+      "unavailable": "이 호스트에서는 호스트 로그를 사용할 수 없습니다.",
+      "error": "로그 명령 실패: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "부분 지원",
+        "unknown": "지원 상태 알 수 없음"
+      },
+      "presets": {
+        "all": "전체",
+        "errors": "오류",
+        "auth": "SSH/인증",
+        "kernel": "커널",
+        "system": "시스템"
+      },
+      "columns": {
+        "time": "시간",
+        "level": "수준",
+        "source": "소스",
+        "unit": "유닛",
+        "message": "메시지"
+      },
+      "levels": {
+        "error": "오류",
+        "warning": "경고",
+        "info": "정보",
+        "debug": "디버그",
+        "unknown": "알 수 없음"
+      },
+      "actions": {
+        "refresh": "로그 새로고침",
+        "follow": "로그 추적"
+      },
+      "follow_title": "호스트 로그: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "로그 스냅샷이 이미 실행 중입니다.",
+        "snapshot_loaded": "{{count}}개 로그 항목을 불러왔습니다.",
+        "snapshot_failed": "로그를 불러오지 못했습니다: {{reason}}",
+        "unavailable": "이 호스트에서는 호스트 로그를 사용할 수 없습니다.",
+        "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
+        "exec_terminal_missing": "호스트 로그에 사용할 활성 SSH 터미널 경로가 없습니다.",
+        "follow_opened": "{{preset}} 로그를 추적 중입니다.",
+        "partial_support": "{{os}}에서는 호스트 로그가 부분 지원됩니다.",
+        "unknown_error": "알 수 없는 오류"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "tmux 검색...",
+      "count_suffix": "개 세션",
+      "loading": "tmux 세션을 불러오는 중...",
+      "empty": "일치하는 tmux 세션이 없습니다",
+      "unavailable": "이 호스트에서는 tmux를 사용할 수 없습니다.",
+      "error": "tmux 명령 실패: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "부분 지원",
+        "unknown": "지원 상태 알 수 없음"
+      },
+      "columns": {
+        "session": "세션",
+        "attached": "연결",
+        "windows": "창",
+        "panes": "Pane",
+        "activity": "활동",
+        "created": "생성"
+      },
+      "attached": {
+        "yes": "연결됨",
+        "no": "분리됨"
+      },
+      "actions": {
+        "new_session": "새 세션",
+        "refresh": "tmux 새로고침",
+        "attach": "연결",
+        "kill_session": "세션 종료",
+        "rename_session": "세션 이름 변경",
+        "rename_window": "창 이름 변경",
+        "kill_window": "창 종료",
+        "kill_pane": "Pane 종료",
+        "send_command": "명령 보내기"
+      },
+      "active_window": "활성 #{{index}} {{name}}",
+      "no_active_window": "활성 창 없음",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "새 tmux 세션",
+      "new_session_name": "새 세션",
+      "confirm": {
+        "title": "tmux 작업 확인",
+        "cancel": "취소",
+        "kill_session_desc": "tmux 세션 {{id}}({{name}})을 종료할까요? 이 세션의 모든 창과 pane이 종료됩니다.",
+        "kill_window_desc": "세션 {{name}}의 tmux 창 {{target}}을 종료할까요? 이 창의 모든 Pane이 종료됩니다.",
+        "kill_pane_desc": "세션 {{name}}의 tmux Pane {{target}}을 종료할까요? 실행 중인 명령도 종료됩니다.",
+        "action_desc": "세션 {{name}}의 {{target}}에 tmux 작업을 실행할까요?"
+      },
+      "toast": {
+        "snapshot_already_running": "tmux 스냅샷이 이미 실행 중입니다.",
+        "snapshot_loaded": "{{count}}개 tmux 세션을 불러왔습니다.",
+        "snapshot_failed": "tmux 세션을 불러오지 못했습니다: {{reason}}",
+        "unavailable": "이 호스트에서는 tmux를 사용할 수 없습니다.",
+        "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
+        "exec_terminal_missing": "tmux에 사용할 활성 SSH 터미널 경로가 없습니다.",
+        "attach_opened": "{{name}}에 연결 중입니다.",
+        "new_session_opened": "{{name}}을 여는 중입니다.",
+        "action_already_running": "tmux 작업이 이미 실행 중입니다.",
+        "action_failed": "tmux 작업 실패.",
+        "unknown_error": "알 수 없는 오류",
+        "input_required": "계속하기 전에 값을 입력하세요."
+      },
+      "input": {
+        "rename_session_title": "세션 이름 변경",
+        "rename_window_title": "창 이름 변경",
+        "send_command_title": "Pane에 명령 보내기",
+        "rename_session_desc": "세션 {{target}}의 새 이름을 설정합니다.",
+        "rename_window_desc": "세션 {{name}}의 창 {{target}}에 새 이름을 설정합니다.",
+        "send_command_desc": "세션 {{name}}의 Pane {{target}}에 한 줄 명령을 보내고 Enter를 입력합니다.",
+        "rename_session_placeholder": "세션 이름",
+        "rename_window_placeholder": "창 이름",
+        "send_command_placeholder": "보낼 명령"
+      }
     }
   },
   "sessions": {

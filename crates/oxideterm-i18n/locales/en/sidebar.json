@@ -248,6 +248,130 @@
         "action_failed": "Service action failed.",
         "partial_support": "Service management is partial on {{os}}."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "Search logs...",
+      "count_suffix": "logs",
+      "loading": "Loading logs...",
+      "empty": "No logs match",
+      "unavailable": "Host logs are not available on this host.",
+      "error": "Log command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Partial support",
+        "unknown": "Support unknown"
+      },
+      "presets": {
+        "all": "All",
+        "errors": "Errors",
+        "auth": "SSH/Auth",
+        "kernel": "Kernel",
+        "system": "System"
+      },
+      "columns": {
+        "time": "Time",
+        "level": "Level",
+        "source": "Source",
+        "unit": "Unit",
+        "message": "Message"
+      },
+      "levels": {
+        "error": "Error",
+        "warning": "Warn",
+        "info": "Info",
+        "debug": "Debug",
+        "unknown": "Unknown"
+      },
+      "actions": {
+        "refresh": "Refresh logs",
+        "follow": "Follow logs"
+      },
+      "follow_title": "Host logs: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "A log snapshot is already running.",
+        "snapshot_loaded": "Loaded {{count}} log entries.",
+        "snapshot_failed": "Failed to load logs: {{reason}}",
+        "unavailable": "Host logs are unavailable on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for host logs.",
+        "follow_opened": "Following {{preset}} logs.",
+        "partial_support": "Host logs are partial on {{os}}.",
+        "unknown_error": "Unknown error"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "Search tmux...",
+      "count_suffix": "sessions",
+      "loading": "Loading tmux sessions...",
+      "empty": "No tmux sessions match",
+      "unavailable": "tmux is not available on this host.",
+      "error": "tmux command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Partial support",
+        "unknown": "Support unknown"
+      },
+      "columns": {
+        "session": "Session",
+        "attached": "Attached",
+        "windows": "Windows",
+        "panes": "Panes",
+        "activity": "Activity",
+        "created": "Created"
+      },
+      "attached": {
+        "yes": "Attached",
+        "no": "Detached"
+      },
+      "actions": {
+        "new_session": "New session",
+        "refresh": "Refresh tmux",
+        "attach": "Attach",
+        "kill_session": "Kill session",
+        "rename_session": "Rename session",
+        "rename_window": "Rename window",
+        "kill_window": "Kill window",
+        "kill_pane": "Kill pane",
+        "send_command": "Send command"
+      },
+      "active_window": "Active #{{index}} {{name}}",
+      "no_active_window": "No active window",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "New tmux session",
+      "new_session_name": "new session",
+      "confirm": {
+        "title": "Confirm tmux action",
+        "cancel": "Cancel",
+        "kill_session_desc": "Kill tmux session {{id}} ({{name}})? All windows and panes in this session will be terminated.",
+        "kill_window_desc": "Kill tmux window {{target}} in session {{name}}? All panes in this window will be terminated.",
+        "kill_pane_desc": "Kill tmux pane {{target}} in session {{name}}? Its running command will be terminated.",
+        "action_desc": "Run tmux action on {{target}} in session {{name}}?"
+      },
+      "toast": {
+        "snapshot_already_running": "A tmux snapshot is already running.",
+        "snapshot_loaded": "Loaded {{count}} tmux sessions.",
+        "snapshot_failed": "Failed to load tmux sessions: {{reason}}",
+        "unavailable": "tmux is unavailable on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for tmux.",
+        "attach_opened": "Attaching to {{name}}.",
+        "new_session_opened": "Opening {{name}}.",
+        "action_already_running": "A tmux action is already running.",
+        "action_failed": "tmux action failed.",
+        "unknown_error": "Unknown error",
+        "input_required": "Enter a value before continuing."
+      },
+      "input": {
+        "rename_session_title": "Rename session",
+        "rename_window_title": "Rename window",
+        "send_command_title": "Send command to pane",
+        "rename_session_desc": "Set a new name for session {{target}}.",
+        "rename_window_desc": "Set a new name for window {{target}} in session {{name}}.",
+        "send_command_desc": "Send one command followed by Enter to pane {{target}} in session {{name}}.",
+        "rename_session_placeholder": "Session name",
+        "rename_window_placeholder": "Window name",
+        "send_command_placeholder": "Command to send"
+      }
     }
   },
   "sessions": {

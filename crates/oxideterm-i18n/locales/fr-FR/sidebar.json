@@ -248,6 +248,130 @@
         "action_failed": "L’action de service a échoué.",
         "partial_support": "La gestion des services est partielle sur {{os}}."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "Rechercher des journaux...",
+      "count_suffix": "journaux",
+      "loading": "Chargement des journaux...",
+      "empty": "Aucun journal correspondant",
+      "unavailable": "Les journaux de l’hôte ne sont pas disponibles sur cet hôte.",
+      "error": "La commande de journaux a échoué : {{error}}",
+      "capability": {
+        "full": "Prise en charge complète",
+        "partial": "Prise en charge partielle",
+        "unknown": "Prise en charge inconnue"
+      },
+      "presets": {
+        "all": "Tous",
+        "errors": "Erreurs",
+        "auth": "SSH/Auth",
+        "kernel": "Noyau",
+        "system": "Système"
+      },
+      "columns": {
+        "time": "Heure",
+        "level": "Niveau",
+        "source": "Source",
+        "unit": "Unité",
+        "message": "Message"
+      },
+      "levels": {
+        "error": "Erreur",
+        "warning": "Avert.",
+        "info": "Info",
+        "debug": "Debug",
+        "unknown": "Inconnu"
+      },
+      "actions": {
+        "refresh": "Actualiser les journaux",
+        "follow": "Suivre les journaux"
+      },
+      "follow_title": "Journaux de l’hôte : {{preset}}",
+      "toast": {
+        "snapshot_already_running": "Une capture de journaux est déjà en cours.",
+        "snapshot_loaded": "{{count}} entrées de journal chargées.",
+        "snapshot_failed": "Impossible de charger les journaux : {{reason}}",
+        "unavailable": "Les journaux de l’hôte ne sont pas disponibles sur cet hôte.",
+        "connection_missing": "La connexion sélectionnée n’est plus disponible.",
+        "exec_terminal_missing": "Aucune route de terminal SSH active n’est disponible pour les journaux de l’hôte.",
+        "follow_opened": "Suivi des journaux {{preset}}.",
+        "partial_support": "Les journaux de l’hôte sont partiels sur {{os}}.",
+        "unknown_error": "Erreur inconnue"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "Rechercher tmux...",
+      "count_suffix": "sessions",
+      "loading": "Chargement des sessions tmux...",
+      "empty": "Aucune session tmux correspondante",
+      "unavailable": "tmux n’est pas disponible sur cet hôte.",
+      "error": "La commande tmux a échoué : {{error}}",
+      "capability": {
+        "full": "Prise en charge complète",
+        "partial": "Prise en charge partielle",
+        "unknown": "Prise en charge inconnue"
+      },
+      "columns": {
+        "session": "Session",
+        "attached": "Attachée",
+        "windows": "Fenêtres",
+        "panes": "Panes",
+        "activity": "Activité",
+        "created": "Créée"
+      },
+      "attached": {
+        "yes": "Attachée",
+        "no": "Détachée"
+      },
+      "actions": {
+        "new_session": "Nouvelle session",
+        "refresh": "Actualiser tmux",
+        "attach": "Attacher",
+        "kill_session": "Tuer la session",
+        "rename_session": "Renommer la session",
+        "rename_window": "Renommer la fenêtre",
+        "kill_window": "Tuer la fenêtre",
+        "kill_pane": "Tuer le pane",
+        "send_command": "Envoyer la commande"
+      },
+      "active_window": "Active #{{index}} {{name}}",
+      "no_active_window": "Aucune fenêtre active",
+      "attach_title": "tmux : {{name}}",
+      "new_session_title": "Nouvelle session tmux",
+      "new_session_name": "nouvelle session",
+      "confirm": {
+        "title": "Confirmer l’action tmux",
+        "cancel": "Annuler",
+        "kill_session_desc": "Tuer la session tmux {{id}} ({{name}}) ? Toutes les fenêtres et panes de cette session seront terminées.",
+        "kill_window_desc": "Tuer la fenêtre tmux {{target}} dans la session {{name}} ? Tous les panes de cette fenêtre seront arrêtés.",
+        "kill_pane_desc": "Tuer le pane tmux {{target}} dans la session {{name}} ? La commande en cours sera arrêtée.",
+        "action_desc": "Exécuter l’action tmux sur {{target}} dans la session {{name}} ?"
+      },
+      "toast": {
+        "snapshot_already_running": "Une capture tmux est déjà en cours.",
+        "snapshot_loaded": "{{count}} sessions tmux chargées.",
+        "snapshot_failed": "Impossible de charger les sessions tmux : {{reason}}",
+        "unavailable": "tmux n’est pas disponible sur cet hôte.",
+        "connection_missing": "La connexion sélectionnée n’est plus disponible.",
+        "exec_terminal_missing": "Aucune route de terminal SSH active n’est disponible pour tmux.",
+        "attach_opened": "Attachement à {{name}}.",
+        "new_session_opened": "Ouverture de {{name}}.",
+        "action_already_running": "Une action tmux est déjà en cours.",
+        "action_failed": "L’action tmux a échoué.",
+        "unknown_error": "Erreur inconnue",
+        "input_required": "Saisissez une valeur avant de continuer."
+      },
+      "input": {
+        "rename_session_title": "Renommer la session",
+        "rename_window_title": "Renommer la fenêtre",
+        "send_command_title": "Envoyer une commande au pane",
+        "rename_session_desc": "Définir un nouveau nom pour la session {{target}}.",
+        "rename_window_desc": "Définir un nouveau nom pour la fenêtre {{target}} dans la session {{name}}.",
+        "send_command_desc": "Envoyer une commande puis Entrée au pane {{target}} dans la session {{name}}.",
+        "rename_session_placeholder": "Nom de session",
+        "rename_window_placeholder": "Nom de fenêtre",
+        "send_command_placeholder": "Commande à envoyer"
+      }
     }
   },
   "sessions": {

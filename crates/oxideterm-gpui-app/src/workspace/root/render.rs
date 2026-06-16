@@ -16,6 +16,9 @@ impl Render for WorkspaceApp {
         self.poll_host_docker_logs_results(cx);
         self.poll_host_service_action_results(cx);
         self.poll_host_service_logs_results(cx);
+        self.poll_host_logs_snapshot_results(cx);
+        self.poll_host_tmux_snapshot_results(cx);
+        self.poll_host_tmux_action_results(cx);
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
@@ -172,6 +175,12 @@ impl Render for WorkspaceApp {
                 } else if this.handle_host_service_confirm_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_host_tmux_confirm_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_tmux_input_dialog_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -194,6 +203,12 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_host_service_search_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_log_search_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_tmux_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_native_plugin_confirm_key(event, cx) {
@@ -739,6 +754,12 @@ impl Render for WorkspaceApp {
                 root.child(dialog)
             })
             .when_some(self.render_host_service_logs_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_host_tmux_confirm_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_host_tmux_input_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
             .when_some(self.render_native_plugin_confirm_dialog(cx), |root, dialog| {

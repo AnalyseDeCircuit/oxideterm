@@ -39,6 +39,9 @@ pub(super) enum WorkspaceImeTarget {
     HostProcessRenice,
     HostDockerSearch,
     HostServiceSearch,
+    HostLogSearch,
+    HostTmuxSearch,
+    HostTmuxDialogInput,
     QuickCommand(QuickCommandInput),
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
@@ -89,6 +92,9 @@ impl WorkspaceImeTarget {
             Self::HostProcessRenice => 7,
             Self::HostDockerSearch => 8,
             Self::HostServiceSearch => 9,
+            Self::HostLogSearch => 10,
+            Self::HostTmuxSearch => 11,
+            Self::HostTmuxDialogInput => 12,
             Self::QuickCommand(input) => 500 + input.anchor_key(),
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
@@ -441,6 +447,20 @@ impl WorkspaceApp {
         }
         if self.connection_monitor.host_service_search_focused {
             return Some(WorkspaceImeTarget::HostServiceSearch);
+        }
+        if self.connection_monitor.host_log_search_focused {
+            return Some(WorkspaceImeTarget::HostLogSearch);
+        }
+        if self.connection_monitor.host_tmux_search_focused {
+            return Some(WorkspaceImeTarget::HostTmuxSearch);
+        }
+        if self
+            .connection_monitor
+            .host_tmux_input_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.focused)
+        {
+            return Some(WorkspaceImeTarget::HostTmuxDialogInput);
         }
 
         if self.terminal_quick_commands_open
@@ -1151,6 +1171,20 @@ impl WorkspaceApp {
                 .connection_monitor
                 .host_service_search_focused
                 .then(|| self.connection_monitor.host_service_search_query.clone()),
+            WorkspaceImeTarget::HostLogSearch => self
+                .connection_monitor
+                .host_log_search_focused
+                .then(|| self.connection_monitor.host_log_search_query.clone()),
+            WorkspaceImeTarget::HostTmuxSearch => self
+                .connection_monitor
+                .host_tmux_search_focused
+                .then(|| self.connection_monitor.host_tmux_search_query.clone()),
+            WorkspaceImeTarget::HostTmuxDialogInput => self
+                .connection_monitor
+                .host_tmux_input_dialog
+                .as_ref()
+                .filter(|dialog| dialog.focused)
+                .map(|dialog| dialog.value.clone()),
             WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
@@ -1856,6 +1890,40 @@ impl WorkspaceApp {
                         text,
                     );
                     self.connection_monitor.host_service_expanded_id = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostLogSearch => {
+                if self.connection_monitor.host_log_search_focused {
+                    replace_utf16(
+                        &mut self.connection_monitor.host_log_search_query,
+                        replacement_range,
+                        text,
+                    );
+                    self.connection_monitor.host_log_expanded_index = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostTmuxSearch => {
+                if self.connection_monitor.host_tmux_search_focused {
+                    replace_utf16(
+                        &mut self.connection_monitor.host_tmux_search_query,
+                        replacement_range,
+                        text,
+                    );
+                    self.connection_monitor.host_tmux_expanded_session_id = None;
+                    self.connection_monitor.host_tmux_expanded_window_id = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostTmuxDialogInput => {
+                if let Some(dialog) = self.connection_monitor.host_tmux_input_dialog.as_mut()
+                    && dialog.focused
+                {
+                    replace_utf16(&mut dialog.value, replacement_range, text);
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

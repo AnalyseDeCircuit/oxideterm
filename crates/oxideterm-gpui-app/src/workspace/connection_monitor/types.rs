@@ -57,6 +57,29 @@ const HOST_SERVICE_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
 const HOST_SERVICE_LOGS_MAX_OUTPUT_SIZE: usize = 128 * 1024;
 const HOST_SERVICE_LOGS_DIALOG_WIDTH: f32 = 760.0;
 const HOST_SERVICE_LOGS_DIALOG_MAX_HEIGHT: f32 = 520.0;
+const HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT: f32 = 56.0;
+const HOST_LOG_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_LOG_TIME_COLUMN_WIDTH: f32 = 92.0;
+const HOST_LOG_LEVEL_COLUMN_WIDTH: f32 = 58.0;
+const HOST_LOG_SOURCE_COLUMN_WIDTH: f32 = 96.0;
+const HOST_LOG_UNIT_COLUMN_WIDTH: f32 = 96.0;
+const HOST_LOG_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 680.0;
+const HOST_LOG_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
+const HOST_LOG_SNAPSHOT_LIMIT: usize = 300;
+const HOST_LOG_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 256 * 1024;
+const HOST_TMUX_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_TMUX_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_TMUX_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_TMUX_ATTACHED_COLUMN_WIDTH: f32 = 74.0;
+const HOST_TMUX_WINDOWS_COLUMN_WIDTH: f32 = 58.0;
+const HOST_TMUX_PANES_COLUMN_WIDTH: f32 = 48.0;
+const HOST_TMUX_ACTIVITY_COLUMN_WIDTH: f32 = 92.0;
+const HOST_TMUX_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 620.0;
+const HOST_TMUX_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_TMUX_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 128 * 1024;
+const HOST_TMUX_ACTION_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_TMUX_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
+const HOST_TMUX_INPUT_DIALOG_WIDTH: f32 = 460.0;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
@@ -278,6 +301,63 @@ struct HostServiceLogsDialog {
     loading: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostLogSnapshotRequest {
+    connection_id: String,
+    preset: LogPreset,
+    limit: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostLogSnapshotDelivery {
+    request: HostLogSnapshotRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostTmuxSnapshotRequest {
+    connection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostTmuxSnapshotDelivery {
+    request: HostTmuxSnapshotRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostTmuxActionRequest {
+    connection_id: String,
+    session_id: String,
+    session_name: String,
+    target_label: String,
+    action: TmuxActionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostTmuxActionDelivery {
+    request: HostTmuxActionRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostTmuxInputDialogKind {
+    RenameSession { target: String },
+    RenameWindow { target: String },
+    SendPaneCommand { target: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct HostTmuxInputDialog {
+    connection_id: String,
+    session_id: String,
+    session_name: String,
+    target_label: String,
+    pub(in crate::workspace) value: String,
+    pub(in crate::workspace) focused: bool,
+    kind: HostTmuxInputDialogKind,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionRuntimeSection {
     Overview,
@@ -340,6 +420,35 @@ pub(super) struct ConnectionMonitorState {
     host_service_logs_dialog: Option<HostServiceLogsDialog>,
     host_service_logs_rx: Option<std::sync::mpsc::Receiver<HostServiceLogsDelivery>>,
     host_service_logs_polling: bool,
+    pub(in crate::workspace) host_log_search_query: String,
+    pub(in crate::workspace) host_log_search_focused: bool,
+    pub(in crate::workspace) host_log_expanded_index: Option<usize>,
+    host_log_preset: LogPreset,
+    host_log_snapshot_connection_id: Option<String>,
+    host_log_snapshot: Option<ResourceLogSnapshot>,
+    host_log_snapshot_rx: Option<std::sync::mpsc::Receiver<HostLogSnapshotDelivery>>,
+    host_log_snapshot_running: Option<HostLogSnapshotRequest>,
+    host_log_snapshot_polling: bool,
+    host_log_last_error: Option<String>,
+    host_log_list_state: ListState,
+    host_log_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_tmux_search_query: String,
+    pub(in crate::workspace) host_tmux_search_focused: bool,
+    pub(in crate::workspace) host_tmux_expanded_session_id: Option<String>,
+    pub(in crate::workspace) host_tmux_expanded_window_id: Option<String>,
+    host_tmux_snapshot_connection_id: Option<String>,
+    host_tmux_snapshot: Option<ResourceTmuxSnapshot>,
+    host_tmux_snapshot_rx: Option<std::sync::mpsc::Receiver<HostTmuxSnapshotDelivery>>,
+    host_tmux_snapshot_running: Option<HostTmuxSnapshotRequest>,
+    host_tmux_snapshot_polling: bool,
+    host_tmux_last_error: Option<String>,
+    host_tmux_pending_confirm: Option<HostTmuxActionRequest>,
+    pub(in crate::workspace) host_tmux_input_dialog: Option<HostTmuxInputDialog>,
+    host_tmux_action_running: Option<HostTmuxActionRequest>,
+    host_tmux_action_rx: Option<std::sync::mpsc::Receiver<HostTmuxActionDelivery>>,
+    host_tmux_action_polling: bool,
+    host_tmux_list_state: ListState,
+    host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -423,6 +532,43 @@ impl ConnectionMonitorState {
             host_service_logs_dialog: None,
             host_service_logs_rx: None,
             host_service_logs_polling: false,
+            host_log_search_query: String::new(),
+            host_log_search_focused: false,
+            host_log_expanded_index: None,
+            host_log_preset: LogPreset::All,
+            host_log_snapshot_connection_id: None,
+            host_log_snapshot: None,
+            host_log_snapshot_rx: None,
+            host_log_snapshot_running: None,
+            host_log_snapshot_polling: false,
+            host_log_last_error: None,
+            host_log_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_log_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_tmux_search_query: String::new(),
+            host_tmux_search_focused: false,
+            host_tmux_expanded_session_id: None,
+            host_tmux_expanded_window_id: None,
+            host_tmux_snapshot_connection_id: None,
+            host_tmux_snapshot: None,
+            host_tmux_snapshot_rx: None,
+            host_tmux_snapshot_running: None,
+            host_tmux_snapshot_polling: false,
+            host_tmux_last_error: None,
+            host_tmux_pending_confirm: None,
+            host_tmux_input_dialog: None,
+            host_tmux_action_running: None,
+            host_tmux_action_rx: None,
+            host_tmux_action_polling: false,
+            host_tmux_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_TMUX_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_tmux_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

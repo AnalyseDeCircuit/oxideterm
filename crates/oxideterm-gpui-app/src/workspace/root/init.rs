@@ -901,6 +901,9 @@ impl WorkspaceApp {
                             workspace.poll_host_docker_logs_results(cx);
                             workspace.poll_host_service_action_results(cx);
                             workspace.poll_host_service_logs_results(cx);
+                            workspace.poll_host_logs_snapshot_results(cx);
+                            workspace.poll_host_tmux_snapshot_results(cx);
+                            workspace.poll_host_tmux_action_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_start_sftp_remote_load(cx);

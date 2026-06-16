@@ -248,6 +248,130 @@
         "action_failed": "サービス操作に失敗しました。",
         "partial_support": "{{os}} でのサービス管理は一部対応です。"
       }
+    },
+    "host_logs": {
+      "search_placeholder": "ログを検索...",
+      "count_suffix": "件のログ",
+      "loading": "ログを読み込み中...",
+      "empty": "一致するログはありません",
+      "unavailable": "このホストではホストログを利用できません。",
+      "error": "ログコマンドに失敗しました: {{error}}",
+      "capability": {
+        "full": "完全対応",
+        "partial": "一部対応",
+        "unknown": "対応状況不明"
+      },
+      "presets": {
+        "all": "すべて",
+        "errors": "エラー",
+        "auth": "SSH/認証",
+        "kernel": "カーネル",
+        "system": "システム"
+      },
+      "columns": {
+        "time": "時刻",
+        "level": "レベル",
+        "source": "ソース",
+        "unit": "ユニット",
+        "message": "メッセージ"
+      },
+      "levels": {
+        "error": "エラー",
+        "warning": "警告",
+        "info": "情報",
+        "debug": "デバッグ",
+        "unknown": "不明"
+      },
+      "actions": {
+        "refresh": "ログを更新",
+        "follow": "ログを追跡"
+      },
+      "follow_title": "ホストログ: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "ログスナップショットはすでに実行中です。",
+        "snapshot_loaded": "{{count}} 件のログを読み込みました。",
+        "snapshot_failed": "ログを読み込めませんでした: {{reason}}",
+        "unavailable": "このホストではホストログを利用できません。",
+        "connection_missing": "選択した接続は利用できなくなりました。",
+        "exec_terminal_missing": "ホストログ用の有効な SSH ターミナル経路がありません。",
+        "follow_opened": "{{preset}} ログを追跡しています。",
+        "partial_support": "{{os}} でのホストログは一部対応です。",
+        "unknown_error": "不明なエラー"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "tmux を検索...",
+      "count_suffix": "件のセッション",
+      "loading": "tmux セッションを読み込み中...",
+      "empty": "一致する tmux セッションはありません",
+      "unavailable": "このホストでは tmux を利用できません。",
+      "error": "tmux コマンドに失敗しました: {{error}}",
+      "capability": {
+        "full": "完全対応",
+        "partial": "一部対応",
+        "unknown": "対応状況不明"
+      },
+      "columns": {
+        "session": "セッション",
+        "attached": "接続",
+        "windows": "ウィンドウ",
+        "panes": "Pane",
+        "activity": "アクティビティ",
+        "created": "作成"
+      },
+      "attached": {
+        "yes": "接続中",
+        "no": "切断中"
+      },
+      "actions": {
+        "new_session": "新規セッション",
+        "refresh": "tmux を更新",
+        "attach": "接続",
+        "kill_session": "セッションを強制終了",
+        "rename_session": "セッション名を変更",
+        "rename_window": "ウィンドウ名を変更",
+        "kill_window": "ウィンドウを終了",
+        "kill_pane": "Pane を終了",
+        "send_command": "コマンドを送信"
+      },
+      "active_window": "アクティブ #{{index}} {{name}}",
+      "no_active_window": "アクティブなウィンドウなし",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "新規 tmux セッション",
+      "new_session_name": "新規セッション",
+      "confirm": {
+        "title": "tmux 操作の確認",
+        "cancel": "キャンセル",
+        "kill_session_desc": "tmux セッション {{id}}（{{name}}）を強制終了しますか？このセッション内のすべてのウィンドウと pane が終了します。",
+        "kill_window_desc": "セッション {{name}} の tmux ウィンドウ {{target}} を終了しますか？このウィンドウ内のすべての Pane が終了します。",
+        "kill_pane_desc": "セッション {{name}} の tmux Pane {{target}} を終了しますか？実行中のコマンドも終了します。",
+        "action_desc": "セッション {{name}} の {{target}} に tmux 操作を実行しますか？"
+      },
+      "toast": {
+        "snapshot_already_running": "tmux スナップショットはすでに実行中です。",
+        "snapshot_loaded": "{{count}} 件の tmux セッションを読み込みました。",
+        "snapshot_failed": "tmux セッションを読み込めませんでした: {{reason}}",
+        "unavailable": "このホストでは tmux を利用できません。",
+        "connection_missing": "選択した接続は利用できなくなりました。",
+        "exec_terminal_missing": "tmux 用の有効な SSH ターミナル経路がありません。",
+        "attach_opened": "{{name}} に接続しています。",
+        "new_session_opened": "{{name}} を開いています。",
+        "action_already_running": "tmux 操作はすでに実行中です。",
+        "action_failed": "tmux 操作に失敗しました。",
+        "unknown_error": "不明なエラー",
+        "input_required": "続行する前に値を入力してください。"
+      },
+      "input": {
+        "rename_session_title": "セッション名を変更",
+        "rename_window_title": "ウィンドウ名を変更",
+        "send_command_title": "Pane にコマンドを送信",
+        "rename_session_desc": "セッション {{target}} の新しい名前を設定します。",
+        "rename_window_desc": "セッション {{name}} のウィンドウ {{target}} に新しい名前を設定します。",
+        "send_command_desc": "セッション {{name}} の Pane {{target}} に 1 行のコマンドを送信して Enter を押します。",
+        "rename_session_placeholder": "セッション名",
+        "rename_window_placeholder": "ウィンドウ名",
+        "send_command_placeholder": "送信するコマンド"
+      }
     }
   },
   "sessions": {

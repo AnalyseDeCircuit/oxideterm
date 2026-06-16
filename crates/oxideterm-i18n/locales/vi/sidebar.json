@@ -248,6 +248,130 @@
         "action_failed": "Thao tác dịch vụ thất bại.",
         "partial_support": "Quản lý dịch vụ chỉ được hỗ trợ một phần trên {{os}}."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "Tìm nhật ký...",
+      "count_suffix": "nhật ký",
+      "loading": "Đang tải nhật ký...",
+      "empty": "Không có nhật ký phù hợp",
+      "unavailable": "Nhật ký máy chủ không khả dụng trên máy chủ này.",
+      "error": "Lệnh nhật ký thất bại: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ một phần",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "presets": {
+        "all": "Tất cả",
+        "errors": "Lỗi",
+        "auth": "SSH/Xác thực",
+        "kernel": "Kernel",
+        "system": "Hệ thống"
+      },
+      "columns": {
+        "time": "Thời gian",
+        "level": "Mức",
+        "source": "Nguồn",
+        "unit": "Unit",
+        "message": "Thông điệp"
+      },
+      "levels": {
+        "error": "Lỗi",
+        "warning": "Cảnh báo",
+        "info": "Thông tin",
+        "debug": "Debug",
+        "unknown": "Không rõ"
+      },
+      "actions": {
+        "refresh": "Làm mới nhật ký",
+        "follow": "Theo dõi nhật ký"
+      },
+      "follow_title": "Nhật ký máy chủ: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "Một snapshot nhật ký đang chạy.",
+        "snapshot_loaded": "Đã tải {{count}} mục nhật ký.",
+        "snapshot_failed": "Không thể tải nhật ký: {{reason}}",
+        "unavailable": "Nhật ký máy chủ không khả dụng trên máy chủ này.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH đang hoạt động cho nhật ký máy chủ.",
+        "follow_opened": "Đang theo dõi nhật ký {{preset}}.",
+        "partial_support": "Nhật ký máy chủ chỉ được hỗ trợ một phần trên {{os}}.",
+        "unknown_error": "Lỗi không rõ"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "Tìm tmux...",
+      "count_suffix": "phiên",
+      "loading": "Đang tải phiên tmux...",
+      "empty": "Không có phiên tmux phù hợp",
+      "unavailable": "tmux không khả dụng trên máy chủ này.",
+      "error": "Lệnh tmux thất bại: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ một phần",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "columns": {
+        "session": "Phiên",
+        "attached": "Đã gắn",
+        "windows": "Cửa sổ",
+        "panes": "Pane",
+        "activity": "Hoạt động",
+        "created": "Đã tạo"
+      },
+      "attached": {
+        "yes": "Đã gắn",
+        "no": "Đã tách"
+      },
+      "actions": {
+        "new_session": "Phiên mới",
+        "refresh": "Làm mới tmux",
+        "attach": "Gắn",
+        "kill_session": "Kết thúc phiên",
+        "rename_session": "Đổi tên phiên",
+        "rename_window": "Đổi tên cửa sổ",
+        "kill_window": "Kết thúc cửa sổ",
+        "kill_pane": "Kết thúc pane",
+        "send_command": "Gửi lệnh"
+      },
+      "active_window": "Đang hoạt động #{{index}} {{name}}",
+      "no_active_window": "Không có cửa sổ hoạt động",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "Phiên tmux mới",
+      "new_session_name": "phiên mới",
+      "confirm": {
+        "title": "Xác nhận thao tác tmux",
+        "cancel": "Hủy",
+        "kill_session_desc": "Kết thúc phiên tmux {{id}} ({{name}})? Tất cả cửa sổ và pane trong phiên này sẽ bị kết thúc.",
+        "kill_window_desc": "Kết thúc cửa sổ tmux {{target}} trong phiên {{name}}? Tất cả pane trong cửa sổ này sẽ bị kết thúc.",
+        "kill_pane_desc": "Kết thúc pane tmux {{target}} trong phiên {{name}}? Lệnh đang chạy sẽ bị kết thúc.",
+        "action_desc": "Chạy thao tác tmux trên {{target}} trong phiên {{name}}?"
+      },
+      "toast": {
+        "snapshot_already_running": "Một snapshot tmux đang chạy.",
+        "snapshot_loaded": "Đã tải {{count}} phiên tmux.",
+        "snapshot_failed": "Không thể tải phiên tmux: {{reason}}",
+        "unavailable": "tmux không khả dụng trên máy chủ này.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH đang hoạt động cho tmux.",
+        "attach_opened": "Đang gắn vào {{name}}.",
+        "new_session_opened": "Đang mở {{name}}.",
+        "action_already_running": "Một thao tác tmux đang chạy.",
+        "action_failed": "Thao tác tmux thất bại.",
+        "unknown_error": "Lỗi không rõ",
+        "input_required": "Nhập một giá trị trước khi tiếp tục."
+      },
+      "input": {
+        "rename_session_title": "Đổi tên phiên",
+        "rename_window_title": "Đổi tên cửa sổ",
+        "send_command_title": "Gửi lệnh tới pane",
+        "rename_session_desc": "Đặt tên mới cho phiên {{target}}.",
+        "rename_window_desc": "Đặt tên mới cho cửa sổ {{target}} trong phiên {{name}}.",
+        "send_command_desc": "Gửi một lệnh rồi Enter tới pane {{target}} trong phiên {{name}}.",
+        "rename_session_placeholder": "Tên phiên",
+        "rename_window_placeholder": "Tên cửa sổ",
+        "send_command_placeholder": "Lệnh cần gửi"
+      }
     }
   },
   "sessions": {

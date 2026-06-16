@@ -248,6 +248,130 @@
         "action_failed": "服務操作失敗。",
         "partial_support": "{{os}} 上的服務管理為部分支援。"
       }
+    },
+    "host_logs": {
+      "search_placeholder": "搜尋日誌...",
+      "count_suffix": "則日誌",
+      "loading": "正在載入日誌...",
+      "empty": "沒有符合的日誌",
+      "unavailable": "此主機上日誌不可用。",
+      "error": "日誌命令失敗：{{error}}",
+      "capability": {
+        "full": "完整支援",
+        "partial": "部分支援",
+        "unknown": "支援狀態未知"
+      },
+      "presets": {
+        "all": "全部",
+        "errors": "錯誤",
+        "auth": "SSH/認證",
+        "kernel": "核心",
+        "system": "系統"
+      },
+      "columns": {
+        "time": "時間",
+        "level": "級別",
+        "source": "來源",
+        "unit": "單元",
+        "message": "訊息"
+      },
+      "levels": {
+        "error": "錯誤",
+        "warning": "警告",
+        "info": "資訊",
+        "debug": "除錯",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "重新整理日誌",
+        "follow": "追蹤日誌"
+      },
+      "follow_title": "主機日誌：{{preset}}",
+      "toast": {
+        "snapshot_already_running": "已有日誌快照正在執行。",
+        "snapshot_loaded": "已載入 {{count}} 則日誌。",
+        "snapshot_failed": "日誌載入失敗：{{reason}}",
+        "unavailable": "此主機上日誌不可用。",
+        "connection_missing": "所選連線已不可用。",
+        "exec_terminal_missing": "主機日誌沒有可用的即時 SSH 終端路由。",
+        "follow_opened": "正在追蹤 {{preset}} 日誌。",
+        "partial_support": "{{os}} 上的主機日誌為部分支援。",
+        "unknown_error": "未知錯誤"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "搜尋 tmux...",
+      "count_suffix": "個會話",
+      "loading": "正在載入 tmux 會話...",
+      "empty": "沒有符合的 tmux 會話",
+      "unavailable": "此主機上 tmux 不可用。",
+      "error": "tmux 命令失敗：{{error}}",
+      "capability": {
+        "full": "完整支援",
+        "partial": "部分支援",
+        "unknown": "支援狀態未知"
+      },
+      "columns": {
+        "session": "會話",
+        "attached": "連線",
+        "windows": "視窗",
+        "panes": "Pane",
+        "activity": "活動",
+        "created": "建立"
+      },
+      "attached": {
+        "yes": "已連線",
+        "no": "未連線"
+      },
+      "actions": {
+        "new_session": "新增會話",
+        "refresh": "重新整理 tmux",
+        "attach": "連線",
+        "kill_session": "殺死會話",
+        "rename_session": "重新命名工作階段",
+        "rename_window": "重新命名視窗",
+        "kill_window": "強制結束視窗",
+        "kill_pane": "強制結束 Pane",
+        "send_command": "傳送命令"
+      },
+      "active_window": "活動 #{{index}} {{name}}",
+      "no_active_window": "無活動視窗",
+      "attach_title": "tmux：{{name}}",
+      "new_session_title": "新增 tmux 會話",
+      "new_session_name": "新會話",
+      "confirm": {
+        "title": "確認 tmux 操作",
+        "cancel": "取消",
+        "kill_session_desc": "要殺死 tmux 會話 {{id}}（{{name}}）嗎？此會話中的所有視窗和 pane 都會被終止。",
+        "kill_window_desc": "要強制結束工作階段 {{name}} 中的 tmux 視窗 {{target}} 嗎？此視窗內所有 Pane 都會被終止。",
+        "kill_pane_desc": "要強制結束工作階段 {{name}} 中的 tmux Pane {{target}} 嗎？其中執行的命令會被終止。",
+        "action_desc": "要對工作階段 {{name}} 中的 {{target}} 執行 tmux 操作嗎？"
+      },
+      "toast": {
+        "snapshot_already_running": "已有 tmux 快照正在執行。",
+        "snapshot_loaded": "已載入 {{count}} 個 tmux 會話。",
+        "snapshot_failed": "tmux 會話載入失敗：{{reason}}",
+        "unavailable": "此主機上 tmux 不可用。",
+        "connection_missing": "所選連線已不可用。",
+        "exec_terminal_missing": "tmux 沒有可用的即時 SSH 終端路由。",
+        "attach_opened": "正在連線到 {{name}}。",
+        "new_session_opened": "正在開啟 {{name}}。",
+        "action_already_running": "已有 tmux 操作正在執行。",
+        "action_failed": "tmux 操作失敗。",
+        "unknown_error": "未知錯誤",
+        "input_required": "繼續前請輸入內容。"
+      },
+      "input": {
+        "rename_session_title": "重新命名工作階段",
+        "rename_window_title": "重新命名視窗",
+        "send_command_title": "向 Pane 傳送命令",
+        "rename_session_desc": "為工作階段 {{target}} 設定新名稱。",
+        "rename_window_desc": "為工作階段 {{name}} 中的視窗 {{target}} 設定新名稱。",
+        "send_command_desc": "向工作階段 {{name}} 中的 Pane {{target}} 傳送一條命令並按 Enter。",
+        "rename_session_placeholder": "工作階段名稱",
+        "rename_window_placeholder": "視窗名稱",
+        "send_command_placeholder": "要傳送的命令"
+      }
     }
   },
   "sessions": {

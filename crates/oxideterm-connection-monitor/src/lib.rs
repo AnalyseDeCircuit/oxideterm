@@ -7,12 +7,14 @@
 //! SSH registries feed it snapshots; GPUI surfaces render it.
 
 mod docker;
+mod log;
 mod metrics;
 mod process;
 mod profiler;
 mod service;
 mod stats;
 mod summary;
+mod tmux;
 
 pub use docker::{
     DockerActionCommand, DockerActionKind, DockerCaptureCommand, ResourceDockerContainer,
@@ -21,6 +23,11 @@ pub use docker::{
     docker_action_failure_message, docker_action_succeeded, docker_action_success_message,
     docker_row_signature, docker_sample_command, docker_state_label_key, parse_docker_snapshot,
     visible_docker_rows,
+};
+pub use log::{
+    LogCaptureCommand, LogCommandCapability, LogPreset, ResourceLogEntry, ResourceLogSnapshot,
+    ResourceLogStatus, build_log_follow_command, build_log_snapshot_command, log_level_label_key,
+    log_preset_label_key, log_row_signature, parse_log_snapshot, visible_log_rows,
 };
 pub use metrics::{
     CpuSnapshot, MemorySnapshot, MetricsSource, NetInterfaceSnapshot, NetSnapshot,
@@ -62,4 +69,12 @@ pub use summary::{
     format_bytes, format_rate, gpu_detail_value, gpu_label, gpu_list_rows, gpu_memory_percent,
     gpu_memory_summary, gpu_utilization_percent, interface_list_rows, metrics_source_label_key,
     percent_level, resource_metrics_is_rtt_only, rtt_level, top_process_list_rows,
+};
+pub use tmux::{
+    ResourceTmuxPane, ResourceTmuxSession, ResourceTmuxSnapshot, ResourceTmuxStatus,
+    ResourceTmuxWindow, TmuxActionCommand, TmuxActionKind, TmuxCaptureCommand,
+    TmuxCommandCapability, build_tmux_action_command, build_tmux_attach_command,
+    build_tmux_new_session_command, build_tmux_snapshot_command, parse_tmux_snapshot,
+    tmux_action_failure_message, tmux_action_succeeded, tmux_action_success_message,
+    tmux_session_row_signature, visible_tmux_session_rows,
 };

@@ -248,6 +248,130 @@
         "action_failed": "Ação de serviço falhou.",
         "partial_support": "O gerenciamento de serviços é parcial em {{os}}."
       }
+    },
+    "host_logs": {
+      "search_placeholder": "Buscar logs...",
+      "count_suffix": "logs",
+      "loading": "Carregando logs...",
+      "empty": "Nenhum log correspondente",
+      "unavailable": "Os logs do host não estão disponíveis neste host.",
+      "error": "Comando de log falhou: {{error}}",
+      "capability": {
+        "full": "Suporte completo",
+        "partial": "Suporte parcial",
+        "unknown": "Suporte desconhecido"
+      },
+      "presets": {
+        "all": "Todos",
+        "errors": "Erros",
+        "auth": "SSH/Auth",
+        "kernel": "Kernel",
+        "system": "Sistema"
+      },
+      "columns": {
+        "time": "Hora",
+        "level": "Nível",
+        "source": "Origem",
+        "unit": "Unidade",
+        "message": "Mensagem"
+      },
+      "levels": {
+        "error": "Erro",
+        "warning": "Aviso",
+        "info": "Info",
+        "debug": "Debug",
+        "unknown": "Desconhecido"
+      },
+      "actions": {
+        "refresh": "Atualizar logs",
+        "follow": "Seguir logs"
+      },
+      "follow_title": "Logs do host: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "Um snapshot de logs já está em execução.",
+        "snapshot_loaded": "{{count}} entradas de log carregadas.",
+        "snapshot_failed": "Falha ao carregar logs: {{reason}}",
+        "unavailable": "Os logs do host não estão disponíveis neste host.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa está disponível para logs do host.",
+        "follow_opened": "Seguindo logs de {{preset}}.",
+        "partial_support": "Os logs do host são parciais em {{os}}.",
+        "unknown_error": "Erro desconhecido"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "Buscar tmux...",
+      "count_suffix": "sessões",
+      "loading": "Carregando sessões tmux...",
+      "empty": "Nenhuma sessão tmux correspondente",
+      "unavailable": "tmux não está disponível neste host.",
+      "error": "Comando tmux falhou: {{error}}",
+      "capability": {
+        "full": "Suporte completo",
+        "partial": "Suporte parcial",
+        "unknown": "Suporte desconhecido"
+      },
+      "columns": {
+        "session": "Sessão",
+        "attached": "Anexada",
+        "windows": "Janelas",
+        "panes": "Panes",
+        "activity": "Atividade",
+        "created": "Criada"
+      },
+      "attached": {
+        "yes": "Anexada",
+        "no": "Desanexada"
+      },
+      "actions": {
+        "new_session": "Nova sessão",
+        "refresh": "Atualizar tmux",
+        "attach": "Anexar",
+        "kill_session": "Matar sessão",
+        "rename_session": "Renomear sessão",
+        "rename_window": "Renomear janela",
+        "kill_window": "Encerrar janela",
+        "kill_pane": "Encerrar pane",
+        "send_command": "Enviar comando"
+      },
+      "active_window": "Ativa #{{index}} {{name}}",
+      "no_active_window": "Nenhuma janela ativa",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "Nova sessão tmux",
+      "new_session_name": "nova sessão",
+      "confirm": {
+        "title": "Confirmar ação tmux",
+        "cancel": "Cancelar",
+        "kill_session_desc": "Matar a sessão tmux {{id}} ({{name}})? Todas as janelas e panes desta sessão serão encerradas.",
+        "kill_window_desc": "Encerrar a janela tmux {{target}} na sessão {{name}}? Todos os panes dessa janela serão encerrados.",
+        "kill_pane_desc": "Encerrar o pane tmux {{target}} na sessão {{name}}? O comando em execução será encerrado.",
+        "action_desc": "Executar a ação do tmux em {{target}} na sessão {{name}}?"
+      },
+      "toast": {
+        "snapshot_already_running": "Um snapshot tmux já está em execução.",
+        "snapshot_loaded": "{{count}} sessões tmux carregadas.",
+        "snapshot_failed": "Falha ao carregar sessões tmux: {{reason}}",
+        "unavailable": "tmux não está disponível neste host.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa está disponível para tmux.",
+        "attach_opened": "Anexando a {{name}}.",
+        "new_session_opened": "Abrindo {{name}}.",
+        "action_already_running": "Uma ação tmux já está em execução.",
+        "action_failed": "Ação tmux falhou.",
+        "unknown_error": "Erro desconhecido",
+        "input_required": "Insira um valor antes de continuar."
+      },
+      "input": {
+        "rename_session_title": "Renomear sessão",
+        "rename_window_title": "Renomear janela",
+        "send_command_title": "Enviar comando ao pane",
+        "rename_session_desc": "Defina um novo nome para a sessão {{target}}.",
+        "rename_window_desc": "Defina um novo nome para a janela {{target}} na sessão {{name}}.",
+        "send_command_desc": "Envia um comando seguido de Enter ao pane {{target}} na sessão {{name}}.",
+        "rename_session_placeholder": "Nome da sessão",
+        "rename_window_placeholder": "Nome da janela",
+        "send_command_placeholder": "Comando a enviar"
+      }
     }
   },
   "sessions": {
