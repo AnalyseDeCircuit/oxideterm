@@ -191,6 +191,19 @@
         "su_password": "su パスワード",
         "custom_prompt": "カスタムプロンプト"
       }
+    },
+    "views": {
+      "mode_label": "表示モード",
+      "grid": "グリッド",
+      "list": "リスト",
+      "tree": "ツリー",
+      "recent": "最近の接続",
+      "groups": "グループ",
+      "hosts": "ホスト",
+      "group_count": "{{count}} 台のホスト",
+      "list_header": "保存済みセッション",
+      "expand_all": "すべて展開",
+      "collapse_all": "すべて折りたたむ"
     }
   }
 }

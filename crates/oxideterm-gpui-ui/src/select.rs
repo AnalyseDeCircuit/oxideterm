@@ -121,6 +121,9 @@ pub enum SelectAnchorId {
     TerminalBroadcastMenu,
     TerminalCommandBar,
     TerminalCastSeekbar,
+    SessionManagerViewMode,
+    SessionManagerSort,
+    SessionManagerBatchMove,
 }
 
 impl SelectAnchorId {

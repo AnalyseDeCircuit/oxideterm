@@ -191,6 +191,19 @@
         "su_password": "mật khẩu su",
         "custom_prompt": "Lời nhắc tùy chỉnh"
       }
+    },
+    "views": {
+      "mode_label": "Chế độ xem",
+      "grid": "Lưới",
+      "list": "Danh sách",
+      "tree": "Cây",
+      "recent": "Gần đây",
+      "groups": "Nhóm",
+      "hosts": "Máy chủ",
+      "group_count": "{{count}} máy chủ",
+      "list_header": "Phiên đã lưu",
+      "expand_all": "Mở rộng tất cả",
+      "collapse_all": "Thu gọn tất cả"
     }
   }
 }

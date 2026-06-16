@@ -110,10 +110,8 @@ impl WorkspaceApp {
                 div()
                     .flex_1()
                     .min_h(px(0.0))
-                    .flex()
-                    .flex_row()
-                    .child(self.render_session_manager_folder_tree(has_background, cx))
-                    .child(self.render_session_manager_table(has_background, cx)),
+                    .min_w(px(0.0))
+                    .child(self.render_session_manager_view_content(has_background, cx)),
             )
             .when_some(self.session_manager.status.clone(), |surface, status| {
                 surface.child(
@@ -145,46 +143,24 @@ impl WorkspaceApp {
             .when_some(self.session_manager.oxide_export_dialog.as_ref(), |surface, _| {
                 surface.child(self.render_oxide_export_dialog(cx))
             })
-            .when_some(
-                self.session_manager
-                    .row_menu_connection_id
-                    .as_deref()
-                    .and_then(|id| self.connection_info_by_id(id)),
-                |surface, conn| {
-                    surface.child(self.workspace_context_menu_backdrop(
-                        self.render_row_more_menu(conn, window, has_background, cx),
-                        cx,
-                    ))
-                },
-            )
-            .when_some(
-                self.session_manager
-                .row_context_menu_connection_id
-                .as_deref()
-                .and_then(|id| self.connection_info_by_id(id)),
-                |surface, conn| {
-                    surface.child(self.workspace_context_menu_backdrop(
-                        self.render_row_context_menu(conn, window, has_background, cx),
-                        cx,
-                    ))
-                },
-            )
-            .when(
-                self.session_manager.folder_tree_context_menu_x.is_some()
-                    && self.session_manager.folder_tree_context_menu_y.is_some(),
-                |surface| {
-                    surface.child(self.workspace_context_menu_backdrop(
-                        self.render_folder_tree_context_menu(window, cx),
-                        cx,
-                    ))
-                },
-            )
+            .when(self.session_manager.view_mode_menu_open, |surface| {
+                surface.child(self.workspace_context_menu_backdrop(
+                    self.render_session_manager_view_mode_menu(window, has_background, cx),
+                    cx,
+                ))
+            })
+            .when(self.session_manager.sort_menu_open, |surface| {
+                surface.child(self.workspace_context_menu_backdrop(
+                    self.render_session_manager_sort_menu(window, has_background, cx),
+                    cx,
+                ))
+            })
             .when(
                 !self.session_manager.selected_ids.is_empty()
                     && self.session_manager.show_batch_move,
                 |surface| {
                     surface.child(self.workspace_context_menu_backdrop(
-                        self.render_batch_move_popover(cx),
+                        self.render_batch_move_popover(window, cx),
                         cx,
                     ))
                 },

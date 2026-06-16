@@ -191,6 +191,19 @@
         "su_password": "su-Passwort",
         "custom_prompt": "Benutzerdefinierter Prompt"
       }
+    },
+    "views": {
+      "mode_label": "Ansichtsmodus",
+      "grid": "Raster",
+      "list": "Liste",
+      "tree": "Baum",
+      "recent": "Zuletzt verwendet",
+      "groups": "Gruppen",
+      "hosts": "Server",
+      "group_count": "{{count}} Host(s)",
+      "list_header": "Gespeicherte Sitzungen",
+      "expand_all": "Alle erweitern",
+      "collapse_all": "Alle einklappen"
     }
   }
 }

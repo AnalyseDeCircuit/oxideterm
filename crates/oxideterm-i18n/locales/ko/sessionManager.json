@@ -191,6 +191,19 @@
         "su_password": "su 비밀번호",
         "custom_prompt": "사용자 지정 프롬프트"
       }
+    },
+    "views": {
+      "mode_label": "보기 모드",
+      "grid": "그리드",
+      "list": "목록",
+      "tree": "트리",
+      "recent": "최근 연결",
+      "groups": "그룹",
+      "hosts": "호스트",
+      "group_count": "호스트 {{count}}개",
+      "list_header": "저장된 세션",
+      "expand_all": "모두 펼치기",
+      "collapse_all": "모두 접기"
     }
   }
 }

@@ -750,22 +750,6 @@ impl WorkspaceApp {
             native_plugin_event_log_last_id: 0,
             native_plugin_event_log_polling: false,
             session_manager: SessionManagerState::default(),
-            // Session manager folder tree is a nested browser tree. Virtualize
-            // the root rows first; expanded child rows stay grouped under their
-            // parent until tree-row flattening is migrated.
-            session_manager_folder_tree_list_state: ListState::new(
-                SESSION_MANAGER_FOLDER_TREE_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(SESSION_MANAGER_FOLDER_TREE_LIST_ESTIMATED_HEIGHT),
-                    SESSION_MANAGER_FOLDER_TREE_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            session_manager_folder_tree_list_cache: RefCell::new(
-                VirtualListSignatureCache::default(),
-            ),
             // .oxide export can contain many saved connections. Keep the
             // selectable record rows on the shared variable-list path while the
             // dialog chrome remains ordinary GPUI layout.

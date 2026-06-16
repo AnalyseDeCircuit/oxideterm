@@ -321,16 +321,30 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_batch_move_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_batch_move_popover(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let groups = self.connection_store.groups().to_vec();
-        div()
+        let Some(anchor) = self
+            .select_anchors
+            .get(&SelectAnchorId::SessionManagerBatchMove)
+            .copied()
+        else {
+            return div().into_any_element();
+        };
+        let viewport = window.viewport_size();
+        let placement = browser_behavior::clamp_context_menu_position(
+            f32::from(anchor.bounds.left()),
+            f32::from(anchor.bounds.bottom()) + 4.0,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            MANAGER_BATCH_MOVE_MENU_WIDTH,
+            MANAGER_BATCH_MOVE_MENU_HEIGHT,
+            8.0,
+        );
+        let popup = div()
             .id("session-manager-batch-move-scroll")
-            .absolute()
-            .top(px(44.0))
-            .right(px(104.0))
-            .w(px(220.0))
-            .max_h(px(260.0))
+            .w(px(MANAGER_BATCH_MOVE_MENU_WIDTH))
+            .max_h(px(MANAGER_BATCH_MOVE_MENU_HEIGHT))
             .selectable_overflow_y_scroll(
                 &self.selectable_text_scroll_handle("session-manager-batch-move-scroll"),
             )
@@ -348,8 +362,19 @@ impl WorkspaceApp {
                 groups
                     .into_iter()
                     .map(|group| self.render_batch_move_item(Some(group.clone()), group, cx)),
-            )
-            .into_any_element()
+            );
+
+        // Batch move is a Radix dropdown in Tauri; keep it anchored to the
+        // actual trigger instead of the old toolbar-relative hard-coded corner.
+        deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(gpui::point(px(placement.x), px(placement.y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(overlay_content_boundary(popup)),
+        )
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
+        .into_any_element()
     }
 
     fn render_batch_move_item(

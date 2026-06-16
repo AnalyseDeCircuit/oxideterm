@@ -20,54 +20,9 @@ impl WorkspaceApp {
                         .any(|tag| tag.to_lowercase().contains(&query))
             });
         }
-        self.sort_session_rows(&mut rows);
-        if self.session_manager.selected_group.as_deref() == Some(RECENT_FILTER) {
-            rows.truncate(20);
-        }
-        rows
-    }
-
-    fn filtered_session_serial_profiles(&self) -> Vec<SerialProfile> {
-        let query = self.session_manager.search_query.trim().to_lowercase();
-        let mut rows = self.connection_store.serial_profiles().to_vec();
-        rows.retain(|profile| self.serial_profile_matches_filter(profile));
-        if !query.is_empty() {
-            rows.retain(|profile| {
-                profile.name.to_lowercase().contains(&query)
-                    || profile.port_path.to_lowercase().contains(&query)
-                    || profile
-                        .group
-                        .as_deref()
-                        .unwrap_or_default()
-                        .to_lowercase()
-                        .contains(&query)
-            });
-        }
-        rows.sort_by(|left, right| right.last_used_at.cmp(&left.last_used_at));
-        if self.session_manager.selected_group.as_deref() == Some(RECENT_FILTER) {
-            rows.truncate(20);
-        }
-        rows
-    }
-
-    fn filtered_session_telnet_profiles(&self) -> Vec<TelnetProfile> {
-        let query = self.session_manager.search_query.trim().to_lowercase();
-        let mut rows = self.connection_store.telnet_profiles().to_vec();
-        rows.retain(|profile| self.telnet_profile_matches_filter(profile));
-        if !query.is_empty() {
-            rows.retain(|profile| {
-                profile.name.to_lowercase().contains(&query)
-                    || profile.host.to_lowercase().contains(&query)
-                    || profile.port.to_string().contains(&query)
-                    || profile
-                        .group
-                        .as_deref()
-                        .unwrap_or_default()
-                        .to_lowercase()
-                        .contains(&query)
-            });
-        }
-        rows.sort_by(|left, right| right.last_used_at.cmp(&left.last_used_at));
+        // The new grid/list/tree display model owns presentation sorting. This
+        // helper is only used to retain valid checkbox selections after filters.
+        rows.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
         if self.session_manager.selected_group.as_deref() == Some(RECENT_FILTER) {
             rows.truncate(20);
         }
@@ -83,52 +38,6 @@ impl WorkspaceApp {
                 conn_group == group || conn_group.starts_with(&format!("{group}/"))
             }),
         }
-    }
-
-    fn serial_profile_matches_filter(&self, profile: &SerialProfile) -> bool {
-        match self.session_manager.selected_group.as_deref() {
-            None => true,
-            Some(UNGROUPED_FILTER) => profile.group.is_none(),
-            Some(RECENT_FILTER) => profile.last_used_at.is_some(),
-            Some(group) => profile.group.as_deref().is_some_and(|profile_group| {
-                profile_group == group || profile_group.starts_with(&format!("{group}/"))
-            }),
-        }
-    }
-
-    fn telnet_profile_matches_filter(&self, profile: &TelnetProfile) -> bool {
-        match self.session_manager.selected_group.as_deref() {
-            None => true,
-            Some(UNGROUPED_FILTER) => profile.group.is_none(),
-            Some(RECENT_FILTER) => profile.last_used_at.is_some(),
-            Some(group) => profile.group.as_deref().is_some_and(|profile_group| {
-                profile_group == group || profile_group.starts_with(&format!("{group}/"))
-            }),
-        }
-    }
-
-    fn sort_session_rows(&self, rows: &mut [ConnectionInfo]) {
-        let field = self.session_manager.sort_field;
-        rows.sort_by(|left, right| {
-            let ordering = match field {
-                SessionSortField::Name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-                SessionSortField::Host => left.host.to_lowercase().cmp(&right.host.to_lowercase()),
-                SessionSortField::Port => left.port.cmp(&right.port),
-                SessionSortField::Username => left
-                    .username
-                    .to_lowercase()
-                    .cmp(&right.username.to_lowercase()),
-                SessionSortField::AuthType => {
-                    auth_label(left.auth_type).cmp(&auth_label(right.auth_type))
-                }
-                SessionSortField::Group => left.group.cmp(&right.group),
-                SessionSortField::LastUsed => left.last_used_at.cmp(&right.last_used_at),
-            };
-            match self.session_manager.sort_direction {
-                SortDirection::Asc => ordering,
-                SortDirection::Desc => ordering.reverse(),
-            }
-        });
     }
 
     fn connection_count_for_group(&self, group: &str) -> usize {
@@ -221,38 +130,33 @@ impl WorkspaceApp {
         close_session_menu_state(&mut self.session_manager)
     }
 
-    fn open_session_row_context_menu(&mut self, id: &str, x: f32, y: f32) {
-        // Opening a Radix ContextMenu replaces any sibling menu owner. Native
-        // row context menus share the same close helper so right-click cannot
-        // leave an inline "more" menu or folder menu alive behind it.
+    fn toggle_session_view_mode_menu(&mut self) {
+        let was_open = self.session_manager.view_mode_menu_open;
         self.close_session_row_menus();
-        self.select_connection_for_context_menu(id);
-        self.session_manager.row_context_menu_connection_id = Some(id.to_string());
-        self.session_manager.row_context_menu_x = x;
-        self.session_manager.row_context_menu_y = y;
-    }
-
-    fn toggle_session_row_more_menu(&mut self, id: &str, x: f32, y: f32) {
-        let same_row_open = self.session_manager.row_menu_connection_id.as_deref() == Some(id);
-        self.close_session_row_menus();
-        if !same_row_open {
-            // The inline "more" trigger is rendered inside the table row, but
-            // the menu itself is portaled to the surface with a shared backdrop
-            // so outside click and Esc follow the same Radix close owner.
-            self.session_manager.row_menu_connection_id = Some(id.to_string());
-            self.session_manager.row_menu_x = x;
-            self.session_manager.row_menu_y = y;
+        if !was_open {
+            // The view-mode selector is root-mounted and positioned from its
+            // cached trigger bounds, so opening only needs to claim menu owner.
+            self.session_manager.view_mode_menu_open = true;
         }
     }
 
-    fn open_session_folder_tree_context_menu(&mut self, x: f32, y: f32) {
-        // FolderTree's blank-area context menu is a sibling of row menus in
-        // Tauri. Keep the replacement rule explicit before assigning the new
-        // tree menu coordinates.
+    fn toggle_session_sort_menu(&mut self) {
+        let was_open = self.session_manager.sort_menu_open;
         self.close_session_row_menus();
-        self.session_manager.folder_tree_context_menu_x = Some(x);
-        self.session_manager.folder_tree_context_menu_y = Some(y);
-        self.session_manager.show_batch_move = false;
+        if !was_open {
+            // Sort uses the same root-mounted anchored menu as view mode; keep
+            // positioning separate from pointer coordinates to avoid drift.
+            self.session_manager.sort_menu_open = true;
+        }
+    }
+
+    fn set_session_sort_field(&mut self, field: SessionSortField) {
+        if self.session_manager.sort_field == field {
+            self.session_manager.sort_direction = self.session_manager.sort_direction.toggled();
+        } else {
+            self.session_manager.sort_field = field;
+            self.session_manager.sort_direction = field.default_direction();
+        }
     }
 
     fn toggle_connection_selection(&mut self, id: &str) {
@@ -261,34 +165,6 @@ impl WorkspaceApp {
         } else {
             self.session_manager.selected_ids.insert(id.to_string());
         }
-    }
-
-    fn select_connection_for_context_menu(&mut self, id: &str) {
-        // Browser file/table UIs keep an existing multi-selection when the
-        // context target is already selected, but right-clicking an unselected
-        // row first moves selection to that row before opening the menu.
-        crate::workspace::browser_behavior::preserve_or_move_context_selection(
-            &mut self.session_manager.selected_ids,
-            id.to_string(),
-        );
-    }
-
-    fn toggle_all_visible_connections(&mut self, cx: &mut Context<Self>) {
-        let rows = self.filtered_session_connections();
-        let all_selected = !rows.is_empty()
-            && rows
-                .iter()
-                .all(|row| self.session_manager.selected_ids.contains(&row.id));
-        if all_selected {
-            for row in rows {
-                self.session_manager.selected_ids.remove(&row.id);
-            }
-        } else {
-            for row in rows {
-                self.session_manager.selected_ids.insert(row.id);
-            }
-        }
-        cx.notify();
     }
 
     pub(super) fn clear_session_selection_for_invisible_rows(&mut self) {
@@ -730,15 +606,11 @@ impl WorkspaceApp {
 fn close_session_menu_state(session_manager: &mut SessionManagerState) -> bool {
     // SessionManager floating menus share one ContextMenu dismissal owner for
     // outside click, Esc, and guarded item activation.
-    let changed = session_manager.row_menu_connection_id.is_some()
-        || session_manager.row_context_menu_connection_id.is_some()
-        || session_manager.folder_tree_context_menu_x.is_some()
-        || session_manager.folder_tree_context_menu_y.is_some()
+    let changed = session_manager.view_mode_menu_open
+        || session_manager.sort_menu_open
         || session_manager.show_batch_move;
-    session_manager.row_menu_connection_id = None;
-    session_manager.row_context_menu_connection_id = None;
-    session_manager.folder_tree_context_menu_x = None;
-    session_manager.folder_tree_context_menu_y = None;
+    session_manager.view_mode_menu_open = false;
+    session_manager.sort_menu_open = false;
     session_manager.show_batch_move = false;
     changed
 }

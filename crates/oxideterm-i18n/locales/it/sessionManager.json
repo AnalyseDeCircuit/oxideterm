@@ -191,6 +191,19 @@
         "su_password": "password su",
         "custom_prompt": "Prompt personalizzato"
       }
+    },
+    "views": {
+      "mode_label": "Modalità vista",
+      "grid": "Griglia",
+      "list": "Elenco",
+      "tree": "Albero",
+      "recent": "Recenti",
+      "groups": "Gruppi",
+      "hosts": "Host",
+      "group_count": "{{count}} host",
+      "list_header": "Sessioni salvate",
+      "expand_all": "Espandi tutto",
+      "collapse_all": "Comprimi tutto"
     }
   }
 }

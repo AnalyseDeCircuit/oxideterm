@@ -191,6 +191,19 @@
         "su_password": "su password",
         "custom_prompt": "Custom prompt"
       }
+    },
+    "views": {
+      "mode_label": "View mode",
+      "grid": "Grid",
+      "list": "List",
+      "tree": "Tree",
+      "recent": "Recent",
+      "groups": "Groups",
+      "hosts": "Hosts",
+      "group_count": "{{count}} host(s)",
+      "list_header": "Saved sessions",
+      "expand_all": "Expand all",
+      "collapse_all": "Collapse all"
     }
   }
 }

@@ -589,6 +589,12 @@ impl WorkspaceApp {
                 && self.terminal_broadcast_menu_open)
             || (anchor.id == SelectAnchorId::TerminalCommandBar
                 && self.terminal_quick_commands_open)
+            || (anchor.id == SelectAnchorId::SessionManagerViewMode
+                && self.session_manager.view_mode_menu_open)
+            || (anchor.id == SelectAnchorId::SessionManagerSort
+                && self.session_manager.sort_menu_open)
+            || (anchor.id == SelectAnchorId::SessionManagerBatchMove
+                && self.session_manager.show_batch_move)
             || self
                 .settings_slider_drag
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -1361,5 +1367,10 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             // first open and later resizes can compute the same adaptive width.
             | SelectAnchorId::TerminalCommandBar
             | SelectAnchorId::TerminalCastSeekbar
+            // Session Manager toolbar menus use window-anchored overlays, so
+            // their trigger bounds must be cached before pointer-down.
+            | SelectAnchorId::SessionManagerViewMode
+            | SelectAnchorId::SessionManagerSort
+            | SelectAnchorId::SessionManagerBatchMove
     )
 }

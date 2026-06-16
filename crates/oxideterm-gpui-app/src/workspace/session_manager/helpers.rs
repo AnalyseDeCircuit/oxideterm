@@ -35,37 +35,6 @@ fn expand_group_path(group: &str, expanded_groups: &mut HashSet<String>) {
     }
 }
 
-fn auth_badge_style(
-    auth_type: AuthType,
-    text_muted: u32,
-    text: u32,
-) -> (LucideIcon, &'static str, Rgba, Rgba) {
-    match auth_type {
-        AuthType::Key => (LucideIcon::Key, "Key", rgba(0x10b98133), rgb(0x6ee7b7)),
-        AuthType::ManagedKey => (
-            LucideIcon::Key,
-            "Managed",
-            rgba(0x10b98133),
-            rgb(0x6ee7b7),
-        ),
-        AuthType::Password => (LucideIcon::Lock, "Pwd", rgba(0xf59e0b33), rgb(0xfcd34d)),
-        AuthType::Agent => (LucideIcon::Bot, "Agent", rgba(0x3b82f633), rgb(0x93c5fd)),
-        AuthType::Certificate => (
-            LucideIcon::ShieldQuestion,
-            "certificate",
-            rgba((text_muted << 8) | 0x33),
-            rgb(text),
-        ),
-    }
-}
-
-fn auth_badge_width(label: &str) -> f32 {
-    MANAGER_AUTH_BADGE_PADDING_X * 2.0
-        + MANAGER_AUTH_BADGE_ICON_SIZE
-        + MANAGER_AUTH_BADGE_GAP
-        + label.chars().count() as f32 * MANAGER_AUTH_BADGE_CHAR_WIDTH
-}
-
 fn format_last_used(last_used: Option<&str>, i18n: &I18n) -> String {
     let Some(last_used) = last_used else {
         return i18n.t("sessionManager.table.never_used");
@@ -107,16 +76,8 @@ fn theme_bg(color: u32, has_background: bool) -> Rgba {
     color_for_background(color, has_background, BG_ACTIVE_THEME_ALPHA)
 }
 
-fn theme_panel_bg(color: u32, has_background: bool) -> Rgba {
-    theme_bg(color, has_background)
-}
-
 fn theme_secondary_bg(color: u32, has_background: bool) -> Rgba {
     theme_bg(color, has_background)
-}
-
-fn theme_active_bg(color: u32, has_background: bool) -> Rgba {
-    color_for_background(color, has_background, BG_ACTIVE_THEME_ALPHA)
 }
 
 fn theme_hover_bg(color: u32, has_background: bool) -> Rgba {
@@ -250,22 +211,6 @@ fn terminal_serial_flow_from_profile(
         oxideterm_connections::SerialFlowControl::Hardware => {
             oxideterm_terminal::SerialFlowControl::Hardware
         }
-    }
-}
-
-fn serial_profile_parity_label(parity: &oxideterm_connections::SerialParity) -> &'static str {
-    match parity {
-        oxideterm_connections::SerialParity::None => "",
-        oxideterm_connections::SerialParity::Odd => "O",
-        oxideterm_connections::SerialParity::Even => "E",
-    }
-}
-
-fn serial_profile_flow_label(flow: &oxideterm_connections::SerialFlowControl) -> &'static str {
-    match flow {
-        oxideterm_connections::SerialFlowControl::None => "",
-        oxideterm_connections::SerialFlowControl::Software => " · XON/XOFF",
-        oxideterm_connections::SerialFlowControl::Hardware => " · RTS/CTS",
     }
 }
 

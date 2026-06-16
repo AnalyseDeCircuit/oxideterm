@@ -318,9 +318,6 @@ const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 const ACTIVE_SESSION_FOCUS_LIST_ESTIMATED_HEIGHT: f32 = 76.0;
-const SESSION_MANAGER_FOLDER_TREE_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const SESSION_MANAGER_FOLDER_TREE_LIST_ESTIMATED_HEIGHT: f32 = 36.0;
-const SESSION_MANAGER_FOLDER_TREE_LIST_OVERSCAN: usize = 8;
 const OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT: f32 = 58.0;
 const OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN: usize = 8;
@@ -974,8 +971,6 @@ pub(crate) struct WorkspaceApp {
     native_plugin_event_log_last_id: u64,
     native_plugin_event_log_polling: bool,
     session_manager: SessionManagerState,
-    session_manager_folder_tree_list_state: ListState,
-    session_manager_folder_tree_list_cache: RefCell<VirtualListSignatureCache>,
     oxide_export_connection_list_state: ListState,
     oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
     oxide_import_connection_preview_list_state: ListState,

@@ -191,6 +191,19 @@
         "su_password": "su 密碼",
         "custom_prompt": "自訂提示"
       }
+    },
+    "views": {
+      "mode_label": "檢視模式",
+      "grid": "網格",
+      "list": "列表",
+      "tree": "樹狀",
+      "recent": "最近連線",
+      "groups": "群組",
+      "hosts": "主機",
+      "group_count": "{{count}} 台主機",
+      "list_header": "已儲存會話",
+      "expand_all": "展開全部",
+      "collapse_all": "摺疊全部"
     }
   }
 }
