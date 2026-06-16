@@ -2144,7 +2144,9 @@ impl WorkspaceApp {
             .map(native_plugin_toast_variant)
             .unwrap_or(TerminalNoticeVariant::Default);
 
+        let id = self.next_workspace_toast_id();
         self.workspace_toasts.push(WorkspaceToast {
+            id,
             notice: TerminalNotice {
                 title: native_plugin_notice_title(plugin_id, title),
                 description,
@@ -2172,7 +2174,9 @@ impl WorkspaceApp {
             .map(native_plugin_notification_variant)
             .unwrap_or(TerminalNoticeVariant::Default);
 
+        let id = self.next_workspace_toast_id();
         self.workspace_toasts.push(WorkspaceToast {
+            id,
             notice: TerminalNotice {
                 title: native_plugin_notice_title(plugin_id, title),
                 description,
@@ -2335,9 +2339,11 @@ impl WorkspaceApp {
         // Tauri plugin progress is host-owned and keyed by reporter id. Native
         // updates the same toast entry instead of appending one toast per event
         // burst, which keeps noisy process runtimes from flooding the overlay.
+        let id = self.next_workspace_toast_id();
         self.plugin_progress_toasts.insert(
             progress_key,
             WorkspaceToast {
+                id,
                 notice,
                 expires_at: std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL,
             },

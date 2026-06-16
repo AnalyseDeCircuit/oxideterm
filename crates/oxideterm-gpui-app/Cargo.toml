@@ -75,6 +75,9 @@ zeroize.workspace = true
 [build-dependencies]
 embed-resource = "3.0.9"
 
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }

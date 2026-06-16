@@ -42,13 +42,25 @@ impl WorkspaceApp {
 
         let workspace = cx.entity();
         div()
-            .w_full()
-            .h_full()
+            .size_full()
             .min_w_0()
             .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
             .child(select_anchor_probe(
                 SelectAnchorId::AiPanelRoot,
-                panel,
+                div()
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .overflow_hidden()
+                    // The probe is a custom Element used only for bounds. Keep a
+                    // normal sized flex wrapper around the actual AI panel so
+                    // header, body, model bar, and input inherit the sidebar width.
+                    .child(panel),
                 Self::deferred_ai_select_anchor_update(workspace),
             ))
             .into_any_element()
@@ -387,11 +399,13 @@ impl WorkspaceApp {
                     .max_w(px(260.0))
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .text_size(px(13.0))
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(rgb(self.tokens.ui.text))
                             .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
+                                SelectableTextRole::NonSelectable,
                                 "ai-chat-load-failed",
                                 "title",
                                 self.i18n.t("ai.chat.load_failed_title"),
@@ -401,11 +415,13 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .text_size(px(12.0))
                             .line_height(px(18.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
+                                SelectableTextRole::NonSelectable,
                                 "ai-chat-load-failed",
                                 "message",
                                 message,
@@ -447,6 +463,8 @@ impl WorkspaceApp {
 
     fn render_ai_sidebar_empty_chat(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
+            .w_full()
+            .min_w_0()
             .h_full()
             .flex()
             .flex_col()
@@ -454,12 +472,15 @@ impl WorkspaceApp {
             .pt(px(48.0))
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .mb(px(24.0))
                     .text_size(px(13.0))
                     .font_weight(gpui::FontWeight::BOLD)
                     .text_color(rgb(self.tokens.ui.text))
+                    .whitespace_nowrap()
                     .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
+                        SelectableTextRole::NonSelectable,
                         "ai-chat-empty",
                         "get-started",
                         self.i18n.t("ai.chat.get_started"),
@@ -469,6 +490,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(px(4.0))

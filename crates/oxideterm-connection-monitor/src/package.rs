@@ -278,6 +278,9 @@ pub fn package_status_label_key(status: &str) -> &'static str {
 }
 
 fn build_linux_package_snapshot_command() -> String {
+    // Package snapshots share the user's SSH connection with terminals. Keep
+    // them to manager detection plus cached/upgradable rows; full inventories
+    // and service-owner mapping are explicit inspect/diagnostic work.
     concat!(
         "echo '===PACKAGES==='; ",
         "echo '__OXIDE_PACKAGE_CAPABILITY__\tpartial\tlinux_packages'; ",
@@ -285,19 +288,13 @@ fn build_linux_package_snapshot_command() -> String {
         "if command -v apt >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; then ",
         "oxide_pkg_any=1; echo 'MANAGER\tapt\ttrue\tapt'; ",
         "apt list --upgradable 2>/dev/null | awk 'NR>1 && $0 !~ /^Listing/ { line=$0; split(line,a,\"/\"); name=a[1]; rest=a[2]; n=split(rest,b,\" \"); repo=b[1]; cand=b[2]; arch=b[3]; installed=\"\"; marker=\"upgradable from: \"; start=index(line,marker); if(start>0){ installed=substr(line,start+length(marker)); sub(/\\].*/,\"\",installed) } printf \"ROW\\t%s\\tapt\\t%s\\t%s\\t%s\\t%s\\tupgradable\\t\\t\\t\\tapt\\n\", name, installed, cand, arch, repo }'; ",
-        "dpkg-query -W -f='ROW\\t${binary:Package}\\tapt\\t${Version}\\t\\t${Architecture}\\t\\tinstalled\\t\\t\\t\\tdpkg\\n' 2>/dev/null; ",
-        "if command -v systemctl >/dev/null 2>&1; then for oxide_unit in /etc/systemd/system/*.service /usr/lib/systemd/system/*.service /lib/systemd/system/*.service; do [ -e \"$oxide_unit\" ] || continue; oxide_owner=$(dpkg -S \"$oxide_unit\" 2>/dev/null | head -n 1 | cut -d: -f1 | cut -d, -f1); [ -n \"$oxide_owner\" ] && printf 'OWNER\\tapt\\t%s\\t%s\\t%s\\tdpkg\\n' \"$oxide_owner\" \"$(basename \"$oxide_unit\")\" \"$oxide_unit\"; done; fi; ",
         "fi; ",
         "oxide_rpm_manager=''; if command -v dnf >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1; then oxide_rpm_manager='dnf'; elif command -v yum >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1; then oxide_rpm_manager='yum'; fi; ",
         "if [ -n \"$oxide_rpm_manager\" ]; then oxide_pkg_any=1; printf 'MANAGER\\t%s\\ttrue\\trpm\\n' \"$oxide_rpm_manager\"; ",
         "$oxide_rpm_manager --cacheonly check-update -q 2>/dev/null | awk -v manager=\"$oxide_rpm_manager\" 'NF>=3 && $1 !~ /^(Last|Obsoleting|Security:)/ { arch=$1; sub(/^.*\\./,\"\",arch); name=$1; sub(\"\\\\.\" arch \"$\",\"\",name); printf \"ROW\\t%s\\t%s\\t\\t%s\\t%s\\t%s\\tupgradable\\t\\t\\t\\t%s\\n\", name, manager, $2, arch, $3, manager }'; ",
-        "rpm -qa --qf 'ROW\\t%{NAME}\\t'\"$oxide_rpm_manager\"'\\t%{VERSION}-%{RELEASE}\\t\\t%{ARCH}\\t\\tinstalled\\t%{SUMMARY}\\t\\t\\trpm\\n' 2>/dev/null; ",
-        "if command -v systemctl >/dev/null 2>&1; then for oxide_unit in /etc/systemd/system/*.service /usr/lib/systemd/system/*.service /lib/systemd/system/*.service; do [ -e \"$oxide_unit\" ] || continue; oxide_owner=$(rpm -qf --qf '%{NAME}\\n' \"$oxide_unit\" 2>/dev/null | head -n 1); [ -n \"$oxide_owner\" ] && printf 'OWNER\\t%s\\t%s\\t%s\\t%s\\trpm\\n' \"$oxide_rpm_manager\" \"$oxide_owner\" \"$(basename \"$oxide_unit\")\" \"$oxide_unit\"; done; fi; ",
         "fi; ",
         "if command -v pacman >/dev/null 2>&1; then oxide_pkg_any=1; echo 'MANAGER\tpacman\ttrue\tpacman'; ",
         "pacman -Qu 2>/dev/null | awk 'NF>=4 { printf \"ROW\\t%s\\tpacman\\t%s\\t%s\\t\\t\\tupgradable\\t\\t\\t\\tpacman\\n\", $1, $2, $4 }'; ",
-        "pacman -Q 2>/dev/null | awk 'NF>=2 { printf \"ROW\\t%s\\tpacman\\t%s\\t\\t\\t\\tinstalled\\t\\t\\t\\tpacman\\n\", $1, $2 }'; ",
-        "if command -v systemctl >/dev/null 2>&1; then for oxide_unit in /etc/systemd/system/*.service /usr/lib/systemd/system/*.service /lib/systemd/system/*.service; do [ -e \"$oxide_unit\" ] || continue; oxide_owner=$(pacman -Qoq \"$oxide_unit\" 2>/dev/null | head -n 1); [ -n \"$oxide_owner\" ] && printf 'OWNER\\tpacman\\t%s\\t%s\\t%s\\tpacman\\n' \"$oxide_owner\" \"$(basename \"$oxide_unit\")\" \"$oxide_unit\"; done; fi; ",
         "fi; ",
         "if [ \"$oxide_pkg_any\" -eq 0 ]; then echo '__OXIDE_PACKAGE_UNAVAILABLE__'; fi; ",
         "echo '===PACKAGES_END==='"
@@ -306,14 +303,14 @@ fn build_linux_package_snapshot_command() -> String {
 }
 
 fn build_macos_package_snapshot_command() -> String {
+    // Homebrew can be slow on large installations. Avoid automatic full
+    // inventory and services scans; users can inspect a selected formula.
     concat!(
         "echo '===PACKAGES==='; ",
         "if command -v brew >/dev/null 2>&1; then ",
         "echo '__OXIDE_PACKAGE_CAPABILITY__\tpartial\tmacos_brew'; ",
         "echo 'MANAGER\tbrew\ttrue\tbrew'; ",
         "HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --verbose 2>/dev/null | awk '{ name=$1; installed=\"\"; candidate=\"\"; if (match($0, /\\([^)]*\\)/)) installed=substr($0,RSTART+1,RLENGTH-2); if (index($0,\" < \")>0) candidate=$NF; printf \"ROW\\t%s\\tbrew\\t%s\\t%s\\t\\t\\toutdated\\t\\t\\t\\tbrew\\n\", name, installed, candidate }'; ",
-        "HOMEBREW_NO_AUTO_UPDATE=1 brew list --versions 2>/dev/null | awk 'NF>=1 { name=$1; $1=\"\"; sub(/^ /,\"\"); printf \"ROW\\t%s\\tbrew\\t%s\\t\\t\\t\\tinstalled\\t\\t\\t\\tbrew\\n\", name, $0 }'; ",
-        "HOMEBREW_NO_AUTO_UPDATE=1 brew services list 2>/dev/null | awk 'NR>1 && NF>=1 { path=(NF>=4 ? $4 : \"\"); printf \"OWNER\\tbrew\\t%s\\t%s\\t%s\\tbrew\\n\", $1, $1, path }'; ",
         "else echo '__OXIDE_PACKAGE_UNAVAILABLE__'; fi; ",
         "echo '===PACKAGES_END==='"
     )
@@ -321,13 +318,14 @@ fn build_macos_package_snapshot_command() -> String {
 }
 
 fn build_bsd_package_snapshot_command() -> String {
+    // Keep BSD package snapshots to update checks. Full pkg query output can be
+    // large over SSH and should be requested explicitly later.
     concat!(
         "echo '===PACKAGES==='; ",
         "if command -v pkg >/dev/null 2>&1; then ",
         "echo '__OXIDE_PACKAGE_CAPABILITY__\tpartial\tbsd_pkg'; ",
         "echo 'MANAGER\tpkg\ttrue\tpkg'; ",
         "pkg version -v 2>/dev/null | awk 'NF>=3 && $2 ~ /[<>]/ { printf \"ROW\\t%s\\tpkg\\t%s\\t\\t\\t\\tupgradable\\t\\t\\t\\tpkg\\n\", $1, $3 }'; ",
-        "pkg query 'ROW\\t%n\\tpkg\\t%v\\t\\t%q\\t%R\\tinstalled\\t%c\\t\\t\\tpkg' 2>/dev/null; ",
         "else echo '__OXIDE_PACKAGE_UNAVAILABLE__'; fi; ",
         "echo '===PACKAGES_END==='"
     )
@@ -708,14 +706,24 @@ mod tests {
     fn package_commands_keep_managers_read_only() {
         let linux = build_package_snapshot_command("Linux");
         let mac = build_package_snapshot_command("macOS");
+        let bsd = build_package_snapshot_command("FreeBSD");
         let windows = build_package_snapshot_command("Windows");
 
         assert!(linux.command.contains("apt list --upgradable"));
         assert!(linux.command.contains("--cacheonly check-update"));
         assert!(linux.command.contains("pacman -Qu"));
+        assert!(!linux.command.contains("dpkg-query -W"));
+        assert!(!linux.command.contains("rpm -qa"));
+        assert!(!linux.command.contains("pacman -Q 2"));
+        assert!(!linux.command.contains("OWNER\\t"));
         assert!(!linux.command.contains(" upgrade"));
         assert!(mac.command.contains("HOMEBREW_NO_AUTO_UPDATE=1"));
+        assert!(mac.command.contains("brew outdated"));
+        assert!(!mac.command.contains("brew list --versions"));
+        assert!(!mac.command.contains("brew services list"));
         assert!(!mac.command.contains("brew update"));
+        assert!(bsd.command.contains("pkg version -v"));
+        assert!(!bsd.command.contains("pkg query"));
         assert!(windows.command.contains("__OXIDE_PACKAGE_UNAVAILABLE__"));
     }
 

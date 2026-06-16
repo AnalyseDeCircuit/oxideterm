@@ -1,12 +1,45 @@
 const CONTEXT_SIDEBAR_RESIZE_GUTTER_WIDTH: f32 = 8.0;
+const CONTEXT_SIDEBAR_RESIZE_HOTZONE_WIDTH: f32 = 12.0;
 const CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH: f32 = 1.0;
 
 fn context_sidebar_resize_gutter_width() -> f32 {
     CONTEXT_SIDEBAR_RESIZE_GUTTER_WIDTH
 }
 
-fn context_sidebar_content_width(total_width: f32) -> f32 {
-    (total_width - context_sidebar_resize_gutter_width()).max(0.0)
+fn context_sidebar_frame_chrome(total_width: f32) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("context-right-sidebar-frame")
+        .relative()
+        .flex_none()
+        .w(px(total_width))
+        .h_full()
+        .min_w_0()
+        .flex()
+        .flex_row()
+}
+
+fn context_sidebar_region_chrome() -> gpui::Div {
+    div()
+        .relative()
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .min_h_0()
+}
+
+fn context_sidebar_resize_hotzone_chrome() -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("context-right-sidebar-resize-hotzone")
+        .absolute()
+        .left_0()
+        .top_0()
+        .bottom_0()
+        .w(px(CONTEXT_SIDEBAR_RESIZE_HOTZONE_WIDTH))
+        .cursor(CursorStyle::ResizeColumn)
+        // This is the frame-owned hit target rendered after the content region.
+        // Host Tools bodies can contain scroll/list hitboxes; keeping the resize
+        // hotzone above them prevents loaded content from stealing edge drags.
+        .occlude()
 }
 
 impl WorkspaceApp {
@@ -51,19 +84,14 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .id("context-right-sidebar-frame")
-            .relative()
-            .flex_none()
-            .w(px(self.ai_sidebar_width))
-            .h_full()
-            .min_w_0()
-            .flex()
-            // The frame owns the full right-sidebar width. Keep the resize
-            // gutter and content panel together here so root layout changes
-            // cannot separate the hitbox from the width being resized.
+        context_sidebar_frame_chrome(self.ai_sidebar_width)
+            // The frame owns the full right-sidebar width. Keep the gutter as
+            // a fixed flex child and let the content region consume the rest;
+            // hand-derived nested widths made the AI titlebar narrower than
+            // the visible chat body after sidebar resizes.
             .child(self.render_context_right_sidebar_resize_gutter(cx))
             .child(self.render_context_right_sidebar_region(cx))
+            .child(self.render_context_right_sidebar_resize_hotzone(cx))
             .into_any_element()
     }
 
@@ -80,16 +108,11 @@ impl WorkspaceApp {
                 ("sidebar.panels.host_tools", "host-tools", LucideIcon::Wrench)
             }
         };
-        div()
-            .relative()
-            .w(px(context_sidebar_content_width(self.ai_sidebar_width)))
-            .flex_none()
-            .h_full()
-            .min_h_0()
+        context_sidebar_region_chrome()
             .child(
                 div()
-                    .w_full()
-                    .h_full()
+                    .size_full()
+                    .min_w_0()
                     .min_h_0()
                     .flex()
                     .flex_col()
@@ -98,10 +121,14 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .w_full()
+                            .min_w_0()
                             .flex_none()
                             .h(px(42.0))
                             .flex()
+                            .flex_row()
                             .items_center()
+                            .justify_between()
+                            .gap(px(8.0))
                             .px_3()
                             // The context-sidebar titlebar is fixed chrome.
                             // Give it its own hitbox so wheel/drag events
@@ -109,20 +136,17 @@ impl WorkspaceApp {
                             .occlude()
                             .border_b_1()
                             .border_color(rgba((theme.border << 8) | 0x4d))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    // The panel title is draggable chrome, but the
-                                    // collapse button must stay anchored at the
-                                    // far edge after right-sidebar width changes.
-                                    .child(self.render_context_sidebar_panel_title(
-                                        title_key, title_role, icon, cx,
-                                    )),
-                            )
+                            // Keep the title and collapse button in one real
+                            // horizontal flex row. The region width is owned by
+                            // the parent frame, so this row must never infer a
+                            // smaller hand-derived width from the title text.
+                            .child(self.render_context_sidebar_panel_title(
+                                title_key, title_role, icon, cx,
+                            ))
                             .child(
                                 div()
                                     .id("context-sidebar-collapse")
+                                    .flex_none()
                                     .size(px(28.0))
                                     .flex()
                                     .items_center()
@@ -169,6 +193,8 @@ impl WorkspaceApp {
                             .min_w_0()
                             .flex_1()
                             .min_h_0()
+                            .flex()
+                            .flex_col()
                             .overflow_hidden()
                             .child(match self.active_context_sidebar_panel {
                                 ContextSidebarPanel::Assistant => self.render_ai_sidebar_content(cx),
@@ -222,6 +248,22 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(super) fn render_context_right_sidebar_resize_hotzone(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        context_sidebar_resize_hotzone_chrome()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                    this.start_ai_sidebar_resize(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
     fn render_context_sidebar_panel_title(
         &self,
         title_key: &'static str,
@@ -233,6 +275,8 @@ impl WorkspaceApp {
         self.render_window_drag_content_region(
             "context-sidebar-titlebar-title",
             div()
+                .w_full()
+                .flex_1()
                 .min_w(px(0.0))
                 .flex()
                 .items_center()
@@ -240,13 +284,14 @@ impl WorkspaceApp {
                 .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.accent)))
                 .child(
                     div()
+                        .flex_1()
                         .min_w(px(0.0))
                         .truncate()
                         .text_size(px(13.0))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(rgb(theme.text))
                         .child(self.render_display_text_with_role(
-                            SelectableTextRole::PlainDocument,
+                            SelectableTextRole::NonSelectable,
                             "context-sidebar-title",
                             title_role,
                             self.i18n.t(title_key),
@@ -1426,6 +1471,89 @@ pub(super) enum SidebarActionKind {
 #[cfg(test)]
 mod sidebar_resize_region_tests {
     use super::*;
+    use std::{cell::Cell, rc::Rc};
+
+    use gpui::{
+        Context, IntoElement, Modifiers, MouseButton, ParentElement, Point, Render, Styled,
+        TestAppContext, Window, div, px, size,
+    };
+
+    struct TestContextSidebarChrome {
+        total_width: f32,
+        resize_started: Rc<Cell<bool>>,
+    }
+
+    impl Render for TestContextSidebarChrome {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let resize_started = self.resize_started.clone();
+            context_sidebar_frame_chrome(self.total_width)
+                .debug_selector(|| "context-frame".to_string())
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(context_sidebar_resize_gutter_width()))
+                        .h_full()
+                        .debug_selector(|| "context-gutter".to_string()),
+                )
+                .child(
+                    context_sidebar_region_chrome()
+                        .debug_selector(|| "context-region".to_string())
+                        .child(
+                            div()
+                                .size_full()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .min_w(px(0.0))
+                                        .flex_none()
+                                        .h(px(42.0))
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap(px(8.0))
+                                        .px_3()
+                                        .debug_selector(|| "context-titlebar".to_string())
+                                        .child(
+                                            div()
+                                                .h_full()
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .debug_selector(|| "context-title-drag".to_string()),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .size(px(28.0))
+                                                .debug_selector(|| "context-collapse".to_string()),
+                                        ),
+                                ),
+                        ),
+                )
+                .child(
+                    context_sidebar_resize_hotzone_chrome()
+                        .debug_selector(|| "context-hotzone".to_string())
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            resize_started.set(true);
+                            cx.stop_propagation();
+                        }),
+                )
+        }
+    }
+
+    fn right_edge(bounds: &gpui::Bounds<gpui::Pixels>) -> f32 {
+        f32::from(bounds.origin.x) + f32::from(bounds.size.width)
+    }
+
+    fn assert_close(label: &str, actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= 0.5,
+            "{label}: expected {expected}, got {actual}"
+        );
+    }
 
     #[test]
     fn context_sidebar_resize_gutter_is_layout_owned() {
@@ -1436,29 +1564,82 @@ mod sidebar_resize_region_tests {
         // GPUI List with interactive rows, and that content can steal an
         // internal edge hitbox before resize starts.
         assert!(gutter_width >= 8.0);
-        assert_eq!(
-            context_sidebar_content_width(360.0),
-            360.0 - gutter_width
-        );
-        assert_eq!(context_sidebar_content_width(0.0), 0.0);
     }
 
-    #[test]
-    fn context_sidebar_frame_preserves_total_width_math() {
+    #[gpui::test]
+    fn context_sidebar_region_fills_remaining_frame_width(cx: &mut TestAppContext) {
+        let total_width = 620.0;
         let gutter_width = context_sidebar_resize_gutter_width();
-        let minimum_sidebar_width = AI_SIDEBAR_MIN_WIDTH;
-        let maximum_sidebar_width = AI_SIDEBAR_MAX_WIDTH;
+        let resize_started = Rc::new(Cell::new(false));
 
-        // The persisted/sidebar state width is the total frame width. Content
-        // width must be derived from it so dragging the gutter always resizes
-        // the same visual entity the user is touching.
-        assert_eq!(
-            gutter_width + context_sidebar_content_width(minimum_sidebar_width),
-            minimum_sidebar_width
+        let (_, cx) = cx.add_window_view(|_, _| TestContextSidebarChrome {
+            total_width,
+            resize_started: resize_started.clone(),
+        });
+        cx.simulate_resize(size(px(700.0), px(180.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+
+        let frame = cx.debug_bounds("context-frame").expect("frame bounds");
+        let gutter = cx.debug_bounds("context-gutter").expect("gutter bounds");
+        let region = cx.debug_bounds("context-region").expect("region bounds");
+        let titlebar = cx
+            .debug_bounds("context-titlebar")
+            .expect("titlebar bounds");
+        let collapse = cx
+            .debug_bounds("context-collapse")
+            .expect("collapse bounds");
+        let hotzone = cx.debug_bounds("context-hotzone").expect("hotzone bounds");
+
+        assert_close("frame width", f32::from(frame.size.width), total_width);
+        assert_close("gutter width", f32::from(gutter.size.width), gutter_width);
+        assert_close(
+            "gutter origin",
+            f32::from(gutter.origin.x) - f32::from(frame.origin.x),
+            0.0,
         );
-        assert_eq!(
-            gutter_width + context_sidebar_content_width(maximum_sidebar_width),
-            maximum_sidebar_width
+        assert_close(
+            "region origin",
+            f32::from(region.origin.x) - f32::from(frame.origin.x),
+            gutter_width,
+        );
+        assert_close(
+            "region width",
+            f32::from(region.size.width),
+            total_width - gutter_width,
+        );
+        assert_close(
+            "titlebar width",
+            f32::from(titlebar.size.width),
+            f32::from(region.size.width),
+        );
+
+        // The collapse control should be at the right chrome edge, allowing for
+        // the titlebar padding. This catches regressions where the titlebar row
+        // shrinks to the intrinsic "OxideSens" title width.
+        let right_padding = right_edge(&titlebar) - right_edge(&collapse);
+        assert_close("collapse right padding", right_padding, 12.0);
+
+        assert_close(
+            "hotzone origin",
+            f32::from(hotzone.origin.x) - f32::from(frame.origin.x),
+            0.0,
+        );
+        assert_close(
+            "hotzone width",
+            f32::from(hotzone.size.width),
+            CONTEXT_SIDEBAR_RESIZE_HOTZONE_WIDTH,
+        );
+
+        cx.simulate_mouse_down(
+            Point::new(frame.origin.x + px(4.0), frame.origin.y + px(20.0)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        assert!(
+            resize_started.get(),
+            "resize hotzone should receive edge mouse down after content is rendered"
         );
     }
 }

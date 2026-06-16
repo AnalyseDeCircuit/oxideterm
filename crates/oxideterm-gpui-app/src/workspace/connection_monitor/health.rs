@@ -1585,7 +1585,11 @@ impl WorkspaceApp {
                         "host-log-refresh",
                         true,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_logs_snapshot(selected_id.clone(), cx);
+                            this.request_host_logs_snapshot(
+                                selected_id.clone(),
+                                HostSnapshotFeedback::Toast,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }),
                         cx.entity(),
@@ -1737,7 +1741,11 @@ impl WorkspaceApp {
                         "host-tmux-refresh",
                         true,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_tmux_snapshot(selected_id.clone(), cx);
+                            this.request_host_tmux_snapshot(
+                                selected_id.clone(),
+                                HostSnapshotFeedback::Toast,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }),
                         cx.entity(),
@@ -2304,7 +2312,11 @@ impl WorkspaceApp {
                         "host-port-refresh",
                         true,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_ports_snapshot(selected_id.clone(), cx);
+                            this.request_host_ports_snapshot(
+                                selected_id.clone(),
+                                HostSnapshotFeedback::Toast,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }),
                         cx.entity(),
@@ -2403,7 +2415,11 @@ impl WorkspaceApp {
                         "host-schedule-refresh",
                         true,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_schedules_snapshot(selected_id.clone(), cx);
+                            this.request_host_schedules_snapshot(
+                                selected_id.clone(),
+                                HostSnapshotFeedback::Toast,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }),
                         cx.entity(),
@@ -2502,7 +2518,11 @@ impl WorkspaceApp {
                         "host-filesystem-refresh",
                         true,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_filesystems_snapshot(selected_id.clone(), cx);
+                            this.request_host_filesystems_snapshot(
+                                selected_id.clone(),
+                                HostSnapshotFeedback::Toast,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }),
                         cx.entity(),
@@ -2567,7 +2587,11 @@ impl WorkspaceApp {
                 "host-package-refresh",
                 true,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.request_host_packages_snapshot(selected_id.clone(), cx);
+                    this.request_host_packages_snapshot(
+                        selected_id.clone(),
+                        HostSnapshotFeedback::Toast,
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
                 cx.entity(),
@@ -8452,23 +8476,32 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.request_host_logs_snapshot(connection_id, cx);
+        self.request_host_logs_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    fn request_host_logs_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    fn request_host_logs_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_monitor.host_log_snapshot_polling {
-            self.push_host_log_toast(
-                self.i18n
-                    .t("sidebar.host_logs.toast.snapshot_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+            if feedback.should_toast() {
+                self.push_host_log_toast(
+                    self.i18n
+                        .t("sidebar.host_logs.toast.snapshot_already_running"),
+                    TerminalNoticeVariant::Warning,
+                );
+            }
             return;
         }
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_log_toast(
-                self.i18n.t("sidebar.host_logs.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
+            if feedback.should_toast() {
+                self.push_host_log_toast(
+                    self.i18n.t("sidebar.host_logs.toast.connection_missing"),
+                    TerminalNoticeVariant::Error,
+                );
+            }
             cx.notify();
             return;
         };
@@ -8477,12 +8510,14 @@ impl WorkspaceApp {
             match self.host_log_snapshot_command(&connection_id, preset, HOST_LOG_SNAPSHOT_LIMIT) {
                 Ok(command) => command,
                 Err(error) => {
-                    self.push_host_log_toast(error, TerminalNoticeVariant::Error);
+                    if feedback.should_toast() {
+                        self.push_host_log_toast(error, TerminalNoticeVariant::Error);
+                    }
                     cx.notify();
                     return;
                 }
             };
-        if command.capability == LogCommandCapability::Partial {
+        if feedback.should_toast() && command.capability == LogCommandCapability::Partial {
             self.push_host_log_toast(
                 self.i18n_replace(
                     "sidebar.host_logs.toast.partial_support",
@@ -8496,6 +8531,7 @@ impl WorkspaceApp {
             connection_id: connection_id.clone(),
             preset,
             limit: HOST_LOG_SNAPSHOT_LIMIT,
+            feedback,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.connection_monitor.host_log_snapshot_connection_id = Some(connection_id);
@@ -8529,29 +8565,39 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.request_host_tmux_snapshot(connection_id, cx);
+        self.request_host_tmux_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    fn request_host_tmux_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    fn request_host_tmux_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_monitor.host_tmux_snapshot_polling {
-            self.push_host_tmux_toast(
-                self.i18n
-                    .t("sidebar.host_tmux.toast.snapshot_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+            if feedback.should_toast() {
+                self.push_host_tmux_toast(
+                    self.i18n
+                        .t("sidebar.host_tmux.toast.snapshot_already_running"),
+                    TerminalNoticeVariant::Warning,
+                );
+            }
             return;
         }
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_tmux_toast(
-                self.i18n.t("sidebar.host_tmux.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
+            if feedback.should_toast() {
+                self.push_host_tmux_toast(
+                    self.i18n.t("sidebar.host_tmux.toast.connection_missing"),
+                    TerminalNoticeVariant::Error,
+                );
+            }
             cx.notify();
             return;
         };
         let (command, _os_type) = self.host_tmux_snapshot_command(&connection_id);
         let request = HostTmuxSnapshotRequest {
             connection_id: connection_id.clone(),
+            feedback,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.connection_monitor.host_tmux_snapshot_connection_id = Some(connection_id);
@@ -8584,28 +8630,37 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.request_host_ports_snapshot(connection_id, cx);
+        self.request_host_ports_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    fn request_host_ports_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    fn request_host_ports_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_monitor.host_port_snapshot_polling {
-            self.push_host_port_toast(
-                self.i18n
-                    .t("sidebar.host_ports.toast.snapshot_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+            if feedback.should_toast() {
+                self.push_host_port_toast(
+                    self.i18n
+                        .t("sidebar.host_ports.toast.snapshot_already_running"),
+                    TerminalNoticeVariant::Warning,
+                );
+            }
             return;
         }
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_port_toast(
-                self.i18n.t("sidebar.host_ports.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
+            if feedback.should_toast() {
+                self.push_host_port_toast(
+                    self.i18n.t("sidebar.host_ports.toast.connection_missing"),
+                    TerminalNoticeVariant::Error,
+                );
+            }
             cx.notify();
             return;
         };
         let (command, os_type) = self.host_port_snapshot_command(&connection_id);
-        if command.capability == PortCommandCapability::Partial {
+        if feedback.should_toast() && command.capability == PortCommandCapability::Partial {
             self.push_host_port_toast(
                 self.i18n_replace(
                     "sidebar.host_ports.toast.partial_support",
@@ -8617,6 +8672,7 @@ impl WorkspaceApp {
 
         let request = HostPortSnapshotRequest {
             connection_id: connection_id.clone(),
+            feedback,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.connection_monitor.host_port_snapshot_connection_id = Some(connection_id);
@@ -8650,28 +8706,37 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.request_host_schedules_snapshot(connection_id, cx);
+        self.request_host_schedules_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    fn request_host_schedules_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    fn request_host_schedules_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_monitor.host_schedule_snapshot_polling {
-            self.push_host_schedule_toast(
-                self.i18n
-                    .t("sidebar.host_schedules.toast.snapshot_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+            if feedback.should_toast() {
+                self.push_host_schedule_toast(
+                    self.i18n
+                        .t("sidebar.host_schedules.toast.snapshot_already_running"),
+                    TerminalNoticeVariant::Warning,
+                );
+            }
             return;
         }
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_schedule_toast(
-                self.i18n.t("sidebar.host_schedules.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
+            if feedback.should_toast() {
+                self.push_host_schedule_toast(
+                    self.i18n.t("sidebar.host_schedules.toast.connection_missing"),
+                    TerminalNoticeVariant::Error,
+                );
+            }
             cx.notify();
             return;
         };
         let (command, os_type) = self.host_schedule_snapshot_command(&connection_id);
-        if command.capability == ScheduledTaskCapability::Partial {
+        if feedback.should_toast() && command.capability == ScheduledTaskCapability::Partial {
             self.push_host_schedule_toast(
                 self.i18n_replace(
                     "sidebar.host_schedules.toast.partial_support",
@@ -8683,6 +8748,7 @@ impl WorkspaceApp {
 
         let request = HostScheduleSnapshotRequest {
             connection_id: connection_id.clone(),
+            feedback,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.connection_monitor.host_schedule_snapshot_connection_id = Some(connection_id);
@@ -8716,29 +8782,38 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.request_host_filesystems_snapshot(connection_id, cx);
+        self.request_host_filesystems_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    fn request_host_filesystems_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    fn request_host_filesystems_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_monitor.host_filesystem_snapshot_polling {
-            self.push_host_filesystem_toast(
-                self.i18n
-                    .t("sidebar.host_filesystems.toast.snapshot_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+            if feedback.should_toast() {
+                self.push_host_filesystem_toast(
+                    self.i18n
+                        .t("sidebar.host_filesystems.toast.snapshot_already_running"),
+                    TerminalNoticeVariant::Warning,
+                );
+            }
             return;
         }
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_filesystem_toast(
-                self.i18n
-                    .t("sidebar.host_filesystems.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
+            if feedback.should_toast() {
+                self.push_host_filesystem_toast(
+                    self.i18n
+                        .t("sidebar.host_filesystems.toast.connection_missing"),
+                    TerminalNoticeVariant::Error,
+                );
+            }
             cx.notify();
             return;
         };
         let (command, os_type) = self.host_filesystem_snapshot_command(&connection_id);
-        if command.capability == FilesystemCommandCapability::Partial {
+        if feedback.should_toast() && command.capability == FilesystemCommandCapability::Partial {
             self.push_host_filesystem_toast(
                 self.i18n_replace(
                     "sidebar.host_filesystems.toast.partial_support",
@@ -8750,6 +8825,7 @@ impl WorkspaceApp {
 
         let request = HostFilesystemSnapshotRequest {
             connection_id: connection_id.clone(),
+            feedback,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.connection_monitor.host_filesystem_snapshot_connection_id = Some(connection_id);
@@ -8783,24 +8859,33 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.request_host_packages_snapshot(connection_id, cx);
+        self.request_host_packages_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    fn request_host_packages_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
+    fn request_host_packages_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
         if self.connection_monitor.host_package_snapshot_polling {
-            self.push_host_package_toast(
-                self.i18n
-                    .t("sidebar.host_packages.toast.snapshot_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+            if feedback.should_toast() {
+                self.push_host_package_toast(
+                    self.i18n
+                        .t("sidebar.host_packages.toast.snapshot_already_running"),
+                    TerminalNoticeVariant::Warning,
+                );
+            }
             return;
         }
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_package_toast(
-                self.i18n
-                    .t("sidebar.host_packages.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
+            if feedback.should_toast() {
+                self.push_host_package_toast(
+                    self.i18n
+                        .t("sidebar.host_packages.toast.connection_missing"),
+                    TerminalNoticeVariant::Error,
+                );
+            }
             cx.notify();
             return;
         };
@@ -8808,6 +8893,7 @@ impl WorkspaceApp {
 
         let request = HostPackageSnapshotRequest {
             connection_id: connection_id.clone(),
+            feedback,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         self.connection_monitor.host_package_snapshot_connection_id = Some(connection_id);
@@ -10544,17 +10630,25 @@ impl WorkspaceApp {
                 self.connection_monitor.host_log_snapshot_rx = Some(rx);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let feedback = self
+                    .connection_monitor
+                    .host_log_snapshot_running
+                    .as_ref()
+                    .map(|request| request.feedback)
+                    .unwrap_or(HostSnapshotFeedback::Silent);
                 self.connection_monitor.host_log_snapshot_polling = false;
                 self.connection_monitor.host_log_snapshot_running = None;
                 let reason = self.i18n.t("sidebar.host_logs.toast.unknown_error");
                 self.connection_monitor.host_log_last_error = Some(reason.clone());
-                self.push_host_log_toast(
-                    self.i18n_replace(
-                        "sidebar.host_logs.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_log_toast(
+                        self.i18n_replace(
+                            "sidebar.host_logs.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
                 cx.notify();
             }
         }
@@ -10577,17 +10671,25 @@ impl WorkspaceApp {
                 self.connection_monitor.host_tmux_snapshot_rx = Some(rx);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let feedback = self
+                    .connection_monitor
+                    .host_tmux_snapshot_running
+                    .as_ref()
+                    .map(|request| request.feedback)
+                    .unwrap_or(HostSnapshotFeedback::Silent);
                 self.connection_monitor.host_tmux_snapshot_polling = false;
                 self.connection_monitor.host_tmux_snapshot_running = None;
                 let reason = self.i18n.t("sidebar.host_tmux.toast.unknown_error");
                 self.connection_monitor.host_tmux_last_error = Some(reason.clone());
-                self.push_host_tmux_toast(
-                    self.i18n_replace(
-                        "sidebar.host_tmux.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_tmux_toast(
+                        self.i18n_replace(
+                            "sidebar.host_tmux.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
                 cx.notify();
             }
         }
@@ -10610,17 +10712,25 @@ impl WorkspaceApp {
                 self.connection_monitor.host_port_snapshot_rx = Some(rx);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let feedback = self
+                    .connection_monitor
+                    .host_port_snapshot_running
+                    .as_ref()
+                    .map(|request| request.feedback)
+                    .unwrap_or(HostSnapshotFeedback::Silent);
                 self.connection_monitor.host_port_snapshot_polling = false;
                 self.connection_monitor.host_port_snapshot_running = None;
                 let reason = self.i18n.t("sidebar.host_ports.toast.unknown_error");
                 self.connection_monitor.host_port_last_error = Some(reason.clone());
-                self.push_host_port_toast(
-                    self.i18n_replace(
-                        "sidebar.host_ports.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_port_toast(
+                        self.i18n_replace(
+                            "sidebar.host_ports.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
                 cx.notify();
             }
         }
@@ -10643,17 +10753,25 @@ impl WorkspaceApp {
                 self.connection_monitor.host_schedule_snapshot_rx = Some(rx);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let feedback = self
+                    .connection_monitor
+                    .host_schedule_snapshot_running
+                    .as_ref()
+                    .map(|request| request.feedback)
+                    .unwrap_or(HostSnapshotFeedback::Silent);
                 self.connection_monitor.host_schedule_snapshot_polling = false;
                 self.connection_monitor.host_schedule_snapshot_running = None;
                 let reason = self.i18n.t("sidebar.host_schedules.toast.unknown_error");
                 self.connection_monitor.host_schedule_last_error = Some(reason.clone());
-                self.push_host_schedule_toast(
-                    self.i18n_replace(
-                        "sidebar.host_schedules.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_schedule_toast(
+                        self.i18n_replace(
+                            "sidebar.host_schedules.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
                 cx.notify();
             }
         }
@@ -10676,17 +10794,25 @@ impl WorkspaceApp {
                 self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let feedback = self
+                    .connection_monitor
+                    .host_filesystem_snapshot_running
+                    .as_ref()
+                    .map(|request| request.feedback)
+                    .unwrap_or(HostSnapshotFeedback::Silent);
                 self.connection_monitor.host_filesystem_snapshot_polling = false;
                 self.connection_monitor.host_filesystem_snapshot_running = None;
                 let reason = self.i18n.t("sidebar.host_filesystems.toast.unknown_error");
                 self.connection_monitor.host_filesystem_last_error = Some(reason.clone());
-                self.push_host_filesystem_toast(
-                    self.i18n_replace(
-                        "sidebar.host_filesystems.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_filesystem_toast(
+                        self.i18n_replace(
+                            "sidebar.host_filesystems.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
                 cx.notify();
             }
         }
@@ -10709,17 +10835,25 @@ impl WorkspaceApp {
                 self.connection_monitor.host_package_snapshot_rx = Some(rx);
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let feedback = self
+                    .connection_monitor
+                    .host_package_snapshot_running
+                    .as_ref()
+                    .map(|request| request.feedback)
+                    .unwrap_or(HostSnapshotFeedback::Silent);
                 self.connection_monitor.host_package_snapshot_polling = false;
                 self.connection_monitor.host_package_snapshot_running = None;
                 let reason = self.i18n.t("sidebar.host_packages.toast.unknown_error");
                 self.connection_monitor.host_package_last_error = Some(reason.clone());
-                self.push_host_package_toast(
-                    self.i18n_replace(
-                        "sidebar.host_packages.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_package_toast(
+                        self.i18n_replace(
+                            "sidebar.host_packages.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
                 cx.notify();
             }
         }
@@ -10994,6 +11128,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let feedback = delivery.request.feedback;
         self.connection_monitor.host_log_snapshot_polling = false;
         self.connection_monitor.host_log_snapshot_running = None;
         self.connection_monitor.host_log_snapshot_rx = None;
@@ -11009,31 +11144,37 @@ impl WorkspaceApp {
                 match &snapshot.status {
                     ResourceLogStatus::Available { .. } => {
                         self.connection_monitor.host_log_last_error = None;
-                        self.push_host_log_toast(
-                            self.i18n_replace(
-                                "sidebar.host_logs.toast.snapshot_loaded",
-                                &[("count", visible_count.to_string())],
-                            ),
-                            TerminalNoticeVariant::Success,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_log_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_logs.toast.snapshot_loaded",
+                                    &[("count", visible_count.to_string())],
+                                ),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
                     }
                     ResourceLogStatus::Unavailable => {
                         self.connection_monitor.host_log_last_error =
                             Some(self.i18n.t("sidebar.host_logs.unavailable"));
-                        self.push_host_log_toast(
-                            self.i18n.t("sidebar.host_logs.toast.unavailable"),
-                            TerminalNoticeVariant::Warning,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_log_toast(
+                                self.i18n.t("sidebar.host_logs.toast.unavailable"),
+                                TerminalNoticeVariant::Warning,
+                            );
+                        }
                     }
                     ResourceLogStatus::Error { message } => {
                         self.connection_monitor.host_log_last_error = Some(message.clone());
-                        self.push_host_log_toast(
-                            self.i18n_replace(
-                                "sidebar.host_logs.toast.snapshot_failed",
-                                &[("reason", message.clone())],
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_log_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_logs.toast.snapshot_failed",
+                                    &[("reason", message.clone())],
+                                ),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
                     }
                     ResourceLogStatus::Unknown => {}
                 }
@@ -11057,13 +11198,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_log_toast(
-                    self.i18n_replace(
-                        "sidebar.host_logs.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_log_toast(
+                        self.i18n_replace(
+                            "sidebar.host_logs.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
             Err(error) => {
                 self.connection_monitor.host_log_last_error = Some(error.clone());
@@ -11075,13 +11218,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_log_toast(
-                    self.i18n_replace(
-                        "sidebar.host_logs.toast.snapshot_failed",
-                        &[("reason", error)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_log_toast(
+                        self.i18n_replace(
+                            "sidebar.host_logs.toast.snapshot_failed",
+                            &[("reason", error)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
         }
         cx.notify();
@@ -11101,6 +11246,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let feedback = delivery.request.feedback;
         self.connection_monitor.host_tmux_snapshot_polling = false;
         self.connection_monitor.host_tmux_snapshot_running = None;
         self.connection_monitor.host_tmux_snapshot_rx = None;
@@ -11115,31 +11261,37 @@ impl WorkspaceApp {
                         )
                         .len();
                         self.connection_monitor.host_tmux_last_error = None;
-                        self.push_host_tmux_toast(
-                            self.i18n_replace(
-                                "sidebar.host_tmux.toast.snapshot_loaded",
-                                &[("count", count.to_string())],
-                            ),
-                            TerminalNoticeVariant::Success,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_tmux_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_tmux.toast.snapshot_loaded",
+                                    &[("count", count.to_string())],
+                                ),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
                     }
                     ResourceTmuxStatus::Unavailable => {
                         self.connection_monitor.host_tmux_last_error =
                             Some(self.i18n.t("sidebar.host_tmux.unavailable"));
-                        self.push_host_tmux_toast(
-                            self.i18n.t("sidebar.host_tmux.toast.unavailable"),
-                            TerminalNoticeVariant::Warning,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_tmux_toast(
+                                self.i18n.t("sidebar.host_tmux.toast.unavailable"),
+                                TerminalNoticeVariant::Warning,
+                            );
+                        }
                     }
                     ResourceTmuxStatus::Error { message } => {
                         self.connection_monitor.host_tmux_last_error = Some(message.clone());
-                        self.push_host_tmux_toast(
-                            self.i18n_replace(
-                                "sidebar.host_tmux.toast.snapshot_failed",
-                                &[("reason", message.clone())],
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_tmux_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_tmux.toast.snapshot_failed",
+                                    &[("reason", message.clone())],
+                                ),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
                     }
                     ResourceTmuxStatus::Unknown => {}
                 }
@@ -11164,13 +11316,15 @@ impl WorkspaceApp {
                     windows: Vec::new(),
                     panes: Vec::new(),
                 });
-                self.push_host_tmux_toast(
-                    self.i18n_replace(
-                        "sidebar.host_tmux.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_tmux_toast(
+                        self.i18n_replace(
+                            "sidebar.host_tmux.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
             Err(error) => {
                 self.connection_monitor.host_tmux_last_error = Some(error.clone());
@@ -11184,13 +11338,15 @@ impl WorkspaceApp {
                     windows: Vec::new(),
                     panes: Vec::new(),
                 });
-                self.push_host_tmux_toast(
-                    self.i18n_replace(
-                        "sidebar.host_tmux.toast.snapshot_failed",
-                        &[("reason", error)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_tmux_toast(
+                        self.i18n_replace(
+                            "sidebar.host_tmux.toast.snapshot_failed",
+                            &[("reason", error)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
         }
         cx.notify();
@@ -11210,6 +11366,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let feedback = delivery.request.feedback;
         self.connection_monitor.host_port_snapshot_polling = false;
         self.connection_monitor.host_port_snapshot_running = None;
         self.connection_monitor.host_port_snapshot_rx = None;
@@ -11225,31 +11382,37 @@ impl WorkspaceApp {
                 match &snapshot.status {
                     ResourcePortStatus::Available { .. } => {
                         self.connection_monitor.host_port_last_error = None;
-                        self.push_host_port_toast(
-                            self.i18n_replace(
-                                "sidebar.host_ports.toast.snapshot_loaded",
-                                &[("count", visible_count.to_string())],
-                            ),
-                            TerminalNoticeVariant::Success,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_port_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_ports.toast.snapshot_loaded",
+                                    &[("count", visible_count.to_string())],
+                                ),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
                     }
                     ResourcePortStatus::Unavailable => {
                         self.connection_monitor.host_port_last_error =
                             Some(self.i18n.t("sidebar.host_ports.unavailable"));
-                        self.push_host_port_toast(
-                            self.i18n.t("sidebar.host_ports.toast.unavailable"),
-                            TerminalNoticeVariant::Warning,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_port_toast(
+                                self.i18n.t("sidebar.host_ports.toast.unavailable"),
+                                TerminalNoticeVariant::Warning,
+                            );
+                        }
                     }
                     ResourcePortStatus::Error { message } => {
                         self.connection_monitor.host_port_last_error = Some(message.clone());
-                        self.push_host_port_toast(
-                            self.i18n_replace(
-                                "sidebar.host_ports.toast.snapshot_failed",
-                                &[("reason", message.clone())],
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_port_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_ports.toast.snapshot_failed",
+                                    &[("reason", message.clone())],
+                                ),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
                     }
                     ResourcePortStatus::Unknown => {}
                 }
@@ -11273,13 +11436,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_port_toast(
-                    self.i18n_replace(
-                        "sidebar.host_ports.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_port_toast(
+                        self.i18n_replace(
+                            "sidebar.host_ports.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
             Err(error) => {
                 self.connection_monitor.host_port_last_error = Some(error.clone());
@@ -11291,13 +11456,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_port_toast(
-                    self.i18n_replace(
-                        "sidebar.host_ports.toast.snapshot_failed",
-                        &[("reason", error)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_port_toast(
+                        self.i18n_replace(
+                            "sidebar.host_ports.toast.snapshot_failed",
+                            &[("reason", error)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
         }
         cx.notify();
@@ -11317,6 +11484,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let feedback = delivery.request.feedback;
         self.connection_monitor.host_schedule_snapshot_polling = false;
         self.connection_monitor.host_schedule_snapshot_running = None;
         self.connection_monitor.host_schedule_snapshot_rx = None;
@@ -11332,31 +11500,37 @@ impl WorkspaceApp {
                 match &snapshot.status {
                     ResourceScheduledTaskStatus::Available { .. } => {
                         self.connection_monitor.host_schedule_last_error = None;
-                        self.push_host_schedule_toast(
-                            self.i18n_replace(
-                                "sidebar.host_schedules.toast.snapshot_loaded",
-                                &[("count", visible_count.to_string())],
-                            ),
-                            TerminalNoticeVariant::Success,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_schedule_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_schedules.toast.snapshot_loaded",
+                                    &[("count", visible_count.to_string())],
+                                ),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
                     }
                     ResourceScheduledTaskStatus::Unavailable => {
                         self.connection_monitor.host_schedule_last_error =
                             Some(self.i18n.t("sidebar.host_schedules.unavailable"));
-                        self.push_host_schedule_toast(
-                            self.i18n.t("sidebar.host_schedules.toast.unavailable"),
-                            TerminalNoticeVariant::Warning,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_schedule_toast(
+                                self.i18n.t("sidebar.host_schedules.toast.unavailable"),
+                                TerminalNoticeVariant::Warning,
+                            );
+                        }
                     }
                     ResourceScheduledTaskStatus::Error { message } => {
                         self.connection_monitor.host_schedule_last_error = Some(message.clone());
-                        self.push_host_schedule_toast(
-                            self.i18n_replace(
-                                "sidebar.host_schedules.toast.snapshot_failed",
-                                &[("reason", message.clone())],
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_schedule_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_schedules.toast.snapshot_failed",
+                                    &[("reason", message.clone())],
+                                ),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
                     }
                     ResourceScheduledTaskStatus::Unknown => {}
                 }
@@ -11380,13 +11554,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_schedule_toast(
-                    self.i18n_replace(
-                        "sidebar.host_schedules.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_schedule_toast(
+                        self.i18n_replace(
+                            "sidebar.host_schedules.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
             Err(error) => {
                 self.connection_monitor.host_schedule_last_error = Some(error.clone());
@@ -11398,13 +11574,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_schedule_toast(
-                    self.i18n_replace(
-                        "sidebar.host_schedules.toast.snapshot_failed",
-                        &[("reason", error)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_schedule_toast(
+                        self.i18n_replace(
+                            "sidebar.host_schedules.toast.snapshot_failed",
+                            &[("reason", error)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
         }
         cx.notify();
@@ -11424,6 +11602,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let feedback = delivery.request.feedback;
         self.connection_monitor.host_filesystem_snapshot_polling = false;
         self.connection_monitor.host_filesystem_snapshot_running = None;
         self.connection_monitor.host_filesystem_snapshot_rx = None;
@@ -11439,31 +11618,37 @@ impl WorkspaceApp {
                 match &snapshot.status {
                     ResourceFilesystemStatus::Available { .. } => {
                         self.connection_monitor.host_filesystem_last_error = None;
-                        self.push_host_filesystem_toast(
-                            self.i18n_replace(
-                                "sidebar.host_filesystems.toast.snapshot_loaded",
-                                &[("count", visible_count.to_string())],
-                            ),
-                            TerminalNoticeVariant::Success,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_filesystem_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_filesystems.toast.snapshot_loaded",
+                                    &[("count", visible_count.to_string())],
+                                ),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
                     }
                     ResourceFilesystemStatus::Unavailable => {
                         self.connection_monitor.host_filesystem_last_error =
                             Some(self.i18n.t("sidebar.host_filesystems.unavailable"));
-                        self.push_host_filesystem_toast(
-                            self.i18n.t("sidebar.host_filesystems.toast.unavailable"),
-                            TerminalNoticeVariant::Warning,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_filesystem_toast(
+                                self.i18n.t("sidebar.host_filesystems.toast.unavailable"),
+                                TerminalNoticeVariant::Warning,
+                            );
+                        }
                     }
                     ResourceFilesystemStatus::Error { message } => {
                         self.connection_monitor.host_filesystem_last_error = Some(message.clone());
-                        self.push_host_filesystem_toast(
-                            self.i18n_replace(
-                                "sidebar.host_filesystems.toast.snapshot_failed",
-                                &[("reason", message.clone())],
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_filesystem_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_filesystems.toast.snapshot_failed",
+                                    &[("reason", message.clone())],
+                                ),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
                     }
                     ResourceFilesystemStatus::Unknown => {}
                 }
@@ -11487,13 +11672,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_filesystem_toast(
-                    self.i18n_replace(
-                        "sidebar.host_filesystems.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_filesystem_toast(
+                        self.i18n_replace(
+                            "sidebar.host_filesystems.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
             Err(error) => {
                 self.connection_monitor.host_filesystem_last_error = Some(error.clone());
@@ -11505,13 +11692,15 @@ impl WorkspaceApp {
                     },
                     entries: Vec::new(),
                 });
-                self.push_host_filesystem_toast(
-                    self.i18n_replace(
-                        "sidebar.host_filesystems.toast.snapshot_failed",
-                        &[("reason", error)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_filesystem_toast(
+                        self.i18n_replace(
+                            "sidebar.host_filesystems.toast.snapshot_failed",
+                            &[("reason", error)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
         }
         cx.notify();
@@ -11531,6 +11720,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let feedback = delivery.request.feedback;
         self.connection_monitor.host_package_snapshot_polling = false;
         self.connection_monitor.host_package_snapshot_running = None;
         self.connection_monitor.host_package_snapshot_rx = None;
@@ -11546,31 +11736,37 @@ impl WorkspaceApp {
                 match &snapshot.status {
                     ResourcePackageStatus::Available { .. } => {
                         self.connection_monitor.host_package_last_error = None;
-                        self.push_host_package_toast(
-                            self.i18n_replace(
-                                "sidebar.host_packages.toast.snapshot_loaded",
-                                &[("count", visible_count.to_string())],
-                            ),
-                            TerminalNoticeVariant::Success,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_package_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_packages.toast.snapshot_loaded",
+                                    &[("count", visible_count.to_string())],
+                                ),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
                     }
                     ResourcePackageStatus::Unavailable => {
                         self.connection_monitor.host_package_last_error =
                             Some(self.i18n.t("sidebar.host_packages.unavailable"));
-                        self.push_host_package_toast(
-                            self.i18n.t("sidebar.host_packages.toast.unavailable"),
-                            TerminalNoticeVariant::Warning,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_package_toast(
+                                self.i18n.t("sidebar.host_packages.toast.unavailable"),
+                                TerminalNoticeVariant::Warning,
+                            );
+                        }
                     }
                     ResourcePackageStatus::Error { message } => {
                         self.connection_monitor.host_package_last_error = Some(message.clone());
-                        self.push_host_package_toast(
-                            self.i18n_replace(
-                                "sidebar.host_packages.toast.snapshot_failed",
-                                &[("reason", message.clone())],
-                            ),
-                            TerminalNoticeVariant::Error,
-                        );
+                        if feedback.should_toast() {
+                            self.push_host_package_toast(
+                                self.i18n_replace(
+                                    "sidebar.host_packages.toast.snapshot_failed",
+                                    &[("reason", message.clone())],
+                                ),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
                     }
                     ResourcePackageStatus::Unknown => {}
                 }
@@ -11595,13 +11791,15 @@ impl WorkspaceApp {
                     managers: Vec::new(),
                     entries: Vec::new(),
                 });
-                self.push_host_package_toast(
-                    self.i18n_replace(
-                        "sidebar.host_packages.toast.snapshot_failed",
-                        &[("reason", reason)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_package_toast(
+                        self.i18n_replace(
+                            "sidebar.host_packages.toast.snapshot_failed",
+                            &[("reason", reason)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
             Err(error) => {
                 self.connection_monitor.host_package_last_error = Some(error.clone());
@@ -11614,13 +11812,15 @@ impl WorkspaceApp {
                     managers: Vec::new(),
                     entries: Vec::new(),
                 });
-                self.push_host_package_toast(
-                    self.i18n_replace(
-                        "sidebar.host_packages.toast.snapshot_failed",
-                        &[("reason", error)],
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
+                if feedback.should_toast() {
+                    self.push_host_package_toast(
+                        self.i18n_replace(
+                            "sidebar.host_packages.toast.snapshot_failed",
+                            &[("reason", error)],
+                        ),
+                        TerminalNoticeVariant::Error,
+                    );
+                }
             }
         }
         cx.notify();
@@ -11698,7 +11898,11 @@ impl WorkspaceApp {
                 self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
             }
         }
-        self.request_host_schedules_snapshot(delivery.request.connection_id, cx);
+        self.request_host_schedules_snapshot(
+            delivery.request.connection_id,
+            HostSnapshotFeedback::Silent,
+            cx,
+        );
     }
 
     fn finish_host_tmux_action(
@@ -11723,7 +11927,11 @@ impl WorkspaceApp {
                 self.push_host_tmux_toast(error, TerminalNoticeVariant::Error);
             }
         }
-        self.request_host_tmux_snapshot(delivery.request.connection_id, cx);
+        self.request_host_tmux_snapshot(
+            delivery.request.connection_id,
+            HostSnapshotFeedback::Silent,
+            cx,
+        );
     }
 
     fn push_host_process_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
@@ -13410,22 +13618,46 @@ impl WorkspaceApp {
                             this.connection_monitor.host_schedule_pending_confirm = None;
                             this.sync_connection_monitor_selection(cx);
                             if this.active_context_sidebar_tool == ContextSidebarTool::Logs {
-                                this.request_host_logs_snapshot(connection_id.clone(), cx);
+                                this.request_host_logs_snapshot(
+                                    connection_id.clone(),
+                                    HostSnapshotFeedback::Silent,
+                                    cx,
+                                );
                             }
                             if this.active_context_sidebar_tool == ContextSidebarTool::Tmux {
-                                this.request_host_tmux_snapshot(connection_id.clone(), cx);
+                                this.request_host_tmux_snapshot(
+                                    connection_id.clone(),
+                                    HostSnapshotFeedback::Silent,
+                                    cx,
+                                );
                             }
                             if this.active_context_sidebar_tool == ContextSidebarTool::Ports {
-                                this.request_host_ports_snapshot(connection_id.clone(), cx);
+                                this.request_host_ports_snapshot(
+                                    connection_id.clone(),
+                                    HostSnapshotFeedback::Silent,
+                                    cx,
+                                );
                             }
                             if this.active_context_sidebar_tool == ContextSidebarTool::Schedules {
-                                this.request_host_schedules_snapshot(connection_id.clone(), cx);
+                                this.request_host_schedules_snapshot(
+                                    connection_id.clone(),
+                                    HostSnapshotFeedback::Silent,
+                                    cx,
+                                );
                             }
                             if this.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
-                                this.request_host_filesystems_snapshot(connection_id.clone(), cx);
+                                this.request_host_filesystems_snapshot(
+                                    connection_id.clone(),
+                                    HostSnapshotFeedback::Silent,
+                                    cx,
+                                );
                             }
                             if this.active_context_sidebar_tool == ContextSidebarTool::Packages {
-                                this.request_host_packages_snapshot(connection_id.clone(), cx);
+                                this.request_host_packages_snapshot(
+                                    connection_id.clone(),
+                                    HostSnapshotFeedback::Silent,
+                                    cx,
+                                );
                             }
                             cx.stop_propagation();
                         }),
@@ -13572,22 +13804,46 @@ impl WorkspaceApp {
                     self.connection_monitor.host_schedule_pending_confirm = None;
                     self.sync_connection_monitor_selection(cx);
                     if self.active_context_sidebar_tool == ContextSidebarTool::Logs {
-                        self.request_host_logs_snapshot(connection.connection_id.clone(), cx);
+                        self.request_host_logs_snapshot(
+                            connection.connection_id.clone(),
+                            HostSnapshotFeedback::Silent,
+                            cx,
+                        );
                     }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Tmux {
-                        self.request_host_tmux_snapshot(connection.connection_id.clone(), cx);
+                        self.request_host_tmux_snapshot(
+                            connection.connection_id.clone(),
+                            HostSnapshotFeedback::Silent,
+                            cx,
+                        );
                     }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Ports {
-                        self.request_host_ports_snapshot(connection.connection_id.clone(), cx);
+                        self.request_host_ports_snapshot(
+                            connection.connection_id.clone(),
+                            HostSnapshotFeedback::Silent,
+                            cx,
+                        );
                     }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Schedules {
-                        self.request_host_schedules_snapshot(connection.connection_id.clone(), cx);
+                        self.request_host_schedules_snapshot(
+                            connection.connection_id.clone(),
+                            HostSnapshotFeedback::Silent,
+                            cx,
+                        );
                     }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
-                        self.request_host_filesystems_snapshot(connection.connection_id.clone(), cx);
+                        self.request_host_filesystems_snapshot(
+                            connection.connection_id.clone(),
+                            HostSnapshotFeedback::Silent,
+                            cx,
+                        );
                     }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Packages {
-                        self.request_host_packages_snapshot(connection.connection_id.clone(), cx);
+                        self.request_host_packages_snapshot(
+                            connection.connection_id.clone(),
+                            HostSnapshotFeedback::Silent,
+                            cx,
+                        );
                     }
                 }
                 true

@@ -351,11 +351,24 @@ struct HostServiceLogsDialog {
     loading: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HostSnapshotFeedback {
+    Silent,
+    Toast,
+}
+
+impl HostSnapshotFeedback {
+    fn should_toast(self) -> bool {
+        matches!(self, Self::Toast)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HostLogSnapshotRequest {
     connection_id: String,
     preset: LogPreset,
     limit: usize,
+    feedback: HostSnapshotFeedback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -367,6 +380,7 @@ struct HostLogSnapshotDelivery {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HostTmuxSnapshotRequest {
     connection_id: String,
+    feedback: HostSnapshotFeedback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -393,6 +407,7 @@ struct HostTmuxActionDelivery {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HostPortSnapshotRequest {
     connection_id: String,
+    feedback: HostSnapshotFeedback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -404,6 +419,7 @@ struct HostPortSnapshotDelivery {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HostScheduleSnapshotRequest {
     connection_id: String,
+    feedback: HostSnapshotFeedback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -415,6 +431,7 @@ struct HostScheduleSnapshotDelivery {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HostFilesystemSnapshotRequest {
     connection_id: String,
+    feedback: HostSnapshotFeedback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -426,6 +443,7 @@ struct HostFilesystemSnapshotDelivery {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct HostPackageSnapshotRequest {
     connection_id: String,
+    feedback: HostSnapshotFeedback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

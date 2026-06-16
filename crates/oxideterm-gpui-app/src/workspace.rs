@@ -133,7 +133,7 @@ use oxideterm_gpui_terminal::{
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
-    toast::{ToastVariant, ToastView},
+    toast::{ToastVariant, ToastView, toast_close},
     toaster::toaster,
     tooltip::tooltip_content,
 };
@@ -992,6 +992,9 @@ pub(crate) struct WorkspaceApp {
     local_shells: Vec<ShellInfo>,
     terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
     terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
+    // Standard toasts need stable ids so the close button removes the rendered
+    // toast, not whichever item later occupies the same list index.
+    workspace_toast_next_id: u64,
     workspace_toasts: Vec<WorkspaceToast>,
     plugin_progress_toasts: HashMap<String, WorkspaceToast>,
     connection_trace_tx: std::sync::mpsc::Sender<ConnectionTraceEvent>,
@@ -1163,6 +1166,7 @@ pub(crate) struct AiCliAgentSession {
 
 #[derive(Clone, Debug)]
 struct WorkspaceToast {
+    id: u64,
     notice: TerminalNotice,
     expires_at: Instant,
 }

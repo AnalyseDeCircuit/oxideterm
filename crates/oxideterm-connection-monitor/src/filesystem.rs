@@ -397,6 +397,8 @@ pub fn filesystem_attention_label_keys(entry: &ResourceFilesystemEntry) -> Vec<&
 }
 
 fn build_linux_filesystem_snapshot_command() -> String {
+    // Snapshot commands run on the interactive SSH connection. Keep them
+    // metadata-only: recursive du/find scans belong in explicit diagnostics.
     concat!(
         "echo '===FILESYSTEMS==='; ",
         "if command -v df >/dev/null 2>&1; then ",
@@ -406,15 +408,14 @@ fn build_linux_filesystem_snapshot_command() -> String {
         "else echo '__OXIDE_FILESYSTEM_UNAVAILABLE__'; fi; ",
         "if command -v findmnt >/dev/null 2>&1; then findmnt -rnP -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | sed 's/^/FINDMNT\\t/'; fi; ",
         "if command -v lsblk >/dev/null 2>&1; then lsblk -b -P -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINTS,MODEL 2>/dev/null | sed 's/^/LSBLK\\t/'; fi; ",
-        "if command -v du >/dev/null 2>&1; then du -x -B1 -d 2 / 2>/dev/null | sort -nr | head -n 80 | awk '{ size=$1; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%s\\t%s\\t/\\tdu\\n\", size, $0 }'; fi; ",
-        "if command -v find >/dev/null 2>&1; then find / -xdev -type f -size +100M -printf '%s\\t%p\\n' 2>/dev/null | sort -nr | head -n 40 | awk -F '\\t' '{ printf \"HOTSPOT\\tlarge_file\\t%s\\t%s\\t/\\tfind\\n\", $1, $2 }'; fi; ",
-        "if command -v find >/dev/null 2>&1; then find / -xdev -printf '%h\\n' 2>/dev/null | sort | uniq -c | sort -nr | head -n 50 | awk '{ count=$1; $1=\"\"; sub(/^ /,\"\"); printf \"INODEHOTSPOT\\t%s\\t%s\\t/\\tfind\\n\", count, $0 }'; fi; ",
         "echo '===FILESYSTEMS_END==='"
     )
     .to_string()
 }
 
 fn build_macos_filesystem_snapshot_command() -> String {
+    // macOS snapshot stays shallow for the same reason as Linux: recursive
+    // filesystem walking can stall the SSH session on remote or slow disks.
     concat!(
         "echo '===FILESYSTEMS==='; ",
         "if command -v df >/dev/null 2>&1; then ",
@@ -423,15 +424,14 @@ fn build_macos_filesystem_snapshot_command() -> String {
         "df -iP 2>/dev/null | awk 'NR>1 { mount=$6; for (i=7;i<=NF;i++) mount=mount\" \"$i; pct=$5; gsub(/%/,\"\",pct); printf \"INODE\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n\", $1,$2,$3,$4,pct,mount }'; ",
         "else echo '__OXIDE_FILESYSTEM_UNAVAILABLE__'; fi; ",
         "mount 2>/dev/null | sed 's/^/MOUNT\\t/'; ",
-        "du -x -k -d 2 / 2>/dev/null | sort -nr | head -n 80 | awk '{ size=$1*1024; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%.0f\\t%s\\t/\\tdu\\n\", size, $0 }'; ",
-        "find -x / -type f -size +100M -exec stat -f '%z\\t%N' {} \\; 2>/dev/null | sort -nr | head -n 40 | awk -F '\\t' '{ printf \"HOTSPOT\\tlarge_file\\t%s\\t%s\\t/\\tfind\\n\", $1, $2 }'; ",
-        "find -x / -print 2>/dev/null | sed 's#[^/][^/]*$##; s#/$##; s#^$#/#' | sort | uniq -c | sort -nr | head -n 50 | awk '{ count=$1; $1=\"\"; sub(/^ /,\"\"); printf \"INODEHOTSPOT\\t%s\\t%s\\t/\\tfind\\n\", count, $0 }'; ",
         "echo '===FILESYSTEMS_END==='"
     )
     .to_string()
 }
 
 fn build_bsd_filesystem_snapshot_command() -> String {
+    // BSD support is intentionally a shallow snapshot; deep path analysis is
+    // exposed through the diagnostic terminal so cancellation is visible.
     concat!(
         "echo '===FILESYSTEMS==='; ",
         "if command -v df >/dev/null 2>&1; then ",
@@ -440,17 +440,14 @@ fn build_bsd_filesystem_snapshot_command() -> String {
         "df -iP 2>/dev/null | awk 'NR>1 { mount=$6; for (i=7;i<=NF;i++) mount=mount\" \"$i; pct=$5; gsub(/%/,\"\",pct); printf \"INODE\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n\", $1,$2,$3,$4,pct,mount }'; ",
         "else echo '__OXIDE_FILESYSTEM_UNAVAILABLE__'; fi; ",
         "mount 2>/dev/null | sed 's/^/MOUNT\\t/'; ",
-        "du -x -k -d 2 / 2>/dev/null | sort -nr | head -n 80 | awk '{ size=$1*1024; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%.0f\\t%s\\t/\\tdu\\n\", size, $0 }'; ",
-        "find -x / -type f -size +100M -exec stat -f '%z\\t%N' {} \\; 2>/dev/null | sort -nr | head -n 40 | awk -F '\\t' '{ printf \"HOTSPOT\\tlarge_file\\t%s\\t%s\\t/\\tfind\\n\", $1, $2 }'; ",
-        "find -x / -print 2>/dev/null | sed 's#[^/][^/]*$##; s#/$##; s#^$#/#' | sort | uniq -c | sort -nr | head -n 50 | awk '{ count=$1; $1=\"\"; sub(/^ /,\"\"); printf \"INODEHOTSPOT\\t%s\\t%s\\t/\\tfind\\n\", count, $0 }'; ",
         "echo '===FILESYSTEMS_END==='"
     )
     .to_string()
 }
 
 fn build_windows_filesystem_snapshot_command() -> String {
-    // Windows has no Unix inode concept, so file-count hotspots model the same
-    // operational risk without pretending that NTFS exposes inode pressure.
+    // Windows snapshots also avoid Get-ChildItem -Recurse. Deep NTFS scans can
+    // dominate slow OpenSSH sessions and should only run in explicit terminals.
     concat!(
         "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
         "Write-Output '===FILESYSTEMS===';",
@@ -472,22 +469,6 @@ fn build_windows_filesystem_snapshot_command() -> String {
         "}",
         "}catch{$psdriveError=$_.Exception.Message};",
         "if($volumeError -and $psdriveError){Write-Output ('__OXIDE_FILESYSTEM_ERROR__'+[char]9+$psdriveError)};",
-        "$roots=@();",
-        "try{Get-Volume|Where-Object{$_.DriveLetter}|ForEach-Object{$roots+=($_.DriveLetter+':\\')}}catch{};",
-        "if($roots.Count -eq 0){try{Get-PSDrive -PSProvider FileSystem|ForEach-Object{$roots+=$_.Root}}catch{}};",
-        "foreach($root in ($roots|Select-Object -Unique)){",
-        "try{",
-        "Get-ChildItem -LiteralPath $root -Force -Directory -ErrorAction SilentlyContinue|ForEach-Object{",
-        "$dir=$_.FullName;$size=[int64]0;$count=[int64]0;",
-        "Get-ChildItem -LiteralPath $dir -Force -Recurse -File -ErrorAction SilentlyContinue|ForEach-Object{$size+=[int64]$_.Length;$count+=1};",
-        "Write-Output ('HOTSPOT'+[char]9+'large_dir'+[char]9+$size+[char]9+$dir+[char]9+$root+[char]9+'powershell');",
-        "Write-Output ('COUNTHOTSPOT'+[char]9+$count+[char]9+$dir+[char]9+$root+[char]9+'powershell')",
-        "};",
-        "Get-ChildItem -LiteralPath $root -Force -Recurse -File -ErrorAction SilentlyContinue|Where-Object{$_.Length -ge 104857600}|Sort-Object Length -Descending|Select-Object -First 40|ForEach-Object{",
-        "Write-Output ('HOTSPOT'+[char]9+'large_file'+[char]9+[int64]$_.Length+[char]9+$_.FullName+[char]9+$root+[char]9+'powershell')",
-        "}",
-        "}catch{}",
-        "};",
         "Write-Output '===FILESYSTEMS_END==='",
         "\""
     )
@@ -1136,16 +1117,24 @@ mod tests {
         let windows = build_filesystem_snapshot_command("Windows");
 
         assert!(linux.command.contains("df -PTB1"));
-        assert!(linux.command.contains("-d 2 /"));
-        assert!(linux.command.contains("INODEHOTSPOT"));
+        assert!(linux.command.contains("findmnt -rnP"));
+        assert!(linux.command.contains("lsblk -b -P"));
+        assert!(!linux.command.contains("du -x"));
+        assert!(!linux.command.contains("find / -xdev"));
+        assert!(!linux.command.contains("INODEHOTSPOT"));
         assert_eq!(linux.capability, FilesystemCommandCapability::Full);
         assert!(mac.command.contains("df -kP"));
+        assert!(!mac.command.contains("du -x"));
+        assert!(!mac.command.contains("find -x /"));
         assert_eq!(mac.capability, FilesystemCommandCapability::Partial);
         assert!(bsd.command.contains("df -kP"));
+        assert!(!bsd.command.contains("du -x"));
+        assert!(!bsd.command.contains("find -x /"));
         assert_eq!(bsd.capability, FilesystemCommandCapability::Partial);
         assert!(windows.command.contains("Get-Volume"));
-        assert!(windows.command.contains("COUNTHOTSPOT"));
-        assert!(windows.command.contains("Get-ChildItem"));
+        assert!(windows.command.contains("Get-PSDrive"));
+        assert!(!windows.command.contains("COUNTHOTSPOT"));
+        assert!(!windows.command.contains("Get-ChildItem"));
         assert_eq!(windows.capability, FilesystemCommandCapability::Partial);
     }
 }

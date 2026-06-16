@@ -1475,7 +1475,7 @@ impl WorkspaceApp {
                             .font_weight(gpui::FontWeight::BOLD)
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
+                                SelectableTextRole::NonSelectable,
                                 "ai-chat-header",
                                 "label",
                                 self.i18n.t("ai.chat.header").to_uppercase(),

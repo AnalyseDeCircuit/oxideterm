@@ -1,4 +1,6 @@
-use gpui::{Div, FontWeight, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{
+    AnyElement, Div, FontWeight, ParentElement, Styled, div, prelude::*, px, rgb, rgba, svg,
+};
 use oxideterm_theme::ThemeTokens;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,6 +17,7 @@ pub struct ToastView {
     pub status_text: Option<String>,
     pub progress: Option<f32>,
     pub variant: ToastVariant,
+    pub close: Option<AnyElement>,
 }
 
 fn toast_content_width(tokens: &ThemeTokens) -> f32 {
@@ -98,6 +101,7 @@ pub fn toast(tokens: &ThemeTokens, view: ToastView) -> Div {
                     )
                 }),
         )
+        .when_some(view.close, |toast, close| toast.child(close))
 }
 
 pub fn toast_action(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
@@ -117,12 +121,26 @@ pub fn toast_action(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
 }
 
 pub fn toast_close(tokens: &ThemeTokens) -> Div {
+    let button_size = tokens.metrics.ui_toast_close_size + tokens.spacing.two;
+
     div()
         .absolute()
         .right(px(tokens.spacing.two))
         .top(px(tokens.spacing.two))
-        .size(px(tokens.metrics.ui_toast_close_size))
+        .flex()
+        .size(px(button_size))
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
         .rounded(px(tokens.radii.xs))
         .text_color(rgb(tokens.ui.text_muted))
-        .child("×")
+        .opacity(0.75)
+        .hover(|button| button.opacity(1.0).text_color(rgb(tokens.ui.text)))
+        // Tauri's Radix ToastClose is an absolute top-right affordance with a
+        // 16px X icon and 4px padding. GPUI uses the same visual footprint here.
+        .child(
+            svg()
+                .path("lucide/x.svg")
+                .size(px(tokens.metrics.ui_toast_close_size)),
+        )
 }

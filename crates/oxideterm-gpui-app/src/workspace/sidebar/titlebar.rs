@@ -41,6 +41,7 @@ impl WorkspaceApp {
             .flex_1()
             .min_w(px(0.0))
             .flex()
+            .flex_row()
             .items_center()
             // Only use this for non-interactive top-chrome title content. Do not
             // wrap buttons, tabs, resize handles, terminal content, or inputs.

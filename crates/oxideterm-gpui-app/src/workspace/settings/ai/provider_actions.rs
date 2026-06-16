@@ -183,7 +183,9 @@ impl WorkspaceApp {
         title: String,
         variant: TerminalNoticeVariant,
     ) {
+        let id = self.next_workspace_toast_id();
         self.workspace_toasts.push(WorkspaceToast {
+            id,
             notice: TerminalNotice {
                 title,
                 description: None,

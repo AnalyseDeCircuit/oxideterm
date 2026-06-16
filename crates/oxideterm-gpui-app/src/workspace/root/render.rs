@@ -118,7 +118,7 @@ impl Render for WorkspaceApp {
             self.active_tab().map(|tab| tab_background_key(&tab.kind)),
             cx,
         );
-        let toast_layer = self.render_workspace_toasts();
+        let toast_layer = self.render_workspace_toasts(cx);
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
         let titlebar_visible = !window.is_fullscreen();
         let effective_titlebar_height = if titlebar_visible {
@@ -1150,6 +1150,18 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn next_workspace_toast_id(&mut self) -> u64 {
+        let id = self.workspace_toast_next_id;
+        self.workspace_toast_next_id = self.workspace_toast_next_id.wrapping_add(1).max(1);
+        id
+    }
+
+    fn dismiss_workspace_toast(&mut self, toast_id: u64) -> bool {
+        let previous_len = self.workspace_toasts.len();
+        self.workspace_toasts.retain(|toast| toast.id != toast_id);
+        previous_len != self.workspace_toasts.len()
+    }
+
     fn poll_terminal_notices(&mut self, cx: &mut Context<Self>) {
         const WORKSPACE_TOAST_TTL: Duration = Duration::from_secs(4);
 
@@ -1163,7 +1175,9 @@ impl WorkspaceApp {
 
         let mut added = false;
         while let Ok(notice) = self.terminal_notice_rx.try_recv() {
+            let id = self.next_workspace_toast_id();
             self.workspace_toasts.push(WorkspaceToast {
+                id,
                 notice,
                 expires_at: now + WORKSPACE_TOAST_TTL,
             });
@@ -1188,7 +1202,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_workspace_toasts(&self) -> Option<AnyElement> {
+    fn render_workspace_toasts(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.workspace_toasts.is_empty()
             && self.plugin_progress_toasts.is_empty()
             && !self
@@ -1199,33 +1213,88 @@ impl WorkspaceApp {
             return None;
         }
 
-        let standard_toasts = self.workspace_toasts.iter().map(|toast| ToastView {
-            title: toast.notice.title.clone(),
-            description: toast.notice.description.clone(),
-            status_text: toast.notice.status_text.clone(),
-            progress: toast.notice.progress,
-            variant: toast_variant_from_terminal(toast.notice.variant),
+        let workspace = cx.entity();
+        let standard_toasts = self.workspace_toasts.iter().map(|toast| {
+            let toast_id = toast.id;
+            let workspace = workspace.clone();
+            ToastView {
+                title: toast.notice.title.clone(),
+                description: toast.notice.description.clone(),
+                status_text: toast.notice.status_text.clone(),
+                progress: toast.notice.progress,
+                variant: toast_variant_from_terminal(toast.notice.variant),
+                close: Some(
+                    toast_close(&self.tokens)
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                if this.dismiss_workspace_toast(toast_id) {
+                                    cx.notify();
+                                }
+                            });
+                            cx.stop_propagation();
+                        })
+                        .into_any_element(),
+                ),
+            }
         });
-        let plugin_progress_toasts = self.plugin_progress_toasts.values().map(|toast| ToastView {
-            title: toast.notice.title.clone(),
-            description: toast.notice.description.clone(),
-            status_text: toast.notice.status_text.clone(),
-            progress: toast.notice.progress,
-            variant: toast_variant_from_terminal(toast.notice.variant),
-        });
+        let plugin_progress_toasts =
+            self.plugin_progress_toasts
+                .iter()
+                .map(|(toast_key, toast)| {
+                    let toast_key = toast_key.clone();
+                    let workspace = workspace.clone();
+                    ToastView {
+                        title: toast.notice.title.clone(),
+                        description: toast.notice.description.clone(),
+                        status_text: toast.notice.status_text.clone(),
+                        progress: toast.notice.progress,
+                        variant: toast_variant_from_terminal(toast.notice.variant),
+                        close: Some(
+                            toast_close(&self.tokens)
+                                .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                                    let _ = workspace.update(cx, |this, cx| {
+                                        if this.plugin_progress_toasts.remove(&toast_key).is_some()
+                                        {
+                                            cx.notify();
+                                        }
+                                    });
+                                    cx.stop_propagation();
+                                })
+                                .into_any_element(),
+                        ),
+                    }
+                });
         let trace_toasts = self
             .connection_trace_toasts
-            .values()
-            .filter_map(|trace| trace.displayed.as_ref())
-            .map(|event| ToastView {
-                title: self.connection_trace_title(event),
-                description: None,
-                status_text: Some(self.connection_trace_status_text(event)),
-                progress: Some(event.progress),
-                variant: match event.status {
-                    ConnectionTraceStatus::Ready => ToastVariant::Success,
-                    _ => ToastVariant::Default,
-                },
+            .iter()
+            .filter_map(|(attempt_id, trace)| {
+                let event = trace.displayed.as_ref()?;
+                Some((attempt_id.clone(), event))
+            })
+            .map(|(attempt_id, event)| {
+                let workspace = workspace.clone();
+                ToastView {
+                    title: self.connection_trace_title(event),
+                    description: None,
+                    status_text: Some(self.connection_trace_status_text(event)),
+                    progress: Some(event.progress),
+                    variant: match event.status {
+                        ConnectionTraceStatus::Ready => ToastVariant::Success,
+                        _ => ToastVariant::Default,
+                    },
+                    close: Some(
+                        toast_close(&self.tokens)
+                            .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                                let _ = workspace.update(cx, |this, cx| {
+                                    if this.connection_trace_toasts.remove(&attempt_id).is_some() {
+                                        cx.notify();
+                                    }
+                                });
+                                cx.stop_propagation();
+                            })
+                            .into_any_element(),
+                    ),
+                }
             });
         let toasts = standard_toasts.chain(plugin_progress_toasts).chain(trace_toasts);
         Some(toaster(&self.tokens, toasts).into_any_element())

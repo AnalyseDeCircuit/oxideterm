@@ -850,6 +850,7 @@ impl WorkspaceApp {
             local_shells,
             terminal_notice_tx,
             terminal_notice_rx,
+            workspace_toast_next_id: 1,
             workspace_toasts: Vec::new(),
             plugin_progress_toasts: HashMap::new(),
             connection_trace_tx,
