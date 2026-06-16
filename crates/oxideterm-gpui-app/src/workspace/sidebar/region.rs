@@ -109,9 +109,17 @@ impl WorkspaceApp {
                             .occlude()
                             .border_b_1()
                             .border_color(rgba((theme.border << 8) | 0x4d))
-                            .child(self.render_context_sidebar_panel_title(
-                                title_key, title_role, icon, cx,
-                            ))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    // The panel title is draggable chrome, but the
+                                    // collapse button must stay anchored at the
+                                    // far edge after right-sidebar width changes.
+                                    .child(self.render_context_sidebar_panel_title(
+                                        title_key, title_role, icon, cx,
+                                    )),
+                            )
                             .child(
                                 div()
                                     .id("context-sidebar-collapse")

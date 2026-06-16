@@ -77,6 +77,7 @@ pub(super) enum ContextSidebarTool {
     Ports,
     Schedules,
     Filesystems,
+    Packages,
 }
 
 #[derive(Clone, Copy)]

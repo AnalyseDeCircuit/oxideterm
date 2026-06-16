@@ -48,7 +48,8 @@
       "forwarding": "端口转发",
       "ports": "端口",
       "schedules": "计划任务",
-      "filesystems": "磁盘"
+      "filesystems": "磁盘",
+      "packages": "包管理"
     },
     "tooltips": {
       "settings": "设置",
@@ -557,7 +558,9 @@
         "high_usage": "高占用",
         "inode_pressure": "Inode 压力",
         "large_items": "大项",
-        "blocks": "块设备"
+        "blocks": "块设备",
+        "attention": "需要关注",
+        "inode_hotspots": "Inode / 文件数"
       },
       "columns": {
         "path": "路径",
@@ -571,14 +574,17 @@
         "used_available": "已用 / 可用",
         "source": "来源",
         "detail": "详情",
-        "options": "选项"
+        "options": "选项",
+        "attention": "关注原因"
       },
       "kinds": {
         "mount": "挂载点",
         "large_dir": "大目录",
         "large_file": "大文件",
         "block": "块设备",
-        "unknown": "未知"
+        "unknown": "未知",
+        "inode_dir": "Inode 热点",
+        "count_dir": "文件数热点"
       },
       "read_only": {
         "yes": "是",
@@ -601,6 +607,82 @@
         "copied_path": "已复制 {{path}}。",
         "partial_support": "{{os}} 上的文件系统检查为部分支持。",
         "unknown_error": "未知文件系统扫描错误。"
+      },
+      "attention": {
+        "critical_usage": "容量危险",
+        "high_usage": "高占用",
+        "critical_inode": "Inode 危险",
+        "inode_pressure": "Inode 压力",
+        "low_free_space": "剩余过低",
+        "read_only": "只读挂载",
+        "large_item": "大项",
+        "inode_hotspot": "Inode 热点",
+        "file_count_hotspot": "文件数热点"
+      },
+      "values": {
+        "inode_count": "{{count}} 个 inode",
+        "file_count": "{{count}} 个文件"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "搜索软件包...",
+      "count_suffix": "个包",
+      "loading": "正在扫描软件包...",
+      "empty": "没有匹配的软件包",
+      "unavailable": "此主机上没有可用的包管理工具。",
+      "error": "包管理命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "只读支持",
+        "unknown": "支持情况未知"
+      },
+      "filters": {
+        "all": "全部",
+        "upgradable": "可更新",
+        "installed": "已安装",
+        "services": "服务相关",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "软件包",
+        "status": "状态",
+        "installed": "已安装",
+        "candidate": "候选版本",
+        "manager": "管理器",
+        "service": "服务",
+        "arch": "架构",
+        "repository": "仓库",
+        "summary": "摘要",
+        "source": "来源",
+        "owner_paths": "归属路径"
+      },
+      "status": {
+        "upgradable": "可更新",
+        "installed": "已安装",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "刷新软件包",
+        "inspect": "打开包详情",
+        "copy_name": "复制包名"
+      },
+      "inspect_title": "包详情",
+      "toast": {
+        "snapshot_already_running": "软件包扫描已经在运行。",
+        "snapshot_loaded": "已加载 {{count}} 个软件包。",
+        "snapshot_failed": "扫描软件包失败：{{reason}}",
+        "unavailable": "此主机上没有可用的包管理工具。",
+        "connection_missing": "选中的连接已不可用。",
+        "exec_terminal_missing": "没有可用于包详情的实时 SSH 终端路由。",
+        "inspect_unsupported": "暂不支持 {{manager}} 的包详情命令。",
+        "inspect_opened": "已打开 {{name}} 的详情。",
+        "copied_name": "已复制 {{name}}。",
+        "partial_support": "{{os}} 上的软件包检查为只读支持。",
+        "unknown_error": "未知的软件包扫描错误。"
       }
     }
   },

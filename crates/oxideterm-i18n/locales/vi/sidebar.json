@@ -48,7 +48,8 @@
       "forwarding": "Chuyển tiếp cổng",
       "ports": "Cổng",
       "schedules": "Tác vụ đã lên lịch",
-      "filesystems": "Ổ đĩa"
+      "filesystems": "Ổ đĩa",
+      "packages": "Gói"
     },
     "tooltips": {
       "settings": "Cài đặt",
@@ -557,7 +558,9 @@
         "high_usage": "Mức dùng cao",
         "inode_pressure": "Áp lực inode",
         "large_items": "Mục lớn",
-        "blocks": "Thiết bị khối"
+        "blocks": "Thiết bị khối",
+        "attention": "Cần chú ý",
+        "inode_hotspots": "Inode / số tệp"
       },
       "columns": {
         "path": "Đường dẫn",
@@ -571,14 +574,17 @@
         "used_available": "Đã dùng / còn trống",
         "source": "Nguồn",
         "detail": "Chi tiết",
-        "options": "Tùy chọn"
+        "options": "Tùy chọn",
+        "attention": "Cần chú ý"
       },
       "kinds": {
         "mount": "Điểm gắn",
         "large_dir": "Thư mục lớn",
         "large_file": "Tệp lớn",
         "block": "Thiết bị khối",
-        "unknown": "Không rõ"
+        "unknown": "Không rõ",
+        "inode_dir": "Điểm nóng inode",
+        "count_dir": "Điểm nóng số lượng tệp"
       },
       "read_only": {
         "yes": "Có",
@@ -601,6 +607,82 @@
         "copied_path": "Đã sao chép {{path}}.",
         "partial_support": "Kiểm tra hệ thống tệp chỉ được hỗ trợ một phần trên {{os}}.",
         "unknown_error": "Lỗi quét hệ thống tệp không xác định."
+      },
+      "attention": {
+        "critical_usage": "Mức dùng nguy hiểm",
+        "high_usage": "Mức dùng cao",
+        "critical_inode": "Inode nguy hiểm",
+        "inode_pressure": "Áp lực inode",
+        "low_free_space": "Còn ít dung lượng",
+        "read_only": "Chỉ đọc",
+        "large_item": "Mục lớn",
+        "inode_hotspot": "Điểm nóng inode",
+        "file_count_hotspot": "Điểm nóng số lượng tệp"
+      },
+      "values": {
+        "inode_count": "{{count}} inode",
+        "file_count": "{{count}} tệp"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Tìm gói...",
+      "count_suffix": "gói",
+      "loading": "Đang quét gói...",
+      "empty": "Không có gói khớp",
+      "unavailable": "Không có công cụ quản lý gói trên máy chủ này.",
+      "error": "Lệnh gói thất bại: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ chỉ đọc",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "filters": {
+        "all": "Tất cả",
+        "upgradable": "Có thể cập nhật",
+        "installed": "Đã cài",
+        "services": "Dịch vụ",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Gói",
+        "status": "Trạng thái",
+        "installed": "Đã cài",
+        "candidate": "Bản ứng viên",
+        "manager": "Trình quản lý",
+        "service": "Dịch vụ",
+        "arch": "Kiến trúc",
+        "repository": "Kho",
+        "summary": "Tóm tắt",
+        "source": "Nguồn",
+        "owner_paths": "Đường dẫn sở hữu"
+      },
+      "status": {
+        "upgradable": "Có thể cập nhật",
+        "installed": "Đã cài",
+        "unknown": "Không rõ"
+      },
+      "actions": {
+        "refresh": "Làm mới gói",
+        "inspect": "Mở chi tiết gói",
+        "copy_name": "Sao chép tên gói"
+      },
+      "inspect_title": "Chi tiết gói",
+      "toast": {
+        "snapshot_already_running": "Quét gói đang chạy.",
+        "snapshot_loaded": "Đã tải {{count}} gói.",
+        "snapshot_failed": "Không thể quét gói: {{reason}}",
+        "unavailable": "Không có công cụ quản lý gói trên máy chủ này.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH trực tiếp cho chi tiết gói.",
+        "inspect_unsupported": "Chưa hỗ trợ chi tiết gói cho {{manager}}.",
+        "inspect_opened": "Đã mở chi tiết cho {{name}}.",
+        "copied_name": "Đã sao chép {{name}}.",
+        "partial_support": "Kiểm tra gói trên {{os}} chỉ hỗ trợ đọc.",
+        "unknown_error": "Lỗi quét gói không xác định."
       }
     }
   },

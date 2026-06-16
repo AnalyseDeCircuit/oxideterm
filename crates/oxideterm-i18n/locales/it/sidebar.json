@@ -48,7 +48,8 @@
       "forwarding": "Inoltro porte",
       "ports": "Porte",
       "schedules": "Attività pianificate",
-      "filesystems": "Dischi"
+      "filesystems": "Dischi",
+      "packages": "Pacchetti"
     },
     "tooltips": {
       "settings": "Impostazioni",
@@ -557,7 +558,9 @@
         "high_usage": "Uso elevato",
         "inode_pressure": "Pressione inode",
         "large_items": "Elementi grandi",
-        "blocks": "Blocchi"
+        "blocks": "Blocchi",
+        "attention": "Da controllare",
+        "inode_hotspots": "Inode / numero file"
       },
       "columns": {
         "path": "Percorso",
@@ -571,14 +574,17 @@
         "used_available": "Usato / disponibile",
         "source": "Origine",
         "detail": "Dettaglio",
-        "options": "Opzioni"
+        "options": "Opzioni",
+        "attention": "Da controllare"
       },
       "kinds": {
         "mount": "Mount",
         "large_dir": "Directory grande",
         "large_file": "File grande",
         "block": "Dispositivo a blocchi",
-        "unknown": "Sconosciuto"
+        "unknown": "Sconosciuto",
+        "inode_dir": "Hotspot inode",
+        "count_dir": "Hotspot conteggio file"
       },
       "read_only": {
         "yes": "Sì",
@@ -601,6 +607,82 @@
         "copied_path": "{{path}} copiato.",
         "partial_support": "L’ispezione del file system è parziale su {{os}}.",
         "unknown_error": "Errore sconosciuto nella scansione del file system."
+      },
+      "attention": {
+        "critical_usage": "Uso critico",
+        "high_usage": "Uso elevato",
+        "critical_inode": "Inode critici",
+        "inode_pressure": "Pressione inode",
+        "low_free_space": "Poco spazio libero",
+        "read_only": "Sola lettura",
+        "large_item": "Elemento grande",
+        "inode_hotspot": "Hotspot inode",
+        "file_count_hotspot": "Hotspot conteggio file"
+      },
+      "values": {
+        "inode_count": "{{count}} inode",
+        "file_count": "{{count}} file"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Cerca pacchetti...",
+      "count_suffix": "pacchetti",
+      "loading": "Scansione pacchetti...",
+      "empty": "Nessun pacchetto corrispondente",
+      "unavailable": "Nessuno strumento di pacchetti disponibile su questo host.",
+      "error": "Comando pacchetti non riuscito: {{error}}",
+      "capability": {
+        "full": "Supporto completo",
+        "partial": "Supporto in sola lettura",
+        "unknown": "Supporto sconosciuto"
+      },
+      "filters": {
+        "all": "Tutti",
+        "upgradable": "Aggiornabili",
+        "installed": "Installati",
+        "services": "Servizi",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Pacchetto",
+        "status": "Stato",
+        "installed": "Installato",
+        "candidate": "Candidato",
+        "manager": "Gestore",
+        "service": "Servizio",
+        "arch": "Architettura",
+        "repository": "Repository",
+        "summary": "Riepilogo",
+        "source": "Origine",
+        "owner_paths": "Percorsi proprietari"
+      },
+      "status": {
+        "upgradable": "Aggiornabile",
+        "installed": "Installato",
+        "unknown": "Sconosciuto"
+      },
+      "actions": {
+        "refresh": "Aggiorna pacchetti",
+        "inspect": "Apri dettagli pacchetto",
+        "copy_name": "Copia nome pacchetto"
+      },
+      "inspect_title": "Dettagli pacchetto",
+      "toast": {
+        "snapshot_already_running": "La scansione dei pacchetti è già in corso.",
+        "snapshot_loaded": "{{count}} pacchetti caricati.",
+        "snapshot_failed": "Impossibile analizzare i pacchetti: {{reason}}",
+        "unavailable": "Nessuno strumento di pacchetti disponibile su questo host.",
+        "connection_missing": "La connessione selezionata non è più disponibile.",
+        "exec_terminal_missing": "Nessun percorso terminale SSH attivo disponibile per i dettagli del pacchetto.",
+        "inspect_unsupported": "I dettagli dei pacchetti non sono ancora supportati per {{manager}}.",
+        "inspect_opened": "Dettagli aperti per {{name}}.",
+        "copied_name": "{{name}} copiato.",
+        "partial_support": "L'ispezione dei pacchetti su {{os}} è in sola lettura.",
+        "unknown_error": "Errore sconosciuto durante la scansione dei pacchetti."
       }
     }
   },

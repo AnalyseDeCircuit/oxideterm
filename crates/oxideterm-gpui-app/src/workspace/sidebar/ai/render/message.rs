@@ -1463,10 +1463,11 @@ impl WorkspaceApp {
             .bg(rgb(self.tokens.ui.bg))
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .min_w_0()
                     .child(
                         div()
                             .flex_none()
@@ -1526,6 +1527,7 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .flex_none()
                     .flex()
                     .items_center()
                     .gap(px(2.0))

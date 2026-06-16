@@ -48,7 +48,8 @@
       "forwarding": "Reenvío de puertos",
       "ports": "Puertos",
       "schedules": "Tareas programadas",
-      "filesystems": "Discos"
+      "filesystems": "Discos",
+      "packages": "Paquetes"
     },
     "tooltips": {
       "settings": "Configuración",
@@ -557,7 +558,9 @@
         "high_usage": "Uso alto",
         "inode_pressure": "Presión de inodos",
         "large_items": "Elementos grandes",
-        "blocks": "Bloques"
+        "blocks": "Bloques",
+        "attention": "Atención",
+        "inode_hotspots": "Inodos / recuento de archivos"
       },
       "columns": {
         "path": "Ruta",
@@ -571,14 +574,17 @@
         "used_available": "Usado / disponible",
         "source": "Fuente",
         "detail": "Detalle",
-        "options": "Opciones"
+        "options": "Opciones",
+        "attention": "Atención"
       },
       "kinds": {
         "mount": "Montaje",
         "large_dir": "Directorio grande",
         "large_file": "Archivo grande",
         "block": "Dispositivo de bloque",
-        "unknown": "Desconocido"
+        "unknown": "Desconocido",
+        "inode_dir": "Punto caliente de inodos",
+        "count_dir": "Punto caliente de recuento de archivos"
       },
       "read_only": {
         "yes": "Sí",
@@ -601,6 +607,82 @@
         "copied_path": "{{path}} copiado.",
         "partial_support": "La inspección del sistema de archivos es parcial en {{os}}.",
         "unknown_error": "Error desconocido al escanear el sistema de archivos."
+      },
+      "attention": {
+        "critical_usage": "Uso crítico",
+        "high_usage": "Uso alto",
+        "critical_inode": "Inodos críticos",
+        "inode_pressure": "Presión de inodos",
+        "low_free_space": "Poco espacio libre",
+        "read_only": "Solo lectura",
+        "large_item": "Elemento grande",
+        "inode_hotspot": "Punto caliente de inodos",
+        "file_count_hotspot": "Punto caliente de recuento de archivos"
+      },
+      "values": {
+        "inode_count": "{{count}} inodos",
+        "file_count": "{{count}} archivos"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Buscar paquetes...",
+      "count_suffix": "paquetes",
+      "loading": "Analizando paquetes...",
+      "empty": "No hay paquetes coincidentes",
+      "unavailable": "No hay herramientas de paquetes disponibles en este host.",
+      "error": "El comando de paquetes falló: {{error}}",
+      "capability": {
+        "full": "Soporte completo",
+        "partial": "Soporte de solo lectura",
+        "unknown": "Soporte desconocido"
+      },
+      "filters": {
+        "all": "Todos",
+        "upgradable": "Actualizables",
+        "installed": "Instalados",
+        "services": "Servicios",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Paquete",
+        "status": "Estado",
+        "installed": "Instalado",
+        "candidate": "Candidato",
+        "manager": "Gestor",
+        "service": "Servicio",
+        "arch": "Arquitectura",
+        "repository": "Repositorio",
+        "summary": "Resumen",
+        "source": "Origen",
+        "owner_paths": "Rutas propietarias"
+      },
+      "status": {
+        "upgradable": "Actualizable",
+        "installed": "Instalado",
+        "unknown": "Desconocido"
+      },
+      "actions": {
+        "refresh": "Actualizar paquetes",
+        "inspect": "Abrir detalles del paquete",
+        "copy_name": "Copiar nombre del paquete"
+      },
+      "inspect_title": "Detalles del paquete",
+      "toast": {
+        "snapshot_already_running": "El análisis de paquetes ya está en ejecución.",
+        "snapshot_loaded": "{{count}} paquetes cargados.",
+        "snapshot_failed": "Error al analizar paquetes: {{reason}}",
+        "unavailable": "No hay herramientas de paquetes disponibles en este host.",
+        "connection_missing": "La conexión seleccionada ya no está disponible.",
+        "exec_terminal_missing": "No hay una ruta de terminal SSH activa para los detalles del paquete.",
+        "inspect_unsupported": "Los detalles de paquetes aún no son compatibles con {{manager}}.",
+        "inspect_opened": "Detalles abiertos para {{name}}.",
+        "copied_name": "{{name}} copiado.",
+        "partial_support": "La inspección de paquetes en {{os}} es de solo lectura.",
+        "unknown_error": "Error desconocido al analizar paquetes."
       }
     }
   },

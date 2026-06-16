@@ -48,7 +48,8 @@
       "forwarding": "ポート転送",
       "ports": "ポート",
       "schedules": "スケジュール",
-      "filesystems": "ディスク"
+      "filesystems": "ディスク",
+      "packages": "パッケージ"
     },
     "tooltips": {
       "settings": "設定",
@@ -557,7 +558,9 @@
         "high_usage": "高使用率",
         "inode_pressure": "Inode 圧迫",
         "large_items": "大きい項目",
-        "blocks": "ブロック"
+        "blocks": "ブロック",
+        "attention": "要確認",
+        "inode_hotspots": "Inode / ファイル数"
       },
       "columns": {
         "path": "パス",
@@ -571,14 +574,17 @@
         "used_available": "使用済み / 空き",
         "source": "ソース",
         "detail": "詳細",
-        "options": "オプション"
+        "options": "オプション",
+        "attention": "要確認"
       },
       "kinds": {
         "mount": "マウント",
         "large_dir": "大きいディレクトリ",
         "large_file": "大きいファイル",
         "block": "ブロックデバイス",
-        "unknown": "不明"
+        "unknown": "不明",
+        "inode_dir": "Inode ホットスポット",
+        "count_dir": "ファイル数ホットスポット"
       },
       "read_only": {
         "yes": "はい",
@@ -601,6 +607,82 @@
         "copied_path": "{{path}} をコピーしました。",
         "partial_support": "{{os}} でのファイルシステム検査は部分サポートです。",
         "unknown_error": "不明なファイルシステムスキャンエラーです。"
+      },
+      "attention": {
+        "critical_usage": "使用率危険",
+        "high_usage": "高使用率",
+        "critical_inode": "Inode 危険",
+        "inode_pressure": "Inode 圧迫",
+        "low_free_space": "空き不足",
+        "read_only": "読み取り専用",
+        "large_item": "大きい項目",
+        "inode_hotspot": "Inode ホットスポット",
+        "file_count_hotspot": "ファイル数ホットスポット"
+      },
+      "values": {
+        "inode_count": "{{count}} inode",
+        "file_count": "{{count}} ファイル"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "パッケージを検索...",
+      "count_suffix": "パッケージ",
+      "loading": "パッケージをスキャン中...",
+      "empty": "一致するパッケージはありません",
+      "unavailable": "このホストではパッケージ管理ツールを使用できません。",
+      "error": "パッケージコマンドに失敗しました: {{error}}",
+      "capability": {
+        "full": "完全対応",
+        "partial": "読み取り専用対応",
+        "unknown": "対応状況不明"
+      },
+      "filters": {
+        "all": "すべて",
+        "upgradable": "更新可能",
+        "installed": "インストール済み",
+        "services": "サービス関連",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "パッケージ",
+        "status": "状態",
+        "installed": "インストール済み",
+        "candidate": "候補版",
+        "manager": "管理ツール",
+        "service": "サービス",
+        "arch": "アーキテクチャ",
+        "repository": "リポジトリ",
+        "summary": "概要",
+        "source": "ソース",
+        "owner_paths": "所有パス"
+      },
+      "status": {
+        "upgradable": "更新可能",
+        "installed": "インストール済み",
+        "unknown": "不明"
+      },
+      "actions": {
+        "refresh": "パッケージを更新",
+        "inspect": "パッケージ詳細を開く",
+        "copy_name": "パッケージ名をコピー"
+      },
+      "inspect_title": "パッケージ詳細",
+      "toast": {
+        "snapshot_already_running": "パッケージスキャンは既に実行中です。",
+        "snapshot_loaded": "{{count}} 件のパッケージを読み込みました。",
+        "snapshot_failed": "パッケージのスキャンに失敗しました: {{reason}}",
+        "unavailable": "このホストではパッケージ管理ツールを使用できません。",
+        "connection_missing": "選択した接続は利用できなくなりました。",
+        "exec_terminal_missing": "パッケージ詳細に使えるライブ SSH 端末ルートがありません。",
+        "inspect_unsupported": "{{manager}} のパッケージ詳細コマンドはまだ対応していません。",
+        "inspect_opened": "{{name}} の詳細を開きました。",
+        "copied_name": "{{name}} をコピーしました。",
+        "partial_support": "{{os}} のパッケージ検査は読み取り専用対応です。",
+        "unknown_error": "不明なパッケージスキャンエラーです。"
       }
     }
   },

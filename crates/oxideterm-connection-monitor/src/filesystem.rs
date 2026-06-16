@@ -58,13 +58,23 @@ pub struct ResourceFilesystemSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FilesystemEntrySeverity {
+    #[default]
+    Normal,
+    Warning,
+    Critical,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FilesystemFilter {
     #[default]
     All,
+    Attention,
     Mounts,
     ReadOnly,
     HighUsage,
     InodePressure,
+    InodeHotspots,
     LargeItems,
     Blocks,
 }
@@ -117,19 +127,19 @@ pub fn build_filesystem_diagnostic_command(os_type: &str) -> String {
         .to_string(),
         FilesystemOs::MacOs => concat!(
             "df -h; df -ih; mount; diskutil list; ",
-            "du -x -h -d 1 / 2>/dev/null | sort -hr | head -n 40; ",
+            "du -x -h -d 2 / 2>/dev/null | sort -hr | head -n 80; ",
             "find -x / -type f -size +100M -exec stat -f '%z %N' {} \\; 2>/dev/null | sort -nr | head -n 40"
         )
         .to_string(),
         FilesystemOs::Bsd => concat!(
             "df -h; df -ih; mount; ",
-            "du -x -h -d 1 / 2>/dev/null | sort -hr | head -n 40; ",
+            "du -x -h -d 2 / 2>/dev/null | sort -hr | head -n 80; ",
             "find -x / -type f -size +100M -exec stat -f '%z %N' {} \\; 2>/dev/null | sort -nr | head -n 40"
         )
         .to_string(),
         FilesystemOs::Linux | FilesystemOs::Unknown => concat!(
             "df -hT; df -ih; findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null; ",
-            "lsblk -f; du -xhd1 / 2>/dev/null | sort -hr | head -n 40; ",
+            "lsblk -f; du -xhd2 / 2>/dev/null | sort -hr | head -n 80; ",
             "find / -xdev -type f -size +100M -printf '%s %p\\n' 2>/dev/null | sort -nr | head -n 40"
         )
         .to_string(),
@@ -182,6 +192,8 @@ pub fn parse_filesystem_snapshot(output: &str) -> ResourceFilesystemSnapshot {
         if let Some(entry) = parse_filesystem_row_line(line)
             .or_else(|| parse_df_line(line))
             .or_else(|| parse_hotspot_line(line))
+            .or_else(|| parse_inode_hotspot_line(line))
+            .or_else(|| parse_count_hotspot_line(line))
             .or_else(|| parse_lsblk_line(line))
             .or_else(|| parse_windows_volume_line(line))
         {
@@ -263,10 +275,12 @@ pub fn filesystem_row_signature(entry: &ResourceFilesystemEntry) -> u64 {
 pub fn filesystem_filter_label_key(filter: FilesystemFilter) -> &'static str {
     match filter {
         FilesystemFilter::All => "sidebar.host_filesystems.filters.all",
+        FilesystemFilter::Attention => "sidebar.host_filesystems.filters.attention",
         FilesystemFilter::Mounts => "sidebar.host_filesystems.filters.mounts",
         FilesystemFilter::ReadOnly => "sidebar.host_filesystems.filters.read_only",
         FilesystemFilter::HighUsage => "sidebar.host_filesystems.filters.high_usage",
         FilesystemFilter::InodePressure => "sidebar.host_filesystems.filters.inode_pressure",
+        FilesystemFilter::InodeHotspots => "sidebar.host_filesystems.filters.inode_hotspots",
         FilesystemFilter::LargeItems => "sidebar.host_filesystems.filters.large_items",
         FilesystemFilter::Blocks => "sidebar.host_filesystems.filters.blocks",
     }
@@ -277,6 +291,8 @@ pub fn filesystem_kind_label_key(kind: &str) -> &'static str {
         "mount" => "sidebar.host_filesystems.kinds.mount",
         "large_dir" => "sidebar.host_filesystems.kinds.large_dir",
         "large_file" => "sidebar.host_filesystems.kinds.large_file",
+        "inode_dir" => "sidebar.host_filesystems.kinds.inode_dir",
+        "count_dir" => "sidebar.host_filesystems.kinds.count_dir",
         "block" => "sidebar.host_filesystems.kinds.block",
         _ => "sidebar.host_filesystems.kinds.unknown",
     }
@@ -290,6 +306,96 @@ pub fn filesystem_read_only_label_key(read_only: bool) -> &'static str {
     }
 }
 
+pub fn filesystem_entry_severity(entry: &ResourceFilesystemEntry) -> FilesystemEntrySeverity {
+    let usage_percent = parse_percent(&entry.used_percent);
+    let inode_percent = parse_percent(&entry.inode_percent);
+    let available_bytes = parse_u64(&entry.available_bytes);
+    let total_bytes = parse_u64(&entry.size_bytes);
+    let item_bytes = parse_u64(&entry.size_bytes);
+    let inode_count = parse_u64(&entry.inode_used);
+
+    if entry.kind == "mount" {
+        if usage_percent >= 95
+            || inode_percent >= 95
+            || (total_bytes >= 1024 * 1024 * 1024
+                && available_bytes > 0
+                && available_bytes < 512 * 1024 * 1024)
+        {
+            return FilesystemEntrySeverity::Critical;
+        }
+        if usage_percent >= 85
+            || inode_percent >= 85
+            || entry.read_only
+            || (total_bytes >= 1024 * 1024 * 1024
+                && available_bytes > 0
+                && available_bytes < 1024 * 1024 * 1024)
+        {
+            return FilesystemEntrySeverity::Warning;
+        }
+    }
+
+    if entry.kind == "large_dir" || entry.kind == "large_file" {
+        if item_bytes >= 50 * 1024 * 1024 * 1024 {
+            return FilesystemEntrySeverity::Critical;
+        }
+        if item_bytes >= 10 * 1024 * 1024 * 1024 {
+            return FilesystemEntrySeverity::Warning;
+        }
+    }
+
+    if entry.kind == "inode_dir" || entry.kind == "count_dir" {
+        if inode_count >= 100_000 {
+            return FilesystemEntrySeverity::Critical;
+        }
+        if inode_count >= 10_000 {
+            return FilesystemEntrySeverity::Warning;
+        }
+    }
+
+    FilesystemEntrySeverity::Normal
+}
+
+pub fn filesystem_attention_label_keys(entry: &ResourceFilesystemEntry) -> Vec<&'static str> {
+    let mut keys = Vec::new();
+    let usage_percent = parse_percent(&entry.used_percent);
+    let inode_percent = parse_percent(&entry.inode_percent);
+    let available_bytes = parse_u64(&entry.available_bytes);
+    let total_bytes = parse_u64(&entry.size_bytes);
+
+    if entry.kind == "mount" {
+        if usage_percent >= 95 {
+            keys.push("sidebar.host_filesystems.attention.critical_usage");
+        } else if usage_percent >= 85 {
+            keys.push("sidebar.host_filesystems.attention.high_usage");
+        }
+        if inode_percent >= 95 {
+            keys.push("sidebar.host_filesystems.attention.critical_inode");
+        } else if inode_percent >= 85 {
+            keys.push("sidebar.host_filesystems.attention.inode_pressure");
+        }
+        if total_bytes >= 1024 * 1024 * 1024
+            && available_bytes > 0
+            && available_bytes < 1024 * 1024 * 1024
+        {
+            keys.push("sidebar.host_filesystems.attention.low_free_space");
+        }
+        if entry.read_only {
+            keys.push("sidebar.host_filesystems.attention.read_only");
+        }
+    }
+
+    if entry.kind == "large_dir" || entry.kind == "large_file" {
+        keys.push("sidebar.host_filesystems.attention.large_item");
+    }
+    if entry.kind == "inode_dir" {
+        keys.push("sidebar.host_filesystems.attention.inode_hotspot");
+    }
+    if entry.kind == "count_dir" {
+        keys.push("sidebar.host_filesystems.attention.file_count_hotspot");
+    }
+    keys
+}
+
 fn build_linux_filesystem_snapshot_command() -> String {
     concat!(
         "echo '===FILESYSTEMS==='; ",
@@ -300,8 +406,9 @@ fn build_linux_filesystem_snapshot_command() -> String {
         "else echo '__OXIDE_FILESYSTEM_UNAVAILABLE__'; fi; ",
         "if command -v findmnt >/dev/null 2>&1; then findmnt -rnP -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | sed 's/^/FINDMNT\\t/'; fi; ",
         "if command -v lsblk >/dev/null 2>&1; then lsblk -b -P -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINTS,MODEL 2>/dev/null | sed 's/^/LSBLK\\t/'; fi; ",
-        "if command -v du >/dev/null 2>&1; then du -x -B1 -d 1 / 2>/dev/null | sort -nr | head -n 40 | awk '{ size=$1; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%s\\t%s\\t/\\tdu\\n\", size, $0 }'; fi; ",
+        "if command -v du >/dev/null 2>&1; then du -x -B1 -d 2 / 2>/dev/null | sort -nr | head -n 80 | awk '{ size=$1; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%s\\t%s\\t/\\tdu\\n\", size, $0 }'; fi; ",
         "if command -v find >/dev/null 2>&1; then find / -xdev -type f -size +100M -printf '%s\\t%p\\n' 2>/dev/null | sort -nr | head -n 40 | awk -F '\\t' '{ printf \"HOTSPOT\\tlarge_file\\t%s\\t%s\\t/\\tfind\\n\", $1, $2 }'; fi; ",
+        "if command -v find >/dev/null 2>&1; then find / -xdev -printf '%h\\n' 2>/dev/null | sort | uniq -c | sort -nr | head -n 50 | awk '{ count=$1; $1=\"\"; sub(/^ /,\"\"); printf \"INODEHOTSPOT\\t%s\\t%s\\t/\\tfind\\n\", count, $0 }'; fi; ",
         "echo '===FILESYSTEMS_END==='"
     )
     .to_string()
@@ -316,8 +423,9 @@ fn build_macos_filesystem_snapshot_command() -> String {
         "df -iP 2>/dev/null | awk 'NR>1 { mount=$6; for (i=7;i<=NF;i++) mount=mount\" \"$i; pct=$5; gsub(/%/,\"\",pct); printf \"INODE\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n\", $1,$2,$3,$4,pct,mount }'; ",
         "else echo '__OXIDE_FILESYSTEM_UNAVAILABLE__'; fi; ",
         "mount 2>/dev/null | sed 's/^/MOUNT\\t/'; ",
-        "du -x -k -d 1 / 2>/dev/null | sort -nr | head -n 40 | awk '{ size=$1*1024; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%.0f\\t%s\\t/\\tdu\\n\", size, $0 }'; ",
+        "du -x -k -d 2 / 2>/dev/null | sort -nr | head -n 80 | awk '{ size=$1*1024; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%.0f\\t%s\\t/\\tdu\\n\", size, $0 }'; ",
         "find -x / -type f -size +100M -exec stat -f '%z\\t%N' {} \\; 2>/dev/null | sort -nr | head -n 40 | awk -F '\\t' '{ printf \"HOTSPOT\\tlarge_file\\t%s\\t%s\\t/\\tfind\\n\", $1, $2 }'; ",
+        "find -x / -print 2>/dev/null | sed 's#[^/][^/]*$##; s#/$##; s#^$#/#' | sort | uniq -c | sort -nr | head -n 50 | awk '{ count=$1; $1=\"\"; sub(/^ /,\"\"); printf \"INODEHOTSPOT\\t%s\\t%s\\t/\\tfind\\n\", count, $0 }'; ",
         "echo '===FILESYSTEMS_END==='"
     )
     .to_string()
@@ -332,18 +440,22 @@ fn build_bsd_filesystem_snapshot_command() -> String {
         "df -iP 2>/dev/null | awk 'NR>1 { mount=$6; for (i=7;i<=NF;i++) mount=mount\" \"$i; pct=$5; gsub(/%/,\"\",pct); printf \"INODE\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n\", $1,$2,$3,$4,pct,mount }'; ",
         "else echo '__OXIDE_FILESYSTEM_UNAVAILABLE__'; fi; ",
         "mount 2>/dev/null | sed 's/^/MOUNT\\t/'; ",
-        "du -x -k -d 1 / 2>/dev/null | sort -nr | head -n 40 | awk '{ size=$1*1024; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%.0f\\t%s\\t/\\tdu\\n\", size, $0 }'; ",
+        "du -x -k -d 2 / 2>/dev/null | sort -nr | head -n 80 | awk '{ size=$1*1024; $1=\"\"; sub(/^ /,\"\"); printf \"HOTSPOT\\tlarge_dir\\t%.0f\\t%s\\t/\\tdu\\n\", size, $0 }'; ",
         "find -x / -type f -size +100M -exec stat -f '%z\\t%N' {} \\; 2>/dev/null | sort -nr | head -n 40 | awk -F '\\t' '{ printf \"HOTSPOT\\tlarge_file\\t%s\\t%s\\t/\\tfind\\n\", $1, $2 }'; ",
+        "find -x / -print 2>/dev/null | sed 's#[^/][^/]*$##; s#/$##; s#^$#/#' | sort | uniq -c | sort -nr | head -n 50 | awk '{ count=$1; $1=\"\"; sub(/^ /,\"\"); printf \"INODEHOTSPOT\\t%s\\t%s\\t/\\tfind\\n\", count, $0 }'; ",
         "echo '===FILESYSTEMS_END==='"
     )
     .to_string()
 }
 
 fn build_windows_filesystem_snapshot_command() -> String {
+    // Windows has no Unix inode concept, so file-count hotspots model the same
+    // operational risk without pretending that NTFS exposes inode pressure.
     concat!(
         "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
         "Write-Output '===FILESYSTEMS===';",
         "Write-Output ('__OXIDE_FILESYSTEM_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_powershell');",
+        "$volumeError=$null;$psdriveError=$null;",
         "try{",
         "Get-Volume|ForEach-Object{",
         "$path=if($_.DriveLetter){$_.DriveLetter+':\\\\'}else{$_.Path};",
@@ -352,11 +464,30 @@ fn build_windows_filesystem_snapshot_command() -> String {
         "$ro=if($_.OperationalStatus -contains 'Read-only'){'true'}else{'false'};",
         "Write-Output ('WINVOL'+[char]9+$path+[char]9+$_.UniqueId+[char]9+$_.FileSystem+[char]9+$size+[char]9+$used+[char]9+$free+[char]9+$pct+[char]9+$ro+[char]9+$_.HealthStatus)",
         "};",
+        "}catch{$volumeError=$_.Exception.Message};",
+        "try{",
         "Get-PSDrive -PSProvider FileSystem|ForEach-Object{",
         "$root=$_.Root;$used=[int64]($_.Used);$free=[int64]($_.Free);$size=$used+$free;$pct=if($size -gt 0){[math]::Round(($used*100.0)/$size,1)}else{0};",
         "Write-Output ('WINVOL'+[char]9+$root+[char]9+$_.Name+[char]9+''+[char]9+$size+[char]9+$used+[char]9+$free+[char]9+$pct+[char]9+'false'+[char]9+'PSDrive')",
         "}",
-        "}catch{Write-Output ('__OXIDE_FILESYSTEM_ERROR__'+[char]9+$_.Exception.Message)};",
+        "}catch{$psdriveError=$_.Exception.Message};",
+        "if($volumeError -and $psdriveError){Write-Output ('__OXIDE_FILESYSTEM_ERROR__'+[char]9+$psdriveError)};",
+        "$roots=@();",
+        "try{Get-Volume|Where-Object{$_.DriveLetter}|ForEach-Object{$roots+=($_.DriveLetter+':\\')}}catch{};",
+        "if($roots.Count -eq 0){try{Get-PSDrive -PSProvider FileSystem|ForEach-Object{$roots+=$_.Root}}catch{}};",
+        "foreach($root in ($roots|Select-Object -Unique)){",
+        "try{",
+        "Get-ChildItem -LiteralPath $root -Force -Directory -ErrorAction SilentlyContinue|ForEach-Object{",
+        "$dir=$_.FullName;$size=[int64]0;$count=[int64]0;",
+        "Get-ChildItem -LiteralPath $dir -Force -Recurse -File -ErrorAction SilentlyContinue|ForEach-Object{$size+=[int64]$_.Length;$count+=1};",
+        "Write-Output ('HOTSPOT'+[char]9+'large_dir'+[char]9+$size+[char]9+$dir+[char]9+$root+[char]9+'powershell');",
+        "Write-Output ('COUNTHOTSPOT'+[char]9+$count+[char]9+$dir+[char]9+$root+[char]9+'powershell')",
+        "};",
+        "Get-ChildItem -LiteralPath $root -Force -Recurse -File -ErrorAction SilentlyContinue|Where-Object{$_.Length -ge 104857600}|Sort-Object Length -Descending|Select-Object -First 40|ForEach-Object{",
+        "Write-Output ('HOTSPOT'+[char]9+'large_file'+[char]9+[int64]$_.Length+[char]9+$_.FullName+[char]9+$root+[char]9+'powershell')",
+        "}",
+        "}catch{}",
+        "};",
         "Write-Output '===FILESYSTEMS_END==='",
         "\""
     )
@@ -541,6 +672,64 @@ fn parse_hotspot_line(line: &str) -> Option<ResourceFilesystemEntry> {
     })
 }
 
+fn parse_inode_hotspot_line(line: &str) -> Option<ResourceFilesystemEntry> {
+    let payload = line.strip_prefix("INODEHOTSPOT\t")?;
+    let parts = payload.splitn(4, '\t').collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return None;
+    }
+    let path = clean(parts[1]);
+    Some(ResourceFilesystemEntry {
+        id: format!("inode_dir:{path}"),
+        kind: "inode_dir".to_string(),
+        path,
+        device: String::new(),
+        fs_type: String::new(),
+        size_bytes: String::new(),
+        used_bytes: String::new(),
+        available_bytes: String::new(),
+        used_percent: String::new(),
+        inode_total: String::new(),
+        inode_used: clean_number(parts[0]),
+        inode_available: String::new(),
+        inode_percent: String::new(),
+        read_only: false,
+        options: String::new(),
+        item_type: "directory".to_string(),
+        source: clean(parts[3]),
+        detail: clean(parts[2]),
+    })
+}
+
+fn parse_count_hotspot_line(line: &str) -> Option<ResourceFilesystemEntry> {
+    let payload = line.strip_prefix("COUNTHOTSPOT\t")?;
+    let parts = payload.splitn(4, '\t').collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return None;
+    }
+    let path = clean(parts[1]);
+    Some(ResourceFilesystemEntry {
+        id: format!("count_dir:{path}"),
+        kind: "count_dir".to_string(),
+        path,
+        device: String::new(),
+        fs_type: String::new(),
+        size_bytes: String::new(),
+        used_bytes: String::new(),
+        available_bytes: String::new(),
+        used_percent: String::new(),
+        inode_total: String::new(),
+        inode_used: clean_number(parts[0]),
+        inode_available: String::new(),
+        inode_percent: String::new(),
+        read_only: false,
+        options: String::new(),
+        item_type: "directory".to_string(),
+        source: clean(parts[3]),
+        detail: clean(parts[2]),
+    })
+}
+
 fn parse_lsblk_line(line: &str) -> Option<ResourceFilesystemEntry> {
     let payload = line.strip_prefix("LSBLK\t")?;
     let properties = parse_key_value_properties(payload);
@@ -627,6 +816,9 @@ fn dedupe_and_sort_filesystem_entries(entries: &mut Vec<ResourceFilesystemEntry>
 fn filesystem_matches_filter(entry: &ResourceFilesystemEntry, filter: FilesystemFilter) -> bool {
     match filter {
         FilesystemFilter::All => true,
+        FilesystemFilter::Attention => {
+            filesystem_entry_severity(entry) != FilesystemEntrySeverity::Normal
+        }
         FilesystemFilter::Mounts => entry.kind == "mount",
         FilesystemFilter::ReadOnly => entry.kind == "mount" && entry.read_only,
         FilesystemFilter::HighUsage => {
@@ -635,6 +827,7 @@ fn filesystem_matches_filter(entry: &ResourceFilesystemEntry, filter: Filesystem
         FilesystemFilter::InodePressure => {
             entry.kind == "mount" && parse_percent(&entry.inode_percent) >= 85
         }
+        FilesystemFilter::InodeHotspots => entry.kind == "inode_dir" || entry.kind == "count_dir",
         FilesystemFilter::LargeItems => entry.kind == "large_dir" || entry.kind == "large_file",
         FilesystemFilter::Blocks => entry.kind == "block",
     }
@@ -649,6 +842,7 @@ fn filesystem_matches_query(entry: &ResourceFilesystemEntry, query: &str) -> boo
         entry.size_bytes.as_str(),
         entry.used_bytes.as_str(),
         entry.available_bytes.as_str(),
+        entry.inode_used.as_str(),
         entry.used_percent.as_str(),
         entry.inode_percent.as_str(),
         entry.options.as_str(),
@@ -665,8 +859,10 @@ fn filesystem_kind_rank(kind: &str) -> u8 {
         "mount" => 0,
         "large_dir" => 1,
         "large_file" => 2,
-        "block" => 3,
-        _ => 4,
+        "inode_dir" => 3,
+        "count_dir" => 4,
+        "block" => 5,
+        _ => 6,
     }
 }
 
@@ -839,6 +1035,7 @@ mod tests {
             "FINDMNT\tTARGET=\"/data archive\" SOURCE=\"/dev/sdb1\" FSTYPE=\"xfs\" OPTIONS=\"ro,noatime\"\n",
             "HOTSPOT\tlarge_dir\t1500\t/data archive/logs\t/data archive\tdu\n",
             "HOTSPOT\tlarge_file\t1200\t/data archive/big file.bin\t/data archive\tfind\n",
+            "INODEHOTSPOT\t12000\t/data archive/cache\t/data archive\tfind\n",
             "===FILESYSTEMS_END===\n"
         );
 
@@ -846,12 +1043,26 @@ mod tests {
         let read_only = visible_filesystem_rows(&snapshot.entries, "", FilesystemFilter::ReadOnly);
         let large =
             visible_filesystem_rows(&snapshot.entries, "big file", FilesystemFilter::LargeItems);
+        let inode_hotspots =
+            visible_filesystem_rows(&snapshot.entries, "cache", FilesystemFilter::InodeHotspots);
+        let attention = visible_filesystem_rows(&snapshot.entries, "", FilesystemFilter::Attention);
 
         assert_eq!(read_only.len(), 1);
         assert_eq!(read_only[0].path, "/data archive");
         assert_eq!(large.len(), 1);
         assert_eq!(large[0].kind, "large_file");
         assert_eq!(large[0].path, "/data archive/big file.bin");
+        assert_eq!(inode_hotspots.len(), 1);
+        assert_eq!(inode_hotspots[0].inode_used, "12000");
+        assert!(attention.iter().any(|entry| entry.kind == "inode_dir"));
+        assert_eq!(
+            filesystem_entry_severity(&read_only[0]),
+            FilesystemEntrySeverity::Warning
+        );
+        assert!(
+            filesystem_attention_label_keys(&read_only[0])
+                .contains(&"sidebar.host_filesystems.attention.read_only")
+        );
     }
 
     #[test]
@@ -867,6 +1078,8 @@ mod tests {
             "===FILESYSTEMS===\n",
             "__OXIDE_FILESYSTEM_CAPABILITY__\tpartial\twindows_powershell\n",
             "WINVOL\tC:\\\t\\\\?\\Volume{abc}\\\tNTFS\t1000\t700\t300\t70\tfalse\tHealthy\n",
+            "HOTSPOT\tlarge_dir\t53687091200\tC:\\logs\tC:\\\tpowershell\n",
+            "COUNTHOTSPOT\t25000\tC:\\logs\tC:\\\tpowershell\n",
             "===FILESYSTEMS_END===\n"
         );
 
@@ -877,6 +1090,23 @@ mod tests {
         assert_eq!(mac_snapshot.entries[0].fs_type, "apfs");
         assert_eq!(windows_snapshot.entries[0].path, "C:\\");
         assert_eq!(windows_snapshot.entries[0].used_percent, "70");
+
+        let count_hotspots = visible_filesystem_rows(
+            &windows_snapshot.entries,
+            "logs",
+            FilesystemFilter::InodeHotspots,
+        );
+        assert_eq!(count_hotspots.len(), 1);
+        assert_eq!(count_hotspots[0].kind, "count_dir");
+        assert_eq!(count_hotspots[0].inode_used, "25000");
+        assert_eq!(
+            filesystem_entry_severity(&count_hotspots[0]),
+            FilesystemEntrySeverity::Warning
+        );
+        assert!(
+            filesystem_attention_label_keys(&count_hotspots[0])
+                .contains(&"sidebar.host_filesystems.attention.file_count_hotspot")
+        );
     }
 
     #[test]
@@ -906,12 +1136,16 @@ mod tests {
         let windows = build_filesystem_snapshot_command("Windows");
 
         assert!(linux.command.contains("df -PTB1"));
+        assert!(linux.command.contains("-d 2 /"));
+        assert!(linux.command.contains("INODEHOTSPOT"));
         assert_eq!(linux.capability, FilesystemCommandCapability::Full);
         assert!(mac.command.contains("df -kP"));
         assert_eq!(mac.capability, FilesystemCommandCapability::Partial);
         assert!(bsd.command.contains("df -kP"));
         assert_eq!(bsd.capability, FilesystemCommandCapability::Partial);
         assert!(windows.command.contains("Get-Volume"));
+        assert!(windows.command.contains("COUNTHOTSPOT"));
+        assert!(windows.command.contains("Get-ChildItem"));
         assert_eq!(windows.capability, FilesystemCommandCapability::Partial);
     }
 }

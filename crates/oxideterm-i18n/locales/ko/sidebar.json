@@ -48,7 +48,8 @@
       "forwarding": "포트 포워딩",
       "ports": "포트",
       "schedules": "예약 작업",
-      "filesystems": "디스크"
+      "filesystems": "디스크",
+      "packages": "패키지"
     },
     "tooltips": {
       "settings": "설정",
@@ -557,7 +558,9 @@
         "high_usage": "높은 사용량",
         "inode_pressure": "Inode 압박",
         "large_items": "큰 항목",
-        "blocks": "블록"
+        "blocks": "블록",
+        "attention": "주의 필요",
+        "inode_hotspots": "Inode / 파일 수"
       },
       "columns": {
         "path": "경로",
@@ -571,14 +574,17 @@
         "used_available": "사용 / 사용 가능",
         "source": "소스",
         "detail": "세부 정보",
-        "options": "옵션"
+        "options": "옵션",
+        "attention": "주의 사유"
       },
       "kinds": {
         "mount": "마운트",
         "large_dir": "큰 디렉터리",
         "large_file": "큰 파일",
         "block": "블록 장치",
-        "unknown": "알 수 없음"
+        "unknown": "알 수 없음",
+        "inode_dir": "Inode 핫스팟",
+        "count_dir": "파일 수 핫스팟"
       },
       "read_only": {
         "yes": "예",
@@ -601,6 +607,82 @@
         "copied_path": "{{path}}을(를) 복사했습니다.",
         "partial_support": "{{os}}에서는 파일 시스템 검사가 부분 지원됩니다.",
         "unknown_error": "알 수 없는 파일 시스템 스캔 오류입니다."
+      },
+      "attention": {
+        "critical_usage": "위험한 사용량",
+        "high_usage": "높은 사용량",
+        "critical_inode": "위험한 inode",
+        "inode_pressure": "Inode 압박",
+        "low_free_space": "남은 공간 부족",
+        "read_only": "읽기 전용",
+        "large_item": "큰 항목",
+        "inode_hotspot": "Inode 핫스팟",
+        "file_count_hotspot": "파일 수 핫스팟"
+      },
+      "values": {
+        "inode_count": "{{count}}개 inode",
+        "file_count": "{{count}}개 파일"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "패키지 검색...",
+      "count_suffix": "개 패키지",
+      "loading": "패키지 스캔 중...",
+      "empty": "일치하는 패키지가 없습니다",
+      "unavailable": "이 호스트에서 패키지 관리 도구를 사용할 수 없습니다.",
+      "error": "패키지 명령 실패: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "읽기 전용 지원",
+        "unknown": "지원 상태 알 수 없음"
+      },
+      "filters": {
+        "all": "전체",
+        "upgradable": "업데이트 가능",
+        "installed": "설치됨",
+        "services": "서비스 관련",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "패키지",
+        "status": "상태",
+        "installed": "설치 버전",
+        "candidate": "후보 버전",
+        "manager": "관리자",
+        "service": "서비스",
+        "arch": "아키텍처",
+        "repository": "저장소",
+        "summary": "요약",
+        "source": "소스",
+        "owner_paths": "소유 경로"
+      },
+      "status": {
+        "upgradable": "업데이트 가능",
+        "installed": "설치됨",
+        "unknown": "알 수 없음"
+      },
+      "actions": {
+        "refresh": "패키지 새로고침",
+        "inspect": "패키지 상세 열기",
+        "copy_name": "패키지 이름 복사"
+      },
+      "inspect_title": "패키지 상세",
+      "toast": {
+        "snapshot_already_running": "패키지 스캔이 이미 실행 중입니다.",
+        "snapshot_loaded": "{{count}}개 패키지를 불러왔습니다.",
+        "snapshot_failed": "패키지 스캔 실패: {{reason}}",
+        "unavailable": "이 호스트에서 패키지 관리 도구를 사용할 수 없습니다.",
+        "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
+        "exec_terminal_missing": "패키지 상세에 사용할 수 있는 활성 SSH 터미널 경로가 없습니다.",
+        "inspect_unsupported": "{{manager}}의 패키지 상세 명령은 아직 지원되지 않습니다.",
+        "inspect_opened": "{{name}} 상세를 열었습니다.",
+        "copied_name": "{{name}}을(를) 복사했습니다.",
+        "partial_support": "{{os}}의 패키지 검사는 읽기 전용으로 지원됩니다.",
+        "unknown_error": "알 수 없는 패키지 스캔 오류입니다."
       }
     }
   },

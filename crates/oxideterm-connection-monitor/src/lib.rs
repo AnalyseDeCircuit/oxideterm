@@ -10,6 +10,7 @@ mod docker;
 mod filesystem;
 mod log;
 mod metrics;
+mod package;
 mod port;
 mod process;
 mod profiler;
@@ -28,9 +29,10 @@ pub use docker::{
     visible_docker_rows,
 };
 pub use filesystem::{
-    FilesystemCaptureCommand, FilesystemCommandCapability, FilesystemFilter,
-    ResourceFilesystemEntry, ResourceFilesystemSnapshot, ResourceFilesystemStatus,
-    build_filesystem_diagnostic_command, build_filesystem_snapshot_command,
+    FilesystemCaptureCommand, FilesystemCommandCapability, FilesystemEntrySeverity,
+    FilesystemFilter, ResourceFilesystemEntry, ResourceFilesystemSnapshot,
+    ResourceFilesystemStatus, build_filesystem_diagnostic_command,
+    build_filesystem_snapshot_command, filesystem_attention_label_keys, filesystem_entry_severity,
     filesystem_filter_label_key, filesystem_kind_label_key, filesystem_read_only_label_key,
     filesystem_row_signature, parse_filesystem_snapshot, visible_filesystem_rows,
 };
@@ -46,6 +48,12 @@ pub use metrics::{
     parse_disk_usage, parse_disks, parse_gpus, parse_loadavg, parse_meminfo, parse_memory_snapshot,
     parse_net_snapshot, parse_nproc, parse_resource_metrics, parse_top_processes,
     previous_sample_from_metrics, push_history,
+};
+pub use package::{
+    PackageCaptureCommand, PackageCommandCapability, PackageFilter, PackageInspectCommand,
+    ResourcePackageEntry, ResourcePackageManager, ResourcePackageSnapshot, ResourcePackageStatus,
+    build_package_inspect_command, build_package_snapshot_command, package_filter_label_key,
+    package_row_signature, package_status_label_key, parse_package_snapshot, visible_package_rows,
 };
 pub use port::{
     PortCaptureCommand, PortCommandCapability, PortFilter, ResourcePortEntry, ResourcePortSnapshot,

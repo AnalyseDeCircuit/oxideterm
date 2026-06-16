@@ -120,6 +120,16 @@ const HOST_FILESYSTEM_SIZE_COLUMN_WIDTH: f32 = 104.0;
 const HOST_FILESYSTEM_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 720.0;
 const HOST_FILESYSTEM_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(15);
 const HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 512 * 1024;
+const HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_PACKAGE_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_PACKAGE_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_PACKAGE_STATUS_COLUMN_WIDTH: f32 = 84.0;
+const HOST_PACKAGE_VERSION_COLUMN_WIDTH: f32 = 116.0;
+const HOST_PACKAGE_MANAGER_COLUMN_WIDTH: f32 = 66.0;
+const HOST_PACKAGE_SERVICE_COLUMN_WIDTH: f32 = 108.0;
+const HOST_PACKAGE_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 720.0;
+const HOST_PACKAGE_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(18);
+const HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 512 * 1024;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
@@ -414,6 +424,17 @@ struct HostFilesystemSnapshotDelivery {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct HostPackageSnapshotRequest {
+    connection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostPackageSnapshotDelivery {
+    request: HostPackageSnapshotRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct HostScheduleActionRequest {
     connection_id: String,
     task_id: String,
@@ -600,6 +621,18 @@ pub(super) struct ConnectionMonitorState {
     host_filesystem_last_error: Option<String>,
     host_filesystem_list_state: ListState,
     host_filesystem_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(in crate::workspace) host_package_search_query: String,
+    pub(in crate::workspace) host_package_search_focused: bool,
+    host_package_filter: PackageFilter,
+    pub(in crate::workspace) host_package_expanded_index: Option<usize>,
+    host_package_snapshot_connection_id: Option<String>,
+    host_package_snapshot: Option<ResourcePackageSnapshot>,
+    host_package_snapshot_rx: Option<std::sync::mpsc::Receiver<HostPackageSnapshotDelivery>>,
+    host_package_snapshot_running: Option<HostPackageSnapshotRequest>,
+    host_package_snapshot_polling: bool,
+    host_package_last_error: Option<String>,
+    host_package_list_state: ListState,
+    host_package_list_cache: RefCell<VirtualListSignatureCache>,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -775,6 +808,22 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_filesystem_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_package_search_query: String::new(),
+            host_package_search_focused: false,
+            host_package_filter: PackageFilter::All,
+            host_package_expanded_index: None,
+            host_package_snapshot_connection_id: None,
+            host_package_snapshot: None,
+            host_package_snapshot_rx: None,
+            host_package_snapshot_running: None,
+            host_package_snapshot_polling: false,
+            host_package_last_error: None,
+            host_package_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_package_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

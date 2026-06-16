@@ -907,6 +907,7 @@ impl WorkspaceApp {
                             workspace.poll_host_ports_snapshot_results(cx);
                             workspace.poll_host_schedules_snapshot_results(cx);
                             workspace.poll_host_filesystems_snapshot_results(cx);
+                            workspace.poll_host_packages_snapshot_results(cx);
                             workspace.poll_host_schedule_logs_results(cx);
                             workspace.poll_host_schedule_action_results(cx);
                             workspace.poll_external_settings_store_changes(cx);

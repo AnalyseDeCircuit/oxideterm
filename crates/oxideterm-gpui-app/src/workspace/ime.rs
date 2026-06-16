@@ -45,6 +45,7 @@ pub(super) enum WorkspaceImeTarget {
     HostPortSearch,
     HostScheduleSearch,
     HostFilesystemSearch,
+    HostPackageSearch,
     QuickCommand(QuickCommandInput),
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
@@ -101,6 +102,7 @@ impl WorkspaceImeTarget {
             Self::HostPortSearch => 13,
             Self::HostScheduleSearch => 14,
             Self::HostFilesystemSearch => 15,
+            Self::HostPackageSearch => 16,
             Self::QuickCommand(input) => 500 + input.anchor_key(),
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
@@ -476,6 +478,9 @@ impl WorkspaceApp {
         }
         if self.connection_monitor.host_filesystem_search_focused {
             return Some(WorkspaceImeTarget::HostFilesystemSearch);
+        }
+        if self.connection_monitor.host_package_search_focused {
+            return Some(WorkspaceImeTarget::HostPackageSearch);
         }
 
         if self.terminal_quick_commands_open
@@ -1212,6 +1217,10 @@ impl WorkspaceApp {
                 .connection_monitor
                 .host_filesystem_search_focused
                 .then(|| self.connection_monitor.host_filesystem_search_query.clone()),
+            WorkspaceImeTarget::HostPackageSearch => self
+                .connection_monitor
+                .host_package_search_focused
+                .then(|| self.connection_monitor.host_package_search_query.clone()),
             WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
@@ -1987,6 +1996,18 @@ impl WorkspaceApp {
                         text,
                     );
                     self.connection_monitor.host_filesystem_expanded_index = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostPackageSearch => {
+                if self.connection_monitor.host_package_search_focused {
+                    replace_utf16(
+                        &mut self.connection_monitor.host_package_search_query,
+                        replacement_range,
+                        text,
+                    );
+                    self.connection_monitor.host_package_expanded_index = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

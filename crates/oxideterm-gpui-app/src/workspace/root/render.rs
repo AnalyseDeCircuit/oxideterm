@@ -22,6 +22,7 @@ impl Render for WorkspaceApp {
         self.poll_host_ports_snapshot_results(cx);
         self.poll_host_schedules_snapshot_results(cx);
         self.poll_host_filesystems_snapshot_results(cx);
+        self.poll_host_packages_snapshot_results(cx);
         self.poll_host_schedule_logs_results(cx);
         self.poll_host_schedule_action_results(cx);
         self.maybe_refresh_connection_monitor(cx);
@@ -226,6 +227,9 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_host_filesystem_search_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_package_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_native_plugin_confirm_key(event, cx) {

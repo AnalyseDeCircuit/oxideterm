@@ -352,6 +352,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let message = self.i18n.t(error.message_key);
         div()
+            .w_full()
+            .min_w_0()
             .h_full()
             .flex()
             .flex_col()
@@ -377,6 +379,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
@@ -504,6 +508,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .w_full()
+            .min_w_0()
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -519,17 +525,23 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
             })
             .child(Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted)))
-            .child(div().truncate().child(
-                // Quick prompts are clickable commands; label text must not steal the row click.
-                self.render_display_text_with_role(
-                    SelectableTextRole::NonSelectable,
-                    "ai-quick-prompt",
-                    label.clone(),
-                    label,
-                    self.tokens.ui.text_muted,
-                    cx,
-                ),
-            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(
+                        // Quick prompts are clickable commands; label text must not steal the row click.
+                        self.render_display_text_with_role(
+                            SelectableTextRole::NonSelectable,
+                            "ai-quick-prompt",
+                            label.clone(),
+                            label,
+                            self.tokens.ui.text_muted,
+                            cx,
+                        ),
+                    ),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {

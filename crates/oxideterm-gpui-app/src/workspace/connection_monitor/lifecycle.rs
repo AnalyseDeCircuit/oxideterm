@@ -82,6 +82,7 @@ impl WorkspaceApp {
                     | ContextSidebarTool::Ports
                     | ContextSidebarTool::Schedules
                     | ContextSidebarTool::Filesystems
+                    | ContextSidebarTool::Packages
             ));
         if !monitor_surface_visible {
             return;

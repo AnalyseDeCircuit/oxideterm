@@ -48,7 +48,8 @@
       "forwarding": "連接埠轉發",
       "ports": "連接埠",
       "schedules": "排程任務",
-      "filesystems": "磁碟"
+      "filesystems": "磁碟",
+      "packages": "套件"
     },
     "tooltips": {
       "settings": "設定",
@@ -557,7 +558,9 @@
         "high_usage": "高使用量",
         "inode_pressure": "Inode 壓力",
         "large_items": "大型項目",
-        "blocks": "區塊裝置"
+        "blocks": "區塊裝置",
+        "attention": "需要關注",
+        "inode_hotspots": "Inode / 檔案數"
       },
       "columns": {
         "path": "路徑",
@@ -571,14 +574,17 @@
         "used_available": "已用 / 可用",
         "source": "來源",
         "detail": "詳細資料",
-        "options": "選項"
+        "options": "選項",
+        "attention": "關注原因"
       },
       "kinds": {
         "mount": "掛載點",
         "large_dir": "大型目錄",
         "large_file": "大型檔案",
         "block": "區塊裝置",
-        "unknown": "未知"
+        "unknown": "未知",
+        "inode_dir": "Inode 熱點",
+        "count_dir": "檔案數熱點"
       },
       "read_only": {
         "yes": "是",
@@ -601,6 +607,82 @@
         "copied_path": "已複製 {{path}}。",
         "partial_support": "{{os}} 上的檔案系統檢查為部分支援。",
         "unknown_error": "未知檔案系統掃描錯誤。"
+      },
+      "attention": {
+        "critical_usage": "容量危險",
+        "high_usage": "高使用量",
+        "critical_inode": "Inode 危險",
+        "inode_pressure": "Inode 壓力",
+        "low_free_space": "剩餘過低",
+        "read_only": "唯讀掛載",
+        "large_item": "大型項目",
+        "inode_hotspot": "Inode 熱點",
+        "file_count_hotspot": "檔案數熱點"
+      },
+      "values": {
+        "inode_count": "{{count}} 個 inode",
+        "file_count": "{{count}} 個檔案"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "搜尋套件...",
+      "count_suffix": "個套件",
+      "loading": "正在掃描套件...",
+      "empty": "沒有相符的套件",
+      "unavailable": "此主機上沒有可用的套件管理工具。",
+      "error": "套件命令失敗：{{error}}",
+      "capability": {
+        "full": "完整支援",
+        "partial": "唯讀支援",
+        "unknown": "支援狀態未知"
+      },
+      "filters": {
+        "all": "全部",
+        "upgradable": "可更新",
+        "installed": "已安裝",
+        "services": "服務相關",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "套件",
+        "status": "狀態",
+        "installed": "已安裝",
+        "candidate": "候選版本",
+        "manager": "管理器",
+        "service": "服務",
+        "arch": "架構",
+        "repository": "儲存庫",
+        "summary": "摘要",
+        "source": "來源",
+        "owner_paths": "歸屬路徑"
+      },
+      "status": {
+        "upgradable": "可更新",
+        "installed": "已安裝",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "重新整理套件",
+        "inspect": "開啟套件詳細資訊",
+        "copy_name": "複製套件名稱"
+      },
+      "inspect_title": "套件詳細資訊",
+      "toast": {
+        "snapshot_already_running": "套件掃描已在執行。",
+        "snapshot_loaded": "已載入 {{count}} 個套件。",
+        "snapshot_failed": "掃描套件失敗：{{reason}}",
+        "unavailable": "此主機上沒有可用的套件管理工具。",
+        "connection_missing": "選取的連線已不可用。",
+        "exec_terminal_missing": "沒有可用於套件詳細資訊的即時 SSH 終端路由。",
+        "inspect_unsupported": "暫不支援 {{manager}} 的套件詳細資訊命令。",
+        "inspect_opened": "已開啟 {{name}} 的詳細資訊。",
+        "copied_name": "已複製 {{name}}。",
+        "partial_support": "{{os}} 上的套件檢查為唯讀支援。",
+        "unknown_error": "未知的套件掃描錯誤。"
       }
     }
   },

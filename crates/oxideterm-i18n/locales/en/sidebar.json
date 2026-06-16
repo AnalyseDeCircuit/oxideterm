@@ -48,7 +48,8 @@
       "forwarding": "Port Forwarding",
       "ports": "Ports",
       "schedules": "Schedules",
-      "filesystems": "Disks"
+      "filesystems": "Disks",
+      "packages": "Packages"
     },
     "tooltips": {
       "settings": "Settings",
@@ -557,7 +558,9 @@
         "high_usage": "High usage",
         "inode_pressure": "Inode pressure",
         "large_items": "Large items",
-        "blocks": "Blocks"
+        "blocks": "Blocks",
+        "attention": "Attention",
+        "inode_hotspots": "Inode / file count"
       },
       "columns": {
         "path": "Path",
@@ -571,14 +574,17 @@
         "used_available": "Used / available",
         "source": "Source",
         "detail": "Detail",
-        "options": "Options"
+        "options": "Options",
+        "attention": "Attention"
       },
       "kinds": {
         "mount": "Mount",
         "large_dir": "Large dir",
         "large_file": "Large file",
         "block": "Block",
-        "unknown": "Unknown"
+        "unknown": "Unknown",
+        "inode_dir": "Inode hotspot",
+        "count_dir": "File count hotspot"
       },
       "read_only": {
         "yes": "Yes",
@@ -601,6 +607,82 @@
         "copied_path": "Copied {{path}}.",
         "partial_support": "Filesystem inspection is partial on {{os}}.",
         "unknown_error": "Unknown filesystem scan error."
+      },
+      "attention": {
+        "critical_usage": "Critical usage",
+        "high_usage": "High usage",
+        "critical_inode": "Critical inode",
+        "inode_pressure": "Inode pressure",
+        "low_free_space": "Low free",
+        "read_only": "Read-only",
+        "large_item": "Large item",
+        "inode_hotspot": "Inode hotspot",
+        "file_count_hotspot": "File count hotspot"
+      },
+      "values": {
+        "inode_count": "{{count}} inodes",
+        "file_count": "{{count}} files"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Search packages...",
+      "count_suffix": "packages",
+      "loading": "Scanning packages...",
+      "empty": "No packages match",
+      "unavailable": "Package tools are not available on this host.",
+      "error": "Package command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Read-only support",
+        "unknown": "Support unknown"
+      },
+      "filters": {
+        "all": "All",
+        "upgradable": "Upgradable",
+        "installed": "Installed",
+        "services": "Services",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Package",
+        "status": "Status",
+        "installed": "Installed",
+        "candidate": "Candidate",
+        "manager": "Manager",
+        "service": "Service",
+        "arch": "Arch",
+        "repository": "Repository",
+        "summary": "Summary",
+        "source": "Source",
+        "owner_paths": "Owner paths"
+      },
+      "status": {
+        "upgradable": "Upgradable",
+        "installed": "Installed",
+        "unknown": "Unknown"
+      },
+      "actions": {
+        "refresh": "Refresh packages",
+        "inspect": "Open package details",
+        "copy_name": "Copy package name"
+      },
+      "inspect_title": "Package details",
+      "toast": {
+        "snapshot_already_running": "Package scan is already running.",
+        "snapshot_loaded": "Loaded {{count}} packages.",
+        "snapshot_failed": "Failed to scan packages: {{reason}}",
+        "unavailable": "Package tools are not available on this host.",
+        "connection_missing": "The selected connection is no longer available.",
+        "exec_terminal_missing": "No live SSH terminal route is available for package details.",
+        "inspect_unsupported": "Package details are not supported for {{manager}} yet.",
+        "inspect_opened": "Opened details for {{name}}.",
+        "copied_name": "Copied {{name}}.",
+        "partial_support": "Package inspection is read-only on {{os}}.",
+        "unknown_error": "Unknown package scan error."
       }
     }
   },

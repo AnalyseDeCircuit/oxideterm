@@ -48,7 +48,8 @@
       "forwarding": "Redirecionamento de portas",
       "ports": "Portas",
       "schedules": "Tarefas agendadas",
-      "filesystems": "Discos"
+      "filesystems": "Discos",
+      "packages": "Pacotes"
     },
     "tooltips": {
       "settings": "Configurações",
@@ -557,7 +558,9 @@
         "high_usage": "Alto uso",
         "inode_pressure": "Pressão de inodes",
         "large_items": "Itens grandes",
-        "blocks": "Blocos"
+        "blocks": "Blocos",
+        "attention": "Atenção",
+        "inode_hotspots": "Inodes / contagem de arquivos"
       },
       "columns": {
         "path": "Caminho",
@@ -571,14 +574,17 @@
         "used_available": "Usado / disponível",
         "source": "Origem",
         "detail": "Detalhe",
-        "options": "Opções"
+        "options": "Opções",
+        "attention": "Atenção"
       },
       "kinds": {
         "mount": "Montagem",
         "large_dir": "Diretório grande",
         "large_file": "Arquivo grande",
         "block": "Dispositivo de bloco",
-        "unknown": "Desconhecido"
+        "unknown": "Desconhecido",
+        "inode_dir": "Ponto quente de inode",
+        "count_dir": "Ponto quente de contagem de arquivos"
       },
       "read_only": {
         "yes": "Sim",
@@ -601,6 +607,82 @@
         "copied_path": "{{path}} copiado.",
         "partial_support": "A inspeção do sistema de arquivos é parcial em {{os}}.",
         "unknown_error": "Erro desconhecido na varredura do sistema de arquivos."
+      },
+      "attention": {
+        "critical_usage": "Uso crítico",
+        "high_usage": "Alto uso",
+        "critical_inode": "Inodes críticos",
+        "inode_pressure": "Pressão de inodes",
+        "low_free_space": "Pouco espaço livre",
+        "read_only": "Somente leitura",
+        "large_item": "Item grande",
+        "inode_hotspot": "Ponto quente de inode",
+        "file_count_hotspot": "Ponto quente de contagem de arquivos"
+      },
+      "values": {
+        "inode_count": "{{count}} inodes",
+        "file_count": "{{count}} arquivos"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Buscar pacotes...",
+      "count_suffix": "pacotes",
+      "loading": "Verificando pacotes...",
+      "empty": "Nenhum pacote correspondente",
+      "unavailable": "Nenhuma ferramenta de pacotes está disponível neste host.",
+      "error": "Comando de pacotes falhou: {{error}}",
+      "capability": {
+        "full": "Suporte completo",
+        "partial": "Suporte somente leitura",
+        "unknown": "Suporte desconhecido"
+      },
+      "filters": {
+        "all": "Todos",
+        "upgradable": "Atualizáveis",
+        "installed": "Instalados",
+        "services": "Serviços",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Pacote",
+        "status": "Status",
+        "installed": "Instalado",
+        "candidate": "Candidato",
+        "manager": "Gerenciador",
+        "service": "Serviço",
+        "arch": "Arquitetura",
+        "repository": "Repositório",
+        "summary": "Resumo",
+        "source": "Origem",
+        "owner_paths": "Caminhos proprietários"
+      },
+      "status": {
+        "upgradable": "Atualizável",
+        "installed": "Instalado",
+        "unknown": "Desconhecido"
+      },
+      "actions": {
+        "refresh": "Atualizar pacotes",
+        "inspect": "Abrir detalhes do pacote",
+        "copy_name": "Copiar nome do pacote"
+      },
+      "inspect_title": "Detalhes do pacote",
+      "toast": {
+        "snapshot_already_running": "A verificação de pacotes já está em execução.",
+        "snapshot_loaded": "{{count}} pacotes carregados.",
+        "snapshot_failed": "Falha ao verificar pacotes: {{reason}}",
+        "unavailable": "Nenhuma ferramenta de pacotes está disponível neste host.",
+        "connection_missing": "A conexão selecionada não está mais disponível.",
+        "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa disponível para detalhes do pacote.",
+        "inspect_unsupported": "Detalhes de pacotes ainda não são compatíveis com {{manager}}.",
+        "inspect_opened": "Detalhes abertos para {{name}}.",
+        "copied_name": "{{name}} copiado.",
+        "partial_support": "A inspeção de pacotes em {{os}} é somente leitura.",
+        "unknown_error": "Erro desconhecido ao verificar pacotes."
       }
     }
   },

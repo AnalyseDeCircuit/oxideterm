@@ -48,7 +48,8 @@
       "forwarding": "Portweiterleitung",
       "ports": "Ports",
       "schedules": "Zeitpläne",
-      "filesystems": "Datenträger"
+      "filesystems": "Datenträger",
+      "packages": "Pakete"
     },
     "tooltips": {
       "settings": "Einstellungen",
@@ -557,7 +558,9 @@
         "high_usage": "Hohe Nutzung",
         "inode_pressure": "Inode-Druck",
         "large_items": "Große Einträge",
-        "blocks": "Blockgeräte"
+        "blocks": "Blockgeräte",
+        "attention": "Auffällig",
+        "inode_hotspots": "Inodes / Dateianzahl"
       },
       "columns": {
         "path": "Pfad",
@@ -571,14 +574,17 @@
         "used_available": "Belegt / verfügbar",
         "source": "Quelle",
         "detail": "Detail",
-        "options": "Optionen"
+        "options": "Optionen",
+        "attention": "Auffälligkeit"
       },
       "kinds": {
         "mount": "Mount",
         "large_dir": "Großes Verzeichnis",
         "large_file": "Große Datei",
         "block": "Blockgerät",
-        "unknown": "Unbekannt"
+        "unknown": "Unbekannt",
+        "inode_dir": "Inode-Hotspot",
+        "count_dir": "Dateianzahl-Hotspot"
       },
       "read_only": {
         "yes": "Ja",
@@ -601,6 +607,82 @@
         "copied_path": "{{path}} kopiert.",
         "partial_support": "Dateisystemprüfung wird auf {{os}} nur teilweise unterstützt.",
         "unknown_error": "Unbekannter Dateisystem-Scanfehler."
+      },
+      "attention": {
+        "critical_usage": "Kritische Nutzung",
+        "high_usage": "Hohe Nutzung",
+        "critical_inode": "Kritische Inodes",
+        "inode_pressure": "Inode-Druck",
+        "low_free_space": "Wenig frei",
+        "read_only": "Nur lesbar",
+        "large_item": "Großer Eintrag",
+        "inode_hotspot": "Inode-Hotspot",
+        "file_count_hotspot": "Dateianzahl-Hotspot"
+      },
+      "values": {
+        "inode_count": "{{count}} Inodes",
+        "file_count": "{{count}} Dateien"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Pakete suchen...",
+      "count_suffix": "Pakete",
+      "loading": "Pakete werden gescannt...",
+      "empty": "Keine passenden Pakete",
+      "unavailable": "Auf diesem Host sind keine Paketwerkzeuge verfügbar.",
+      "error": "Paketbefehl fehlgeschlagen: {{error}}",
+      "capability": {
+        "full": "Voll unterstützt",
+        "partial": "Nur-Lese-Unterstützung",
+        "unknown": "Unterstützung unbekannt"
+      },
+      "filters": {
+        "all": "Alle",
+        "upgradable": "Aktualisierbar",
+        "installed": "Installiert",
+        "services": "Dienste",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Paket",
+        "status": "Status",
+        "installed": "Installiert",
+        "candidate": "Kandidat",
+        "manager": "Manager",
+        "service": "Dienst",
+        "arch": "Architektur",
+        "repository": "Repository",
+        "summary": "Zusammenfassung",
+        "source": "Quelle",
+        "owner_paths": "Besitzerpfade"
+      },
+      "status": {
+        "upgradable": "Aktualisierbar",
+        "installed": "Installiert",
+        "unknown": "Unbekannt"
+      },
+      "actions": {
+        "refresh": "Pakete aktualisieren",
+        "inspect": "Paketdetails öffnen",
+        "copy_name": "Paketnamen kopieren"
+      },
+      "inspect_title": "Paketdetails",
+      "toast": {
+        "snapshot_already_running": "Paket-Scan läuft bereits.",
+        "snapshot_loaded": "{{count}} Pakete geladen.",
+        "snapshot_failed": "Pakete konnten nicht gescannt werden: {{reason}}",
+        "unavailable": "Auf diesem Host sind keine Paketwerkzeuge verfügbar.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "exec_terminal_missing": "Keine aktive SSH-Terminalroute für Paketdetails verfügbar.",
+        "inspect_unsupported": "Paketdetails werden für {{manager}} noch nicht unterstützt.",
+        "inspect_opened": "Details für {{name}} geöffnet.",
+        "copied_name": "{{name}} kopiert.",
+        "partial_support": "Paketprüfung ist auf {{os}} nur lesend unterstützt.",
+        "unknown_error": "Unbekannter Paket-Scan-Fehler."
       }
     }
   },

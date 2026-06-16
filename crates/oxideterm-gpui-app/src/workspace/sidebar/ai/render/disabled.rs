@@ -1,6 +1,8 @@
 impl WorkspaceApp {
     fn render_ai_sidebar_disabled(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
+            .w_full()
+            .min_w_0()
             .px(px(16.0))
             .h_full()
             .flex()
