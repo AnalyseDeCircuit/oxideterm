@@ -178,7 +178,7 @@ impl WorkspaceApp {
                                 SelectableTextRole::PlainDocument,
                                 "ssh-config-import",
                                 "title",
-                                "SSH Config",
+                                self.i18n.t("settings_view.connections.ssh_config.title"),
                                 theme.text,
                                 cx,
                             )),
@@ -252,12 +252,19 @@ impl WorkspaceApp {
             .selected_import_aliases
             .contains(&host.alias);
         let alias = host.alias.clone();
+        let endpoint = format!(
+            "{}@{}:{}",
+            host.user.unwrap_or_else(|| current_username()),
+            host.hostname.unwrap_or_else(|| "-".to_string()),
+            host.port.unwrap_or(22)
+        );
         div()
-            .h(px(44.0))
+            .min_h(px(64.0))
             .flex()
-            .items_center()
+            .items_start()
             .gap(px(10.0))
             .px_4()
+            .py_3()
             .border_b_1()
             .border_color(rgba((theme.border << 8) | 0x80))
             .child(
@@ -282,42 +289,57 @@ impl WorkspaceApp {
             )
             .child(
                 div()
-                    .w(px(150.0))
-                    .truncate()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(host.alias),
-            )
-            .child(
-                div()
                     .flex_1()
-                    .truncate()
-                    .text_color(rgb(theme.text_muted))
-                    .child(format!(
-                        "{}@{}:{}",
-                        host.user.unwrap_or_else(|| current_username()),
-                        host.hostname.unwrap_or_else(|| "-".to_string()),
-                        host.port.unwrap_or(22)
-                    )),
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .flex_wrap()
+                            // SSH aliases are the primary identity in the import dialog, so they
+                            // must wrap before lower-priority metadata squeezes them into ellipses.
+                            .child(
+                                div()
+                                    .min_w(px(0.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .line_height(px(20.0))
+                                    .child(host.alias),
+                            )
+                            .when(host.already_imported, |row| {
+                                row.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .px_2()
+                                        .py(px(2.0))
+                                        .rounded(px(self.tokens.radii.md))
+                                        .bg(rgba((theme.success << 8) | 0x2a))
+                                        .text_color(rgb(theme.success))
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .child(self.render_display_text_with_role(
+                                            SelectableTextRole::PlainDocument,
+                                            "ssh-config-import",
+                                            "imported",
+                                            self.i18n.t(
+                                                "settings_view.connections.ssh_config.already_imported",
+                                            ),
+                                            theme.success,
+                                            cx,
+                                        )),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .text_color(rgb(theme.text_muted))
+                            .line_height(px(18.0))
+                            .child(endpoint),
+                    ),
             )
-            .when(host.already_imported, |row| {
-                row.child(
-                    div()
-                        .px_2()
-                        .py(px(2.0))
-                        .rounded(px(self.tokens.radii.md))
-                        .bg(rgba((theme.success << 8) | 0x2a))
-                        .text_color(rgb(theme.success))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .child(self.render_display_text_with_role(
-                            SelectableTextRole::PlainDocument,
-                            "ssh-config-import",
-                            "imported",
-                            "Imported",
-                            theme.success,
-                            cx,
-                        )),
-                )
-            })
             .into_any_element()
     }
 

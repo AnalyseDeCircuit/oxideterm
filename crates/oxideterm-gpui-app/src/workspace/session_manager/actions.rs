@@ -534,7 +534,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    #[allow(dead_code)]
     fn open_ssh_config_import(&mut self, cx: &mut Context<Self>) {
         let names = self
             .connection_store

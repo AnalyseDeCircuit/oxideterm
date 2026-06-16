@@ -10,7 +10,7 @@ use super::{
 use crate::{
     client::Config,
     extensions::{self, Statvfs},
-    protocol::{FileAttributes, OpenFlags, StatusCode},
+    protocol::{File as SftpNameFile, FileAttributes, OpenFlags, StatusCode},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +79,21 @@ impl SftpSession {
     /// Default: 10 seconds
     pub fn set_timeout(&self, secs: u64) {
         self.session.set_timeout(secs);
+    }
+
+    /// Returns server-advertised SFTP limits when the OpenSSH extension is available.
+    pub fn advertised_limits(&self) -> Option<Limits> {
+        self.features.limits
+    }
+
+    /// Returns the packet length cap after applying the local config and server limits.
+    pub fn negotiated_packet_len(&self) -> u32 {
+        self.features.max_packet_len
+    }
+
+    /// Returns the server-advertised open-handle cap when known.
+    pub fn advertised_open_handle_limit(&self) -> Option<u64> {
+        self.features.limits.and_then(|limits| limits.open_handles)
     }
 
     /// Closes the inner channel stream.
@@ -172,20 +187,22 @@ impl SftpSession {
         let parent = Arc::from(path.as_str());
 
         let handle = self.session.opendir(path).await?.handle;
-        let mut files = vec![];
+        let mut files = Vec::new();
 
         loop {
             match self.session.readdir(handle.as_str()).await {
                 Ok(name) => {
-                    files = name
-                        .files
-                        .into_iter()
-                        .map(|f| (f.filename, f.attrs))
-                        .chain(files)
-                        .collect();
+                    append_name_files(&mut files, name.files);
                 }
                 Err(Error::Status(status)) if status.status_code == StatusCode::Eof => break,
-                Err(err) => return Err(err),
+                Err(err) => {
+                    // `read_dir` owns the directory handle once opendir
+                    // succeeds. Preserve the original read error, but still
+                    // ask the server to close the handle so large failed
+                    // listings do not leak remote/server-side handles.
+                    let _ = self.session.close(handle).await;
+                    return Err(err);
+                }
             }
         }
 
@@ -272,5 +289,86 @@ impl SftpSession {
         }
 
         self.session.statvfs(path).await.map(Some)
+    }
+}
+
+fn append_name_files(files: &mut Vec<(String, Metadata)>, batch: Vec<SftpNameFile>) {
+    // Keep the server-provided readdir order and append batches linearly.
+    // Rebuilding `new_batch.chain(files).collect()` on every packet becomes
+    // quadratic for large directories.
+    files.extend(batch.into_iter().map(|file| (file.filename, file.attrs)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl SftpSession {
+        fn for_test_with_limits(limits: Option<Limits>, max_packet_len: u32) -> Self {
+            let stream = tokio::io::duplex(64).0;
+            Self {
+                session: Arc::new(RawSftpSession::new(stream)),
+                features: Features {
+                    hardlink: false,
+                    fsync: false,
+                    statvfs: false,
+                    limits,
+                    max_concurrent_writes: 8,
+                    max_packet_len,
+                },
+            }
+        }
+    }
+
+    fn named_file(filename: &str) -> SftpNameFile {
+        SftpNameFile {
+            filename: filename.to_owned(),
+            longname: String::new(),
+            attrs: FileAttributes::empty(),
+        }
+    }
+
+    #[test]
+    fn read_dir_accumulates_batches_in_server_order() {
+        let mut files = Vec::new();
+
+        append_name_files(&mut files, vec![named_file("a"), named_file("b")]);
+        append_name_files(&mut files, vec![named_file("c")]);
+
+        let filenames = files
+            .into_iter()
+            .map(|(filename, _attrs)| filename)
+            .collect::<Vec<_>>();
+        assert_eq!(filenames, ["a", "b", "c"]);
+    }
+
+    #[tokio::test]
+    async fn session_exposes_advertised_capacity_hints() {
+        let limits = Limits {
+            packet_len: Some(65_536),
+            read_len: Some(32_768),
+            write_len: Some(32_768),
+            open_handles: Some(128),
+        };
+        let session = SftpSession::for_test_with_limits(Some(limits), 65_536);
+
+        let exposed = session
+            .advertised_limits()
+            .expect("limits should be exposed");
+        assert_eq!(exposed.packet_len, Some(65_536));
+        assert_eq!(exposed.read_len, Some(32_768));
+        assert_eq!(exposed.write_len, Some(32_768));
+        assert_eq!(exposed.open_handles, Some(128));
+        assert_eq!(session.negotiated_packet_len(), 65_536);
+        assert_eq!(session.advertised_open_handle_limit(), Some(128));
+    }
+
+    #[tokio::test]
+    async fn session_capacity_hints_are_empty_without_limits_extension() {
+        let session = SftpSession::for_test_with_limits(None, 262_144);
+
+        assert!(session.advertised_limits().is_none());
+        assert_eq!(session.negotiated_packet_len(), 262_144);
+        assert_eq!(session.advertised_open_handle_limit(), None);
     }
 }

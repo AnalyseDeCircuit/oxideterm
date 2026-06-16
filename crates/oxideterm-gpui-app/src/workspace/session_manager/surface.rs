@@ -99,6 +99,12 @@ impl WorkspaceApp {
             .relative()
             .flex()
             .flex_col()
+            // Session Manager is ordinary UI chrome, so it must explicitly
+            // follow the configured Tauri UI font instead of inheriting a
+            // terminal/mono font from surrounding tab content.
+            .font_family(settings_ui_font_family(
+                &self.settings_store.settings().appearance.ui_font_family,
+            ))
             .bg(if has_background {
                 rgba(0x00000000)
             } else {
