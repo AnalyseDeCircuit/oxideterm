@@ -434,6 +434,7 @@ mod tests {
             ],
             top_processes: Vec::new(),
             docker: Default::default(),
+            services: Default::default(),
             ssh_rtt_ms: Some(42),
             source: MetricsSource::Full,
         }

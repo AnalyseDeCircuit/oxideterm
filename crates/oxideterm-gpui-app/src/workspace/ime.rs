@@ -38,6 +38,7 @@ pub(super) enum WorkspaceImeTarget {
     HostProcessSearch,
     HostProcessRenice,
     HostDockerSearch,
+    HostServiceSearch,
     QuickCommand(QuickCommandInput),
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
@@ -87,6 +88,7 @@ impl WorkspaceImeTarget {
             Self::HostProcessSearch => 6,
             Self::HostProcessRenice => 7,
             Self::HostDockerSearch => 8,
+            Self::HostServiceSearch => 9,
             Self::QuickCommand(input) => 500 + input.anchor_key(),
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
@@ -436,6 +438,9 @@ impl WorkspaceApp {
         }
         if self.connection_monitor.host_docker_search_focused {
             return Some(WorkspaceImeTarget::HostDockerSearch);
+        }
+        if self.connection_monitor.host_service_search_focused {
+            return Some(WorkspaceImeTarget::HostServiceSearch);
         }
 
         if self.terminal_quick_commands_open
@@ -1142,6 +1147,10 @@ impl WorkspaceApp {
                 .connection_monitor
                 .host_docker_search_focused
                 .then(|| self.connection_monitor.host_docker_search_query.clone()),
+            WorkspaceImeTarget::HostServiceSearch => self
+                .connection_monitor
+                .host_service_search_focused
+                .then(|| self.connection_monitor.host_service_search_query.clone()),
             WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
@@ -1835,6 +1844,18 @@ impl WorkspaceApp {
                         text,
                     );
                     self.connection_monitor.host_docker_expanded_id = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::HostServiceSearch => {
+                if self.connection_monitor.host_service_search_focused {
+                    replace_utf16(
+                        &mut self.connection_monitor.host_service_search_query,
+                        replacement_range,
+                        text,
+                    );
+                    self.connection_monitor.host_service_expanded_id = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

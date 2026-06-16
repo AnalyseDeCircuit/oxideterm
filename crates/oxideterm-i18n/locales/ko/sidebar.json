@@ -172,6 +172,82 @@
         "connection_missing": "선택한 연결을 사용할 수 없습니다.",
         "action_failed": "Docker 작업에 실패했습니다."
       }
+    },
+    "host_services": {
+      "search_placeholder": "서비스 검색...",
+      "count_suffix": "개 서비스",
+      "sampling": "서비스를 샘플링하는 중...",
+      "empty": "일치하는 서비스가 없습니다",
+      "unavailable": "이 호스트에서 서비스 관리자를 사용할 수 없습니다.",
+      "error": "서비스 명령 실패: {{error}}",
+      "capability": {
+        "full": "전체 지원",
+        "partial": "부분 지원",
+        "unknown": "지원 상태 알 수 없음"
+      },
+      "columns": {
+        "service": "서비스",
+        "state": "상태",
+        "enabled": "활성화",
+        "pid": "PID",
+        "description": "설명",
+        "load": "로드",
+        "sub_state": "하위 상태"
+      },
+      "states": {
+        "running": "실행 중",
+        "stopped": "중지됨",
+        "failed": "실패",
+        "activating": "활성화 중",
+        "deactivating": "비활성화 중",
+        "reloading": "다시 로드 중",
+        "unknown": "알 수 없음"
+      },
+      "enabled": {
+        "enabled": "활성화됨",
+        "disabled": "비활성화됨",
+        "masked": "마스크됨",
+        "static": "정적",
+        "unknown": "알 수 없음"
+      },
+      "actions": {
+        "refresh": "서비스 새로 고침",
+        "logs": "로그 보기",
+        "follow_logs": "로그 추적",
+        "start": "시작",
+        "stop": "중지",
+        "restart": "재시작",
+        "reload": "다시 로드",
+        "enable": "활성화",
+        "disable": "비활성화"
+      },
+      "follow_title": "서비스 로그: {{name}}",
+      "logs": {
+        "title": "로그: {{name}}",
+        "loading": "로그를 불러오는 중...",
+        "empty": "최근 로그가 없습니다.",
+        "close": "로그 닫기"
+      },
+      "confirm": {
+        "title": "서비스 작업 확인",
+        "cancel": "취소",
+        "start_desc": "서비스 {{id}}({{name}})를 시작할까요?",
+        "stop_desc": "서비스 {{id}}({{name}})를 중지할까요? 실행 중인 작업이 중단될 수 있습니다.",
+        "restart_desc": "서비스 {{id}}({{name}})를 재시작할까요? 실행 중인 작업이 중단됩니다.",
+        "reload_desc": "서비스 {{id}}({{name}})를 다시 로드할까요?",
+        "enable_desc": "서비스 {{id}}({{name}})를 시작 시 활성화할까요?",
+        "disable_desc": "서비스 {{id}}({{name}})를 시작 시 비활성화할까요?"
+      },
+      "toast": {
+        "action_already_running": "서비스 작업이 이미 실행 중입니다.",
+        "logs_already_running": "서비스 로그를 이미 불러오는 중입니다.",
+        "logs_failed": "서비스 로그를 불러오지 못했습니다.",
+        "exec_terminal_missing": "이 서비스에 사용할 수 있는 라이브 SSH 터미널 경로가 없습니다.",
+        "follow_opened": "{{name}} 로그를 추적하는 중입니다.",
+        "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
+        "action_failed": "서비스 작업 실패.",
+        "partial_support": "{{os}}에서는 서비스 관리가 부분 지원됩니다."
+      }
     }
   },
   "sessions": {

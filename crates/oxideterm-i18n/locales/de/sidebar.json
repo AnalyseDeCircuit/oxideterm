@@ -172,6 +172,82 @@
         "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
         "action_failed": "Docker-Aktion fehlgeschlagen."
       }
+    },
+    "host_services": {
+      "search_placeholder": "Dienste suchen...",
+      "count_suffix": "Dienste",
+      "sampling": "Dienste werden erfasst...",
+      "empty": "Keine passenden Dienste",
+      "unavailable": "Auf diesem Host ist kein Dienstmanager verfügbar.",
+      "error": "Dienstbefehl fehlgeschlagen: {{error}}",
+      "capability": {
+        "full": "Voll unterstützt",
+        "partial": "Teilweise unterstützt",
+        "unknown": "Unterstützung unbekannt"
+      },
+      "columns": {
+        "service": "Dienst",
+        "state": "Status",
+        "enabled": "Aktiviert",
+        "pid": "PID",
+        "description": "Beschreibung",
+        "load": "Laden",
+        "sub_state": "Unterstatus"
+      },
+      "states": {
+        "running": "Läuft",
+        "stopped": "Gestoppt",
+        "failed": "Fehlgeschlagen",
+        "activating": "Startet",
+        "deactivating": "Stoppt",
+        "reloading": "Lädt neu",
+        "unknown": "Unbekannt"
+      },
+      "enabled": {
+        "enabled": "Aktiviert",
+        "disabled": "Deaktiviert",
+        "masked": "Maskiert",
+        "static": "Statisch",
+        "unknown": "Unbekannt"
+      },
+      "actions": {
+        "refresh": "Dienste aktualisieren",
+        "logs": "Logs anzeigen",
+        "follow_logs": "Logs verfolgen",
+        "start": "Starten",
+        "stop": "Stoppen",
+        "restart": "Neu starten",
+        "reload": "Neu laden",
+        "enable": "Aktivieren",
+        "disable": "Deaktivieren"
+      },
+      "follow_title": "Dienst-Logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Logs werden geladen...",
+        "empty": "Keine aktuellen Logs.",
+        "close": "Logs schließen"
+      },
+      "confirm": {
+        "title": "Dienstaktion bestätigen",
+        "cancel": "Abbrechen",
+        "start_desc": "Dienst {{id}} ({{name}}) starten?",
+        "stop_desc": "Dienst {{id}} ({{name}}) stoppen? Laufende Arbeit kann unterbrochen werden.",
+        "restart_desc": "Dienst {{id}} ({{name}}) neu starten? Laufende Arbeit wird unterbrochen.",
+        "reload_desc": "Dienst {{id}} ({{name}}) neu laden?",
+        "enable_desc": "Dienst {{id}} ({{name}}) beim Start aktivieren?",
+        "disable_desc": "Dienst {{id}} ({{name}}) beim Start deaktivieren?"
+      },
+      "toast": {
+        "action_already_running": "Es läuft bereits eine Dienstaktion.",
+        "logs_already_running": "Dienst-Logs werden bereits geladen.",
+        "logs_failed": "Dienst-Logs konnten nicht geladen werden.",
+        "exec_terminal_missing": "Für diesen Dienst ist keine aktive SSH-Terminalroute verfügbar.",
+        "follow_opened": "Logs für {{name}} werden verfolgt.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "action_failed": "Dienstaktion fehlgeschlagen.",
+        "partial_support": "Dienstverwaltung wird auf {{os}} teilweise unterstützt."
+      }
     }
   },
   "sessions": {

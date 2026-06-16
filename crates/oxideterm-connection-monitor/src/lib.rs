@@ -10,6 +10,7 @@ mod docker;
 mod metrics;
 mod process;
 mod profiler;
+mod service;
 mod stats;
 mod summary;
 
@@ -42,6 +43,14 @@ pub use profiler::{
     RESOURCE_MAX_OUTPUT_SIZE, RESOURCE_SAMPLE_INTERVAL, RESOURCE_SAMPLE_TIMEOUT,
     ResourceSampleShell, ResourceSampler, ResourceSamplerFuture, build_sample_command,
     shell_init_command,
+};
+pub use service::{
+    ResourceService, ResourceServiceSnapshot, ResourceServiceStatus, ServiceActionCommand,
+    ServiceActionKind, ServiceCaptureCommand, ServiceCommandCapability,
+    build_service_action_command, build_service_follow_logs_command, build_service_logs_command,
+    parse_service_snapshot, service_action_failure_message, service_action_succeeded,
+    service_action_success_message, service_enabled_label_key, service_row_signature,
+    service_sample_command, service_state_label_key, visible_service_rows,
 };
 pub use stats::{
     ConnectionMonitorConsumerKind, ConnectionPoolEntryState, ConnectionPoolEntrySummary,

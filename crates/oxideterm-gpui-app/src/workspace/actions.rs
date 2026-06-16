@@ -400,6 +400,7 @@ impl WorkspaceApp {
                     self.active_context_sidebar_tool,
                     ContextSidebarTool::Monitor
                         | ContextSidebarTool::Processes
+                        | ContextSidebarTool::Services
                         | ContextSidebarTool::Docker
                 ));
         if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
@@ -410,6 +411,9 @@ impl WorkspaceApp {
             return;
         }
         if self.handle_host_docker_search_key(event, cx) {
+            return;
+        }
+        if self.handle_host_service_search_key(event, cx) {
             return;
         }
 

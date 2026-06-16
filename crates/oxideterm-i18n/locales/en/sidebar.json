@@ -172,6 +172,82 @@
         "connection_missing": "The selected connection is no longer available.",
         "action_failed": "Docker action failed."
       }
+    },
+    "host_services": {
+      "search_placeholder": "Search services...",
+      "count_suffix": "services",
+      "sampling": "Sampling services...",
+      "empty": "No services match",
+      "unavailable": "Service manager is not available on this host.",
+      "error": "Service command failed: {{error}}",
+      "capability": {
+        "full": "Full support",
+        "partial": "Partial support",
+        "unknown": "Support unknown"
+      },
+      "columns": {
+        "service": "Service",
+        "state": "State",
+        "enabled": "Enabled",
+        "pid": "PID",
+        "description": "Description",
+        "load": "Load",
+        "sub_state": "Sub-state"
+      },
+      "states": {
+        "running": "Running",
+        "stopped": "Stopped",
+        "failed": "Failed",
+        "activating": "Activating",
+        "deactivating": "Deactivating",
+        "reloading": "Reloading",
+        "unknown": "Unknown"
+      },
+      "enabled": {
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "masked": "Masked",
+        "static": "Static",
+        "unknown": "Unknown"
+      },
+      "actions": {
+        "refresh": "Refresh services",
+        "logs": "View logs",
+        "follow_logs": "Follow logs",
+        "start": "Start",
+        "stop": "Stop",
+        "restart": "Restart",
+        "reload": "Reload",
+        "enable": "Enable",
+        "disable": "Disable"
+      },
+      "follow_title": "Service logs: {{name}}",
+      "logs": {
+        "title": "Logs: {{name}}",
+        "loading": "Loading logs...",
+        "empty": "No recent logs.",
+        "close": "Close logs"
+      },
+      "confirm": {
+        "title": "Confirm service action",
+        "cancel": "Cancel",
+        "start_desc": "Start service {{id}} ({{name}})?",
+        "stop_desc": "Stop service {{id}} ({{name}})? Running work may be interrupted.",
+        "restart_desc": "Restart service {{id}} ({{name}})? Running work will be interrupted.",
+        "reload_desc": "Reload service {{id}} ({{name}})?",
+        "enable_desc": "Enable service {{id}} ({{name}}) at startup?",
+        "disable_desc": "Disable service {{id}} ({{name}}) at startup?"
+      },
+      "toast": {
+        "action_already_running": "A service action is already running.",
+        "logs_already_running": "Service logs are already loading.",
+        "logs_failed": "Failed to load service logs.",
+        "exec_terminal_missing": "No live SSH terminal route is available for this service.",
+        "follow_opened": "Following logs for {{name}}.",
+        "connection_missing": "The selected connection is no longer available.",
+        "action_failed": "Service action failed.",
+        "partial_support": "Service management is partial on {{os}}."
+      }
     }
   },
   "sessions": {

@@ -172,6 +172,82 @@
         "connection_missing": "La conexión seleccionada ya no está disponible.",
         "action_failed": "La acción de Docker falló."
       }
+    },
+    "host_services": {
+      "search_placeholder": "Buscar servicios...",
+      "count_suffix": "servicios",
+      "sampling": "Muestreando servicios...",
+      "empty": "No hay servicios que coincidan",
+      "unavailable": "El gestor de servicios no está disponible en este host.",
+      "error": "El comando de servicio falló: {{error}}",
+      "capability": {
+        "full": "Compatibilidad completa",
+        "partial": "Compatibilidad parcial",
+        "unknown": "Compatibilidad desconocida"
+      },
+      "columns": {
+        "service": "Servicio",
+        "state": "Estado",
+        "enabled": "Habilitado",
+        "pid": "PID",
+        "description": "Descripción",
+        "load": "Carga",
+        "sub_state": "Subestado"
+      },
+      "states": {
+        "running": "En ejecución",
+        "stopped": "Detenido",
+        "failed": "Fallido",
+        "activating": "Activando",
+        "deactivating": "Desactivando",
+        "reloading": "Recargando",
+        "unknown": "Desconocido"
+      },
+      "enabled": {
+        "enabled": "Habilitado",
+        "disabled": "Deshabilitado",
+        "masked": "Enmascarado",
+        "static": "Estático",
+        "unknown": "Desconocido"
+      },
+      "actions": {
+        "refresh": "Actualizar servicios",
+        "logs": "Ver registros",
+        "follow_logs": "Seguir registros",
+        "start": "Iniciar",
+        "stop": "Detener",
+        "restart": "Reiniciar",
+        "reload": "Recargar",
+        "enable": "Habilitar",
+        "disable": "Deshabilitar"
+      },
+      "follow_title": "Registros del servicio: {{name}}",
+      "logs": {
+        "title": "Registros: {{name}}",
+        "loading": "Cargando registros...",
+        "empty": "No hay registros recientes.",
+        "close": "Cerrar registros"
+      },
+      "confirm": {
+        "title": "Confirmar acción de servicio",
+        "cancel": "Cancelar",
+        "start_desc": "¿Iniciar el servicio {{id}} ({{name}})?",
+        "stop_desc": "¿Detener el servicio {{id}} ({{name}})? El trabajo en ejecución puede interrumpirse.",
+        "restart_desc": "¿Reiniciar el servicio {{id}} ({{name}})? El trabajo en ejecución se interrumpirá.",
+        "reload_desc": "¿Recargar el servicio {{id}} ({{name}})?",
+        "enable_desc": "¿Habilitar el servicio {{id}} ({{name}}) al iniciar?",
+        "disable_desc": "¿Deshabilitar el servicio {{id}} ({{name}}) al iniciar?"
+      },
+      "toast": {
+        "action_already_running": "Ya hay una acción de servicio en curso.",
+        "logs_already_running": "Los registros del servicio ya se están cargando.",
+        "logs_failed": "No se pudieron cargar los registros del servicio.",
+        "exec_terminal_missing": "No hay una ruta de terminal SSH activa para este servicio.",
+        "follow_opened": "Siguiendo registros de {{name}}.",
+        "connection_missing": "La conexión seleccionada ya no está disponible.",
+        "action_failed": "La acción de servicio falló.",
+        "partial_support": "La gestión de servicios es parcial en {{os}}."
+      }
     }
   },
   "sessions": {

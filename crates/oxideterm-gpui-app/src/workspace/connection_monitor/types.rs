@@ -45,6 +45,18 @@ const HOST_DOCKER_LOGS_TIMEOUT: Duration = Duration::from_secs(8);
 const HOST_DOCKER_LOGS_MAX_OUTPUT_SIZE: usize = 128 * 1024;
 const HOST_DOCKER_LOGS_DIALOG_WIDTH: f32 = 760.0;
 const HOST_DOCKER_LOGS_DIALOG_MAX_HEIGHT: f32 = 520.0;
+const HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
+const HOST_SERVICE_TABLE_HEADER_HEIGHT: f32 = 28.0;
+const HOST_SERVICE_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
+const HOST_SERVICE_STATE_COLUMN_WIDTH: f32 = 78.0;
+const HOST_SERVICE_ENABLED_COLUMN_WIDTH: f32 = 70.0;
+const HOST_SERVICE_PID_COLUMN_WIDTH: f32 = 54.0;
+const HOST_SERVICE_LOGS_TIMEOUT: Duration = Duration::from_secs(8);
+const HOST_SERVICE_ACTION_TIMEOUT: Duration = Duration::from_secs(15);
+const HOST_SERVICE_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
+const HOST_SERVICE_LOGS_MAX_OUTPUT_SIZE: usize = 128 * 1024;
+const HOST_SERVICE_LOGS_DIALOG_WIDTH: f32 = 760.0;
+const HOST_SERVICE_LOGS_DIALOG_MAX_HEIGHT: f32 = 520.0;
 
 const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 const MONITOR_SPARKLINE_POINTS: usize = 12;
@@ -231,6 +243,41 @@ struct HostDockerLogsDialog {
     loading: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostServiceActionRequest {
+    connection_id: String,
+    service_id: String,
+    description: String,
+    action: ServiceActionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostServiceActionDelivery {
+    request: HostServiceActionRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostServiceLogsRequest {
+    connection_id: String,
+    service_id: String,
+    description: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostServiceLogsDelivery {
+    request: HostServiceLogsRequest,
+    result: Result<SshCommandOutput, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostServiceLogsDialog {
+    request: HostServiceLogsRequest,
+    output: Option<String>,
+    error: Option<String>,
+    loading: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionRuntimeSection {
     Overview,
@@ -281,6 +328,18 @@ pub(super) struct ConnectionMonitorState {
     host_docker_logs_dialog: Option<HostDockerLogsDialog>,
     host_docker_logs_rx: Option<std::sync::mpsc::Receiver<HostDockerLogsDelivery>>,
     host_docker_logs_polling: bool,
+    pub(in crate::workspace) host_service_search_query: String,
+    pub(in crate::workspace) host_service_search_focused: bool,
+    pub(in crate::workspace) host_service_expanded_id: Option<String>,
+    host_service_list_state: ListState,
+    host_service_list_cache: RefCell<VirtualListSignatureCache>,
+    host_service_pending_confirm: Option<HostServiceActionRequest>,
+    host_service_action_running: Option<HostServiceActionRequest>,
+    host_service_action_rx: Option<std::sync::mpsc::Receiver<HostServiceActionDelivery>>,
+    host_service_action_polling: bool,
+    host_service_logs_dialog: Option<HostServiceLogsDialog>,
+    host_service_logs_rx: Option<std::sync::mpsc::Receiver<HostServiceLogsDelivery>>,
+    host_service_logs_polling: bool,
     topology_transform: TopologyTransform,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
@@ -348,6 +407,22 @@ impl ConnectionMonitorState {
             host_docker_logs_dialog: None,
             host_docker_logs_rx: None,
             host_docker_logs_polling: false,
+            host_service_search_query: String::new(),
+            host_service_search_focused: false,
+            host_service_expanded_id: None,
+            host_service_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            host_service_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_service_pending_confirm: None,
+            host_service_action_running: None,
+            host_service_action_rx: None,
+            host_service_action_polling: false,
+            host_service_logs_dialog: None,
+            host_service_logs_rx: None,
+            host_service_logs_polling: false,
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
             topology_menu: None,

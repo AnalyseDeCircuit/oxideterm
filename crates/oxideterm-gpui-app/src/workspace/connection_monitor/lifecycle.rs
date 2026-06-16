@@ -73,7 +73,10 @@ impl WorkspaceApp {
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
             && matches!(
                 self.active_context_sidebar_tool,
-                ContextSidebarTool::Monitor | ContextSidebarTool::Processes
+                ContextSidebarTool::Monitor
+                    | ContextSidebarTool::Processes
+                    | ContextSidebarTool::Services
+                    | ContextSidebarTool::Docker
             ));
         if !monitor_surface_visible {
             return;

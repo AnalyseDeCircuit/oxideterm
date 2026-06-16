@@ -172,6 +172,82 @@
         "connection_missing": "所选连接已不可用。",
         "action_failed": "Docker 操作失败。"
       }
+    },
+    "host_services": {
+      "search_placeholder": "搜索服务...",
+      "count_suffix": "个服务",
+      "sampling": "正在采样服务...",
+      "empty": "没有匹配的服务",
+      "unavailable": "此主机上服务管理器不可用。",
+      "error": "服务命令失败：{{error}}",
+      "capability": {
+        "full": "完整支持",
+        "partial": "部分支持",
+        "unknown": "支持状态未知"
+      },
+      "columns": {
+        "service": "服务",
+        "state": "状态",
+        "enabled": "启用",
+        "pid": "PID",
+        "description": "描述",
+        "load": "加载",
+        "sub_state": "子状态"
+      },
+      "states": {
+        "running": "运行中",
+        "stopped": "已停止",
+        "failed": "失败",
+        "activating": "启动中",
+        "deactivating": "停止中",
+        "reloading": "重载中",
+        "unknown": "未知"
+      },
+      "enabled": {
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "masked": "已屏蔽",
+        "static": "静态",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "刷新服务",
+        "logs": "查看日志",
+        "follow_logs": "追踪日志",
+        "start": "启动",
+        "stop": "停止",
+        "restart": "重启",
+        "reload": "重载",
+        "enable": "启用",
+        "disable": "禁用"
+      },
+      "follow_title": "服务日志：{{name}}",
+      "logs": {
+        "title": "日志：{{name}}",
+        "loading": "正在加载日志...",
+        "empty": "暂无近期日志。",
+        "close": "关闭日志"
+      },
+      "confirm": {
+        "title": "确认服务操作",
+        "cancel": "取消",
+        "start_desc": "要启动服务 {{id}}（{{name}}）吗？",
+        "stop_desc": "要停止服务 {{id}}（{{name}}）吗？正在运行的任务可能会中断。",
+        "restart_desc": "要重启服务 {{id}}（{{name}}）吗？正在运行的任务会被中断。",
+        "reload_desc": "要重载服务 {{id}}（{{name}}）吗？",
+        "enable_desc": "要将服务 {{id}}（{{name}}）设为开机启用吗？",
+        "disable_desc": "要将服务 {{id}}（{{name}}）设为开机禁用吗？"
+      },
+      "toast": {
+        "action_already_running": "已有服务操作正在执行。",
+        "logs_already_running": "服务日志正在加载。",
+        "logs_failed": "服务日志加载失败。",
+        "exec_terminal_missing": "此服务没有可用的实时 SSH 终端路由。",
+        "follow_opened": "正在追踪 {{name}} 的日志。",
+        "connection_missing": "所选连接已不可用。",
+        "action_failed": "服务操作失败。",
+        "partial_support": "{{os}} 上的服务管理为部分支持。"
+      }
     }
   },
   "sessions": {

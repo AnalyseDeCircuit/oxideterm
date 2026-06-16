@@ -172,6 +172,82 @@
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
         "action_failed": "Thao tác Docker thất bại."
       }
+    },
+    "host_services": {
+      "search_placeholder": "Tìm dịch vụ...",
+      "count_suffix": "dịch vụ",
+      "sampling": "Đang lấy mẫu dịch vụ...",
+      "empty": "Không có dịch vụ phù hợp",
+      "unavailable": "Trình quản lý dịch vụ không khả dụng trên máy chủ này.",
+      "error": "Lệnh dịch vụ thất bại: {{error}}",
+      "capability": {
+        "full": "Hỗ trợ đầy đủ",
+        "partial": "Hỗ trợ một phần",
+        "unknown": "Chưa rõ hỗ trợ"
+      },
+      "columns": {
+        "service": "Dịch vụ",
+        "state": "Trạng thái",
+        "enabled": "Bật",
+        "pid": "PID",
+        "description": "Mô tả",
+        "load": "Tải",
+        "sub_state": "Trạng thái con"
+      },
+      "states": {
+        "running": "Đang chạy",
+        "stopped": "Đã dừng",
+        "failed": "Thất bại",
+        "activating": "Đang kích hoạt",
+        "deactivating": "Đang vô hiệu hóa",
+        "reloading": "Đang tải lại",
+        "unknown": "Không rõ"
+      },
+      "enabled": {
+        "enabled": "Đã bật",
+        "disabled": "Đã tắt",
+        "masked": "Đã che",
+        "static": "Tĩnh",
+        "unknown": "Không rõ"
+      },
+      "actions": {
+        "refresh": "Làm mới dịch vụ",
+        "logs": "Xem nhật ký",
+        "follow_logs": "Theo dõi nhật ký",
+        "start": "Khởi động",
+        "stop": "Dừng",
+        "restart": "Khởi động lại",
+        "reload": "Tải lại",
+        "enable": "Bật",
+        "disable": "Tắt"
+      },
+      "follow_title": "Nhật ký dịch vụ: {{name}}",
+      "logs": {
+        "title": "Nhật ký: {{name}}",
+        "loading": "Đang tải nhật ký...",
+        "empty": "Không có nhật ký gần đây.",
+        "close": "Đóng nhật ký"
+      },
+      "confirm": {
+        "title": "Xác nhận thao tác dịch vụ",
+        "cancel": "Hủy",
+        "start_desc": "Khởi động dịch vụ {{id}} ({{name}})?",
+        "stop_desc": "Dừng dịch vụ {{id}} ({{name}})? Công việc đang chạy có thể bị gián đoạn.",
+        "restart_desc": "Khởi động lại dịch vụ {{id}} ({{name}})? Công việc đang chạy sẽ bị gián đoạn.",
+        "reload_desc": "Tải lại dịch vụ {{id}} ({{name}})?",
+        "enable_desc": "Bật dịch vụ {{id}} ({{name}}) khi khởi động?",
+        "disable_desc": "Tắt dịch vụ {{id}} ({{name}}) khi khởi động?"
+      },
+      "toast": {
+        "action_already_running": "Một thao tác dịch vụ đang chạy.",
+        "logs_already_running": "Nhật ký dịch vụ đang được tải.",
+        "logs_failed": "Không tải được nhật ký dịch vụ.",
+        "exec_terminal_missing": "Không có tuyến terminal SSH trực tiếp cho dịch vụ này.",
+        "follow_opened": "Đang theo dõi nhật ký của {{name}}.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "action_failed": "Thao tác dịch vụ thất bại.",
+        "partial_support": "Quản lý dịch vụ chỉ được hỗ trợ một phần trên {{os}}."
+      }
     }
   },
   "sessions": {

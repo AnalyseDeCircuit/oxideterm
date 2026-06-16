@@ -530,6 +530,16 @@ pub(crate) fn clamp_context_menu_position(
     }
 }
 
+pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptureOwner) -> bool {
+    // Structural resize drags must stay above scroll-heavy Host Tools content.
+    // GPUI only offers global capture for mouse-up, so resize move events need
+    // an explicit top-level overlay instead of relying on bubbling from rows.
+    matches!(
+        owner,
+        BrowserPointerCaptureOwner::SidebarResize | BrowserPointerCaptureOwner::AiSidebarResize
+    )
+}
+
 impl WorkspaceApp {
     pub(super) fn browser_pointer_capture_owner(&self) -> Option<BrowserPointerCaptureOwner> {
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {
@@ -578,9 +588,9 @@ mod tests {
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
         browser_focus_visible, clamp_context_menu_position, clear_browser_highlighted_select_focus,
         modal_footer_input_key_action, modal_footer_key_action, modal_footer_key_moves_forward,
-        next_required_modal_footer_focus, preserve_or_move_context_selection,
-        resolve_browser_pointer_capture_owner, toggle_browser_highlighted_select_from_pointer,
-        toggle_browser_trigger_select_from_pointer,
+        next_required_modal_footer_focus, pointer_capture_needs_workspace_overlay,
+        preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
+        toggle_browser_highlighted_select_from_pointer, toggle_browser_trigger_select_from_pointer,
     };
     use std::collections::HashSet;
 
@@ -645,6 +655,22 @@ mod tests {
             resolve_browser_pointer_capture_owner(state),
             Some(BrowserPointerCaptureOwner::SidebarResize)
         );
+    }
+
+    #[test]
+    fn pointer_capture_overlay_is_reserved_for_structural_resizes() {
+        assert!(pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::SidebarResize
+        ));
+        assert!(pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::AiSidebarResize
+        ));
+        assert!(!pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::TextSelection
+        ));
+        assert!(!pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::SftpFileDrag
+        ));
     }
 
     #[test]

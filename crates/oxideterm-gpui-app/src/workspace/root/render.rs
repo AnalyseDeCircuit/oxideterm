@@ -14,6 +14,8 @@ impl Render for WorkspaceApp {
         self.poll_host_process_action_results(cx);
         self.poll_host_docker_action_results(cx);
         self.poll_host_docker_logs_results(cx);
+        self.poll_host_service_action_results(cx);
+        self.poll_host_service_logs_results(cx);
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
@@ -167,6 +169,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_host_docker_confirm_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_host_service_confirm_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -186,6 +191,9 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_host_docker_search_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_host_service_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_native_plugin_confirm_key(event, cx) {
@@ -654,6 +662,11 @@ impl Render for WorkspaceApp {
                         layout.child(self.render_context_right_sidebar_frame(cx))
                     }),
             )
+            .when(
+                self.browser_pointer_capture_owner()
+                    .is_some_and(browser_behavior::pointer_capture_needs_workspace_overlay),
+                |root| root.child(self.render_workspace_resize_capture_overlay(cx)),
+            )
             .when(self.new_connection_form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })
@@ -720,6 +733,12 @@ impl Render for WorkspaceApp {
                 root.child(dialog)
             })
             .when_some(self.render_host_docker_logs_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_host_service_confirm_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_host_service_logs_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
             .when_some(self.render_native_plugin_confirm_dialog(cx), |root, dialog| {
@@ -810,6 +829,35 @@ impl Render for WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    fn render_workspace_resize_capture_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("workspace-resize-capture-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .cursor(CursorStyle::ResizeColumn)
+            // Host Tools pages contain Lists, text inputs, and selectable log
+            // lines that can stop bubbling after data arrives. During a resize
+            // drag the frame-level handle must keep owning mouse movement.
+            .occlude()
+            .bg(rgba(0x00000000))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.update_sidebar_resize(event, window, cx);
+                this.update_ai_sidebar_resize(event, window, cx);
+                cx.stop_propagation();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseUpEvent, window, cx| {
+                    this.finish_workspace_pointer_captures(event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
     fn finish_workspace_pointer_captures(
         &mut self,
         event: &MouseUpEvent,

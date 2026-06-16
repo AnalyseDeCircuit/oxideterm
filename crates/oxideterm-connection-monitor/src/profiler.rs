@@ -19,12 +19,16 @@ use tokio::{
 use crate::{
     MetricsSource, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceMetrics,
     docker_sample_command, parse_resource_metrics, previous_sample_from_metrics, push_history,
+    service_sample_command,
 };
 
 pub const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 pub const RESOURCE_SAMPLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const RESOURCE_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
-pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 65_536;
+// Host Tools samples include process, Docker, and service tables. Keep enough
+// room for normal service inventories so SSH capture truncation does not look
+// like a parser failure.
+pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 256 * 1024;
 pub const RESOURCE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const RESOURCE_END_MARKER: &str = "===END===";
 
@@ -357,18 +361,25 @@ pub fn build_sample_command(os_type: &str) -> String {
         _ => None,
     };
     let docker_metrics = docker_sample_command(os_type);
+    let service_metrics = service_sample_command(os_type);
 
     match gpu_metrics {
         Some(gpu_metrics) => {
-            format!("{metrics}; {gpu_metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n")
+            format!(
+                "{metrics}; {gpu_metrics}; {port_cmd}; {docker_metrics}; {service_metrics}; echo '===END==='\n"
+            )
         }
-        None => format!("{metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n"),
+        None => {
+            format!(
+                "{metrics}; {port_cmd}; {docker_metrics}; {service_metrics}; echo '===END==='\n"
+            )
+        }
     }
 }
 
 fn build_windows_sample_command() -> String {
     let script = format!(
-        "{}{}{}",
+        "{}{}{}{}",
         concat!(
             "$ErrorActionPreference='SilentlyContinue';",
             "Write-Output '===CPU_DIRECT===';",
@@ -442,6 +453,7 @@ fn build_windows_sample_command() -> String {
             "Write-Output '===PORTS_END===';"
         ),
         docker_sample_command("Windows"),
+        service_sample_command("Windows"),
         "Write-Output '===END===';",
     );
     // OpenSSH on Windows may start cmd.exe or PowerShell; invoking PowerShell

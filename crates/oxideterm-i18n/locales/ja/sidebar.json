@@ -172,6 +172,82 @@
         "connection_missing": "選択した接続は利用できません。",
         "action_failed": "Docker 操作に失敗しました。"
       }
+    },
+    "host_services": {
+      "search_placeholder": "サービスを検索...",
+      "count_suffix": "サービス",
+      "sampling": "サービスを取得中...",
+      "empty": "一致するサービスはありません",
+      "unavailable": "このホストではサービスマネージャーを利用できません。",
+      "error": "サービスコマンドに失敗しました: {{error}}",
+      "capability": {
+        "full": "完全対応",
+        "partial": "一部対応",
+        "unknown": "対応状況不明"
+      },
+      "columns": {
+        "service": "サービス",
+        "state": "状態",
+        "enabled": "有効化",
+        "pid": "PID",
+        "description": "説明",
+        "load": "ロード",
+        "sub_state": "サブ状態"
+      },
+      "states": {
+        "running": "実行中",
+        "stopped": "停止",
+        "failed": "失敗",
+        "activating": "起動中",
+        "deactivating": "停止中",
+        "reloading": "再読み込み中",
+        "unknown": "不明"
+      },
+      "enabled": {
+        "enabled": "有効",
+        "disabled": "無効",
+        "masked": "マスク済み",
+        "static": "静的",
+        "unknown": "不明"
+      },
+      "actions": {
+        "refresh": "サービスを更新",
+        "logs": "ログを表示",
+        "follow_logs": "ログを追跡",
+        "start": "開始",
+        "stop": "停止",
+        "restart": "再起動",
+        "reload": "再読み込み",
+        "enable": "有効化",
+        "disable": "無効化"
+      },
+      "follow_title": "サービスログ: {{name}}",
+      "logs": {
+        "title": "ログ: {{name}}",
+        "loading": "ログを読み込み中...",
+        "empty": "最近のログはありません。",
+        "close": "ログを閉じる"
+      },
+      "confirm": {
+        "title": "サービス操作の確認",
+        "cancel": "キャンセル",
+        "start_desc": "サービス {{id}}（{{name}}）を開始しますか？",
+        "stop_desc": "サービス {{id}}（{{name}}）を停止しますか？実行中の作業が中断される可能性があります。",
+        "restart_desc": "サービス {{id}}（{{name}}）を再起動しますか？実行中の作業は中断されます。",
+        "reload_desc": "サービス {{id}}（{{name}}）を再読み込みしますか？",
+        "enable_desc": "サービス {{id}}（{{name}}）を起動時に有効化しますか？",
+        "disable_desc": "サービス {{id}}（{{name}}）を起動時に無効化しますか？"
+      },
+      "toast": {
+        "action_already_running": "サービス操作はすでに実行中です。",
+        "logs_already_running": "サービスログはすでに読み込み中です。",
+        "logs_failed": "サービスログの読み込みに失敗しました。",
+        "exec_terminal_missing": "このサービスで利用できるライブ SSH ターミナル経路がありません。",
+        "follow_opened": "{{name}} のログを追跡しています。",
+        "connection_missing": "選択した接続は利用できなくなりました。",
+        "action_failed": "サービス操作に失敗しました。",
+        "partial_support": "{{os}} でのサービス管理は一部対応です。"
+      }
     }
   },
   "sessions": {
