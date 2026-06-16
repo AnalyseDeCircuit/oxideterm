@@ -143,3 +143,32 @@ debug formatting. They do not include hostnames, usernames, node identifiers,
 paths, filenames, server banners, raw error messages, or secret-bearing data.
 OxideTerm may format them to the local stderr stream only when an explicit local
 diagnostic environment variable is enabled.
+
+## Directory listing and request lifecycle cleanup
+
+The high-level `SftpSession::read_dir` path now appends each `SSH_FXP_NAME`
+batch into the accumulated entry vector instead of rebuilding
+`new_batch.chain(old_entries).collect()` for every packet. Large directories
+therefore grow linearly instead of repeatedly copying previously collected
+entries. The order now follows the server-provided `readdir` order.
+
+If `readdir` returns an error after `opendir` succeeds, the session now attempts
+to close the remote directory handle before returning the original error. This
+keeps error reporting stable while avoiding server-side handle leaks on failed
+large listings.
+
+`RawSftpSession::send_encoded` also removes the request waiter from the shared
+request map if the outgoing channel closes between the fast `is_closed` check
+and the actual send. That race previously left an unreachable request entry in
+the map after a failed send.
+
+## Server limit visibility
+
+`SftpSession` now exposes the negotiated OpenSSH `limits@openssh.com` values,
+the effective packet length cap, and the advertised open-handle cap. These are
+read-only capacity hints for upper layers such as `oxideterm-sftp`; they do not
+change the high-level read/write behavior by themselves.
+
+The main immediate use case is safe directory-transfer scheduling. A caller can
+prefer server-provided handle limits over hardcoded concurrency when deciding
+how many files or directory handles to keep open at once.

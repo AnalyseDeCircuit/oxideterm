@@ -235,21 +235,23 @@ impl WorkspaceApp {
         let recent = recent_session_items(&items);
         let (roots, _) = self.session_group_tree();
         let has_groups = !roots.is_empty();
-        let mut content = div()
-            .size_full()
-            .overflow_y_scrollbar()
+        let mut sections = div()
             .p(px(self.tokens.spacing.three))
             .flex()
             .flex_col()
-            .gap(px(self.tokens.spacing.three))
+            .gap(px(self.tokens.spacing.three));
+        let content = div()
+            .size_full()
+            .overflow_y_scrollbar()
             .bg(if has_background {
                 rgba(0x00000000)
             } else {
                 rgb(theme.bg)
-            });
+            })
+            .child(self.render_session_manager_view_actions(false, has_background, cx));
 
         if !recent.is_empty() {
-            content = content.child(self.render_session_manager_grid_section(
+            sections = sections.child(self.render_session_manager_grid_section(
                 self.i18n.t("sessionManager.views.recent"),
                 recent,
                 has_background,
@@ -265,7 +267,7 @@ impl WorkspaceApp {
             if group_items.is_empty() {
                 continue;
             }
-            content = content.child(self.render_session_manager_grid_section(
+            sections = sections.child(self.render_session_manager_grid_section(
                 group_display_name(group),
                 group_items,
                 has_background,
@@ -280,16 +282,16 @@ impl WorkspaceApp {
             items
         };
         if host_items.is_empty() {
-            return content.into_any_element();
+            return content.child(sections).into_any_element();
         }
 
         content
-            .child(self.render_session_manager_grid_section(
+            .child(sections.child(self.render_session_manager_grid_section(
                 self.i18n.t("sessionManager.views.hosts"),
                 host_items,
                 has_background,
                 cx,
-            ))
+            )))
             .into_any_element()
     }
 
@@ -433,6 +435,7 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
+            .child(self.render_session_manager_view_actions(false, has_background, cx))
             .child(
                 div()
                     .border_b_1()
@@ -484,58 +487,83 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.two))
-                    .border_b_1()
-                    .border_color(theme_border(theme.border, has_background))
-                    .bg(theme_secondary_bg(theme.bg_secondary, has_background))
-                    .px_3()
-                    .py_2()
-                    .child(self.render_tree_mode_action_button(
-                        LucideIcon::ChevronDown,
-                        self.i18n.t("sessionManager.views.expand_all"),
-                        has_background,
-                        cx.listener(|this, _event, _window, cx| {
-                            let (roots, children) = this.session_group_tree();
-                            let mut groups = HashSet::new();
-                            collect_session_group_paths(&roots, &children, &mut groups);
-                            this.session_manager.expanded_groups = groups;
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    ))
-                    .child(self.render_tree_mode_action_button(
-                        LucideIcon::ChevronRight,
-                        self.i18n.t("sessionManager.views.collapse_all"),
-                        has_background,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.session_manager.expanded_groups.clear();
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    ))
-                    .child(self.render_tree_mode_action_button(
-                        LucideIcon::Plus,
-                        self.i18n.t("sessionManager.folder_tree.new_group"),
-                        has_background,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_session_row_menus();
-                            this.session_manager.show_new_group = true;
-                            this.session_manager.new_group_name.clear();
-                            this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    )),
-            )
+            .child(self.render_session_manager_view_actions(true, has_background, cx))
             .child(body)
             .into_any_element()
+    }
+
+    fn render_session_manager_view_actions(
+        &self,
+        include_tree_controls: bool,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = self.tokens.ui;
+        let mut row = div()
+            // The SSH config importer is a discovery action for every
+            // session-manager layout, not a tree-only folder operation.
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(self.tokens.spacing.two))
+            .border_b_1()
+            .border_color(theme_border(theme.border, has_background))
+            .bg(theme_secondary_bg(theme.bg_secondary, has_background))
+            .px_3()
+            .py_2();
+        if include_tree_controls {
+            row = row
+                .child(self.render_tree_mode_action_button(
+                    LucideIcon::ChevronDown,
+                    self.i18n.t("sessionManager.views.expand_all"),
+                    has_background,
+                    cx.listener(|this, _event, _window, cx| {
+                        let (roots, children) = this.session_group_tree();
+                        let mut groups = HashSet::new();
+                        collect_session_group_paths(&roots, &children, &mut groups);
+                        this.session_manager.expanded_groups = groups;
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ))
+                .child(self.render_tree_mode_action_button(
+                    LucideIcon::ChevronRight,
+                    self.i18n.t("sessionManager.views.collapse_all"),
+                    has_background,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.session_manager.expanded_groups.clear();
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ))
+                .child(self.render_tree_mode_action_button(
+                    LucideIcon::Plus,
+                    self.i18n.t("sessionManager.folder_tree.new_group"),
+                    has_background,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_session_row_menus();
+                        this.session_manager.show_new_group = true;
+                        this.session_manager.new_group_name.clear();
+                        this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ));
+        }
+        row.child(self.render_tree_mode_action_button(
+            LucideIcon::FolderInput,
+            self.i18n.t("settings_view.connections.ssh_config.title"),
+            has_background,
+            cx.listener(|this, _event, _window, cx| {
+                this.close_session_row_menus();
+                this.open_ssh_config_import(cx);
+                cx.stop_propagation();
+            }),
+            cx,
+        ))
     }
 
     fn render_tree_mode_action_button(

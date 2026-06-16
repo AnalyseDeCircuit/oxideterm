@@ -275,7 +275,13 @@ impl RawSftpSession {
 
         let (tx, rx) = oneshot::channel();
         self.requests.insert(id, tx);
-        self.tx.send(bytes)?;
+        if let Err(error) = self.tx.send(bytes) {
+            // The closed-channel check above is only a fast path; the receiver
+            // can still close between that check and send. Remove the request
+            // waiter so a failed send cannot leave an unreachable map entry.
+            self.requests.remove(&id);
+            return Err(error.into());
+        }
 
         Ok(rx)
     }
