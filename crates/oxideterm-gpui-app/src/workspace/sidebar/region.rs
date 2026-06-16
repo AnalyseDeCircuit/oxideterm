@@ -227,7 +227,11 @@ impl WorkspaceApp {
             .child(
                 div()
                     .absolute()
-                    .left_0()
+                    // The visible divider belongs on the content edge, not
+                    // the outer gutter edge. This keeps titlebar/header
+                    // horizontal rules connected to the sidebar's vertical
+                    // border while preserving the full gutter as resize hitbox.
+                    .right_0()
                     .top_0()
                     .bottom_0()
                     .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
@@ -1491,8 +1495,18 @@ mod sidebar_resize_region_tests {
                 .child(
                     div()
                         .flex_none()
+                        .relative()
                         .w(px(context_sidebar_resize_gutter_width()))
                         .h_full()
+                        .child(
+                            div()
+                                .absolute()
+                                .right_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
+                                .debug_selector(|| "context-divider".to_string()),
+                        )
                         .debug_selector(|| "context-gutter".to_string()),
                 )
                 .child(
@@ -1583,6 +1597,7 @@ mod sidebar_resize_region_tests {
 
         let frame = cx.debug_bounds("context-frame").expect("frame bounds");
         let gutter = cx.debug_bounds("context-gutter").expect("gutter bounds");
+        let divider = cx.debug_bounds("context-divider").expect("divider bounds");
         let region = cx.debug_bounds("context-region").expect("region bounds");
         let titlebar = cx
             .debug_bounds("context-titlebar")
@@ -1603,6 +1618,11 @@ mod sidebar_resize_region_tests {
             "region origin",
             f32::from(region.origin.x) - f32::from(frame.origin.x),
             gutter_width,
+        );
+        assert_close(
+            "divider right edge meets region",
+            right_edge(&divider),
+            f32::from(region.origin.x),
         );
         assert_close(
             "region width",
