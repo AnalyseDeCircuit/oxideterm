@@ -85,7 +85,7 @@ impl Render for TerminalPane {
         .highlight_rules(self.preferences.highlight_rules.clone())
         .row_timestamps(row_timestamps)
         .transparent_background(background.is_some())
-        .ghost_text(self.autosuggest_ghost_text())
+        .ghost_text(self.terminal_ghost_text())
         .viewport_rows(viewport_rows)
         .viewport_display_offset(self.snapshot.display_offset)
         .scroll_y_offset(smooth_scroll_y_offset)

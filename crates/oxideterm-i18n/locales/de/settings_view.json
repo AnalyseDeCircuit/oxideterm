@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "Speichert lokale sudo/su-Hilfsanmeldedaten für dieses Gerät. Geheimnisse bleiben im Privileg-Keychain-Bereich und werden nur nach einem ausdrücklichen Klick gesendet.",
       "privilege_username_placeholder": "Aktueller lokaler Benutzer"
     },
+    "privilege_credentials": {
+      "title": "Privileg-Anmeldedaten",
+      "description": "sudo-, su- und benutzerdefinierte Privileg-Prompt-Anmeldedaten für lokale Shells und gespeicherte Verbindungen zentral verwalten.",
+      "scopes": "Anmeldedaten-Bereiche",
+      "local_scope": "Lokale Shell",
+      "local_scope_hint": "Anmeldedaten für lokale Terminals auf diesem Gerät",
+      "credential_count": "{{count}} Anmeldedaten",
+      "disabled": "Deaktiviert"
+    },
     "tabs": {
       "general": "Allgemein",
       "terminal": "Terminal",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "Wissensdatenbank",
       "local": "Lokales Terminal",
+      "privilege": "Privileg-Anmeldedaten",
       "reconnect": "Wiederverbindung",
       "help": "Hilfe & Info",
       "keybindings": "Tastenkürzel",

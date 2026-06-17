@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "Lưu thông tin xác thực trợ giúp sudo/su cục bộ cho thiết bị này. Bí mật chỉ nằm trong phạm vi keychain đặc quyền và chỉ được gửi sau khi bạn bấm rõ ràng.",
       "privilege_username_placeholder": "Người dùng cục bộ hiện tại"
     },
+    "privilege_credentials": {
+      "title": "Thông tin xác thực đặc quyền",
+      "description": "Quản lý tập trung thông tin xác thực sudo, su và lời nhắc đặc quyền tùy chỉnh cho shell cục bộ và kết nối đã lưu.",
+      "scopes": "Phạm vi thông tin xác thực",
+      "local_scope": "Shell cục bộ",
+      "local_scope_hint": "Thông tin xác thực dùng cho terminal cục bộ trên thiết bị này",
+      "credential_count": "{{count}} thông tin xác thực",
+      "disabled": "Đã tắt"
+    },
     "tabs": {
       "general": "Chung",
       "terminal": "Terminal",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "Cơ sở tri thức",
       "local": "Terminal cục bộ",
+      "privilege": "Thông tin xác thực đặc quyền",
       "reconnect": "Tự động kết nối lại",
       "help": "Trợ giúp & Giới thiệu",
       "keybindings": "Phím tắt",

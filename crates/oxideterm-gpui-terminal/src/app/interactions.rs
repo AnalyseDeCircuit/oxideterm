@@ -4,7 +4,7 @@ use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, ScrollWheelEvent, Timer, TouchPhase, px,
 };
-use oxideterm_terminal::{TermMode, TerminalSearchMatch};
+use oxideterm_terminal::{TermMode, TerminalRow, TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row;
 
 use super::{ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane};
@@ -265,16 +265,15 @@ impl TerminalPane {
     }
 
     fn snapshot_text(&self) -> String {
-        self.snapshot
-            .lines
-            .iter()
-            .map(|row| row.text().trim_end().to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
+        snapshot_text_from_rows(&self.snapshot.lines)
     }
 
     pub fn visible_text_snapshot(&self) -> String {
         self.snapshot_text()
+    }
+
+    pub fn privilege_prompt_text_snapshot(&self) -> String {
+        privilege_prompt_text_from_snapshot(&self.snapshot)
     }
 
     pub fn ai_buffer_snapshot(&self) -> String {
@@ -949,9 +948,98 @@ fn smart_copy_selection_is_owned_by_terminal_ui(mode: TermMode) -> bool {
     !mode.contains(TermMode::ALT_SCREEN) && !mouse_tracking_active(mode)
 }
 
+fn snapshot_text_from_rows(rows: &[TerminalRow]) -> String {
+    rows.iter()
+        .map(|row| row.text().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn privilege_prompt_text_from_snapshot(snapshot: &TerminalSnapshot) -> String {
+    let Some(cursor_row) = snapshot.lines.get(snapshot.cursor_row) else {
+        return snapshot_text_from_rows(&snapshot.lines);
+    };
+
+    if !cursor_row.active_input {
+        return cursor_row.text().trim_end().to_string();
+    }
+
+    let mut start = snapshot.cursor_row;
+    while start > 0
+        && snapshot
+            .lines
+            .get(start - 1)
+            .is_some_and(|row| row.active_input)
+    {
+        start -= 1;
+    }
+
+    let mut end = snapshot.cursor_row;
+    while end + 1 < snapshot.lines.len()
+        && snapshot
+            .lines
+            .get(end + 1)
+            .is_some_and(|row| row.active_input)
+    {
+        end += 1;
+    }
+
+    // Privilege prompts should be detected from the live input area, not the
+    // whole viewport. Full-screen scans can either miss SSH prompts when chrome
+    // rows trail the cursor or, worse, match stale sudo prompts in scrollback.
+    snapshot_text_from_rows(&snapshot.lines[start..=end])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    fn test_cell(ch: char) -> TerminalCell {
+        TerminalCell {
+            ch,
+            zerowidth: String::new(),
+            wide: false,
+            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            attrs: TerminalAttrs::default(),
+            hyperlink: None,
+            cursor: false,
+        }
+    }
+
+    fn test_row(text: &str, active_input: bool) -> TerminalRow {
+        let mut cells = text.chars().map(test_cell).collect::<Vec<_>>();
+        if cells.is_empty() {
+            cells.push(test_cell(' '));
+        }
+        let mut row = TerminalRow {
+            absolute_line: 0,
+            cells: Arc::new(cells),
+            wrapped: false,
+            active_input,
+            signature: 0,
+        };
+        row.refresh_signature();
+        row
+    }
+
+    fn test_snapshot(lines: Vec<TerminalRow>, cursor_row: usize) -> TerminalSnapshot {
+        TerminalSnapshot {
+            generation: 1,
+            cols: 120,
+            rows: lines.len(),
+            cursor_col: 0,
+            cursor_row,
+            cursor_shape: TerminalCursorShape::Block,
+            display_offset: 0,
+            scrollback_lines: 0,
+            lines,
+            images: Vec::new(),
+        }
+    }
 
     #[test]
     fn smart_copy_yields_ctrl_c_to_tui_modes() {
@@ -984,5 +1072,38 @@ mod tests {
             terminal_selection_autoscroll_delta_rows(px(250.0), px(100.0), px(200.0), px(10.0)),
             -TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS
         );
+    }
+
+    #[test]
+    fn privilege_prompt_snapshot_uses_cursor_input_block() {
+        let snapshot = test_snapshot(
+            vec![
+                test_row("old sudo command", false),
+                test_row("[sudo] old 的密码:", false),
+                test_row("❯ sudo yazi", false),
+                test_row("[sudo] lipsc 的密码:", true),
+                test_row("status text after cursor", false),
+            ],
+            3,
+        );
+
+        assert_eq!(
+            privilege_prompt_text_from_snapshot(&snapshot),
+            "[sudo] lipsc 的密码:"
+        );
+    }
+
+    #[test]
+    fn privilege_prompt_snapshot_does_not_match_stale_scrollback_prompt() {
+        let snapshot = test_snapshot(
+            vec![
+                test_row("❯ sudo yazi", false),
+                test_row("[sudo] lipsc 的密码:", false),
+                test_row("", true),
+            ],
+            2,
+        );
+
+        assert_eq!(privilege_prompt_text_from_snapshot(&snapshot), "");
     }
 }

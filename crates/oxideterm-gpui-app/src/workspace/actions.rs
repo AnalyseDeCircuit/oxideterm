@@ -1,6 +1,8 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use oxideterm_gpui_ui::text_input::text_input_anchor_probe;
+use oxideterm_gpui_ui::text_input::{
+    text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
+};
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -15,6 +17,19 @@ pub(super) struct SearchBarState {
     pub(super) visible: bool,
     pub(super) query: String,
     pub(super) active_match: Option<usize>,
+    pub(super) match_count: usize,
+}
+
+impl SearchBarState {
+    fn sync_from_terminal(&mut self, status: TerminalSearchStatus) {
+        self.active_match = status.active_match;
+        self.match_count = status.match_count;
+    }
+
+    fn clear_match_state(&mut self) {
+        self.active_match = None;
+        self.match_count = 0;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,19 +48,29 @@ enum TerminalCommandSuggestionDirection {
 impl WorkspaceApp {
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = true;
+        self.terminal_command_bar_focused = false;
+        self.terminal_command_suggestions_open = false;
+        self.terminal_command_suggestion_highlighted = None;
+        self.close_terminal_quick_commands_popover();
         window.focus(&self.focus_handle);
         if let Some(pane) = self.active_pane() {
             let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
-            let _ = pane.update(cx, |pane, cx| {
-                pane.set_search_query(query, self.search.active_match, cx);
+            let selected_match = query
+                .as_ref()
+                .map(|_| self.search.active_match.unwrap_or(0));
+            let status = pane.update(cx, |pane, cx| {
+                pane.set_search_query(query, selected_match, cx)
             });
+            self.search.sync_from_terminal(status);
+        } else {
+            self.search.clear_match_state();
         }
         cx.notify();
     }
 
     pub(super) fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = false;
-        self.search.active_match = None;
+        self.search.clear_match_state();
         self.ime_marked_text = None;
         if let Some(pane) = self.active_pane() {
             let _ = pane.update(cx, |pane, cx| pane.set_search_query(None, None, cx));
@@ -58,18 +83,21 @@ impl WorkspaceApp {
         let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
         self.search.active_match = query.as_ref().map(|_| 0);
         if let Some(pane) = self.active_pane() {
-            let _ = pane.update(cx, |pane, cx| {
-                pane.set_search_query(query, self.search.active_match, cx);
+            let status = pane.update(cx, |pane, cx| {
+                pane.set_search_query(query, self.search.active_match, cx)
             });
+            self.search.sync_from_terminal(status);
+        } else {
+            self.search.clear_match_state();
         }
         cx.notify();
     }
 
     pub(super) fn search_next(&mut self, forward: bool, cx: &mut Context<Self>) {
         if let Some(pane) = self.active_pane() {
-            let _ = pane.update(cx, |pane, cx| {
-                pane.select_next_search_result(forward, cx);
-            });
+            let status = pane.update(cx, |pane, cx| pane.select_next_search_result(forward, cx));
+            self.search.sync_from_terminal(status);
+            cx.notify();
         }
     }
 
@@ -1720,91 +1748,256 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_search_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        const SEARCH_PANEL_BG_ALPHA: u32 = 0xf5; // Tauri bg-theme-bg-elevated translated to native opacity.
+        const SEARCH_PANEL_BORDER_ALPHA: u32 = 0xcc; // Tauri border-theme-border.
+
         let theme = self.tokens.ui;
         let target = WorkspaceImeTarget::Search;
         let workspace = cx.entity();
-        let query = if self.search.query.is_empty() {
-            self.i18n.t("search.placeholder")
-        } else {
+        let has_query = !self.search.query.is_empty();
+        let marked_text = self.marked_text_for_target(target);
+        let selected_range = self.ime_selected_range_for_target(target);
+        let input_range = selected_range
+            .clone()
+            .filter(|_| has_query && marked_text.is_none());
+        let selection_range = input_range.clone().filter(|range| range.start < range.end);
+        let caret_offset = input_range
+            .as_ref()
+            .filter(|range| range.start == range.end)
+            .map(|range| range.start);
+        let shows_selection = selection_range.is_some();
+        let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
+        let query = if has_query {
             self.search.query.clone()
+        } else {
+            self.i18n.t("search.placeholder")
         };
+        let match_count = self.search.match_count;
+        let active_match = self
+            .search
+            .active_match
+            .filter(|index| *index < match_count);
+        let navigation_disabled = !has_query || match_count == 0;
+        let result_label = if !has_query {
+            String::new()
+        } else if match_count == 0 {
+            self.i18n.t("search.no_results")
+        } else {
+            format!("{}/{}", active_match.unwrap_or(0) + 1, match_count)
+        };
+
         div()
-            .h(px(self.tokens.metrics.searchbar_height))
+            .absolute()
+            .top(px(12.0))
+            .right(px(12.0))
+            .w(px(420.0))
+            .max_w(relative(0.92))
             .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .bg(rgb(theme.bg_panel))
-            .border_b_1()
-            .border_color(rgb(theme.border))
-            .text_size(px(self.tokens.metrics.searchbar_font_size))
+            .flex_col()
+            .overflow_hidden()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | SEARCH_PANEL_BORDER_ALPHA))
+            .bg(rgba((theme.bg_elevated << 8) | SEARCH_PANEL_BG_ALPHA))
+            .shadow_lg()
+            .text_size(px(13.0))
             .text_color(rgb(theme.text))
-            .child(text_input_anchor_probe(
-                target.anchor_id(),
+            .child(
                 div()
-                    .flex_1()
-                    .h(px(self.tokens.metrics.search_input_height))
-                    .px_2()
+                    .h(px(44.0))
                     .flex()
                     .items_center()
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgb(theme.bg))
-                    .text_color(if self.search.query.is_empty() {
-                        rgb(theme.text_muted)
-                    } else {
-                        rgb(theme.text)
-                    })
-                    .child(query)
-                    .when_some(self.marked_text_for_target(target), |input, marked| {
-                        input.child(
+                    .gap(px(8.0))
+                    .px(px(12.0))
+                    .border_b_1()
+                    .border_color(rgba((theme.border << 8) | 0x99))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Search,
+                        15.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(text_input_anchor_probe(
+                        target.anchor_id(),
+                        div()
+                            .h(px(28.0))
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .items_center()
+                            .overflow_hidden()
+                            .rounded(px(self.tokens.radii.sm))
+                            .px(px(2.0))
+                            .cursor_text()
+                            .text_color(if has_query {
+                                rgb(theme.text)
+                            } else {
+                                rgb(theme.text_muted)
+                            })
+                            .when(!has_query && marked_text.is_none(), |input| {
+                                input.child(text_caret(
+                                    &self.tokens,
+                                    self.new_connection_caret_visible,
+                                ))
+                            })
+                            .child(if has_query {
+                                text_input_value_segments_with_color(
+                                    &self.tokens,
+                                    &query,
+                                    false,
+                                    selection_range,
+                                    caret_offset,
+                                    self.new_connection_caret_visible,
+                                    Some(theme.text),
+                                )
+                                .into_any_element()
+                            } else {
+                                div().child(query).into_any_element()
+                            })
+                            .when_some(marked_text, |input, marked| {
+                                input.child(
+                                    div()
+                                        .underline()
+                                        .text_color(rgb(theme.text))
+                                        .child(marked.to_string()),
+                                )
+                            })
+                            .when(
+                                has_query && !shows_selection && !shows_positioned_caret,
+                                |input| {
+                                    input.child(text_caret(
+                                        &self.tokens,
+                                        self.new_connection_caret_visible,
+                                    ))
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, event, window, cx| {
+                                    this.terminal_command_bar_focused = false;
+                                    this.ime_marked_text = None;
+                                    window.focus(&this.focus_handle);
+                                    this.begin_ime_selection_from_mouse_down(
+                                        WorkspaceImeTarget::Search,
+                                        event,
+                                        window,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .on_mouse_move(cx.listener(|this, event, window, cx| {
+                                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                            })),
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_text_input_anchor(anchor, cx);
+                            });
+                        },
+                    ))
+                    .when(has_query, |row| {
+                        row.child(
                             div()
-                                .underline()
-                                .text_color(rgb(theme.text))
-                                .child(marked.to_string()),
+                                .flex_none()
+                                .min_w(px(48.0))
+                                .text_size(px(12.0))
+                                .text_color(rgb(theme.text_muted))
+                                .child(result_label),
                         )
-                    }),
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_text_input_anchor(anchor, cx);
-                    });
-                },
-            ))
-            .child(
-                div()
-                    .px_2()
-                    .cursor_pointer()
-                    .child(self.i18n.t("search.previous"))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.search_next(false, cx);
-                        }),
+                    })
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .cursor_pointer()
+                            .hover(move |style| {
+                                if navigation_disabled {
+                                    style
+                                } else {
+                                    style.bg(rgb(theme.bg_hover))
+                                }
+                            })
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::ArrowUp,
+                                14.0,
+                                if navigation_disabled {
+                                    rgba((theme.text_muted << 8) | 0x66)
+                                } else {
+                                    rgb(theme.text_muted)
+                                },
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.search_next(false, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .cursor_pointer()
+                            .hover(move |style| {
+                                if navigation_disabled {
+                                    style
+                                } else {
+                                    style.bg(rgb(theme.bg_hover))
+                                }
+                            })
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::ArrowDown,
+                                14.0,
+                                if navigation_disabled {
+                                    rgba((theme.text_muted << 8) | 0x66)
+                                } else {
+                                    rgb(theme.text_muted)
+                                },
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.search_next(true, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .cursor_pointer()
+                            .hover(move |style| style.bg(rgb(theme.bg_hover)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                14.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, window, cx| {
+                                    this.close_search(window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
                     ),
             )
             .child(
                 div()
-                    .px_2()
-                    .cursor_pointer()
-                    .child(self.i18n.t("search.next"))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.search_next(true, cx);
-                        }),
-                    ),
-            )
-            .child(
-                div()
-                    .px_2()
-                    .cursor_pointer()
-                    .child(self.i18n.t("search.close"))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, window, cx| {
-                            this.close_search(window, cx);
-                        }),
-                    ),
+                    .px(px(12.0))
+                    .py(px(7.0))
+                    .text_size(px(11.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("search.visible_terminal_hint")),
             )
             .into_any_element()
     }

@@ -157,10 +157,13 @@
       "fill": "Inserisci password",
       "filling": "Inserimento...",
       "fill_title": "Inserisci {{label}}",
+      "enter_fill": "Invio per inserire",
+      "enter_fill_title": "Premi Invio o fai clic per inserire {{label}}",
+      "inline_fill_hint": "Premi Invio per usare la credenziale di privilegio salvata",
       "load_failed": "Impossibile caricare la credenziale privilegiata",
       "send_failed": "Impossibile inviare la credenziale privilegiata",
-      "manage": "Salva credenziale",
-      "manage_title": "Salva una credenziale privilegiata per questa connessione",
+      "manage": "Credenziali di privilegio",
+      "manage_title": "Apri le impostazioni delle credenziali di privilegio per questo ambito",
       "local_manage_unavailable": "La gestione delle credenziali di privilegio della shell locale non è ancora disponibile."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Cerca",
     "previous": "prec",
     "next": "succ",
-    "close": "x"
+    "close": "x",
+    "no_results": "Nessun risultato",
+    "visible_terminal_hint": "Cerca nello scrollback visibile del terminale."
   },
   "workspace": {
     "new_local_terminal": "Nuovo terminale locale"

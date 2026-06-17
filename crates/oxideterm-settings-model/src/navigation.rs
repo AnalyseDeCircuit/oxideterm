@@ -28,6 +28,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Appearance => 3,
         SettingsTab::Local => 6,
         SettingsTab::Connections => 5,
+        SettingsTab::Privilege => 1,
         SettingsTab::Ssh => 1,
         SettingsTab::Reconnect => 3,
         SettingsTab::Network => 4,

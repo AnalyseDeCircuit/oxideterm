@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "保存这台设备上的本地 sudo/su 助手凭据。密钥只保存在提权钥匙串作用域内，并且只会在你明确点击后发送。",
       "privilege_username_placeholder": "当前本地用户"
     },
+    "privilege_credentials": {
+      "title": "提权凭据",
+      "description": "集中管理本地 Shell 和已保存连接的 sudo、su 以及自定义提权提示凭据。",
+      "scopes": "凭据作用域",
+      "local_scope": "本地 Shell",
+      "local_scope_hint": "本机本地终端使用的凭据",
+      "credential_count": "{{count}} 个凭据",
+      "disabled": "已禁用"
+    },
     "tabs": {
       "general": "常规",
       "terminal": "终端",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "知识库",
       "local": "本地终端",
+      "privilege": "提权凭据",
       "reconnect": "自动重连",
       "help": "帮助与关于",
       "keybindings": "快捷键",

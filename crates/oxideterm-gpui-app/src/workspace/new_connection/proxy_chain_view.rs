@@ -150,39 +150,6 @@ impl WorkspaceApp {
                     );
                 }
             }
-            NewConnectionSelect::PrivilegeKind => {
-                let selected = self
-                    .new_connection_form
-                    .as_ref()
-                    .map(|form| form.privilege_draft.kind)
-                    .unwrap_or(PrivilegeCredentialKind::SudoPassword);
-                for (kind, label_key) in [
-                    (
-                        PrivilegeCredentialKind::SudoPassword,
-                        "sessionManager.privilege_credentials.kind.sudo_password",
-                    ),
-                    (
-                        PrivilegeCredentialKind::SuPassword,
-                        "sessionManager.privilege_credentials.kind.su_password",
-                    ),
-                    (
-                        PrivilegeCredentialKind::CustomPrompt,
-                        "sessionManager.privilege_credentials.kind.custom_prompt",
-                    ),
-                ] {
-                    popup = popup.child(
-                        select_option_action(
-                            select_option(&self.tokens, self.i18n.t(label_key), kind == selected),
-                            false,
-                            false,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.set_privilege_credential_kind(kind, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    );
-                }
-            }
             NewConnectionSelect::UpstreamProxyPolicy => {
                 let selected = self
                     .new_connection_form

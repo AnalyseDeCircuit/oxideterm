@@ -157,10 +157,13 @@
       "fill": "Rellenar contraseña",
       "filling": "Rellenando...",
       "fill_title": "Rellenar {{label}}",
+      "enter_fill": "Enter para rellenar",
+      "enter_fill_title": "Pulsa Enter o haz clic para rellenar {{label}}",
+      "inline_fill_hint": "Pulsa Enter para usar la credencial de privilegios guardada",
       "load_failed": "No se pudo cargar la credencial de privilegios",
       "send_failed": "No se pudo enviar la credencial de privilegios",
-      "manage": "Guardar credencial",
-      "manage_title": "Guardar una credencial privilegiada para esta conexión",
+      "manage": "Credenciales de privilegio",
+      "manage_title": "Abrir ajustes de credenciales de privilegio para este ámbito",
       "local_manage_unavailable": "La gestión de credenciales de privilegios para el shell local aún no está disponible."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Buscar",
     "previous": "anterior",
     "next": "siguiente",
-    "close": "x"
+    "close": "x",
+    "no_results": "Sin resultados",
+    "visible_terminal_hint": "Busca en el historial visible del terminal."
   },
   "workspace": {
     "new_local_terminal": "Nuevo terminal local"

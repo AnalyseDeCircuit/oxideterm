@@ -1,10 +1,5 @@
-const CONTEXT_SIDEBAR_RESIZE_GUTTER_WIDTH: f32 = 8.0;
 const CONTEXT_SIDEBAR_RESIZE_HOTZONE_WIDTH: f32 = 12.0;
 const CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH: f32 = 1.0;
-
-fn context_sidebar_resize_gutter_width() -> f32 {
-    CONTEXT_SIDEBAR_RESIZE_GUTTER_WIDTH
-}
 
 fn context_sidebar_frame_chrome(total_width: f32) -> gpui::Stateful<gpui::Div> {
     div()
@@ -85,11 +80,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         context_sidebar_frame_chrome(self.ai_sidebar_width)
-            // The frame owns the full right-sidebar width. Keep the gutter as
-            // a fixed flex child and let the content region consume the rest;
-            // hand-derived nested widths made the AI titlebar narrower than
-            // the visible chat body after sidebar resizes.
-            .child(self.render_context_right_sidebar_resize_gutter(cx))
+            // The frame owns the full right-sidebar width. The content starts
+            // at the real seam with the terminal, while the resize affordance
+            // is an overlay so it does not create a visible layout gap.
             .child(self.render_context_right_sidebar_region(cx))
             .child(self.render_context_right_sidebar_resize_hotzone(cx))
             .into_any_element()
@@ -207,31 +200,19 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_context_right_sidebar_resize_gutter(
+    pub(super) fn render_context_right_sidebar_resize_hotzone(
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .relative()
-            .flex_none()
-            .w(px(context_sidebar_resize_gutter_width()))
-            .h_full()
-            .cursor(CursorStyle::ResizeColumn)
-            // This gutter is a real flex child between the workspace and the
-            // right sidebar content. Do not turn it back into an absolutely
-            // positioned child of the sidebar: scroll-heavy Host Tools pages
-            // can occlude that internal hitbox, especially the process List.
-            .occlude()
-            .bg(rgb(theme.bg))
+        context_sidebar_resize_hotzone_chrome()
             .child(
                 div()
                     .absolute()
-                    // The visible divider belongs on the content edge, not
-                    // the outer gutter edge. This keeps titlebar/header
-                    // horizontal rules connected to the sidebar's vertical
-                    // border while preserving the full gutter as resize hitbox.
-                    .right_0()
+                    // The visible divider is drawn at the actual frame seam.
+                    // The wider invisible hotzone remains above the content
+                    // for reliable edge dragging after Host Tools lists load.
+                    .left_0()
                     .top_0()
                     .bottom_0()
                     .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
@@ -241,22 +222,6 @@ impl WorkspaceApp {
                         rgba((theme.border << 8) | 0x80)
                     }),
             )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.start_ai_sidebar_resize(event, window, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_context_right_sidebar_resize_hotzone(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        context_sidebar_resize_hotzone_chrome()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
@@ -1493,23 +1458,6 @@ mod sidebar_resize_region_tests {
             context_sidebar_frame_chrome(self.total_width)
                 .debug_selector(|| "context-frame".to_string())
                 .child(
-                    div()
-                        .flex_none()
-                        .relative()
-                        .w(px(context_sidebar_resize_gutter_width()))
-                        .h_full()
-                        .child(
-                            div()
-                                .absolute()
-                                .right_0()
-                                .top_0()
-                                .bottom_0()
-                                .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
-                                .debug_selector(|| "context-divider".to_string()),
-                        )
-                        .debug_selector(|| "context-gutter".to_string()),
-                )
-                .child(
                     context_sidebar_region_chrome()
                         .debug_selector(|| "context-region".to_string())
                         .child(
@@ -1549,6 +1497,15 @@ mod sidebar_resize_region_tests {
                 )
                 .child(
                     context_sidebar_resize_hotzone_chrome()
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH))
+                                .debug_selector(|| "context-divider".to_string()),
+                        )
                         .debug_selector(|| "context-hotzone".to_string())
                         .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
                             resize_started.set(true);
@@ -1570,20 +1527,17 @@ mod sidebar_resize_region_tests {
     }
 
     #[test]
-    fn context_sidebar_resize_gutter_is_layout_owned() {
-        let gutter_width = context_sidebar_resize_gutter_width();
-
-        // The right context sidebar resize affordance must remain a frame-owned
-        // flex child, not an internal absolute overlay. Process pages use a
-        // GPUI List with interactive rows, and that content can steal an
-        // internal edge hitbox before resize starts.
-        assert!(gutter_width >= 8.0);
+    fn context_sidebar_resize_hotzone_is_frame_overlay_owned() {
+        // The resize affordance must remain wide enough for reliable dragging,
+        // but it must not reserve layout width between the terminal and the
+        // sidebar content. A frame-owned absolute overlay preserves both.
+        assert!(CONTEXT_SIDEBAR_RESIZE_HOTZONE_WIDTH >= 8.0);
+        assert_eq!(CONTEXT_SIDEBAR_RESIZE_DIVIDER_WIDTH, 1.0);
     }
 
     #[gpui::test]
-    fn context_sidebar_region_fills_remaining_frame_width(cx: &mut TestAppContext) {
+    fn context_sidebar_region_fills_frame_without_layout_gutter(cx: &mut TestAppContext) {
         let total_width = 620.0;
-        let gutter_width = context_sidebar_resize_gutter_width();
         let resize_started = Rc::new(Cell::new(false));
 
         let (_, cx) = cx.add_window_view(|_, _| TestContextSidebarChrome {
@@ -1596,7 +1550,6 @@ mod sidebar_resize_region_tests {
         });
 
         let frame = cx.debug_bounds("context-frame").expect("frame bounds");
-        let gutter = cx.debug_bounds("context-gutter").expect("gutter bounds");
         let divider = cx.debug_bounds("context-divider").expect("divider bounds");
         let region = cx.debug_bounds("context-region").expect("region bounds");
         let titlebar = cx
@@ -1608,26 +1561,20 @@ mod sidebar_resize_region_tests {
         let hotzone = cx.debug_bounds("context-hotzone").expect("hotzone bounds");
 
         assert_close("frame width", f32::from(frame.size.width), total_width);
-        assert_close("gutter width", f32::from(gutter.size.width), gutter_width);
-        assert_close(
-            "gutter origin",
-            f32::from(gutter.origin.x) - f32::from(frame.origin.x),
-            0.0,
-        );
         assert_close(
             "region origin",
             f32::from(region.origin.x) - f32::from(frame.origin.x),
-            gutter_width,
+            0.0,
         );
         assert_close(
-            "divider right edge meets region",
-            right_edge(&divider),
+            "divider origin",
+            f32::from(divider.origin.x),
             f32::from(region.origin.x),
         );
         assert_close(
             "region width",
             f32::from(region.size.width),
-            total_width - gutter_width,
+            total_width,
         );
         assert_close(
             "titlebar width",

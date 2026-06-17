@@ -129,7 +129,8 @@ use oxideterm_gpui_terminal::{
     TerminalHighlightRule as UiHighlightRule, TerminalInputInterceptor,
     TerminalInputInterceptorResult, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
     TerminalPane, TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus,
-    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme, detect_privilege_prompt,
+    TerminalSearchStatus, TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
+    detect_custom_privilege_prompt, detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,

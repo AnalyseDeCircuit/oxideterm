@@ -146,6 +146,7 @@ include!("settings/update.rs");
 include!("settings/general_terminal_pages.rs");
 include!("settings/appearance.rs");
 include!("settings/connections_page.rs");
+include!("settings/privilege_credentials_page.rs");
 include!("settings/network_page.rs");
 include!("settings/sftp_page.rs");
 include!("settings/ide_page.rs");

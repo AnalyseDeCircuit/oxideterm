@@ -36,6 +36,19 @@ fn attach_terminal_to_existing_ssh_node(
     }
 }
 
+#[cfg(test)]
+fn ensure_session_privilege_scope(
+    scopes: &mut HashMap<TerminalSessionId, String>,
+    session_id: TerminalSessionId,
+    scope_id: &str,
+) -> bool {
+    if scopes.contains_key(&session_id) {
+        return false;
+    }
+    scopes.insert(session_id, scope_id.to_string());
+    true
+}
+
 impl WorkspaceApp {
     pub(super) fn observe_active_tab_for_history(&mut self) {
         let active_tab_id = self.active_tab_id;
@@ -268,6 +281,102 @@ impl WorkspaceApp {
             });
     }
 
+    pub(super) fn ensure_terminal_privilege_scope(
+        &mut self,
+        session_id: TerminalSessionId,
+        scope_id: &str,
+    ) -> bool {
+        if self
+            .terminal_privilege_connection_ids
+            .get(&session_id)
+            .is_some_and(|existing| self.connection_store.get(existing).is_some())
+        {
+            return false;
+        }
+        // Privilege credentials are scoped by saved connection id. Older or
+        // reused SSH sessions may predate that explicit mapping, and older
+        // builds could leave a transient runtime id here. Replace only missing
+        // or invalid owners; never rewrite another valid saved-connection scope.
+        self.terminal_privilege_connection_ids
+            .insert(session_id, scope_id.to_string())
+            .as_deref()
+            != Some(scope_id)
+    }
+
+    pub(super) fn set_terminal_privilege_scope(
+        &mut self,
+        session_id: TerminalSessionId,
+        scope_id: &str,
+    ) -> bool {
+        if self.connection_store.get(scope_id).is_none() {
+            return false;
+        }
+        // Explicit user actions such as opening a saved alias or saving a
+        // credential for that alias must be allowed to replace a previous
+        // valid owner. Reused SSH nodes can otherwise keep another alias'
+        // saved id and make the prompt helper read the wrong credential set.
+        self.terminal_privilege_connection_ids
+            .insert(session_id, scope_id.to_string())
+            .as_deref()
+            != Some(scope_id)
+    }
+
+    pub(super) fn ensure_matching_ssh_terminal_privilege_scope(
+        &mut self,
+        saved_connection_id: &str,
+    ) -> bool {
+        let Some(connection) = self.connection_store.get(saved_connection_id) else {
+            return false;
+        };
+        let host = connection.host.clone();
+        let port = connection.port;
+        let username = connection.username.clone();
+        let mut matching_sessions = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (session_id, scope_id) in &self.terminal_privilege_connection_ids {
+            if scope_id == saved_connection_id && seen.insert(*session_id) {
+                matching_sessions.push(*session_id);
+            }
+        }
+        if let Some(node_id) = self.saved_ssh_nodes.get(saved_connection_id)
+            && let Some(node) = self.ssh_nodes.get(node_id)
+        {
+            for session_id in &node.terminal_ids {
+                if seen.insert(*session_id) {
+                    matching_sessions.push(*session_id);
+                }
+            }
+        }
+        for (node_id, node) in &self.ssh_nodes {
+            let saved_owner_matches =
+                node.saved_connection_id.as_deref() == Some(saved_connection_id)
+                    || self
+                        .node_runtime_store
+                        .snapshot(node_id)
+                        .and_then(|snapshot| {
+                            snapshot.origin.saved_connection_id().map(str::to_string)
+                        })
+                        .as_deref()
+                        == Some(saved_connection_id);
+            let endpoint_matches =
+                node.config.host == host && node.config.port == port && node.config.username == username;
+            for session_id in &node.terminal_ids {
+                let existing_owner_is_valid = self
+                    .terminal_privilege_connection_ids
+                    .get(session_id)
+                    .is_some_and(|scope| self.connection_store.get(scope).is_some());
+                if (saved_owner_matches || (endpoint_matches && !existing_owner_is_valid))
+                    && seen.insert(*session_id)
+                {
+                    matching_sessions.push(*session_id);
+                }
+            }
+        }
+        matching_sessions.into_iter().fold(false, |changed, session_id| {
+            self.set_terminal_privilege_scope(session_id, saved_connection_id) || changed
+        })
+    }
+
     pub(super) fn unregister_ssh_terminal_session(&mut self, session_id: TerminalSessionId) {
         let forwarding_registry = self.forwarding_registry.clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
@@ -328,17 +437,26 @@ impl WorkspaceApp {
         if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) {
             tab.active_pane_id = Some(pane_id);
         }
+        let mut privilege_scope_changed = false;
         if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
             && let Some(node) = self.ssh_nodes.get_mut(node_id)
         {
             node.readiness = NodeReadiness::Ready;
             self.active_ssh_node_id = Some(node_id.clone());
             self.expanded_ssh_nodes.insert(node_id.clone());
+            let saved_connection_id = node.saved_connection_id.clone();
+            if let Some(saved_connection_id) = saved_connection_id {
+                privilege_scope_changed =
+                    self.ensure_terminal_privilege_scope(session_id, &saved_connection_id);
+            }
         }
         self.sync_active_tab_surface();
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
+        if privilege_scope_changed {
+            let _ = self.sync_active_privilege_prompt_inline_hint(cx);
+        }
         cx.notify();
         true
     }
@@ -1370,6 +1488,26 @@ mod tests {
             vec![TerminalSessionId(1), TerminalSessionId(2)]
         );
         assert_eq!(node.readiness, NodeReadiness::Ready);
+    }
+
+    #[test]
+    fn privilege_scope_backfill_only_fills_missing_session_owner() {
+        let mut scopes = HashMap::new();
+        let session_id = TerminalSessionId(7);
+
+        assert!(ensure_session_privilege_scope(
+            &mut scopes,
+            session_id,
+            "home-local"
+        ));
+        assert_eq!(scopes.get(&session_id).map(String::as_str), Some("home-local"));
+
+        assert!(!ensure_session_privilege_scope(
+            &mut scopes,
+            session_id,
+            "other-alias"
+        ));
+        assert_eq!(scopes.get(&session_id).map(String::as_str), Some("home-local"));
     }
 
     #[test]

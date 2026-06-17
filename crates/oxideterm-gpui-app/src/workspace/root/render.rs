@@ -311,6 +311,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_transient_workspace_overlay_escape(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_privilege_prompt_helper_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.terminal_command_bar_focused {
                     this.handle_terminal_command_bar_key(event, window, cx);
                     window.prevent_default();
@@ -676,19 +679,24 @@ impl Render for WorkspaceApp {
                             .min_w(px(self.tokens.metrics.min_main_width))
                             .overflow_hidden()
                             .when(!zen_mode, |main| main.child(self.render_tab_bar(window, cx)))
-                            .when(self.search.visible, |main| {
-                                main.child(self.render_search_bar(cx))
-                            })
                             .child(
-                                div().flex_1().relative().overflow_hidden().child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .left_0()
-                                        .right_0()
-                                        .bottom_0()
-                                    .child(content),
-                                ),
+                                div()
+                                    .flex_1()
+                                    .relative()
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .left_0()
+                                            .right_0()
+                                            .bottom_0()
+                                            .child(content),
+                                    )
+                                    .when(
+                                        self.search.visible && self.active_pane().is_some(),
+                                        |main_content| main_content.child(self.render_search_bar(cx)),
+                                    ),
                             ),
                     )
                     .when(self.context_sidebar_visible(), |layout| {

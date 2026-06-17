@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "Store local sudo/su helper credentials for this device. Secrets stay in the privilege keychain scope and are only sent after an explicit click.",
       "privilege_username_placeholder": "Current local user"
     },
+    "privilege_credentials": {
+      "title": "Privilege Credentials",
+      "description": "Manage sudo, su, and custom privilege prompt credentials for local shells and saved connections in one place.",
+      "scopes": "Credential scopes",
+      "local_scope": "Local Shell",
+      "local_scope_hint": "Credentials used by local terminals on this device",
+      "credential_count": "{{count}} credential(s)",
+      "disabled": "Disabled"
+    },
     "tabs": {
       "general": "General",
       "terminal": "Terminal",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "Knowledge Base",
       "local": "Local Terminal",
+      "privilege": "Privilege Credentials",
       "reconnect": "Reconnect",
       "help": "Help & About",
       "keybindings": "Keybindings",

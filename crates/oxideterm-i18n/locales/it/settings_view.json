@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "Salva le credenziali locali sudo/su per questo dispositivo. I segreti restano nell’ambito del portachiavi dei privilegi e vengono inviati solo dopo un clic esplicito.",
       "privilege_username_placeholder": "Utente locale corrente"
     },
+    "privilege_credentials": {
+      "title": "Credenziali di privilegio",
+      "description": "Gestisci in un unico punto le credenziali sudo, su e prompt personalizzati per shell locali e connessioni salvate.",
+      "scopes": "Ambiti credenziali",
+      "local_scope": "Shell locale",
+      "local_scope_hint": "Credenziali usate dai terminali locali su questo dispositivo",
+      "credential_count": "{{count}} credenziale/i",
+      "disabled": "Disattivato"
+    },
     "tabs": {
       "general": "Generale",
       "terminal": "Terminale",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "Base di conoscenza",
       "local": "Terminale Locale",
+      "privilege": "Credenziali di privilegio",
       "reconnect": "Riconnessione",
       "help": "Aiuto e Info",
       "keybindings": "Scorciatoie da tastiera",

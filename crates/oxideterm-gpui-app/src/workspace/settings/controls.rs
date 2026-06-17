@@ -601,7 +601,7 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Local, SettingsSelect::LocalPrivilegeKind) => {
+            (SettingsTab::Local | SettingsTab::Privilege, SettingsSelect::LocalPrivilegeKind) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for kind in [
                     PrivilegeCredentialKind::SudoPassword,
