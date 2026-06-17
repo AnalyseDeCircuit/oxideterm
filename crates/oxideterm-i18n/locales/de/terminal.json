@@ -66,6 +66,8 @@
       "command_mode": "Command mode",
       "command_placeholder": "Run commands",
       "run_command": "Run command",
+      "collapse_input": "Befehlseingabe ausblenden",
+      "expand_input": "Befehlseingabe anzeigen",
       "local_shell": "Local shell",
       "remote_shell": "Remote shell",
       "all_targets": "all",

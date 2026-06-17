@@ -39,6 +39,9 @@ impl Render for TerminalPane {
                 .terminal_graphics
                 .decode_images,
         );
+        let row_timestamps = self
+            .terminal_timestamps_enabled
+            .then(|| Arc::new(self.row_timestamps.clone()));
 
         let background = self.preferences.background.clone().filter(|background| {
             self.preferences.render_policy.allow_background_images && background.path.exists()
@@ -79,6 +82,7 @@ impl Render for TerminalPane {
             self.selected_command_mark_id.clone(),
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
+        .row_timestamps(row_timestamps)
         .transparent_background(background.is_some())
         .ghost_text(self.autosuggest_ghost_text())
         .layout_cache(self.layout_cache.clone());

@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
     ops::Range,
     sync::{
         Arc,
@@ -9,6 +10,7 @@ use std::{
 };
 
 use anyhow::Result;
+use chrono::Timelike;
 use gpui::{
     Bounds, ClipboardItem, Context, FocusHandle, PathPromptOptions, Pixels, Point, SharedString,
     Subscription, Timer, Window, px,
@@ -19,7 +21,7 @@ use oxideterm_terminal::{
     ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCommandMark,
     TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource,
     TerminalCommandMarkEvent, TerminalDrainBudget, TerminalDrainReport, TerminalEvent,
-    TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo, TerminalSession,
+    TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo, TerminalRow, TerminalSession,
     TerminalSnapshot, TrzszTransferDirection, TrzszTransferSelection,
 };
 use oxideterm_trzsz::TrzszState;
@@ -93,6 +95,13 @@ pub struct TerminalPane {
     theme: TerminalUiTheme,
     snapshot: TerminalSnapshot,
     snapshot_generation: u64,
+    terminal_timestamps_enabled: bool,
+    // Visual-only metadata keyed by terminal absolute line; never write this
+    // into the PTY buffer, copied text, or search/indexed terminal content.
+    row_timestamps: HashMap<i64, String>,
+    // Tracks the last painted content signature for each stamped row so the
+    // gutter follows line modification time instead of first-seen time.
+    row_timestamp_signatures: HashMap<i64, u64>,
     metrics: TerminalMetrics,
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
@@ -347,6 +356,9 @@ impl TerminalPane {
             theme: preferences.theme.clone(),
             snapshot,
             snapshot_generation: 1,
+            terminal_timestamps_enabled: false,
+            row_timestamps: HashMap::new(),
+            row_timestamp_signatures: HashMap::new(),
             metrics,
             selection: None,
             pending_paste: None,
@@ -420,6 +432,7 @@ impl TerminalPane {
     }
 
     fn stamp_snapshot(&mut self, mut snapshot: TerminalSnapshot) -> TerminalSnapshot {
+        self.record_snapshot_row_timestamps(&snapshot);
         // Raw backend snapshots are stateless; the pane owns frame generation
         // so future render caches can invalidate without changing backends.
         snapshot.reuse_unchanged_rows_from(&self.snapshot);
@@ -428,6 +441,48 @@ impl TerminalPane {
             self.snapshot_generation = 1;
         }
         snapshot.with_generation(self.snapshot_generation)
+    }
+
+    fn record_snapshot_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
+        // Match iTerm-style semantics: a row label is the time that row was
+        // last modified, not the time it first became visible in the viewport.
+        let label = current_terminal_timestamp_label();
+        record_timestampable_snapshot_rows(
+            &mut self.row_timestamps,
+            &mut self.row_timestamp_signatures,
+            snapshot,
+            &label,
+        );
+        self.trim_row_timestamps(snapshot);
+    }
+
+    fn trim_row_timestamps(&mut self, snapshot: &TerminalSnapshot) {
+        let Some(max_line) = snapshot.lines.iter().map(|row| row.absolute_line).max() else {
+            self.row_timestamps.clear();
+            self.row_timestamp_signatures.clear();
+            return;
+        };
+        let retained_rows = self
+            .preferences
+            .scrollback_lines
+            .saturating_add(snapshot.rows)
+            .saturating_add(1024)
+            .max(2048) as i64;
+        let min_line = max_line.saturating_sub(retained_rows);
+        self.row_timestamps.retain(|line, _| *line >= min_line);
+        self.row_timestamp_signatures
+            .retain(|line, _| *line >= min_line);
+    }
+
+    pub fn terminal_timestamps_enabled(&self) -> bool {
+        self.terminal_timestamps_enabled
+    }
+
+    pub fn toggle_terminal_timestamps(&mut self, cx: &mut Context<Self>) {
+        self.terminal_timestamps_enabled = !self.terminal_timestamps_enabled;
+        // Timestamp visibility is paint-only. Do not restamp or resize here:
+        // both would make old scrollback look like it was modified at toggle time.
+        cx.notify();
     }
 
     pub fn shared_session(&self) -> SharedTerminalSession {
@@ -1180,6 +1235,14 @@ impl TerminalPane {
             .unwrap_or_else(|| gpui::point(px(0.0), px(0.0)))
     }
 
+    fn timestamp_gutter_width(&self) -> f32 {
+        terminal_timestamp_gutter_width(&self.metrics, self.terminal_timestamps_enabled)
+    }
+
+    fn terminal_content_padding_x(&self) -> f32 {
+        TERMINAL_CONTENT_PADDING + self.timestamp_gutter_width()
+    }
+
     pub fn cursor_anchor(&self) -> Option<TerminalCursorAnchor> {
         let bounds = self.bounds?;
         let cursor_bounds = ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics)?;
@@ -1188,7 +1251,7 @@ impl TerminalPane {
         // cell metrics. Expose pane-local facts rather than making workspace
         // code duplicate terminal layout math.
         Some(TerminalCursorAnchor {
-            x: f32::from(cursor_bounds.origin.x) + TERMINAL_CONTENT_PADDING,
+            x: f32::from(cursor_bounds.origin.x) + self.terminal_content_padding_x(),
             y: f32::from(cursor_bounds.origin.y) + TERMINAL_CONTENT_PADDING,
             line_height: self.metrics.line_height_f32(),
             char_width: self.metrics.cell_width_f32(),
@@ -1220,6 +1283,56 @@ fn graphics_options_from_preferences(preferences: &TerminalUiPreferences) -> Gra
     }
 }
 
+fn current_terminal_timestamp_label() -> String {
+    let now = chrono::Local::now();
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
+
+fn record_timestampable_snapshot_rows(
+    row_timestamps: &mut HashMap<i64, String>,
+    row_timestamp_signatures: &mut HashMap<i64, u64>,
+    snapshot: &TerminalSnapshot,
+    label: &str,
+) {
+    for row in &snapshot.lines {
+        if terminal_row_has_timestamp_content(row) {
+            let timestamp_signature = terminal_row_timestamp_signature(row);
+            let line_changed = row_timestamp_signatures.get(&row.absolute_line).copied()
+                != Some(timestamp_signature);
+            if line_changed {
+                row_timestamps.insert(row.absolute_line, label.to_string());
+                row_timestamp_signatures.insert(row.absolute_line, timestamp_signature);
+            }
+        } else {
+            // Blank viewport rows are recycled later. Removing their metadata
+            // prevents new output from inheriting a stale line-modification time.
+            row_timestamps.remove(&row.absolute_line);
+            row_timestamp_signatures.remove(&row.absolute_line);
+        }
+    }
+}
+
+fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    row.wrapped.hash(&mut hasher);
+    for cell in row.cells.iter() {
+        cell.ch.hash(&mut hasher);
+        cell.zerowidth.hash(&mut hasher);
+        cell.wide.hash(&mut hasher);
+        cell.fg.hash(&mut hasher);
+        cell.bg.hash(&mut hasher);
+        cell.attrs.hash(&mut hasher);
+        cell.hyperlink.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn terminal_row_has_timestamp_content(row: &TerminalRow) -> bool {
+    row.cells
+        .iter()
+        .any(|cell| !cell.ch.is_whitespace() || !cell.zerowidth.is_empty())
+}
+
 fn hex_color(color: u32) -> String {
     format!("#{:06x}", color & 0x00ff_ffff)
 }
@@ -1238,6 +1351,8 @@ fn terminal_grid_span_for_viewport(viewport_width: Pixels, cell_width: f32) -> f
     // Browser terminals reserve right-side scrollbar chrome outside the grid.
     // Keep that gutter stable even before scrollback exists so history growth
     // does not resize the PTY and push the scrollbar outside the viewport.
+    // Timestamp labels are a visual overlay and must not change PTY columns;
+    // toggling them should never reflow scrollback or restamp old rows.
     (f32::from(viewport_width) - TERMINAL_CONTENT_PADDING * 2.0 - SCROLLBAR_RESERVED_WIDTH)
         .max(cell_width * 2.0)
 }
@@ -1245,6 +1360,67 @@ fn terminal_grid_span_for_viewport(viewport_width: Pixels, cell_width: f32) -> f
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{collections::HashMap, sync::Arc};
+
+    use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    fn timestamp_test_cell(ch: char) -> TerminalCell {
+        TerminalCell {
+            ch,
+            zerowidth: String::new(),
+            wide: false,
+            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
+            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            attrs: TerminalAttrs::default(),
+            hyperlink: None,
+            cursor: false,
+        }
+    }
+
+    fn timestamp_test_row(absolute_line: i64, text: &str) -> TerminalRow {
+        timestamp_test_row_with_cursor(absolute_line, text, None, false)
+    }
+
+    fn timestamp_test_row_with_cursor(
+        absolute_line: i64,
+        text: &str,
+        cursor_col: Option<usize>,
+        active_input: bool,
+    ) -> TerminalRow {
+        let mut cells = text.chars().map(timestamp_test_cell).collect::<Vec<_>>();
+        if cells.is_empty() {
+            cells.push(timestamp_test_cell(' '));
+        }
+        if let Some(cursor_col) = cursor_col
+            && let Some(cell) = cells.get_mut(cursor_col)
+        {
+            cell.cursor = true;
+        }
+        let mut row = TerminalRow {
+            absolute_line,
+            cells: Arc::new(cells),
+            wrapped: false,
+            active_input,
+            signature: 0,
+        };
+        row.refresh_signature();
+        row
+    }
+
+    fn timestamp_test_snapshot(row: TerminalRow) -> TerminalSnapshot {
+        TerminalSnapshot {
+            generation: 1,
+            cols: row.cells.len().max(1),
+            rows: 1,
+            cursor_col: 0,
+            cursor_row: 0,
+            cursor_shape: TerminalCursorShape::Block,
+            display_offset: 0,
+            scrollback_lines: 0,
+            lines: vec![row],
+            images: Vec::new(),
+        }
+    }
 
     #[test]
     fn terminal_grid_span_reserves_scrollbar_gutter() {
@@ -1257,5 +1433,79 @@ mod tests {
         assert_eq!(cols, 11);
         assert!(scrollbar_right <= 120.0);
         assert_eq!(scrollbar_right, 120.0);
+    }
+
+    #[test]
+    fn terminal_grid_span_keeps_timestamp_gutter_paint_only() {
+        let cell_width = 10.0;
+        let grid_span = terminal_grid_span_for_viewport(px(160.0), cell_width);
+        let cols = whole_cells_in_span(grid_span, cell_width);
+
+        assert_eq!(cols, 15);
+    }
+
+    #[test]
+    fn row_timestamps_track_last_modified_nonblank_content() {
+        let mut row_timestamps = HashMap::new();
+        let mut row_timestamp_signatures = HashMap::new();
+        let blank_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "   "));
+        record_timestampable_snapshot_rows(
+            &mut row_timestamps,
+            &mut row_timestamp_signatures,
+            &blank_snapshot,
+            "10:00:00",
+        );
+
+        assert!(!row_timestamps.contains_key(&42));
+        assert!(!row_timestamp_signatures.contains_key(&42));
+
+        let content_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "ls"));
+        record_timestampable_snapshot_rows(
+            &mut row_timestamps,
+            &mut row_timestamp_signatures,
+            &content_snapshot,
+            "10:00:01",
+        );
+
+        assert_eq!(
+            row_timestamps.get(&42).map(String::as_str),
+            Some("10:00:01")
+        );
+
+        let unchanged_snapshot =
+            timestamp_test_snapshot(timestamp_test_row_with_cursor(42, "ls", Some(1), true));
+        record_timestampable_snapshot_rows(
+            &mut row_timestamps,
+            &mut row_timestamp_signatures,
+            &unchanged_snapshot,
+            "10:00:02",
+        );
+        assert_eq!(
+            row_timestamps.get(&42).map(String::as_str),
+            Some("10:00:01")
+        );
+
+        let changed_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "pwd"));
+        record_timestampable_snapshot_rows(
+            &mut row_timestamps,
+            &mut row_timestamp_signatures,
+            &changed_snapshot,
+            "10:00:03",
+        );
+        assert_eq!(
+            row_timestamps.get(&42).map(String::as_str),
+            Some("10:00:03")
+        );
+
+        let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
+        record_timestampable_snapshot_rows(
+            &mut row_timestamps,
+            &mut row_timestamp_signatures,
+            &cleared_snapshot,
+            "10:00:04",
+        );
+
+        assert!(!row_timestamps.contains_key(&42));
+        assert!(!row_timestamp_signatures.contains_key(&42));
     }
 }

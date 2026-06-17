@@ -66,6 +66,8 @@
       "command_mode": "命令模式",
       "command_placeholder": "輸入命令...",
       "run_command": "執行命令",
+      "collapse_input": "收合命令輸入",
+      "expand_input": "展開命令輸入",
       "local_shell": "本機 Shell",
       "remote_shell": "遠端 Shell",
       "all_targets": "全部",

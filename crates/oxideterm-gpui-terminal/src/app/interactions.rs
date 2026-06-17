@@ -309,7 +309,7 @@ impl TerminalPane {
 
     fn terminal_point_for_position(&self, position: gpui::Point<Pixels>) -> TerminalPoint {
         let origin = self.content_origin();
-        let col = ((f32::from(position.x - origin.x) - TERMINAL_CONTENT_PADDING)
+        let col = ((f32::from(position.x - origin.x) - self.terminal_content_padding_x())
             / self.metrics.cell_width_f32())
         .floor()
         .max(0.0) as usize;

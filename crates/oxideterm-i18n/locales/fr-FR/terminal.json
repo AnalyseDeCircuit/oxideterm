@@ -66,6 +66,8 @@
       "command_mode": "Mode commande",
       "command_placeholder": "Exécuter une commande",
       "run_command": "Exécuter",
+      "collapse_input": "Masquer la saisie de commande",
+      "expand_input": "Afficher la saisie de commande",
       "local_shell": "Shell local",
       "remote_shell": "Shell distant",
       "all_targets": "tous",

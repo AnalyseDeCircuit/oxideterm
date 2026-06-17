@@ -57,6 +57,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::AppearanceBackgroundFit => SelectAnchorId::SettingsAppearanceBackgroundFit,
             Self::CustomThemeDuplicate => SelectAnchorId::SettingsCustomThemeDuplicate,
             Self::TerminalFontFamily => SelectAnchorId::SettingsTerminalFontFamily,
+            Self::TerminalCjkFontFamily => SelectAnchorId::SettingsTerminalCjkFontFamily,
             Self::TerminalEncoding => SelectAnchorId::SettingsTerminalEncoding,
             Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
             Self::IdeAgentMode => SelectAnchorId::SettingsIdeAgentMode,

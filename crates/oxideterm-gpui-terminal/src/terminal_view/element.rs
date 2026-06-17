@@ -8,7 +8,7 @@ use std::{
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
     GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, Pixels, Style, TextRun,
-    Window, fill, point, px, relative, rgb,
+    Window, fill, point, px, relative, rgb, rgba, size,
 };
 use oxideterm_terminal::{
     TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
@@ -51,6 +51,7 @@ pub(crate) struct TerminalElement {
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
     transparent_background: bool,
+    row_timestamps: Option<Arc<HashMap<i64, String>>>,
     layout_cache: Option<Arc<Mutex<TerminalLayoutCache>>>,
 }
 
@@ -72,6 +73,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) selections: Vec<TerminalRect>,
     pub(crate) images: Vec<TerminalImageLayout>,
     pub(crate) text_runs: Vec<BatchedTextRun>,
+    pub(crate) timestamp_runs: Vec<BatchedTextRun>,
     pub(crate) marked_text: Option<BatchedTextRun>,
     pub(crate) ghost_text: Option<BatchedTextRun>,
     pub(crate) ime_cursor_bounds: Option<Bounds<Pixels>>,
@@ -355,6 +357,7 @@ impl TerminalElement {
             bidi_enabled,
             input,
             transparent_background: false,
+            row_timestamps: None,
             ghost_text: None,
             layout_cache: None,
         }
@@ -385,6 +388,14 @@ impl TerminalElement {
 
     pub(crate) fn ghost_text(mut self, ghost_text: Option<String>) -> Self {
         self.ghost_text = ghost_text;
+        self
+    }
+
+    pub(crate) fn row_timestamps(
+        mut self,
+        row_timestamps: Option<Arc<HashMap<i64, String>>>,
+    ) -> Self {
+        self.row_timestamps = row_timestamps;
         self
     }
 
@@ -457,6 +468,7 @@ impl TerminalElement {
             .collect::<Vec<_>>();
         images.sort_by_key(|image| (image.image.snapshot.z_index, image.image.snapshot.id.0));
         let mut text_runs = Vec::new();
+        let mut timestamp_runs = Vec::new();
         let mut cursor = None;
         let scrollbar = terminal_scrollbar(&self.snapshot, &self.metrics);
         let terminal_background = terminal_background(&self.theme);
@@ -502,6 +514,9 @@ impl TerminalElement {
                 &mut text_runs,
                 &mut cursor,
             );
+            if let Some(timestamp_run) = self.timestamp_run_for_row(row_index, row.absolute_line) {
+                timestamp_runs.push(timestamp_run);
+            }
         }
 
         TerminalElementLayout {
@@ -526,6 +541,7 @@ impl TerminalElement {
             selections,
             images,
             text_runs,
+            timestamp_runs,
             marked_text: self.marked_text.as_ref().and_then(|text| {
                 ime_cursor_bounds?;
                 let marked_col = self
@@ -549,6 +565,21 @@ impl TerminalElement {
             cursor,
             scrollbar,
         }
+    }
+
+    fn timestamp_run_for_row(
+        &self,
+        row_index: usize,
+        absolute_line: i64,
+    ) -> Option<BatchedTextRun> {
+        let label = self.row_timestamps.as_ref()?.get(&absolute_line)?.clone();
+        Some(BatchedTextRun {
+            row: row_index,
+            col: 0,
+            cells: TERMINAL_TIMESTAMP_LABEL_CELLS,
+            style: timestamp_text_run(&label, &self.theme, &self.metrics),
+            text: label,
+        })
     }
 
     fn cached_layout_for_bounds(&self, bounds: Bounds<Pixels>) -> Arc<TerminalElementLayout> {
@@ -1425,10 +1456,35 @@ impl Element for TerminalElement {
         if !self.transparent_background {
             window.paint_quad(fill(bounds, rgb(self.theme.background)));
         }
-        let origin =
+        let timestamp_gutter_width =
+            terminal_timestamp_gutter_width(&self.metrics, self.row_timestamps.is_some());
+        let timestamp_origin =
             bounds.origin + point(px(TERMINAL_CONTENT_PADDING), px(TERMINAL_CONTENT_PADDING));
+        // The timestamp gutter and the terminal grid use separate origins so
+        // timestamps remain a paint-only overlay and never affect text runs.
+        let origin = timestamp_origin + point(px(timestamp_gutter_width), px(0.0));
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            if self.row_timestamps.is_some() {
+                for run in &layout.timestamp_runs {
+                    paint_text_run(run, timestamp_origin, &self.metrics, window, cx);
+                }
+                let divider_x = timestamp_origin.x
+                    + px((TERMINAL_TIMESTAMP_LABEL_CELLS as f32
+                        + TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS / 2.0)
+                        * self.metrics.cell_width_f32());
+                let divider_bounds = Bounds::new(
+                    point(divider_x, timestamp_origin.y),
+                    size(
+                        px(1.0),
+                        px(self.snapshot.rows as f32 * self.metrics.line_height_f32()),
+                    ),
+                );
+                window.paint_quad(fill(
+                    divider_bounds,
+                    rgba((self.theme.foreground << 8) | 0x2e),
+                ));
+            }
             for rect in &layout.backgrounds {
                 paint_terminal_rect(rect, origin, &self.metrics, window);
             }

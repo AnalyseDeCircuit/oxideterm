@@ -100,10 +100,8 @@ pub(crate) fn load_terminal_font_open_critical(
     settings: &PersistedSettings,
     text_system: &TextSystem,
 ) -> Result<()> {
-    register_faces(
-        text_system,
-        critical_faces_for_family(settings.terminal.font_family),
-    )
+    let faces = critical_faces_for_settings(settings);
+    register_faces(text_system, &faces)
 }
 
 pub(crate) fn load_terminal_cjk_fallback_regular(text_system: &TextSystem) -> Result<()> {
@@ -137,6 +135,18 @@ fn critical_faces_for_family(family: FontFamily) -> &'static [BundledTerminalFac
         FontFamily::Maple => &[BundledTerminalFace::MapleRegular],
         FontFamily::Cascadia | FontFamily::Consolas | FontFamily::Menlo | FontFamily::Custom => &[],
     }
+}
+
+fn critical_faces_for_settings(settings: &PersistedSettings) -> Vec<BundledTerminalFace> {
+    let mut faces = critical_faces_for_family(settings.terminal.font_family).to_vec();
+    if settings.terminal.cjk_font_family.trim() == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
+        && !faces.contains(&BundledTerminalFace::MapleRegular)
+    {
+        // Explicit CJK fallback selection should be ready with the terminal,
+        // while Auto keeps the existing delayed fallback warmup path.
+        faces.push(BundledTerminalFace::MapleRegular);
+    }
+    faces
 }
 
 fn register_faces(text_system: &TextSystem, faces: &[BundledTerminalFace]) -> Result<()> {
@@ -199,6 +209,18 @@ mod tests {
             &[BundledTerminalFace::MapleRegular]
         );
         assert!(critical_faces_for_family(FontFamily::Custom).is_empty());
+    }
+
+    #[test]
+    fn explicit_bundled_cjk_font_is_loaded_with_terminal_critical_faces() {
+        let mut settings = PersistedSettings::default();
+        settings.terminal.font_family = FontFamily::Jetbrains;
+        settings.terminal.cjk_font_family =
+            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY.to_string();
+
+        let faces = critical_faces_for_settings(&settings);
+
+        assert!(faces.contains(&BundledTerminalFace::MapleRegular));
     }
 
     fn is_sfnt(bytes: &[u8]) -> bool {

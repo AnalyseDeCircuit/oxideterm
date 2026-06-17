@@ -1457,6 +1457,18 @@ impl WorkspaceApp {
             .any(|pane| pane.read(cx).recording_status().state != TerminalRecordingState::Idle)
     }
 
+    pub(super) fn active_terminal_timestamps_enabled(&self, cx: &mut Context<Self>) -> bool {
+        self.active_pane()
+            .is_some_and(|pane| pane.read(cx).terminal_timestamps_enabled())
+    }
+
+    pub(super) fn toggle_active_terminal_timestamps(&mut self, cx: &mut Context<Self>) {
+        if let Some(pane) = self.active_pane() {
+            let _ = pane.update(cx, |pane, cx| pane.toggle_terminal_timestamps(cx));
+        }
+        cx.notify();
+    }
+
     pub(super) fn start_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
         let title = self.active_tab().map(|tab| tab.title.clone());
         if let Some(pane) = self.active_pane() {

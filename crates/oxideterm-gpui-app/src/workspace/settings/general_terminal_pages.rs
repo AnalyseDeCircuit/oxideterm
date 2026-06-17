@@ -492,6 +492,15 @@ impl WorkspaceApp {
                         cx,
                     ));
                 }
+                rows.push(self.card_separator());
+                rows.push(self.select_setting_row(
+                    "settings_view.terminal.cjk_font_family",
+                    "settings_view.terminal.cjk_font_family_hint",
+                    SettingsSelect::TerminalCjkFontFamily,
+                    terminal_cjk_font_label(&settings.terminal.cjk_font_family, &self.i18n),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ));
                 rows.extend([
                     self.terminal_preview(settings),
                     self.card_separator(),

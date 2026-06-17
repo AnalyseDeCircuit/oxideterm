@@ -66,6 +66,8 @@
       "command_mode": "Command mode",
       "command_placeholder": "Run commands",
       "run_command": "Run command",
+      "collapse_input": "コマンド入力を隠す",
+      "expand_input": "コマンド入力を表示",
       "local_shell": "Local shell",
       "remote_shell": "Remote shell",
       "all_targets": "all",

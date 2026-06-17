@@ -72,6 +72,7 @@ pub enum SettingsSelect {
     AppearanceBackgroundFit,
     CustomThemeDuplicate,
     TerminalFontFamily,
+    TerminalCjkFontFamily,
     TerminalEncoding,
     TerminalCursorStyle,
     IdeAgentMode,

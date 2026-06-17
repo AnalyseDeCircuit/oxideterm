@@ -59,6 +59,7 @@ pub enum SelectAnchorId {
     SettingsUpdateProxyMode,
     SettingsUpdateProxyProtocol,
     SettingsTerminalFontFamily,
+    SettingsTerminalCjkFontFamily,
     SettingsTerminalFontSizeSlider,
     SettingsTerminalEncoding,
     SettingsTerminalCursorStyle,
@@ -146,6 +147,7 @@ impl SelectAnchorId {
                 | Self::SettingsAppearanceBackgroundFit
                 | Self::SettingsCustomThemeDuplicate
                 | Self::SettingsTerminalFontFamily
+                | Self::SettingsTerminalCjkFontFamily
                 | Self::SettingsTerminalEncoding
                 | Self::SettingsTerminalCursorStyle
                 | Self::SettingsIdeAgentMode

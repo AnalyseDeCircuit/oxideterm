@@ -7179,6 +7179,7 @@ name = "oxideterm-gpui-terminal"
 version = "2.0.0-gpui-preview.8"
 dependencies = [
  "anyhow",
+ "chrono",
  "gpui",
  "image",
  "oxideterm-render-policy",

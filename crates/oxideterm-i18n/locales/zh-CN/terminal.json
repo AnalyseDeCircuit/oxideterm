@@ -6,6 +6,8 @@
       "command_mode": "命令模式",
       "command_placeholder": "输入命令...",
       "run_command": "执行命令",
+      "collapse_input": "收起命令输入",
+      "expand_input": "展开命令输入",
       "local_shell": "本地 Shell",
       "remote_shell": "远程 Shell",
       "all_targets": "全部",

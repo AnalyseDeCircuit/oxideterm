@@ -60,6 +60,22 @@ pub fn font_family_options() -> &'static [FontFamily] {
     ]
 }
 
+pub fn terminal_cjk_font_options() -> &'static [&'static str] {
+    &[
+        "",
+        oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY,
+        "Sarasa Fixed SC",
+        "Noto Sans Mono CJK SC",
+        "Noto Sans Mono CJK TC",
+        "Noto Sans Mono CJK JP",
+        "Noto Sans Mono CJK KR",
+        "PingFang SC",
+        "Hiragino Sans GB",
+        "Microsoft YaHei UI",
+        "Malgun Gothic",
+    ]
+}
+
 pub fn terminal_encoding_options() -> &'static [TerminalEncoding] {
     &[
         TerminalEncoding::Utf8,

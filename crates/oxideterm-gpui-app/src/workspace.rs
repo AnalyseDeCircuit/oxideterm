@@ -579,6 +579,7 @@ pub(crate) struct WorkspaceApp {
     next_session_id: u64,
     search: SearchBarState,
     terminal_command_bar_focused: bool,
+    terminal_command_input_collapsed: bool,
     terminal_command_bar_draft: String,
     terminal_command_suggestions_open: bool,
     terminal_command_suggestion_highlighted: Option<usize>,

@@ -121,6 +121,7 @@ impl WorkspaceApp {
             next_session_id: 1,
             search: SearchBarState::default(),
             terminal_command_bar_focused: false,
+            terminal_command_input_collapsed: false,
             terminal_command_bar_draft: String::new(),
             terminal_command_suggestions_open: false,
             terminal_command_suggestion_highlighted: None,
@@ -995,6 +996,7 @@ impl WorkspaceApp {
             font_family: terminal
                 .font_family
                 .terminal_family_name(&terminal.custom_font_family),
+            cjk_font_family: terminal_cjk_font_family_preference(&terminal.cjk_font_family),
             font_size: terminal.font_size as f32,
             line_height: terminal.line_height as f32,
             cursor_shape: match terminal.cursor_style {

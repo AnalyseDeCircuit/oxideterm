@@ -195,6 +195,8 @@ pub struct TerminalSettings {
     pub theme: String,
     pub font_family: FontFamily,
     pub custom_font_family: String,
+    #[serde(default)]
+    pub cjk_font_family: String,
     pub font_size: i64,
     pub line_height: f64,
     pub cursor_style: CursorStyle,
@@ -233,6 +235,7 @@ impl Default for TerminalSettings {
             theme: "default".to_string(),
             font_family: FontFamily::Jetbrains,
             custom_font_family: String::new(),
+            cjk_font_family: String::new(),
             font_size: 14,
             line_height: 1.2,
             cursor_style: CursorStyle::Block,

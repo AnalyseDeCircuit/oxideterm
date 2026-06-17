@@ -78,6 +78,21 @@ pub(crate) fn ghost_text_run(
     }
 }
 
+pub(crate) fn timestamp_text_run(
+    text: &str,
+    theme: &TerminalUiTheme,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    TextRun {
+        len: text.len(),
+        font: metrics.font.clone(),
+        color: rgba((theme.header_foreground << 8) | 0xcc).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
 pub(crate) fn text_run_style_matches(left: &TextRun, right: &TextRun) -> bool {
     fn comparable_style(run: &TextRun) -> (&Font, Hsla, Option<Hsla>, bool, bool) {
         (

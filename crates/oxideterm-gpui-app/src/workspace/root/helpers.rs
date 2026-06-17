@@ -173,6 +173,15 @@ fn settings_mono_font_family(settings: &PersistedSettings) -> SharedString {
     settings_css_font_family_head(&family).unwrap_or_else(|| gpui_font_family_name(&family))
 }
 
+fn terminal_cjk_font_family_preference(family: &str) -> Option<String> {
+    let family = family.trim();
+    if family.is_empty() {
+        None
+    } else {
+        Some(family.to_string())
+    }
+}
+
 fn reconnect_phase_label(phase: &ReconnectPhase) -> &'static str {
     match phase {
         ReconnectPhase::Queued => "queued",

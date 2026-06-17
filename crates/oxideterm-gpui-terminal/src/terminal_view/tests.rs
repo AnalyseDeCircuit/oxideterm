@@ -357,6 +357,25 @@ fn terminal_font_uses_real_nerd_font_family_and_fallbacks() {
 }
 
 #[test]
+fn terminal_font_places_explicit_cjk_fallback_before_defaults() {
+    let font = terminal_font_with_family_and_cjk(
+        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
+        Some("Noto Sans Mono CJK SC"),
+    );
+    let fallbacks = font.fallbacks.as_ref().unwrap().fallback_list();
+    let explicit_cjk = fallbacks
+        .iter()
+        .position(|family| family == "Noto Sans Mono CJK SC")
+        .expect("explicit CJK fallback should be registered");
+    let bundled_cjk = fallbacks
+        .iter()
+        .position(|family| family == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY)
+        .expect("bundled CJK fallback should remain available");
+
+    assert!(explicit_cjk < bundled_cjk);
+}
+
+#[test]
 fn oxideterm_terminal_scroll_actions_match_terminal_keymap() {
     let shift_pageup = oxideterm_terminal_scroll_action(&Keystroke {
         modifiers: Modifiers {

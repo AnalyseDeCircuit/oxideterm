@@ -537,22 +537,24 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                     cx,
-                ))
-                .child(self.render_tree_mode_action_button(
-                    LucideIcon::Plus,
-                    self.i18n.t("sessionManager.folder_tree.new_group"),
-                    has_background,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_session_row_menus();
-                        this.session_manager.show_new_group = true;
-                        this.session_manager.new_group_name.clear();
-                        this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                    cx,
                 ));
         }
+        // Group creation is a manager-level action; only expand/collapse is
+        // tree-specific. Keep this outside the tree-controls branch.
+        row = row.child(self.render_tree_mode_action_button(
+            LucideIcon::Plus,
+            self.i18n.t("sessionManager.folder_tree.new_group"),
+            has_background,
+            cx.listener(|this, _event, _window, cx| {
+                this.close_session_row_menus();
+                this.session_manager.show_new_group = true;
+                this.session_manager.new_group_name.clear();
+                this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                cx.notify();
+                cx.stop_propagation();
+            }),
+            cx,
+        ));
         row.child(self.render_tree_mode_action_button(
             LucideIcon::FolderInput,
             self.i18n.t("settings_view.connections.ssh_config.title"),

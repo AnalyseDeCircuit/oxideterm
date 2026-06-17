@@ -407,7 +407,8 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let target = WorkspaceImeTarget::TerminalCommandBar;
         let workspace = cx.entity();
-        let focused = self.terminal_command_bar_focused;
+        let input_collapsed = self.terminal_command_input_collapsed;
+        let focused = self.terminal_command_bar_focused && !input_collapsed;
         let marked_text = self.marked_text_for_target(target);
         let selected_range = self.ime_selected_range_for_target(target);
         let command_is_empty = self.terminal_command_bar_draft.is_empty();
@@ -468,7 +469,14 @@ impl WorkspaceApp {
             .quick_commands_enabled;
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
+        let timestamps_active = self.active_terminal_timestamps_enabled(cx);
         let privilege_prompt_state = self.active_privilege_prompt_state(cx);
+        let input_toggle_tooltip_id = "terminal-command-input-toggle";
+        let input_toggle_title = if input_collapsed {
+            self.i18n.t("terminal.command_bar.expand_input")
+        } else {
+            self.i18n.t("terminal.command_bar.collapse_input")
+        };
 
         let bar = div()
             .relative()
@@ -480,13 +488,14 @@ impl WorkspaceApp {
             .py(px(4.0))
             .shadow_lg()
             .when(
-                focused
+                !input_collapsed
+                    && focused
                     && self.terminal_command_suggestions_open
                     && !command_suggestions.is_empty(),
                 |bar| bar.child(self.render_terminal_command_suggestions(&command_suggestions, cx)),
             )
             .when(
-                quick_commands_enabled && self.terminal_quick_commands_open,
+                !input_collapsed && quick_commands_enabled && self.terminal_quick_commands_open,
                 |bar| {
                     // Tauri renders QuickCommandsPopover as a child of the relative
                     // TerminalCommandBar (`absolute bottom-full right-3`). Keep the
@@ -505,14 +514,84 @@ impl WorkspaceApp {
                     .gap(px(8.0))
                     .child(
                         div()
-                            .truncate()
-                            .text_size(px(11.0))
-                            .text_color(rgb(theme.text_muted))
-                            .child(target_label),
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(
+                                self.terminal_command_action_button(
+                                    if input_collapsed {
+                                        LucideIcon::ChevronRight
+                                    } else {
+                                        LucideIcon::ChevronDown
+                                    },
+                                    rgb(theme.text_muted),
+                                    false,
+                                    Some(if input_collapsed {
+                                        rgba((theme.bg_hover << 8) | 0x99)
+                                    } else {
+                                        rgba(0x00000000)
+                                    }),
+                                    |this, _event, _window, cx| {
+                                        this.terminal_command_input_collapsed =
+                                            !this.terminal_command_input_collapsed;
+                                        // Collapsing is visual-only. Keep the draft, but release
+                                        // hidden input ownership so keystrokes return to the pane.
+                                        if this.terminal_command_input_collapsed {
+                                            this.terminal_command_bar_focused = false;
+                                            this.ime_marked_text = None;
+                                            this.terminal_command_suggestions_open = false;
+                                            this.terminal_command_suggestion_highlighted = None;
+                                            this.close_terminal_quick_commands_popover();
+                                        }
+                                        this.clear_workspace_tooltip(
+                                            input_toggle_tooltip_id,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    },
+                                    cx,
+                                )
+                                .id(input_toggle_tooltip_id)
+                                .on_mouse_move({
+                                    let title = input_toggle_title.clone();
+                                    cx.listener(
+                                        move |this, event: &MouseMoveEvent, _window, cx| {
+                                            this.queue_workspace_tooltip(
+                                                input_toggle_tooltip_id,
+                                                title.clone(),
+                                                f32::from(event.position.x) + 12.0,
+                                                f32::from(event.position.y) + 16.0,
+                                                cx,
+                                            );
+                                        },
+                                    )
+                                })
+                                .on_hover(cx.listener(
+                                    move |this, hovered: &bool, _window, cx| {
+                                        if !*hovered {
+                                            this.clear_workspace_tooltip(
+                                                input_toggle_tooltip_id,
+                                                cx,
+                                            );
+                                        }
+                                    },
+                                )),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(target_label),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
+                            .flex_none()
                             .items_center()
                             .gap(px(4.0))
                             .when(
@@ -730,6 +809,25 @@ impl WorkspaceApp {
                                     }
                                 },
                             ))
+                            .child(self.terminal_command_action_button(
+                                LucideIcon::Clock,
+                                if timestamps_active {
+                                    rgba(0x22d3eeff)
+                                } else {
+                                    rgb(theme.text_muted)
+                                },
+                                false,
+                                Some(if timestamps_active {
+                                    rgba(0x22d3ee26)
+                                } else {
+                                    rgba(0x00000000)
+                                }),
+                                |this, _event, _window, cx| {
+                                    this.toggle_active_terminal_timestamps(cx);
+                                    cx.stop_propagation();
+                                },
+                                cx,
+                            ))
                             .when(recording_active, |actions| {
                                 actions.child(
                                     div()
@@ -822,8 +920,9 @@ impl WorkspaceApp {
                             )),
                     ),
             )
-            .child(
-                div()
+            .when(!input_collapsed, |bar| {
+                bar.child(
+                    div()
                     .mt(px(2.0))
                     .pt(px(4.0))
                     .border_t_1()
@@ -999,7 +1098,8 @@ impl WorkspaceApp {
                                 )),
                         )
                     }),
-            );
+                )
+            });
         select_anchor_probe(
             SelectAnchorId::TerminalCommandBar,
             bar,

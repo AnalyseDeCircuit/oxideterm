@@ -6,6 +6,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 gpui.workspace = true
 image.workspace = true
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }

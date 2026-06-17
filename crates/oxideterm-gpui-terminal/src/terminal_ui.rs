@@ -25,6 +25,8 @@ pub(crate) const SCROLLBAR_WIDTH: f32 = 10.0;
 pub(crate) const SCROLLBAR_GAP: f32 = 0.0;
 pub(crate) const SCROLLBAR_RESERVED_WIDTH: f32 = SCROLLBAR_WIDTH;
 pub(crate) const SCROLLBAR_MIN_THUMB: f32 = 24.0;
+pub(crate) const TERMINAL_TIMESTAMP_LABEL_CELLS: usize = 8;
+pub(crate) const TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS: f32 = 1.0;
 pub(crate) const TERMINAL_SCROLL_MULTIPLIER: f32 = 1.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 pub(crate) const TERMINAL_BLINK_MODE: TerminalBlinkMode = TerminalBlinkMode::On;
@@ -42,6 +44,7 @@ pub(crate) const TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS: bool = true;
 #[derive(Clone)]
 pub struct TerminalUiPreferences {
     pub font_family: String,
+    pub cjk_font_family: Option<String>,
     pub font_size: f32,
     pub line_height: f32,
     pub cursor_shape: TerminalCursorShape,
@@ -75,6 +78,7 @@ impl Default for TerminalUiPreferences {
     fn default() -> Self {
         Self {
             font_family: TERMINAL_FONT.to_string(),
+            cjk_font_family: None,
             font_size: TERMINAL_FONT_SIZE,
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
             cursor_shape: TerminalCursorShape::Block,
@@ -468,7 +472,10 @@ impl TerminalMetrics {
     ) -> Self {
         let font_size = px(preferences.font_size);
         let line_height = px(preferences.font_size * preferences.line_height);
-        let font = terminal_font_with_family(&preferences.font_family);
+        let font = terminal_font_with_family_and_cjk(
+            &preferences.font_family,
+            preferences.cjk_font_family.as_deref(),
+        );
         let font_id = window.text_system().resolve_font(&font);
         let measured_width = window
             .text_system()
@@ -493,6 +500,15 @@ impl TerminalMetrics {
     }
 }
 
+pub(crate) fn terminal_timestamp_gutter_width(metrics: &TerminalMetrics, enabled: bool) -> f32 {
+    if enabled {
+        (TERMINAL_TIMESTAMP_LABEL_CELLS as f32 + TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS)
+            * metrics.cell_width_f32()
+    } else {
+        0.0
+    }
+}
+
 pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: Pixels) -> Pixels {
     let sample = SharedString::from("m");
     let run = TextRun {
@@ -512,39 +528,56 @@ pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: P
 
 #[cfg(test)]
 pub(crate) fn terminal_font() -> Font {
-    terminal_font_with_family(TERMINAL_FONT)
+    terminal_font_with_family_and_cjk(TERMINAL_FONT, None)
 }
 
-pub(crate) fn terminal_font_with_family(family: &str) -> Font {
+pub(crate) fn terminal_font_with_family_and_cjk(family: &str, cjk_family: Option<&str>) -> Font {
+    let mut fallback_families = Vec::new();
+    push_font_fallback(&mut fallback_families, family);
+    if let Some(cjk_family) = cjk_family {
+        push_font_fallback(&mut fallback_families, cjk_family);
+    }
+    for fallback in [
+        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
+        "JetBrainsMono Nerd Font",
+        "JetBrains Mono NF (Subset)",
+        "JetBrains Mono",
+        "JetBrainsMonoNL Nerd Font Mono",
+        oxideterm_settings::MESLO_SUBSET_FAMILY,
+        "MesloLGS Nerd Font Mono",
+        oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY,
+        "Maple Mono NF CN",
+        "Symbols Nerd Font Mono",
+        "Symbols Nerd Font",
+        "ui-monospace",
+        "SF Mono",
+        "Menlo",
+        "Monaco",
+        "Cascadia Mono",
+        "DejaVu Sans Mono",
+        "Noto Sans Mono",
+        "Liberation Mono",
+        "Courier New",
+        "Apple Color Emoji",
+    ] {
+        push_font_fallback(&mut fallback_families, fallback);
+    }
+
     Font {
         family: SharedString::from(family.to_string()),
         features: terminal_font_features(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec![
-            oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY.to_string(),
-            "JetBrainsMono Nerd Font".to_string(),
-            "JetBrains Mono NF (Subset)".to_string(),
-            "JetBrains Mono".to_string(),
-            "JetBrainsMonoNL Nerd Font Mono".to_string(),
-            oxideterm_settings::MESLO_SUBSET_FAMILY.to_string(),
-            "MesloLGS Nerd Font Mono".to_string(),
-            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY.to_string(),
-            "Maple Mono NF CN".to_string(),
-            "Symbols Nerd Font Mono".to_string(),
-            "Symbols Nerd Font".to_string(),
-            "ui-monospace".to_string(),
-            "SF Mono".to_string(),
-            "Menlo".to_string(),
-            "Monaco".to_string(),
-            "Cascadia Mono".to_string(),
-            "DejaVu Sans Mono".to_string(),
-            "Noto Sans Mono".to_string(),
-            "Liberation Mono".to_string(),
-            "Courier New".to_string(),
-            "Apple Color Emoji".to_string(),
-        ])),
+        fallbacks: Some(FontFallbacks::from_fonts(fallback_families)),
         weight: FontWeight::default(),
         style: FontStyle::Normal,
     }
+}
+
+fn push_font_fallback(fallbacks: &mut Vec<String>, family: &str) {
+    let family = family.trim();
+    if family.is_empty() || fallbacks.iter().any(|existing| existing == family) {
+        return;
+    }
+    fallbacks.push(family.to_string());
 }
 
 pub(crate) fn terminal_font_features() -> FontFeatures {

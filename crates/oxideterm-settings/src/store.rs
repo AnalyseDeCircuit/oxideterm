@@ -455,6 +455,7 @@ mod tests {
         );
         assert_eq!(settings.terminal.theme, "default");
         assert_eq!(settings.terminal.font_family, FontFamily::Jetbrains);
+        assert!(settings.terminal.cjk_font_family.is_empty());
         assert_eq!(settings.terminal.font_size, 14);
         assert_eq!(settings.terminal.line_height, 1.2);
         assert_eq!(settings.terminal.scrollback, 1000);

@@ -6,6 +6,8 @@
       "command_mode": "Command mode",
       "command_placeholder": "Run commands",
       "run_command": "Run command",
+      "collapse_input": "Hide command input",
+      "expand_input": "Show command input",
       "local_shell": "Local shell",
       "remote_shell": "Remote shell",
       "all_targets": "All",

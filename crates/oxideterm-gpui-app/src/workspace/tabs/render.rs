@@ -466,6 +466,7 @@ impl WorkspaceApp {
             .map(|root| root.pane_count())
             .unwrap_or(1);
         let broadcast_label = self.terminal_broadcast_toolbar_label();
+        let timestamps_active = self.active_terminal_timestamps_enabled(cx);
 
         Some(
             div()
@@ -587,6 +588,22 @@ impl WorkspaceApp {
                         }
                     },
                 ))
+                .child({
+                    let button = self.terminal_legacy_icon_button(
+                        LucideIcon::Clock,
+                        true,
+                        |this, _event, _window, cx| {
+                            this.toggle_active_terminal_timestamps(cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    );
+                    button.bg(if timestamps_active {
+                        rgba(0x22d3ee26)
+                    } else {
+                        rgba(0x00000000)
+                    })
+                })
                 .child(self.terminal_legacy_icon_button(
                     LucideIcon::Square,
                     false,
