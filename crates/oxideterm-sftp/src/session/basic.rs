@@ -4,28 +4,28 @@ impl SftpSession {
         O: SftpChannelOpener,
     {
         info!("Opening SFTP subsystem for session {session_id}");
-        let channel = connection.open_sftp_channel().await?;
-        channel
-            .request_subsystem(true, "sftp")
-            .await
-            .map_err(|error| {
-                SftpError::SubsystemNotAvailable(format!(
-                    "Failed to request SFTP subsystem: {error}"
-                ))
-            })?;
-        let sftp = RusshSftpSession::new(channel.into_stream())
-            .await
-            .map_err(|error| SftpError::SubsystemNotAvailable(error.to_string()))?;
+        // Store an erased channel factory so directory transfers can open
+        // short-lived sibling SFTP channels without changing the public opener API.
+        let channel_factory: SftpChannelFactory = Arc::new(move || {
+            let connection = connection.clone();
+            Box::pin(async move { connection.open_sftp_channel().await })
+        });
+        let sftp = open_russh_sftp_session(&channel_factory).await?;
         let cwd = sftp
             .canonicalize(".")
             .await
             .map_err(|error| SftpError::ProtocolError(error.to_string()))?;
         info!("SFTP subsystem opened for session {session_id}");
         Ok(Self {
-            sftp,
+            sftp: Arc::new(sftp),
+            channel_factory,
             session_id,
             cwd,
         })
+    }
+
+    async fn open_sibling_sftp(&self) -> Result<RusshSftpSession, SftpError> {
+        open_russh_sftp_session(&self.channel_factory).await
     }
 
     pub fn cwd(&self) -> &str {
@@ -212,4 +212,21 @@ impl SftpSession {
             }
         }
     }
+}
+
+async fn open_russh_sftp_session(
+    channel_factory: &SftpChannelFactory,
+) -> Result<RusshSftpSession, SftpError> {
+    let channel = channel_factory().await?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|error| {
+            SftpError::SubsystemNotAvailable(format!(
+                "Failed to request SFTP subsystem: {error}"
+            ))
+        })?;
+    RusshSftpSession::new(channel.into_stream())
+        .await
+        .map_err(|error| SftpError::SubsystemNotAvailable(error.to_string()))
 }

@@ -1,3 +1,31 @@
+struct DirectorySftpPool {
+    sessions: Vec<Arc<RusshSftpSession>>,
+}
+
+impl DirectorySftpPool {
+    fn new(primary: Arc<RusshSftpSession>) -> Self {
+        Self {
+            sessions: vec![primary],
+        }
+    }
+
+    fn push_auxiliary(&mut self, session: RusshSftpSession) {
+        self.sessions.push(Arc::new(session));
+    }
+
+    fn session_for_worker(&self, worker_index: usize) -> Arc<RusshSftpSession> {
+        self.sessions[worker_index % self.sessions.len()].clone()
+    }
+
+    async fn close_auxiliary_sessions(&self) {
+        // The first entry is the long-lived browser session; only close the
+        // temporary channels opened for this directory transfer.
+        for session in self.sessions.iter().skip(1) {
+            let _ = session.close().await;
+        }
+    }
+}
+
 impl SftpSession {
     pub async fn download_file(
         &self,
@@ -415,31 +443,62 @@ impl SftpSession {
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
-        let parallelism = transfer_manager
+        let requested_parallelism = transfer_manager
             .as_ref()
             .map(|manager| manager.directory_parallelism())
             .unwrap_or(1)
             .clamp(1, crate::MAX_SFTP_DIRECTORY_PARALLELISM);
-        if parallelism <= 1
-            || transfer_manager
-                .as_ref()
-                .is_some_and(|m| m.speed_limit_bps() > 0)
-        {
+        let speed_limit_bps = transfer_manager
+            .as_ref()
+            .map(|manager| manager.speed_limit_bps())
+            .unwrap_or(0);
+        let plan = plan_directory_transfer(
+            jobs.len(),
+            requested_parallelism,
+            speed_limit_bps,
+            self.sftp.advertised_open_handle_limit(),
+        );
+        if plan.worker_count <= 1 {
             for job in &jobs {
                 self.download_file_inner(job, transfer_id, progress_tx, transfer_manager)
                     .await?;
             }
             return Ok(jobs.len() as u64);
         }
-        stream::iter(jobs)
-            .map(|job| async move {
-                self.download_file_inner(&job, transfer_id, progress_tx, transfer_manager)
+
+        let pool = Arc::new(self.open_directory_pool(plan.channel_count).await);
+        let bulk_lane = Arc::new(tokio::sync::Semaphore::new(plan.bulk_lane_workers));
+        let result = stream::iter(jobs.into_iter().enumerate())
+            .map(|(worker_index, job)| {
+                let pool = pool.clone();
+                let bulk_lane = bulk_lane.clone();
+                async move {
+                    let _bulk_permit = match plan.classify_size(job.total_bytes) {
+                        DirectoryJobClass::Compact => None,
+                        DirectoryJobClass::Bulk => Some(
+                            bulk_lane
+                                .acquire()
+                                .await
+                                .map_err(|error| SftpError::TransferError(error.to_string()))?,
+                        ),
+                    };
+                    let sftp = pool.session_for_worker(worker_index);
+                    self.download_file_inner_with_sftp(
+                        sftp,
+                        &job,
+                        transfer_id,
+                        progress_tx,
+                        transfer_manager,
+                    )
                     .await?;
-                Ok::<u64, SftpError>(1)
+                    Ok::<u64, SftpError>(1)
+                }
             })
-            .buffer_unordered(parallelism)
+            .buffer_unordered(plan.worker_count)
             .try_fold(0, |sum, count| async move { Ok(sum + count) })
-            .await
+            .await;
+        pool.close_auxiliary_sessions().await;
+        result
     }
 
     async fn run_upload_jobs(
@@ -449,31 +508,78 @@ impl SftpSession {
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
-        let parallelism = transfer_manager
+        let requested_parallelism = transfer_manager
             .as_ref()
             .map(|manager| manager.directory_parallelism())
             .unwrap_or(1)
             .clamp(1, crate::MAX_SFTP_DIRECTORY_PARALLELISM);
-        if parallelism <= 1
-            || transfer_manager
-                .as_ref()
-                .is_some_and(|m| m.speed_limit_bps() > 0)
-        {
+        let speed_limit_bps = transfer_manager
+            .as_ref()
+            .map(|manager| manager.speed_limit_bps())
+            .unwrap_or(0);
+        let plan = plan_directory_transfer(
+            jobs.len(),
+            requested_parallelism,
+            speed_limit_bps,
+            self.sftp.advertised_open_handle_limit(),
+        );
+        if plan.worker_count <= 1 {
             for job in &jobs {
                 self.upload_file_inner(job, transfer_id, progress_tx, transfer_manager)
                     .await?;
             }
             return Ok(jobs.len() as u64);
         }
-        stream::iter(jobs)
-            .map(|job| async move {
-                self.upload_file_inner(&job, transfer_id, progress_tx, transfer_manager)
+
+        let pool = Arc::new(self.open_directory_pool(plan.channel_count).await);
+        let bulk_lane = Arc::new(tokio::sync::Semaphore::new(plan.bulk_lane_workers));
+        let result = stream::iter(jobs.into_iter().enumerate())
+            .map(|(worker_index, job)| {
+                let pool = pool.clone();
+                let bulk_lane = bulk_lane.clone();
+                async move {
+                    let _bulk_permit = match plan.classify_size(job.total_bytes) {
+                        DirectoryJobClass::Compact => None,
+                        DirectoryJobClass::Bulk => Some(
+                            bulk_lane
+                                .acquire()
+                                .await
+                                .map_err(|error| SftpError::TransferError(error.to_string()))?,
+                        ),
+                    };
+                    let sftp = pool.session_for_worker(worker_index);
+                    self.upload_file_inner_with_sftp(
+                        sftp,
+                        &job,
+                        transfer_id,
+                        progress_tx,
+                        transfer_manager,
+                    )
                     .await?;
-                Ok::<u64, SftpError>(1)
+                    Ok::<u64, SftpError>(1)
+                }
             })
-            .buffer_unordered(parallelism)
+            .buffer_unordered(plan.worker_count)
             .try_fold(0, |sum, count| async move { Ok(sum + count) })
-            .await
+            .await;
+        pool.close_auxiliary_sessions().await;
+        result
+    }
+
+    async fn open_directory_pool(&self, channel_count: usize) -> DirectorySftpPool {
+        let mut pool = DirectorySftpPool::new(self.sftp.clone());
+        for _ in 1..channel_count {
+            match self.open_sibling_sftp().await {
+                Ok(session) => pool.push_auxiliary(session),
+                Err(error) => {
+                    warn!(
+                        "Failed to open auxiliary SFTP channel for directory transfer: {error}"
+                    );
+                    break;
+                }
+            }
+        }
+        pool
     }
 
     async fn download_file_inner(
@@ -483,8 +589,25 @@ impl SftpSession {
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<(), SftpError> {
-        let remote_file = self
-            .sftp
+        self.download_file_inner_with_sftp(
+            self.sftp.clone(),
+            job,
+            transfer_id,
+            progress_tx,
+            transfer_manager,
+        )
+        .await
+    }
+
+    async fn download_file_inner_with_sftp(
+        &self,
+        sftp: Arc<RusshSftpSession>,
+        job: &DownloadFileJob,
+        transfer_id: &str,
+        progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
+        transfer_manager: &Option<Arc<SftpTransferManager>>,
+    ) -> Result<(), SftpError> {
+        let remote_file = sftp
             .open(&job.remote_path)
             .await
             .map_err(|error| self.map_sftp_error(error, &job.remote_path))?;
@@ -589,11 +712,28 @@ impl SftpSession {
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<(), SftpError> {
+        self.upload_file_inner_with_sftp(
+            self.sftp.clone(),
+            job,
+            transfer_id,
+            progress_tx,
+            transfer_manager,
+        )
+        .await
+    }
+
+    async fn upload_file_inner_with_sftp(
+        &self,
+        sftp: Arc<RusshSftpSession>,
+        job: &UploadFileJob,
+        transfer_id: &str,
+        progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
+        transfer_manager: &Option<Arc<SftpTransferManager>>,
+    ) -> Result<(), SftpError> {
         let mut local_file = tokio::fs::File::open(&job.local_path)
             .await
             .map_err(SftpError::IoError)?;
-        let remote_file = self
-            .sftp
+        let remote_file = sftp
             .open_with_flags(
                 &job.remote_path,
                 OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,

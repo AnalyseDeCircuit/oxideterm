@@ -6,6 +6,7 @@ use std::{
     fmt,
     future::Future,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::Arc,
     time::Instant,
 };
@@ -50,12 +51,17 @@ pub trait SftpChannelOpener: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = Result<russh::Channel<russh::client::Msg>, SftpError>> + Send;
 }
 
+type BoxedSftpChannelFuture =
+    Pin<Box<dyn Future<Output = Result<russh::Channel<russh::client::Msg>, SftpError>> + Send>>;
+type SftpChannelFactory = Arc<dyn Fn() -> BoxedSftpChannelFuture + Send + Sync>;
+
 pub struct WriteContentResult {
     pub atomic_write: bool,
 }
 
 pub struct SftpSession {
-    sftp: RusshSftpSession,
+    sftp: Arc<RusshSftpSession>,
+    channel_factory: SftpChannelFactory,
     session_id: String,
     cwd: String,
 }
@@ -87,6 +93,7 @@ impl fmt::Debug for SftpSession {
 include!("session/basic.rs");
 include!("session/preview.rs");
 include!("session/file_ops.rs");
+include!("session/directory_scheduler.rs");
 include!("session/transfers.rs");
 include!("session/preview_helpers.rs");
 include!("session/helpers.rs");
