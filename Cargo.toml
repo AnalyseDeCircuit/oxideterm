@@ -50,7 +50,6 @@ members = [
   "crates/oxideterm-terminal-unicode",
   "crates/oxideterm-theme",
   "crates/oxideterm-trzsz",
-  "crates/oxideterm-webview",
   "crates/oxideterm-workspace",
   "crates/oxideterm-x11-forwarding",
   "crates/russh",

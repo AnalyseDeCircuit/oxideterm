@@ -12,7 +12,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
-gpui-component.workspace = true
+gpui-component = { workspace = true, features = ["webview"] }
 gpui.workspace = true
 image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
@@ -54,7 +54,6 @@ oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-topology = { path = "../oxideterm-topology" }
 oxideterm-update = { path = "../oxideterm-update" }
-oxideterm-webview = { path = "../oxideterm-webview" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-wsl-graphics = { path = "../oxideterm-wsl-graphics" }
 parking_lot.workspace = true

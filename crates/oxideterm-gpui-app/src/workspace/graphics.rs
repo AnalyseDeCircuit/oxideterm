@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::mpsc};
 
 use gpui::Entity;
+use gpui_component::webview::WebView as GpuiWebView;
 use oxideterm_gpui_ui::{
     TextInputView,
     button::{
@@ -8,7 +9,6 @@ use oxideterm_gpui_ui::{
     },
     text_input_anchor_probe,
 };
-use oxideterm_webview::backend::webview::WebView as GpuiWebView;
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use oxideterm_wsl_graphics::{
     GraphicsSessionMode, WSL_GRAPHICS_UNAVAILABLE, WslDistro, WslGraphicsError, WslGraphicsSession,

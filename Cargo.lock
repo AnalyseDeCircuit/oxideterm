@@ -7593,7 +7593,6 @@ dependencies = [
  "oxideterm-theme",
  "oxideterm-topology",
  "oxideterm-update",
- "oxideterm-webview",
  "oxideterm-workspace",
  "oxideterm-wsl-graphics",
  "parking_lot",
@@ -8099,15 +8098,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
-]
-
-[[package]]
-name = "oxideterm-webview"
-version = "2.0.0-gpui-preview.8"
-dependencies = [
- "gpui",
- "gpui-component",
- "oxideterm-theme",
 ]
 
 [[package]]
