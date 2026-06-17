@@ -53,6 +53,9 @@ pub(crate) struct TerminalElement {
     transparent_background: bool,
     row_timestamps: Option<Arc<HashMap<i64, String>>>,
     layout_cache: Option<Arc<Mutex<TerminalLayoutCache>>>,
+    viewport_rows: usize,
+    viewport_display_offset: usize,
+    scroll_y_offset: Pixels,
 }
 
 #[derive(Clone)]
@@ -339,6 +342,8 @@ impl TerminalElement {
         bidi_enabled: bool,
         input: Option<TerminalElementInput>,
     ) -> Self {
+        let viewport_rows = snapshot.rows;
+        let viewport_display_offset = snapshot.display_offset;
         Self {
             snapshot,
             rendered_images,
@@ -360,6 +365,9 @@ impl TerminalElement {
             row_timestamps: None,
             ghost_text: None,
             layout_cache: None,
+            viewport_rows,
+            viewport_display_offset,
+            scroll_y_offset: px(0.0),
         }
     }
 
@@ -391,6 +399,21 @@ impl TerminalElement {
         self
     }
 
+    pub(crate) fn viewport_rows(mut self, viewport_rows: usize) -> Self {
+        self.viewport_rows = viewport_rows;
+        self
+    }
+
+    pub(crate) fn viewport_display_offset(mut self, display_offset: usize) -> Self {
+        self.viewport_display_offset = display_offset;
+        self
+    }
+
+    pub(crate) fn scroll_y_offset(mut self, scroll_y_offset: Pixels) -> Self {
+        self.scroll_y_offset = scroll_y_offset;
+        self
+    }
+
     pub(crate) fn row_timestamps(
         mut self,
         row_timestamps: Option<Arc<HashMap<i64, String>>>,
@@ -406,14 +429,30 @@ impl TerminalElement {
 
     #[allow(dead_code)]
     pub(crate) fn layout(&self) -> TerminalElementLayout {
-        self.layout_for_rows(0..self.snapshot.rows, None)
+        self.layout_for_rows(0..self.painted_row_limit(), None)
     }
 
     pub(crate) fn layout_for_bounds(&self, bounds: Bounds<Pixels>) -> TerminalElementLayout {
-        self.layout_for_rows(
-            terminal_visible_rows(bounds, &self.snapshot, &self.metrics),
-            None,
-        )
+        self.layout_for_rows(self.visible_rows_for_bounds(bounds), None)
+    }
+
+    fn painted_row_limit(&self) -> usize {
+        let overscan_rows = if f32::from(self.scroll_y_offset).abs() > f32::EPSILON {
+            1
+        } else {
+            0
+        };
+        self.viewport_rows
+            .saturating_add(overscan_rows)
+            .min(self.snapshot.lines.len())
+    }
+
+    fn visible_rows_for_bounds(&self, bounds: Bounds<Pixels>) -> Range<usize> {
+        let mut rows = terminal_visible_rows_for_limit(bounds, &self.metrics, self.viewport_rows);
+        if f32::from(self.scroll_y_offset).abs() > f32::EPSILON {
+            rows.end = rows.end.saturating_add(1).min(self.painted_row_limit());
+        }
+        rows
     }
 
     fn layout_for_rows(
@@ -459,7 +498,7 @@ impl TerminalElement {
             .rendered_images
             .iter()
             .filter(|image| {
-                image.snapshot.row < self.snapshot.rows
+                image.snapshot.row < self.painted_row_limit()
                     && image.snapshot.row + image.snapshot.rows > visible_rows.start
                     && image.snapshot.row < visible_rows.end
             })
@@ -470,7 +509,12 @@ impl TerminalElement {
         let mut text_runs = Vec::new();
         let mut timestamp_runs = Vec::new();
         let mut cursor = None;
-        let scrollbar = terminal_scrollbar(&self.snapshot, &self.metrics);
+        let scrollbar = terminal_scrollbar_for_viewport(
+            &self.snapshot,
+            &self.metrics,
+            self.viewport_rows,
+            self.viewport_display_offset,
+        );
         let terminal_background = terminal_background(&self.theme);
         let cursor_row_visible = visible_rows.contains(&self.snapshot.cursor_row);
         let ime_cursor_bounds = cursor_row_visible
@@ -586,7 +630,7 @@ impl TerminalElement {
         let Some(cache) = &self.layout_cache else {
             return Arc::new(self.layout_for_bounds(bounds));
         };
-        let visible_rows = terminal_visible_rows(bounds, &self.snapshot, &self.metrics);
+        let visible_rows = self.visible_rows_for_bounds(bounds);
         let mut cache = cache.lock();
         Arc::new(self.layout_for_rows(visible_rows, Some(&mut cache)))
     }
@@ -1458,86 +1502,106 @@ impl Element for TerminalElement {
         }
         let timestamp_gutter_width =
             terminal_timestamp_gutter_width(&self.metrics, self.row_timestamps.is_some());
-        let timestamp_origin =
+        let viewport_timestamp_origin =
             bounds.origin + point(px(TERMINAL_CONTENT_PADDING), px(TERMINAL_CONTENT_PADDING));
+        let timestamp_origin = viewport_timestamp_origin + point(px(0.0), self.scroll_y_offset);
         // The timestamp gutter and the terminal grid use separate origins so
         // timestamps remain a paint-only overlay and never affect text runs.
+        let viewport_origin =
+            viewport_timestamp_origin + point(px(timestamp_gutter_width), px(0.0));
         let origin = timestamp_origin + point(px(timestamp_gutter_width), px(0.0));
+        let viewport_mask_bounds = Bounds::new(
+            viewport_timestamp_origin,
+            size(
+                px((f32::from(bounds.size.width) - TERMINAL_CONTENT_PADDING).max(0.0)),
+                px(self.viewport_rows as f32 * self.metrics.line_height_f32()),
+            ),
+        );
 
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            if self.row_timestamps.is_some() {
-                for run in &layout.timestamp_runs {
-                    paint_text_run(run, timestamp_origin, &self.metrics, window, cx);
+        window.with_content_mask(
+            Some(ContentMask {
+                bounds: viewport_mask_bounds,
+            }),
+            |window| {
+                if self.row_timestamps.is_some() {
+                    for run in &layout.timestamp_runs {
+                        paint_text_run(run, timestamp_origin, &self.metrics, window, cx);
+                    }
+                    let divider_x = viewport_timestamp_origin.x
+                        + px((TERMINAL_TIMESTAMP_LABEL_CELLS as f32
+                            + TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS / 2.0)
+                            * self.metrics.cell_width_f32());
+                    let divider_bounds = Bounds::new(
+                        point(divider_x, viewport_timestamp_origin.y),
+                        size(
+                            px(1.0),
+                            px(self.viewport_rows as f32 * self.metrics.line_height_f32()),
+                        ),
+                    );
+                    window.paint_quad(fill(
+                        divider_bounds,
+                        rgba((self.theme.foreground << 8) | 0x2e),
+                    ));
                 }
-                let divider_x = timestamp_origin.x
-                    + px((TERMINAL_TIMESTAMP_LABEL_CELLS as f32
-                        + TERMINAL_TIMESTAMP_GUTTER_GAP_CELLS / 2.0)
-                        * self.metrics.cell_width_f32());
-                let divider_bounds = Bounds::new(
-                    point(divider_x, timestamp_origin.y),
-                    size(
-                        px(1.0),
-                        px(self.snapshot.rows as f32 * self.metrics.line_height_f32()),
-                    ),
-                );
-                window.paint_quad(fill(
-                    divider_bounds,
-                    rgba((self.theme.foreground << 8) | 0x2e),
-                ));
-            }
-            for rect in &layout.backgrounds {
-                paint_terminal_rect(rect, origin, &self.metrics, window);
-            }
-            for rect in &layout.highlight_backgrounds {
-                paint_terminal_rect(rect, origin, &self.metrics, window);
-            }
-            for image in layout
-                .images
-                .iter()
-                .filter(|image| image.image.snapshot.z_index < 0)
-            {
-                paint_terminal_image(image, origin, &self.metrics, window);
-            }
-            for rect in &layout.search_matches {
-                paint_terminal_rect(rect, origin, &self.metrics, window);
-            }
-            for overlay in &layout.command_mark_overlays {
-                paint_command_mark_overlay(
-                    overlay,
-                    origin,
-                    self.snapshot.cols,
-                    &self.metrics,
-                    window,
-                );
-            }
-            for rect in &layout.selections {
-                paint_terminal_rect(rect, origin, &self.metrics, window);
-            }
-            for run in &layout.text_runs {
-                paint_text_run(run, origin, &self.metrics, window, cx);
-            }
-            if let Some(ghost_text) = &layout.ghost_text {
-                paint_text_run(ghost_text, origin, &self.metrics, window, cx);
-            }
-            if let Some(marked_text) = &layout.marked_text {
-                paint_text_run(marked_text, origin, &self.metrics, window, cx);
-            }
-            for image in layout
-                .images
-                .iter()
-                .filter(|image| image.image.snapshot.z_index >= 0)
-            {
-                paint_terminal_image(image, origin, &self.metrics, window);
-            }
-            for rect in &layout.highlight_underlines {
-                paint_terminal_underline(rect, origin, &self.metrics, window);
-            }
-            for rect in &layout.highlight_outlines {
-                paint_terminal_outline(rect, origin, &self.metrics, window);
-            }
-        });
+                for rect in &layout.backgrounds {
+                    paint_terminal_rect(rect, origin, &self.metrics, window);
+                }
+                for rect in &layout.highlight_backgrounds {
+                    paint_terminal_rect(rect, origin, &self.metrics, window);
+                }
+                for image in layout
+                    .images
+                    .iter()
+                    .filter(|image| image.image.snapshot.z_index < 0)
+                {
+                    paint_terminal_image(image, origin, &self.metrics, window);
+                }
+                for rect in &layout.search_matches {
+                    paint_terminal_rect(rect, origin, &self.metrics, window);
+                }
+                for overlay in &layout.command_mark_overlays {
+                    paint_command_mark_overlay(
+                        overlay,
+                        origin,
+                        self.snapshot.cols,
+                        &self.metrics,
+                        window,
+                    );
+                }
+                for rect in &layout.selections {
+                    paint_terminal_rect(rect, origin, &self.metrics, window);
+                }
+                for run in &layout.text_runs {
+                    paint_text_run(run, origin, &self.metrics, window, cx);
+                }
+                if let Some(ghost_text) = &layout.ghost_text {
+                    paint_text_run(ghost_text, origin, &self.metrics, window, cx);
+                }
+                if let Some(marked_text) = &layout.marked_text {
+                    paint_text_run(marked_text, origin, &self.metrics, window, cx);
+                }
+                for image in layout
+                    .images
+                    .iter()
+                    .filter(|image| image.image.snapshot.z_index >= 0)
+                {
+                    paint_terminal_image(image, origin, &self.metrics, window);
+                }
+                for rect in &layout.highlight_underlines {
+                    paint_terminal_underline(rect, origin, &self.metrics, window);
+                }
+                for rect in &layout.highlight_outlines {
+                    paint_terminal_outline(rect, origin, &self.metrics, window);
+                }
+            },
+        );
         if let Some(input) = &self.input {
-            let content_bounds = terminal_content_bounds(origin, &self.snapshot, &self.metrics);
+            let content_bounds = terminal_content_bounds_for_rows(
+                viewport_origin,
+                self.viewport_rows,
+                self.snapshot.cols,
+                &self.metrics,
+            );
             window.handle_input(
                 &input.focus_handle,
                 TerminalInputHandler {
@@ -1550,22 +1614,27 @@ impl Element for TerminalElement {
         if layout.marked_text.is_none()
             && let Some(cursor) = layout.cursor
         {
-            window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                paint_cursor(
-                    cursor,
-                    origin,
-                    &self.metrics,
-                    self.theme.header_foreground,
-                    window,
-                );
-            });
+            window.with_content_mask(
+                Some(ContentMask {
+                    bounds: viewport_mask_bounds,
+                }),
+                |window| {
+                    paint_cursor(
+                        cursor,
+                        origin,
+                        &self.metrics,
+                        self.theme.header_foreground,
+                        window,
+                    );
+                },
+            );
         }
         if let Some(scrollbar) = layout.scrollbar {
             paint_scrollbar(
                 scrollbar,
-                origin,
+                viewport_origin,
                 bounds.size.width,
-                self.snapshot.rows,
+                self.viewport_rows,
                 &self.metrics,
                 window,
             );

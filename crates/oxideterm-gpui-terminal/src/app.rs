@@ -126,7 +126,8 @@ pub struct TerminalPane {
     recorder: Option<TerminalRecorder>,
     bell_flash: bool,
     terminal_exited: bool,
-    scroll_px: Pixels,
+    scroll_remainder_px: Pixels,
+    smooth_scroll_animation_active: bool,
     scrollbar_drag: Option<ScrollbarDrag>,
     selection_autoscroll_position: Option<Point<Pixels>>,
     selection_autoscroll_scheduled: bool,
@@ -388,7 +389,8 @@ impl TerminalPane {
             recorder: None,
             bell_flash: false,
             terminal_exited: false,
-            scroll_px: px(0.0),
+            scroll_remainder_px: px(0.0),
+            smooth_scroll_animation_active: false,
             scrollbar_drag: None,
             selection_autoscroll_position: None,
             selection_autoscroll_scheduled: false,
@@ -551,6 +553,9 @@ impl TerminalPane {
             self.selected_command_mark_id = None;
             self.command_mark_id_aliases.clear();
         }
+        if !next_settings.smooth_scroll {
+            self.clear_smooth_scroll_remainder();
+        }
         self.settings = next_settings;
         self.theme = preferences.theme.clone();
         self.image_cache
@@ -702,6 +707,7 @@ impl TerminalPane {
             terminal.clear_buffer();
             terminal.snapshot()
         };
+        self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         self.selection = None;
         self.search_query = None;
@@ -768,9 +774,15 @@ impl TerminalPane {
         let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode(mode);
         let mut needs_notify = event_effect.needs_notify;
         if let Some(snapshot) = next_snapshot {
+            if snapshot.display_offset == 0 {
+                self.clear_smooth_scroll_remainder();
+            }
             self.snapshot = self.stamp_snapshot(snapshot);
             needs_notify = true;
         } else if self.preferences.show_fps_overlay || cleared_command_mark_selection {
+            needs_notify = true;
+        }
+        if self.advance_smooth_scroll_animation() {
             needs_notify = true;
         }
         if needs_notify {
@@ -778,6 +790,31 @@ impl TerminalPane {
         }
 
         self.update_cursor_blink(cx);
+    }
+
+    fn advance_smooth_scroll_animation(&mut self) -> bool {
+        if !self.smooth_scroll_animation_active {
+            return false;
+        }
+
+        let current = f32::from(self.scroll_remainder_px);
+        if current.abs() <= f32::EPSILON {
+            self.smooth_scroll_animation_active = false;
+            return false;
+        }
+
+        // Keep the interpolation short and deterministic. The 16 ms tick loop
+        // gives this roughly six frames, enough to reveal clipped text without
+        // making wheel scrolling feel laggy.
+        let step = (self.metrics.line_height_f32() / 6.0).max(1.0);
+        let next = if current > 0.0 {
+            (current - step).max(0.0)
+        } else {
+            (current + step).min(0.0)
+        };
+        self.scroll_remainder_px = px(next);
+        self.smooth_scroll_animation_active = next.abs() > f32::EPSILON;
+        true
     }
 
     fn clear_command_mark_selection_for_tui_mode(&mut self, mode: TermMode) -> bool {
@@ -1224,6 +1261,7 @@ impl TerminalPane {
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record_resize(cols, rows);
             }
+            self.clear_smooth_scroll_remainder();
             self.snapshot = self.stamp_snapshot(snapshot);
             cx.notify();
         }

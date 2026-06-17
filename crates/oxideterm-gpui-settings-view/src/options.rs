@@ -19,6 +19,10 @@ pub fn set_show_fps_overlay(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.show_fps_overlay = value;
 }
 
+pub fn set_terminal_smooth_scroll(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.smooth_scroll = value;
+}
+
 pub fn set_paste_protection(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.paste_protection = value;
 }

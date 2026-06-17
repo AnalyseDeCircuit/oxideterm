@@ -189,6 +189,10 @@ impl Default for TerminalUnicodeSettings {
     }
 }
 
+fn default_terminal_smooth_scroll() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
@@ -202,6 +206,8 @@ pub struct TerminalSettings {
     pub cursor_style: CursorStyle,
     pub cursor_blink: bool,
     pub scrollback: i64,
+    #[serde(default = "default_terminal_smooth_scroll")]
+    pub smooth_scroll: bool,
     pub renderer: RendererType,
     pub terminal_encoding: TerminalEncoding,
     pub adaptive_renderer: AdaptiveRendererMode,
@@ -241,6 +247,7 @@ impl Default for TerminalSettings {
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
             scrollback: DEFAULT_TERMINAL_SCROLLBACK,
+            smooth_scroll: true,
             renderer: RendererType::default(),
             terminal_encoding: TerminalEncoding::Utf8,
             adaptive_renderer: AdaptiveRendererMode::Auto,
@@ -266,5 +273,20 @@ impl Default for TerminalSettings {
             unicode: TerminalUnicodeSettings::default(),
             extra: ExtraFields::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_settings_default_smooth_scroll_when_missing() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("smoothScroll");
+
+        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+
+        assert!(settings.smooth_scroll);
     }
 }

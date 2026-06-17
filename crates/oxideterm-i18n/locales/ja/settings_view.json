@@ -149,6 +149,8 @@
       "font_size_hint": "ターミナル文字のサイズ",
       "line_height": "行の高さ",
       "line_height_hint": "行間のスペース",
+      "smooth_scroll": "スムーズスクロール",
+      "smooth_scroll_hint": "端末行間のホイールスクロールを滑らかにします",
       "renderer": "レンダラー",
       "renderer_hint": "WebGLまたはCanvasレンダリングを選択",
       "renderer_auto": "自動（WebGL優先）",

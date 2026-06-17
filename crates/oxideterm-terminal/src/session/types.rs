@@ -81,6 +81,14 @@ pub trait TerminalSessionBackend: Send {
         String::new()
     }
     fn snapshot(&self) -> TerminalSnapshot;
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+    ) -> TerminalSnapshot {
+        let _ = (display_offset, rows);
+        self.snapshot()
+    }
     fn terminate_active_task(&mut self) -> Result<()>;
     fn kill_active_task(&mut self) -> Result<()>;
     fn shutdown(&mut self);

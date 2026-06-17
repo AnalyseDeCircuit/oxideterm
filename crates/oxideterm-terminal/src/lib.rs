@@ -10,7 +10,7 @@ use std::{
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener, Notify, OnResize, WindowSize},
     grid::{Dimensions, Scroll},
-    index::Line,
+    index::{Column, Line, Point},
     sync::FairMutex,
     term::{
         Config, Term,

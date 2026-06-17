@@ -149,6 +149,8 @@
       "font_size_hint": "Dimensione dei caratteri del terminale",
       "line_height": "Altezza Linea",
       "line_height_hint": "Spaziatura tra le linee",
+      "smooth_scroll": "Scorrimento fluido",
+      "smooth_scroll_hint": "Anima lo scorrimento della rotella tra le righe del terminale",
       "renderer": "Renderer",
       "renderer_hint": "Scegli rendering WebGL o Canvas",
       "renderer_auto": "Auto (WebGL preferito)",

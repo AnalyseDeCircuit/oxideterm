@@ -149,6 +149,8 @@
       "font_size_hint": "Größe der Terminalzeichen",
       "line_height": "Zeilenhöhe",
       "line_height_hint": "Abstand zwischen Zeilen",
+      "smooth_scroll": "Sanftes Scrollen",
+      "smooth_scroll_hint": "Animiert das Mausrad-Scrollen zwischen Terminalzeilen",
       "renderer": "Renderer",
       "renderer_hint": "WebGL oder Canvas-Rendering wählen",
       "renderer_auto": "Auto (WebGL bevorzugt)",

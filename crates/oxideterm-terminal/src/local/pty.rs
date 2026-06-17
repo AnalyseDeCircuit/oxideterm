@@ -585,6 +585,21 @@ impl LocalPtySession {
         let term = self.term.lock();
         snapshot_from_term(&term, self.size, &self.graphics)
     }
+
+    pub fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+    ) -> TerminalSnapshot {
+        let term = self.term.lock();
+        snapshot_from_term_with_display_offset(
+            &term,
+            self.size,
+            &self.graphics,
+            display_offset,
+            rows,
+        )
+    }
 }
 
 pub(crate) fn snapshot_from_term<T: EventListener>(
@@ -592,11 +607,29 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
 ) -> TerminalSnapshot {
+    snapshot_from_term_with_display_offset(
+        term,
+        size,
+        graphics,
+        term.grid().display_offset(),
+        size.rows,
+    )
+}
+
+pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    display_offset: usize,
+    rows: usize,
+) -> TerminalSnapshot {
     let content = term.renderable_content();
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
-    let mut rows = (0..size.rows)
+    let display_offset = display_offset.min(scrollback_lines);
+    let requested_rows = rows.max(1);
+    let mut rows = (0..requested_rows)
         .map(|row| TerminalRow {
-            absolute_line: row as i64 - content.display_offset as i64,
+            absolute_line: row as i64 - display_offset as i64,
             wrapped: false,
             active_input: false,
             signature: 0,
@@ -616,14 +649,25 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
         })
         .collect::<Vec<_>>();
 
-    for indexed in content.display_iter {
-        let Some(row) = viewport_row_for_grid_line(indexed.point.line.0, content.display_offset)
+    let first_line = -(display_offset as i32);
+    let end_line = first_line.saturating_add(requested_rows as i32);
+    // GPUI smooth scroll needs one paint-only overscan row. Iterate from the
+    // requested display offset instead of mutating the terminal's real offset.
+    let start = Point::new(
+        Line(first_line.saturating_sub(1)),
+        Column(size.cols.saturating_sub(1)),
+    );
+    for indexed in term.grid().iter_from(start) {
+        if indexed.point.line.0 >= end_line {
+            break;
+        }
+        let Some(row) = viewport_row_for_grid_line(indexed.point.line.0, display_offset)
         else {
             continue;
         };
 
         let col = indexed.point.column.0;
-        if row >= size.rows || col >= size.cols {
+        if row >= rows.len() || col >= size.cols {
             continue;
         }
 
@@ -661,7 +705,7 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
         };
     }
 
-    let cursor_row = (content.cursor.point.line.0 + content.display_offset as i32).max(0) as usize;
+    let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
     let cursor_col = content.cursor.point.column.0;
 
     if cursor_row < rows.len() && cursor_col < size.cols {
@@ -680,10 +724,10 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
         cursor_col,
         cursor_row,
         cursor_shape: content.cursor.shape.into(),
-        display_offset: content.display_offset,
+        display_offset,
         scrollback_lines,
         lines: rows,
-        images: graphics.visible_images(content.display_offset, size.rows),
+        images: graphics.visible_images(display_offset, requested_rows),
     }
 }
 

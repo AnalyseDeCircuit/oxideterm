@@ -509,6 +509,37 @@ wait
     }
 
     #[test]
+    fn snapshot_with_display_offset_can_include_paint_overscan_rows() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 3,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(
+            &mut term,
+            b"alpha\r\nbravo\r\ncharlie\r\ndelta\r\necho\r\nfoxtrot",
+        );
+
+        let snapshot = snapshot_from_term_with_display_offset(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            1,
+            4,
+        );
+
+        assert_eq!(snapshot.display_offset, 1);
+        assert_eq!(snapshot.rows, 3);
+        assert_eq!(snapshot.lines.len(), 4);
+        assert_eq!(snapshot.lines[0].absolute_line, -1);
+        assert_eq!(snapshot.lines[3].absolute_line, 2);
+        assert_eq!(snapshot.lines[3].text().trim_end(), "foxtrot");
+    }
+
+    #[test]
     fn shell_integration_osc633_creates_and_closes_command_mark() {
         let size = TerminalSize {
             cols: 80,

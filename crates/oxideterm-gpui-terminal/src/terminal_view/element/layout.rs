@@ -11,17 +11,26 @@ pub(crate) fn terminal_scrollbar(
     snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,
 ) -> Option<TerminalScrollbar> {
+    terminal_scrollbar_for_viewport(snapshot, metrics, snapshot.rows, snapshot.display_offset)
+}
+
+pub(crate) fn terminal_scrollbar_for_viewport(
+    snapshot: &TerminalSnapshot,
+    metrics: &TerminalMetrics,
+    viewport_rows: usize,
+    display_offset: usize,
+) -> Option<TerminalScrollbar> {
     let history = snapshot.scrollback_lines;
     if history == 0 {
         return None;
     }
 
-    let viewport_height = snapshot.rows as f32 * metrics.line_height_f32();
-    let total_lines = snapshot.rows + history;
-    let thumb_height = (viewport_height * snapshot.rows as f32 / total_lines as f32)
+    let viewport_height = viewport_rows as f32 * metrics.line_height_f32();
+    let total_lines = viewport_rows + history;
+    let thumb_height = (viewport_height * viewport_rows as f32 / total_lines as f32)
         .max(SCROLLBAR_MIN_THUMB)
         .min(viewport_height);
-    let scroll_fraction = (history.saturating_sub(snapshot.display_offset)) as f32 / history as f32;
+    let scroll_fraction = (history.saturating_sub(display_offset)) as f32 / history as f32;
     let top = (viewport_height - thumb_height) * scroll_fraction;
 
     Some(TerminalScrollbar {
@@ -30,10 +39,10 @@ pub(crate) fn terminal_scrollbar(
     })
 }
 
-pub(crate) fn terminal_visible_rows(
+pub(crate) fn terminal_visible_rows_for_limit(
     bounds: Bounds<Pixels>,
-    snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,
+    row_limit: usize,
 ) -> Range<usize> {
     let visible_height = (f32::from(bounds.size.height) - TERMINAL_CONTENT_PADDING * 2.0).max(0.0);
     if visible_height <= 0.0 {
@@ -41,7 +50,7 @@ pub(crate) fn terminal_visible_rows(
     }
 
     let visible_rows = (visible_height / metrics.line_height_f32()).ceil() as usize;
-    0..visible_rows.min(snapshot.rows).min(snapshot.lines.len())
+    0..visible_rows.min(row_limit)
 }
 
 #[allow(dead_code)]
@@ -120,16 +129,17 @@ pub(crate) fn visible_search_match_rects(
         .collect()
 }
 
-pub(crate) fn terminal_content_bounds(
+pub(crate) fn terminal_content_bounds_for_rows(
     origin: gpui::Point<Pixels>,
-    snapshot: &TerminalSnapshot,
+    rows: usize,
+    cols: usize,
     metrics: &TerminalMetrics,
 ) -> Bounds<Pixels> {
     Bounds::new(
         origin,
         size(
-            px(snapshot.cols as f32 * metrics.cell_width_f32()),
-            px(snapshot.rows as f32 * metrics.line_height_f32()),
+            px(cols as f32 * metrics.cell_width_f32()),
+            px(rows as f32 * metrics.line_height_f32()),
         ),
     )
 }

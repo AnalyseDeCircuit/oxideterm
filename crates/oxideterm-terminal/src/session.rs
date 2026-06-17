@@ -40,6 +40,7 @@ use crate::{
     TerminalSearchMatch, TerminalSize, TerminalSnapshot, append_grid_line_text,
     backpressure::MagicScanWindow, focus_report_sequence, graphics_cursor_from_term,
     search_logical_line_matches, shell_integration::TerminalShellIntegration, snapshot_from_term,
+    snapshot_from_term_with_display_offset,
 };
 
 const MAX_COMMAND_OUTPUT_LINES: usize = 400;

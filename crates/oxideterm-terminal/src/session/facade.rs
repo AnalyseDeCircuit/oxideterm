@@ -334,6 +334,14 @@ impl TerminalSession {
         self.backend.snapshot()
     }
 
+    pub fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+    ) -> TerminalSnapshot {
+        self.backend.snapshot_with_display_offset(display_offset, rows)
+    }
+
     pub fn shutdown(&mut self) {
         self.backend.shutdown();
     }

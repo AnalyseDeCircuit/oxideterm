@@ -149,6 +149,8 @@
       "font_size_hint": "終端機字元的大小",
       "line_height": "行高",
       "line_height_hint": "行之間的間距",
+      "smooth_scroll": "平滑捲動",
+      "smooth_scroll_hint": "讓滾輪在終端列之間平滑過渡",
       "renderer": "渲染器",
       "renderer_hint": "選擇 WebGL 或 Canvas 渲染",
       "renderer_auto": "自動（優先使用 WebGL）",

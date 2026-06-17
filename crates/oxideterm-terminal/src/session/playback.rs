@@ -315,6 +315,15 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         snapshot_from_term(&term, self.size, &self.graphics)
     }
 
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+    ) -> TerminalSnapshot {
+        let term = self.term.lock();
+        snapshot_from_term_with_display_offset(&term, self.size, &self.graphics, display_offset, rows)
+    }
+
     fn terminate_active_task(&mut self) -> Result<()> {
         Ok(())
     }

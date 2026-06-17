@@ -149,6 +149,8 @@
       "font_size_hint": "터미널 문자 크기",
       "line_height": "줄 높이",
       "line_height_hint": "줄 간격",
+      "smooth_scroll": "부드러운 스크롤",
+      "smooth_scroll_hint": "터미널 줄 사이의 휠 스크롤을 부드럽게 전환합니다",
       "renderer": "렌더러",
       "renderer_hint": "WebGL 또는 Canvas 렌더링 선택",
       "renderer_auto": "자동 (WebGL 선호)",

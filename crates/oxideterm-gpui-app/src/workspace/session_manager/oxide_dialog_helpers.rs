@@ -284,6 +284,7 @@ fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18n) -> Strin
         "backgroundFit" => i18n.t("settings_view.terminal.bg_fit"),
         "backgroundEnabledTabs" => i18n.t("settings_view.terminal.bg_tabs"),
         "scrollback" => i18n.t("settings_view.terminal.scrollback"),
+        "smoothScroll" => i18n.t("settings_view.terminal.smooth_scroll"),
         "renderer" => i18n.t("settings_view.terminal.renderer"),
         "adaptiveRenderer" => i18n.t("settings_view.terminal.adaptive_renderer"),
         "showFpsOverlay" => i18n.t("settings_view.terminal.show_fps_overlay"),

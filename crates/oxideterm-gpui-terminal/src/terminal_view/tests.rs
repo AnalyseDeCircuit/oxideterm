@@ -206,6 +206,45 @@ fn multirow_snapshot(rows: &[&str]) -> TerminalSnapshot {
 }
 
 #[test]
+fn smooth_scroll_layout_includes_one_overscan_row() {
+    let snapshot = multirow_snapshot(&["alpha", "bravo", "charlie", "delta"]);
+    let bounds = visible_layout_bounds(3);
+
+    let snapped = TerminalElement::new(
+        snapshot.clone(),
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .viewport_rows(3)
+    .layout_for_bounds(bounds);
+    assert!(!snapped.text_runs.iter().any(|run| run.row == 3));
+
+    let smooth = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .viewport_rows(3)
+    .scroll_y_offset(px(-1.0))
+    .layout_for_bounds(bounds);
+    assert!(smooth.text_runs.iter().any(|run| run.row == 3));
+}
+
+#[test]
 fn scrollbar_thumb_tracks_display_offset_direction() {
     let metrics = test_metrics();
     let bottom = terminal_scrollbar(&test_snapshot(0, 90), &metrics).unwrap();

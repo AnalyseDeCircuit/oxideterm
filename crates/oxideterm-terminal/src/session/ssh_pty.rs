@@ -756,6 +756,26 @@ impl TerminalSessionBackend for SshPtySession {
         )
     }
 
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+    ) -> TerminalSnapshot {
+        let term = self.term.lock();
+        snapshot_from_term_with_display_offset(
+            &term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            display_offset,
+            rows,
+        )
+    }
+
     fn terminate_active_task(&mut self) -> Result<()> {
         self.write_protocol_bytes(b"\x03")
     }

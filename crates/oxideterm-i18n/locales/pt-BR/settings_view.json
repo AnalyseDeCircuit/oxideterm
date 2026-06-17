@@ -149,6 +149,8 @@
       "font_size_hint": "Tamanho dos caracteres do terminal",
       "line_height": "Altura da linha",
       "line_height_hint": "Espaço entre linhas",
+      "smooth_scroll": "Rolagem suave",
+      "smooth_scroll_hint": "Anima a rolagem da roda entre as linhas do terminal",
       "renderer": "Renderizador",
       "renderer_hint": "Escolher renderização WebGL ou Canvas",
       "renderer_auto": "Automático (preferir WebGL)",

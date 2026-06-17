@@ -514,6 +514,14 @@ impl WorkspaceApp {
                         cx,
                     ),
                     self.card_separator(),
+                    self.checkbox_row(
+                        "settings_view.terminal.smooth_scroll",
+                        "settings_view.terminal.smooth_scroll_hint",
+                        settings.terminal.smooth_scroll,
+                        set_terminal_smooth_scroll,
+                        cx,
+                    ),
+                    self.card_separator(),
                     self.select_setting_row(
                         "settings_view.terminal.encoding",
                         "settings_view.terminal.encoding_hint",

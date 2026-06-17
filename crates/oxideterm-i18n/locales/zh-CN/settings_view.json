@@ -149,6 +149,8 @@
       "font_size_hint": "终端字符大小",
       "line_height": "行高",
       "line_height_hint": "行间距",
+      "smooth_scroll": "平滑滚动",
+      "smooth_scroll_hint": "在终端行之间平滑过渡滚轮滚动",
       "encoding": "终端编码",
       "encoding_hint": "终端输入/输出文本编码。除非远端主机使用旧 locale，否则保持 UTF-8。",
       "renderer": "渲染器",

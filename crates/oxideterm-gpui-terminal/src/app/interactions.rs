@@ -14,6 +14,13 @@ use crate::terminal_view::*;
 const TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS: u64 = 16;
 const TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS: i32 = 4;
 
+#[derive(Clone, Copy)]
+struct TerminalWheelScrollDelta {
+    rows: i32,
+    repaint: bool,
+    animate_rows: bool,
+}
+
 impl TerminalPane {
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let key = event.keystroke.key.as_str();
@@ -58,6 +65,7 @@ impl TerminalPane {
                 terminal.scroll_to_bottom();
                 terminal.snapshot()
             };
+            self.clear_smooth_scroll_remainder();
             self.snapshot = self.stamp_snapshot(snapshot);
             cx.notify();
             return true;
@@ -69,6 +77,7 @@ impl TerminalPane {
                 terminal.scroll_to_top();
                 terminal.snapshot()
             };
+            self.clear_smooth_scroll_remainder();
             self.snapshot = self.stamp_snapshot(snapshot);
             cx.notify();
             return true;
@@ -129,11 +138,16 @@ impl TerminalPane {
         } else {
             TERMINAL_SCROLL_MULTIPLIER
         };
-        let Some(rows) = self.determine_scroll_lines(event, scroll_multiplier) else {
+        let Some(scroll_delta) = self.determine_scroll_delta(event, scroll_multiplier) else {
             return;
         };
 
         if mouse_mode(mode, event.modifiers.shift) {
+            self.clear_smooth_scroll_remainder();
+            let rows = scroll_delta.rows;
+            if rows == 0 {
+                return;
+            }
             let point = self.terminal_point_for_position(event.position);
             let report_count = rows.unsigned_abs().max(1);
             if let Some(report) = mouse_scroll_report(point, event, mode) {
@@ -147,42 +161,104 @@ impl TerminalPane {
         if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
             && !event.modifiers.shift
         {
-            let bytes = alt_scroll(rows);
+            self.clear_smooth_scroll_remainder();
+            if scroll_delta.rows == 0 {
+                return;
+            }
+            let bytes = alt_scroll(scroll_delta.rows);
             self.send_protocol_bytes(&bytes, cx);
             return;
         }
 
         let previous_offset = self.snapshot.display_offset;
-        let snapshot = {
+        let snapshot = if scroll_delta.rows == 0 {
+            self.snapshot.clone()
+        } else {
             let mut terminal = self.terminal.lock();
-            terminal.scroll_lines(terminal_scroll_delta(rows));
+            terminal.scroll_lines(terminal_scroll_delta(scroll_delta.rows));
             terminal.snapshot()
         };
-        if snapshot.display_offset == previous_offset {
+        if scroll_delta.rows != 0 && snapshot.display_offset == previous_offset {
+            let had_remainder = self.clear_smooth_scroll_remainder();
+            if had_remainder {
+                cx.notify();
+            }
             return;
         }
-        self.snapshot = self.stamp_snapshot(snapshot);
-        cx.notify();
+        if scroll_delta.rows != 0 {
+            self.snapshot = self.stamp_snapshot(snapshot);
+            if scroll_delta.animate_rows {
+                self.start_smooth_scroll_row_animation(scroll_delta.rows);
+            }
+        }
+        let clamped_remainder = self.clamp_smooth_scroll_remainder_to_bounds();
+        if scroll_delta.rows != 0 || scroll_delta.repaint || clamped_remainder {
+            cx.notify();
+        }
     }
 
-    fn determine_scroll_lines(
+    pub(super) fn clear_smooth_scroll_remainder(&mut self) -> bool {
+        let had_remainder = f32::from(self.scroll_remainder_px).abs() > f32::EPSILON
+            || self.smooth_scroll_animation_active;
+        self.scroll_remainder_px = px(0.0);
+        self.smooth_scroll_animation_active = false;
+        had_remainder
+    }
+
+    fn start_smooth_scroll_row_animation(&mut self, rows: i32) {
+        // Line-based wheel events arrive as whole terminal rows. Keep the PTY
+        // state line-based, then animate the newly snapped snapshot back into
+        // place so text can be partially clipped during the transition.
+        self.scroll_remainder_px = if rows > 0 {
+            -self.metrics.line_height
+        } else {
+            self.metrics.line_height
+        };
+        self.smooth_scroll_animation_active = true;
+    }
+
+    pub(super) fn clamp_smooth_scroll_remainder_to_bounds(&mut self) -> bool {
+        let remainder = f32::from(self.scroll_remainder_px);
+        let at_bottom = self.snapshot.display_offset == 0;
+        let at_top = self.snapshot.display_offset >= self.snapshot.scrollback_lines;
+        if (at_bottom && remainder < 0.0) || (at_top && remainder > 0.0) {
+            return self.clear_smooth_scroll_remainder();
+        }
+        false
+    }
+
+    fn determine_scroll_delta(
         &mut self,
         event: &ScrollWheelEvent,
         scroll_multiplier: f32,
-    ) -> Option<i32> {
+    ) -> Option<TerminalWheelScrollDelta> {
         match event.touch_phase {
             TouchPhase::Started => {
-                self.scroll_px = px(0.0);
+                self.scroll_remainder_px = px(0.0);
+                self.smooth_scroll_animation_active = false;
                 None
             }
             TouchPhase::Moved => {
+                if self.smooth_scroll_animation_active {
+                    self.scroll_remainder_px = px(0.0);
+                    self.smooth_scroll_animation_active = false;
+                }
                 let line_height = self.metrics.line_height;
-                let old_offset = (self.scroll_px / line_height) as i32;
-                self.scroll_px += event.delta.pixel_delta(line_height).y * scroll_multiplier;
-                let new_offset = (self.scroll_px / line_height) as i32;
-                self.scroll_px %=
-                    px((self.snapshot.rows.max(1) as f32) * self.metrics.line_height_f32());
-                Some(new_offset - old_offset).filter(|rows| *rows != 0)
+                let previous_remainder = self.scroll_remainder_px;
+                self.scroll_remainder_px +=
+                    event.delta.pixel_delta(line_height).y * scroll_multiplier;
+                let rows = (self.scroll_remainder_px / line_height) as i32;
+                if rows != 0 {
+                    self.scroll_remainder_px -= px(rows as f32 * self.metrics.line_height_f32());
+                }
+                let smooth_scroll = self.settings.smooth_scroll;
+                Some(TerminalWheelScrollDelta {
+                    rows,
+                    repaint: smooth_scroll
+                        && rows == 0
+                        && self.scroll_remainder_px != previous_remainder,
+                    animate_rows: smooth_scroll && rows != 0 && !event.delta.precise(),
+                })
             }
             TouchPhase::Ended => None,
         }
@@ -390,6 +466,7 @@ impl TerminalPane {
             terminal.scroll_to_display_offset(offset);
             terminal.snapshot()
         };
+        self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         cx.notify();
     }
@@ -519,6 +596,7 @@ impl TerminalPane {
             terminal.scroll_to_display_offset(target_offset);
             terminal.snapshot()
         };
+        self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         self.update_selection(position, cx);
         self.schedule_selection_autoscroll(cx);
@@ -544,6 +622,7 @@ impl TerminalPane {
             }
             terminal.snapshot()
         };
+        self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         cx.notify();
     }
@@ -600,6 +679,7 @@ impl TerminalPane {
             terminal.scroll_to_display_offset(target_offset);
             terminal.snapshot()
         };
+        self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         cx.notify();
     }

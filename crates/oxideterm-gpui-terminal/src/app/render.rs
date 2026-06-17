@@ -29,7 +29,8 @@ impl Focusable for TerminalPane {
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
-        let mut snapshot = self.snapshot.clone();
+        let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
+            self.render_snapshot_for_smooth_scroll();
         snapshot.cursor_shape = self.preferences.cursor_shape;
         apply_theme_defaults_to_snapshot(&mut snapshot, &self.theme);
         let rendered_images = self.image_cache.render_images(
@@ -85,6 +86,9 @@ impl Render for TerminalPane {
         .row_timestamps(row_timestamps)
         .transparent_background(background.is_some())
         .ghost_text(self.autosuggest_ghost_text())
+        .viewport_rows(viewport_rows)
+        .viewport_display_offset(self.snapshot.display_offset)
+        .scroll_y_offset(smooth_scroll_y_offset)
         .layout_cache(self.layout_cache.clone());
 
         div()
@@ -194,6 +198,43 @@ impl Render for TerminalPane {
 }
 
 impl TerminalPane {
+    fn render_snapshot_for_smooth_scroll(&self) -> (TerminalSnapshot, gpui::Pixels, usize) {
+        let snapshot = self.snapshot.clone();
+        let viewport_rows = snapshot.rows;
+        if !self.settings.smooth_scroll {
+            return (snapshot, px(0.0), viewport_rows);
+        }
+
+        let remainder = f32::from(self.scroll_remainder_px);
+        if remainder.abs() <= f32::EPSILON {
+            return (snapshot, px(0.0), viewport_rows);
+        }
+
+        let overscan_rows = viewport_rows.saturating_add(1);
+        if remainder > 0.0 && snapshot.display_offset < snapshot.scrollback_lines {
+            let display_offset = snapshot.display_offset.saturating_add(1);
+            let overscan = self
+                .terminal
+                .lock()
+                .snapshot_with_display_offset(display_offset, overscan_rows);
+            return (
+                overscan,
+                self.scroll_remainder_px - self.metrics.line_height,
+                viewport_rows,
+            );
+        }
+
+        if remainder < 0.0 && snapshot.display_offset > 0 {
+            let overscan = self
+                .terminal
+                .lock()
+                .snapshot_with_display_offset(snapshot.display_offset, overscan_rows);
+            return (overscan, self.scroll_remainder_px, viewport_rows);
+        }
+
+        (snapshot, px(0.0), viewport_rows)
+    }
+
     fn render_terminal_context_menu(
         &self,
         menu: TerminalContextMenu,
