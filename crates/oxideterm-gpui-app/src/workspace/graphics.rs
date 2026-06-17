@@ -1,7 +1,9 @@
-use std::{collections::HashMap, sync::mpsc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, mpsc},
+};
 
-use gpui::Entity;
-use gpui_component::webview::WebView as GpuiWebView;
+use gpui::RenderImage;
 use oxideterm_gpui_ui::{
     TextInputView,
     button::{
@@ -15,6 +17,11 @@ use oxideterm_wsl_graphics::{
     WslgStatus, wsl,
 };
 
+use super::graphics_vnc::{
+    GraphicsVncFrame, GraphicsVncInput, GraphicsVncWorkerEvent, SharedGraphicsVncGeometry,
+    graphics_vnc_canvas, graphics_vnc_keysyms, run_graphics_vnc_worker, vnc_button_mask,
+    vnc_scroll_masks,
+};
 use super::ime::WorkspaceImeTarget;
 use super::*;
 
@@ -114,10 +121,7 @@ pub(super) enum GraphicsWorkerResult {
         generation: u64,
         result: Result<WslGraphicsSession, String>,
     },
-    WebviewEvent {
-        session_id: String,
-        event: String,
-    },
+    VncEvent(GraphicsVncWorkerEvent),
 }
 
 pub(super) struct GraphicsState {
@@ -133,8 +137,13 @@ pub(super) struct GraphicsState {
     generation: u64,
     pub(super) focused_input: Option<GraphicsInput>,
     session: Option<WslGraphicsSession>,
-    webview_session_id: Option<String>,
-    webview: Option<Entity<GpuiWebView>>,
+    vnc_session_id: Option<String>,
+    vnc_input: Option<tokio::sync::mpsc::UnboundedSender<GraphicsVncInput>>,
+    vnc_stop: Option<tokio::sync::oneshot::Sender<()>>,
+    vnc_frame: Option<GraphicsVncFrame>,
+    vnc_render_image: Option<Arc<RenderImage>>,
+    vnc_geometry: SharedGraphicsVncGeometry,
+    vnc_button_mask: u8,
     worker_tx: mpsc::Sender<GraphicsWorkerResult>,
     worker_rx: mpsc::Receiver<GraphicsWorkerResult>,
 }
@@ -155,8 +164,13 @@ impl GraphicsState {
             generation: 0,
             focused_input: None,
             session: None,
-            webview_session_id: None,
-            webview: None,
+            vnc_session_id: None,
+            vnc_input: None,
+            vnc_stop: None,
+            vnc_frame: None,
+            vnc_render_image: None,
+            vnc_geometry: SharedGraphicsVncGeometry::default(),
+            vnc_button_mask: 0,
             worker_tx,
             worker_rx,
         }
@@ -202,7 +216,7 @@ impl WorkspaceApp {
 
     pub(super) fn poll_graphics_worker_results(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
@@ -268,19 +282,17 @@ impl WorkspaceApp {
                     }
                     match result {
                         Ok(session) => {
+                            self.reset_graphics_vnc_viewer(true);
                             self.graphics.error = None;
-                            self.graphics.status = GraphicsStatus::Active;
-                            self.graphics.webview = None;
-                            self.graphics.webview_session_id = None;
+                            self.graphics.status = GraphicsStatus::Starting;
                             self.graphics.session = Some(session);
                             self.load_graphics_sessions();
                         }
                         Err(error) => {
+                            self.reset_graphics_vnc_viewer(true);
                             self.graphics.status = GraphicsStatus::Error;
                             self.graphics.error = Some(normalize_graphics_error(error));
                             self.graphics.session = None;
-                            self.graphics.webview = None;
-                            self.graphics.webview_session_id = None;
                         }
                     }
                     changed = true;
@@ -300,8 +312,7 @@ impl WorkspaceApp {
                         .is_none_or(|session| session.id == session_id)
                     {
                         self.graphics.session = None;
-                        self.graphics.webview = None;
-                        self.graphics.webview_session_id = None;
+                        self.reset_graphics_vnc_viewer(true);
                         self.graphics.status = GraphicsStatus::Idle;
                         self.load_graphics_sessions();
                     }
@@ -316,37 +327,27 @@ impl WorkspaceApp {
                     }
                     match result {
                         Ok(session) => {
+                            self.reset_graphics_vnc_viewer(true);
                             self.graphics.error = None;
-                            self.graphics.status = GraphicsStatus::Active;
-                            self.graphics.webview = None;
-                            self.graphics.webview_session_id = None;
+                            self.graphics.status = GraphicsStatus::Starting;
                             self.graphics.session = Some(session);
                             self.load_graphics_sessions();
                         }
                         Err(error) => {
+                            self.reset_graphics_vnc_viewer(true);
                             self.graphics.status = GraphicsStatus::Error;
                             self.graphics.error = Some(normalize_graphics_error(error));
-                            self.graphics.webview = None;
-                            self.graphics.webview_session_id = None;
                         }
                     }
                     changed = true;
                 }
-                GraphicsWorkerResult::WebviewEvent { session_id, event } => {
-                    if self
-                        .graphics
-                        .session
-                        .as_ref()
-                        .is_some_and(|session| session.id == session_id)
-                    {
-                        self.apply_graphics_webview_event(event);
-                        changed = true;
-                    }
+                GraphicsWorkerResult::VncEvent(event) => {
+                    changed |= self.apply_graphics_vnc_event(event);
                 }
             }
         }
         if changed {
-            self.ensure_graphics_webview(window, cx);
+            self.ensure_graphics_vnc_worker();
             cx.notify();
         }
     }
@@ -356,6 +357,21 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.graphics.session.is_some()
+            && self.graphics.focused_input.is_none()
+            && let Some(keysym) =
+                graphics_vnc_keysyms(&event.keystroke.key, event.keystroke.key_char.as_deref())
+        {
+            // VNC needs explicit press/release. GPUI routes graphics input
+            // through KeyDown here, so send a short key tap for now.
+            self.send_graphics_vnc_input(GraphicsVncInput::Key { keysym, down: true });
+            self.send_graphics_vnc_input(GraphicsVncInput::Key {
+                keysym,
+                down: false,
+            });
+            cx.notify();
+            return true;
+        }
         if self.graphics.focused_input != Some(GraphicsInput::AppCommand)
             || event.keystroke.modifiers.platform
         {
@@ -406,14 +422,12 @@ impl WorkspaceApp {
             .as_ref()
             .map(|session| session.id.clone())
         else {
-            self.graphics.webview = None;
-            self.graphics.webview_session_id = None;
+            self.reset_graphics_vnc_viewer(true);
             return;
         };
         self.graphics.generation = self.graphics.generation.saturating_add(1);
         let generation = self.graphics.generation;
-        self.graphics.webview = None;
-        self.graphics.webview_session_id = None;
+        self.reset_graphics_vnc_viewer(true);
         let tx = self.graphics.worker_tx.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
@@ -976,19 +990,88 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        self.ensure_graphics_webview(window, cx);
-        let webview = self.graphics.webview.clone();
+        self.ensure_graphics_vnc_worker();
+        let frame = self.graphics.vnc_frame.clone();
+        let render_image = self.graphics.vnc_render_image.clone();
+        let geometry = self.graphics.vnc_geometry.clone();
         div()
             .size_full()
             .relative()
             .overflow_hidden()
             .bg(rgb(0x000000))
-            .child(match webview {
-                Some(webview) if self.graphics.status == GraphicsStatus::Active => {
-                    div().size_full().child(webview).into_any_element()
-                }
-                _ => div().size_full().into_any_element(),
-            })
+            .child(
+                div()
+                    .size_full()
+                    .child(graphics_vnc_canvas(frame, render_image, geometry, 0x000000))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                            this.send_graphics_vnc_pointer(
+                                event.position,
+                                Some((MouseButton::Left, true)),
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                            this.send_graphics_vnc_pointer(
+                                event.position,
+                                Some((MouseButton::Right, true)),
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                            this.send_graphics_vnc_pointer(
+                                event.position,
+                                Some((MouseButton::Middle, true)),
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                            this.send_graphics_vnc_pointer(
+                                event.position,
+                                Some((MouseButton::Left, false)),
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Right,
+                        cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                            this.send_graphics_vnc_pointer(
+                                event.position,
+                                Some((MouseButton::Right, false)),
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Middle,
+                        cx.listener(|this, event: &MouseUpEvent, _window, cx| {
+                            this.send_graphics_vnc_pointer(
+                                event.position,
+                                Some((MouseButton::Middle, false)),
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                        this.send_graphics_vnc_pointer(event.position, None);
+                        cx.stop_propagation();
+                    }))
+                    .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                        this.send_graphics_vnc_scroll(event.position, &event.delta);
+                        cx.stop_propagation();
+                    })),
+            )
             .child(self.render_graphics_toolbar(window, cx))
             .when(
                 self.graphics.status != GraphicsStatus::Active
@@ -1487,8 +1570,7 @@ impl WorkspaceApp {
         self.graphics.status = GraphicsStatus::Starting;
         self.graphics.error = None;
         self.graphics.session = None;
-        self.graphics.webview = None;
-        self.graphics.webview_session_id = None;
+        self.reset_graphics_vnc_viewer(true);
         let tx = self.graphics.worker_tx.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
@@ -1516,8 +1598,7 @@ impl WorkspaceApp {
         self.graphics.status = GraphicsStatus::Starting;
         self.graphics.error = None;
         self.graphics.session = None;
-        self.graphics.webview = None;
-        self.graphics.webview_session_id = None;
+        self.reset_graphics_vnc_viewer(true);
         let tx = self.graphics.worker_tx.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
@@ -1535,8 +1616,7 @@ impl WorkspaceApp {
         } else {
             self.graphics.status = GraphicsStatus::Idle;
             self.graphics.error = None;
-            self.graphics.webview = None;
-            self.graphics.webview_session_id = None;
+            self.reset_graphics_vnc_viewer(true);
         }
     }
 
@@ -1580,8 +1660,7 @@ impl WorkspaceApp {
         let generation = self.graphics.generation;
         self.graphics.status = GraphicsStatus::Starting;
         self.graphics.error = None;
-        self.graphics.webview = None;
-        self.graphics.webview_session_id = None;
+        self.reset_graphics_vnc_viewer(true);
         let tx = self.graphics.worker_tx.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
@@ -1598,8 +1677,7 @@ impl WorkspaceApp {
         let generation = self.graphics.generation;
         self.graphics.status = GraphicsStatus::Starting;
         self.graphics.error = None;
-        self.graphics.webview = None;
-        self.graphics.webview_session_id = None;
+        self.reset_graphics_vnc_viewer(true);
         let tx = self.graphics.worker_tx.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
@@ -1611,71 +1689,142 @@ impl WorkspaceApp {
         });
     }
 
-    fn apply_graphics_webview_event(&mut self, event: String) {
-        match event.as_str() {
-            "connect" => {
+    fn apply_graphics_vnc_event(&mut self, event: GraphicsVncWorkerEvent) -> bool {
+        match event {
+            GraphicsVncWorkerEvent::Connected { session_id } => {
+                if !self.graphics_session_matches(&session_id) {
+                    return false;
+                }
                 self.graphics.status = GraphicsStatus::Active;
                 self.graphics.error = None;
+                true
             }
-            "disconnect:clean" => {
-                self.graphics.status = GraphicsStatus::Idle;
+            GraphicsVncWorkerEvent::Frame { session_id, frame } => {
+                if !self.graphics_session_matches(&session_id) {
+                    return false;
+                }
+                self.graphics.vnc_render_image = frame.render_image();
+                self.graphics.vnc_frame = Some(frame);
+                self.graphics.status = GraphicsStatus::Active;
+                self.graphics.error = None;
+                true
             }
-            "disconnect:dirty" => {
-                self.graphics.status = GraphicsStatus::Disconnected;
+            GraphicsVncWorkerEvent::Disconnected { session_id, reason } => {
+                if !self.graphics_session_matches(&session_id) {
+                    return false;
+                }
+                self.graphics.vnc_session_id = None;
+                self.graphics.vnc_input = None;
+                self.graphics.vnc_stop = None;
+                self.graphics.vnc_button_mask = 0;
+                if let Some(reason) = reason {
+                    self.graphics.status = GraphicsStatus::Error;
+                    self.graphics.error = Some(normalize_graphics_error(reason));
+                } else {
+                    self.graphics.status = GraphicsStatus::Disconnected;
+                }
+                true
             }
-            _ if event.starts_with("securityfailure:") => {
-                self.graphics.status = GraphicsStatus::Error;
-                self.graphics.error =
-                    Some(event.trim_start_matches("securityfailure:").to_string());
-            }
-            _ if event.starts_with("error:") => {
-                self.graphics.status = GraphicsStatus::Error;
-                self.graphics.error = Some(event.trim_start_matches("error:").to_string());
-            }
-            _ => {}
         }
     }
 
-    fn ensure_graphics_webview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn graphics_session_matches(&self, session_id: &str) -> bool {
+        self.graphics
+            .session
+            .as_ref()
+            .is_some_and(|session| session.id == session_id)
+    }
+
+    fn reset_graphics_vnc_viewer(&mut self, clear_frame: bool) {
+        // The native VNC worker is a viewer concern: the WSL graphics crate owns
+        // VNC/server processes, while GPUI owns the client connection and input
+        // routing. Always stop the viewer before switching sessions.
+        if let Some(stop) = self.graphics.vnc_stop.take() {
+            let _ = stop.send(());
+        }
+        self.graphics.vnc_session_id = None;
+        self.graphics.vnc_input = None;
+        self.graphics.vnc_button_mask = 0;
+        self.graphics.vnc_geometry.clear();
+        if clear_frame {
+            self.graphics.vnc_frame = None;
+            self.graphics.vnc_render_image = None;
+        }
+    }
+
+    fn ensure_graphics_vnc_worker(&mut self) {
         let Some(session) = self.graphics.session.clone() else {
-            self.graphics.webview = None;
-            self.graphics.webview_session_id = None;
+            self.reset_graphics_vnc_viewer(true);
             return;
         };
-        if self.graphics.webview_session_id.as_deref() == Some(session.id.as_str())
-            && self.graphics.webview.is_some()
+        if self.graphics.vnc_session_id.as_deref() == Some(session.id.as_str())
+            && self.graphics.vnc_input.is_some()
         {
             return;
         }
 
-        let tx = self.graphics.worker_tx.clone();
+        self.reset_graphics_vnc_viewer(true);
+        let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+        let event_tx = self.graphics.worker_tx.clone();
         let session_id = session.id.clone();
-        let html = graphics_novnc_html(&session, &self.tokens);
-        // Tauri mounts noVNC inside the GraphicsView DOM after a short timeout.
-        // GPUI has no DOM, so the closest one-to-one ownership is a child wry
-        // webview whose JS posts the same connect/disconnect/security events
-        // back into the native state machine.
-        match wry::WebViewBuilder::new()
-            .with_html(html)
-            .with_ipc_handler(move |request| {
-                let _ = tx.send(GraphicsWorkerResult::WebviewEvent {
-                    session_id: session_id.clone(),
-                    event: request.body().clone(),
-                });
+        let vnc_port = session.vnc_port;
+        self.graphics.vnc_session_id = Some(session_id.clone());
+        self.graphics.vnc_input = Some(input_tx);
+        self.graphics.vnc_stop = Some(stop_tx);
+        self.forwarding_runtime.spawn(async move {
+            run_graphics_vnc_worker(session_id, vnc_port, input_rx, stop_rx, move |event| {
+                let _ = event_tx.send(GraphicsWorkerResult::VncEvent(event));
             })
-            .build_as_child(window)
-        {
-            Ok(webview) => {
-                let entity = cx.new(|cx| GpuiWebView::new(webview, window, cx));
-                self.graphics.webview = Some(entity);
-                self.graphics.webview_session_id = Some(session.id);
+            .await;
+        });
+    }
+
+    fn send_graphics_vnc_input(&mut self, input: GraphicsVncInput) -> bool {
+        self.graphics
+            .vnc_input
+            .as_ref()
+            .is_some_and(|sender| sender.send(input).is_ok())
+    }
+
+    fn send_graphics_vnc_pointer(
+        &mut self,
+        position: Point<Pixels>,
+        button_update: Option<(MouseButton, bool)>,
+    ) -> bool {
+        let Some((x, y)) = self.graphics.vnc_geometry.pointer(position) else {
+            return false;
+        };
+        if let Some((button, pressed)) = button_update {
+            let mask = vnc_button_mask(button);
+            if pressed {
+                self.graphics.vnc_button_mask |= mask;
+            } else {
+                self.graphics.vnc_button_mask &= !mask;
             }
-            Err(error) => {
-                self.graphics.status = GraphicsStatus::Error;
-                self.graphics.error = Some(error.to_string());
-                self.graphics.webview = None;
-                self.graphics.webview_session_id = None;
-            }
+        }
+        self.send_graphics_vnc_input(GraphicsVncInput::Pointer {
+            x,
+            y,
+            buttons: self.graphics.vnc_button_mask,
+        })
+    }
+
+    fn send_graphics_vnc_scroll(&mut self, position: Point<Pixels>, delta: &gpui::ScrollDelta) {
+        let Some((x, y)) = self.graphics.vnc_geometry.pointer(position) else {
+            return;
+        };
+        for mask in vnc_scroll_masks(delta) {
+            let _ = self.send_graphics_vnc_input(GraphicsVncInput::Pointer {
+                x,
+                y,
+                buttons: self.graphics.vnc_button_mask | mask,
+            });
+            let _ = self.send_graphics_vnc_input(GraphicsVncInput::Pointer {
+                x,
+                y,
+                buttons: self.graphics.vnc_button_mask,
+            });
         }
     }
 
@@ -1722,73 +1871,4 @@ fn normalize_graphics_error(error: String) -> String {
     } else {
         error
     }
-}
-
-fn graphics_novnc_html(session: &WslGraphicsSession, tokens: &ThemeTokens) -> String {
-    let url = serde_json::to_string(&format!(
-        "ws://127.0.0.1:{}?token={}",
-        session.ws_port, session.ws_token
-    ))
-    .unwrap_or_else(|_| "\"\"".to_string());
-    let bg = format!("#{:06x}", tokens.ui.bg);
-    let text = format!("#{:06x}", tokens.ui.text);
-    format!(
-        r##"<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      html, body, #screen {{
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-      }}
-      #status {{
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: {text};
-        background: {bg};
-        font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }}
-    </style>
-  </head>
-  <body>
-    <div id="screen"></div>
-    <div id="status">Connecting...</div>
-    <script type="module">
-      import RFB from "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/core/rfb.js";
-      const post = (message) => {{
-        if (window.ipc && window.ipc.postMessage) window.ipc.postMessage(message);
-      }};
-      try {{
-        const rfb = new RFB(document.getElementById("screen"), {url}, {{ wsProtocols: ["binary"] }});
-        rfb.scaleViewport = true;
-        rfb.resizeSession = true;
-        rfb.clipViewport = false;
-        rfb.background = "#000000";
-        window.__oxideRfb = rfb;
-        rfb.addEventListener("connect", () => {{
-          const status = document.getElementById("status");
-          if (status) status.remove();
-          post("connect");
-        }});
-        rfb.addEventListener("disconnect", (event) => {{
-          post(event.detail && event.detail.clean ? "disconnect:clean" : "disconnect:dirty");
-        }});
-        rfb.addEventListener("securityfailure", (event) => {{
-          post("securityfailure:" + ((event.detail && event.detail.reason) || "Security failure"));
-        }});
-      }} catch (error) {{
-        post("error:" + (error && error.message ? error.message : String(error)));
-      }}
-    </script>
-  </body>
-</html>"##
-    )
 }

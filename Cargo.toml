@@ -113,7 +113,6 @@ subtle = "2.5"
 sysinfo = { version = "0.33", default-features = false, features = ["disk", "system"] }
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync", "time", "io-util", "net", "fs", "process", "macros"] }
-tokio-tungstenite = "0.24"
 tracing = "0.1"
 tree-sitter = "0.25.10"
 tree-sitter-bash = "0.23.3"
@@ -158,7 +157,6 @@ uuid = { version = "1.23", features = ["v4", "serde"] }
 windows = "0.61"
 windows-core = "0.61"
 whoami = "1.6"
-wry = { package = "lb-wry", version = "0.53.3" }
 zeroize = { version = "1.8", features = ["serde"] }
 
 [profile.release]

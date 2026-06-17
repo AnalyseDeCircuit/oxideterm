@@ -5,15 +5,14 @@
 //!
 //! Tauri owns WSL graphics sessions in backend state, not in the React view.
 //! Native keeps the same ownership boundary here: the registry owns VNC,
-//! desktop/app child processes, and the one-shot noVNC bridge task.
+//! desktop/app child processes, while the GPUI viewer connects to VNC directly.
 
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::process::Child;
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
-use crate::{GraphicsSessionMode, WslGraphicsError, WslGraphicsSession, bridge, wsl};
+use crate::{GraphicsSessionMode, WslGraphicsError, WslGraphicsSession, wsl};
 
 pub const MAX_APP_SESSIONS_PER_DISTRO: usize = 4;
 pub const MAX_APP_SESSIONS_GLOBAL: usize = 8;
@@ -28,7 +27,6 @@ struct WslGraphicsHandle {
     vnc_child: Child,
     desktop_child: Option<Child>,
     app_child: Option<Child>,
-    bridge_handle: JoinHandle<()>,
     distro: String,
     vnc_port: u16,
     stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -79,20 +77,9 @@ impl WslGraphicsState {
         };
 
         let session_id = uuid::Uuid::new_v4().to_string();
-        let vnc_addr = format!("127.0.0.1:{vnc_port}");
-        let (ws_port, ws_token, bridge_handle) =
-            match bridge::start_proxy(vnc_addr, session_id.clone()).await {
-                Ok(result) => result,
-                Err(error) => {
-                    wsl::cleanup_wsl_session(&distro).await;
-                    return Err(error);
-                }
-            };
-
         let session = WslGraphicsSession {
             id: session_id.clone(),
-            ws_port,
-            ws_token,
+            vnc_port,
             distro: distro.clone(),
             desktop_name: prerequisites.desktop.display_name.to_string(),
             mode: GraphicsSessionMode::Desktop,
@@ -102,7 +89,6 @@ impl WslGraphicsState {
             vnc_child,
             desktop_child,
             app_child: None,
-            bridge_handle,
             distro,
             vnc_port,
             stop_tx: None,
@@ -152,25 +138,14 @@ impl WslGraphicsState {
             wsl::start_app_session(&distro, &argv, geometry.as_deref()).await?;
 
         // Tauri gives app sessions a short grace point before relying on the
-        // exit watcher. Keep the same observable ordering before bridge setup.
+        // exit watcher. Keep the same observable ordering before returning.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let session_id = uuid::Uuid::new_v4().to_string();
-        let vnc_addr = format!("127.0.0.1:{vnc_port}");
-        let (ws_port, ws_token, bridge_handle) =
-            match bridge::start_proxy(vnc_addr, session_id.clone()).await {
-                Ok(result) => result,
-                Err(error) => {
-                    wsl::cleanup_wsl_session(&distro).await;
-                    return Err(error);
-                }
-            };
-
         let app_title = title.clone().unwrap_or_else(|| argv[0].clone());
         let session = WslGraphicsSession {
             id: session_id.clone(),
-            ws_port,
-            ws_token,
+            vnc_port,
             distro: distro.clone(),
             desktop_name: app_title,
             mode: GraphicsSessionMode::App { argv, title },
@@ -181,7 +156,6 @@ impl WslGraphicsState {
             vnc_child,
             desktop_child: None,
             app_child: Some(app_child),
-            bridge_handle,
             distro: distro.clone(),
             vnc_port,
             stop_tx: Some(stop_tx),
@@ -204,7 +178,6 @@ impl WslGraphicsState {
                 if let Some(tx) = handle.stop_tx.take() {
                     let _ = tx.send(());
                 }
-                handle.bridge_handle.abort();
                 let _ = handle.vnc_child.kill().await;
                 if let Some(desktop) = handle.desktop_child.as_mut() {
                     let _ = desktop.kill().await;
@@ -230,38 +203,16 @@ impl WslGraphicsState {
         &self,
         session_id: &str,
     ) -> Result<WslGraphicsSession, WslGraphicsError> {
-        let vnc_port = {
-            let sessions = self.sessions.read().await;
-            sessions
-                .get(session_id)
-                .ok_or_else(|| WslGraphicsError::SessionNotFound(session_id.to_string()))?
-                .vnc_port
-        };
-
-        {
-            let sessions = self.sessions.read().await;
-            if let Some(handle) = sessions.get(session_id) {
-                handle.bridge_handle.abort();
-            }
-        }
+        let sessions = self.sessions.read().await;
+        let handle = sessions
+            .get(session_id)
+            .ok_or_else(|| WslGraphicsError::SessionNotFound(session_id.to_string()))?;
 
         tracing::info!(
             "WSL Graphics: reconnecting session {} (VNC port {})",
             session_id,
-            vnc_port
+            handle.vnc_port
         );
-
-        let vnc_addr = format!("127.0.0.1:{vnc_port}");
-        let (ws_port, ws_token, bridge_handle) =
-            bridge::start_proxy(vnc_addr, session_id.to_string()).await?;
-
-        let mut sessions = self.sessions.write().await;
-        let handle = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| WslGraphicsError::SessionNotFound(session_id.to_string()))?;
-        handle.bridge_handle = bridge_handle;
-        handle.info.ws_port = ws_port;
-        handle.info.ws_token = ws_token;
         Ok(handle.info.clone())
     }
 
@@ -296,7 +247,7 @@ impl WslGraphicsState {
         mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     ) {
         // The watcher takes ownership of app_child like Tauri, so natural app
-        // exit can tear down VNC/bridge without holding the registry lock.
+        // exit can tear down VNC without holding the registry lock.
         let app_child = {
             let mut sessions = self.sessions.write().await;
             let Some(handle) = sessions.get_mut(&session_id) else {
@@ -326,7 +277,6 @@ impl WslGraphicsState {
                     }
                     let mut sessions = state.sessions.write().await;
                     if let Some(mut handle) = sessions.remove(&session_id) {
-                        handle.bridge_handle.abort();
                         let _ = handle.vnc_child.kill().await;
                         if let Some(desktop) = handle.desktop_child.as_mut() {
                             let _ = desktop.kill().await;
