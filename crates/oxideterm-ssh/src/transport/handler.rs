@@ -55,6 +55,7 @@ fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
         hop.expected_host_key_fingerprint.clone(),
         hop.agent_forwarding,
         Arc::new(RwLock::new(None)),
+        Arc::new(RwLock::new(None)),
     )
 }
 
@@ -103,6 +104,7 @@ struct NativeClientHandler {
     agent_forwarding_requested: bool,
     agent_forward_semaphore: Arc<Semaphore>,
     remote_forward_handler: RemoteForwardHandlerSlot,
+    x11_forward_handler: X11ForwardHandlerSlot,
     auth_banners: AuthBannerSink,
 }
 
@@ -115,6 +117,7 @@ impl NativeClientHandler {
         expected_host_key_fingerprint: Option<String>,
         agent_forwarding_requested: bool,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        x11_forward_handler: X11ForwardHandlerSlot,
     ) -> Self {
         Self {
             host,
@@ -125,6 +128,7 @@ impl NativeClientHandler {
             agent_forwarding_requested,
             agent_forward_semaphore: Arc::new(Semaphore::new(16)),
             remote_forward_handler,
+            x11_forward_handler,
             auth_banners: new_auth_banner_sink(),
         }
     }
@@ -255,6 +259,30 @@ impl client::Handler for NativeClientHandler {
         };
         tokio::spawn(async move {
             registration.handler.handle_remote_forward(event).await;
+        });
+        Ok(())
+    }
+
+    async fn server_channel_open_x11(
+        &mut self,
+        channel: Channel<client::Msg>,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let Some(registration) = self.x11_forward_handler.read().clone() else {
+            let _ = channel.eof().await;
+            return Ok(());
+        };
+
+        let event = X11ForwardedChannel {
+            connection_id: registration.connection_id.clone(),
+            originator_address: originator_address.to_string(),
+            originator_port: originator_port as u16,
+            stream: Box::new(channel.into_stream()),
+        };
+        tokio::spawn(async move {
+            registration.handler.handle_x11_forward(event).await;
         });
         Ok(())
     }

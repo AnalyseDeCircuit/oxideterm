@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::upstream_proxy::UpstreamProxyConfig;
+use oxideterm_x11_forwarding::X11SshRequest;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
@@ -33,6 +34,8 @@ pub struct SshConfig {
     pub expected_host_key_fingerprint: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip)]
+    pub x11_forwarding: Option<X11SshRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
 }
@@ -245,6 +248,7 @@ impl Default for SshConfig {
             trust_host_key: None,
             expected_host_key_fingerprint: None,
             agent_forwarding: false,
+            x11_forwarding: None,
             post_connect_command: None,
         }
     }

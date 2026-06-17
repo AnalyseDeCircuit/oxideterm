@@ -4,6 +4,7 @@
 use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
 
 use oxideterm_sftp::{SftpChannelOpener, SftpError, SftpExecChannelOpener};
+use oxideterm_x11_forwarding::{X11RemoteDisplayAllocator, X11RemoteXauthUpdate, X11SshRequest};
 use parking_lot::RwLock;
 use russh::{
     AgentAuthError, Channel, ChannelMsg, MethodKind, Pty, Signer as RusshSigner, client,
@@ -268,6 +269,28 @@ struct RemoteForwardRegistration {
 }
 
 type RemoteForwardHandlerSlot = Arc<RwLock<Option<RemoteForwardRegistration>>>;
+
+pub struct X11ForwardedChannel {
+    pub connection_id: String,
+    pub originator_address: String,
+    pub originator_port: u16,
+    pub stream: BoxedSshForwardStream,
+}
+
+pub trait X11ForwardHandler: Send + Sync {
+    fn handle_x11_forward(
+        &self,
+        event: X11ForwardedChannel,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+}
+
+#[derive(Clone)]
+struct X11ForwardRegistration {
+    connection_id: String,
+    handler: Arc<dyn X11ForwardHandler>,
+}
+
+type X11ForwardHandlerSlot = Arc<RwLock<Option<X11ForwardRegistration>>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyboardInteractivePrompt {

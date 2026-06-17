@@ -10,6 +10,7 @@ dashmap.workspace = true
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-topology = { path = "../oxideterm-topology" }
+oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding" }
 parking_lot.workspace = true
 russh = { path = "../russh" }
 serde.workspace = true

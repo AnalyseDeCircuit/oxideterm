@@ -31,6 +31,8 @@ mod registry_saved;
 #[cfg(feature = "runtime")]
 mod remote;
 mod saved;
+#[cfg(feature = "runtime")]
+mod x11;
 
 #[cfg(feature = "runtime")]
 pub use bridge::{
@@ -60,3 +62,5 @@ pub use saved::{
     PersistedForwardDto, SavedForwardError, SavedForwardStore, SavedForwardSyncRecord,
     SavedForwardsSyncSnapshot,
 };
+#[cfg(feature = "runtime")]
+pub use x11::X11ForwardBridge;

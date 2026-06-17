@@ -1,3 +1,18 @@
+async fn request_x11_forwarding_for_shell(
+    channel: &russh::Channel<client::Msg>,
+    request: &X11SshRequest,
+) -> Result<(), russh::Error> {
+    channel
+        .request_x11(
+            true,
+            request.single_connection,
+            request.auth_protocol_name(),
+            request.auth_cookie_hex.clone(),
+            request.screen_number,
+        )
+        .await
+}
+
 impl SshTransportClient {
     pub fn new(config: SshConfig) -> Self {
         Self {
@@ -164,6 +179,7 @@ impl SshTransportClient {
             parent_consumer.clone(),
         );
         let remote_forward_handler = Arc::new(RwLock::new(None));
+        let x11_forward_handler = Arc::new(RwLock::new(None));
 
         // This is the native equivalent of Tauri establish_tunneled_connection:
         // the child SSH transport is opened over the parent's direct-tcpip
@@ -195,6 +211,7 @@ impl SshTransportClient {
                 self.config.expected_host_key_fingerprint.clone(),
                 self.config.agent_forwarding,
                 remote_forward_handler.clone(),
+                x11_forward_handler.clone(),
             );
             let auth_banners = handler.auth_banners();
             let mut target = tokio::time::timeout(
@@ -219,6 +236,7 @@ impl SshTransportClient {
                 target,
                 Vec::new(),
                 remote_forward_handler,
+                x11_forward_handler,
                 auth_banners,
             )))
         }
@@ -259,6 +277,7 @@ impl SshTransportClient {
         &self,
     ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
         let remote_forward_handler = Arc::new(RwLock::new(None));
+        let x11_forward_handler = Arc::new(RwLock::new(None));
         if self
             .config
             .proxy_chain
@@ -266,14 +285,23 @@ impl SshTransportClient {
             .is_some_and(|chain| !chain.is_empty())
         {
             return self
-                .connect_authenticated_proxy_connection(remote_forward_handler)
+                .connect_authenticated_proxy_connection(remote_forward_handler, x11_forward_handler)
                 .await;
         }
 
-        self.connect_direct_authenticated_handle(&self.config, remote_forward_handler.clone())
+        self.connect_direct_authenticated_handle(
+            &self.config,
+            remote_forward_handler.clone(),
+            x11_forward_handler.clone(),
+        )
             .await
             .map(|(handle, auth_banners)| {
-                PooledSshConnection::direct(handle, remote_forward_handler, auth_banners)
+                PooledSshConnection::direct(
+                    handle,
+                    remote_forward_handler,
+                    x11_forward_handler,
+                    auth_banners,
+                )
             })
             .map(Arc::new)
     }
@@ -282,6 +310,7 @@ impl SshTransportClient {
         &self,
         config: &SshConfig,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        x11_forward_handler: X11ForwardHandlerSlot,
     ) -> Result<(client::Handle<NativeClientHandler>, AuthBannerSink), SshTransportError> {
         log_upstream_proxy_path(&config.host, config.port, config.upstream_proxy.as_ref());
         let stream = dial_initial_tcp(
@@ -301,6 +330,7 @@ impl SshTransportClient {
             config.expected_host_key_fingerprint.clone(),
             config.agent_forwarding,
             remote_forward_handler,
+            x11_forward_handler,
         );
         let auth_banners = handler.auth_banners();
         let mut handle = tokio::time::timeout(
@@ -324,6 +354,7 @@ impl SshTransportClient {
     async fn connect_authenticated_proxy_connection(
         &self,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        x11_forward_handler: X11ForwardHandlerSlot,
     ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
         let chain = self.config.proxy_chain.as_deref().unwrap_or_default();
         if chain.is_empty() {
@@ -370,12 +401,14 @@ impl SshTransportClient {
                 stream,
                 self.config.timeout_secs,
                 remote_forward_handler.clone(),
+                x11_forward_handler.clone(),
             )
             .await?;
         Ok(Arc::new(PooledSshConnection::tunneled(
             target,
             jump_handles,
             remote_forward_handler,
+            x11_forward_handler,
             auth_banners,
         )))
     }
@@ -435,6 +468,7 @@ impl SshTransportClient {
         stream: russh::ChannelStream<client::Msg>,
         timeout_secs: u64,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        x11_forward_handler: X11ForwardHandlerSlot,
     ) -> Result<(client::Handle<NativeClientHandler>, AuthBannerSink), SshTransportError> {
         let handler = NativeClientHandler::new(
             self.config.host.clone(),
@@ -444,6 +478,7 @@ impl SshTransportClient {
             self.config.expected_host_key_fingerprint.clone(),
             self.config.agent_forwarding,
             remote_forward_handler,
+            x11_forward_handler,
         );
         let auth_banners = handler.auth_banners();
         let mut handle = tokio::time::timeout(
@@ -487,6 +522,7 @@ impl SshTransportClient {
         let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>(SSH_OUTPUT_CHANNEL_CAPACITY);
         let task_session_id = session_id.clone();
         let agent_forwarding = self.config.agent_forwarding;
+        let x11_forwarding = self.config.x11_forwarding.clone();
         let deferred_pty = self.config.cols == 0 || self.config.rows == 0;
         let initial_cols = self.config.cols.clamp(1, 500);
         let initial_rows = self.config.rows.clamp(1, 200);
@@ -518,6 +554,11 @@ impl SshTransportClient {
                 .map_err(|error| SshTransportError::Channel(error.to_string()))?;
             if agent_forwarding {
                 let _ = channel.agent_forward(true).await;
+            }
+            if let Some(request) = x11_forwarding.as_ref() {
+                request_x11_forwarding_for_shell(&channel, request)
+                    .await
+                    .map_err(|error| SshTransportError::Channel(error.to_string()))?;
             }
             channel
                 .request_shell(false)
@@ -600,6 +641,18 @@ impl SshTransportClient {
                 }
                 if agent_forwarding {
                     let _ = channel.agent_forward(true).await;
+                }
+                if let Some(request) = x11_forwarding.as_ref()
+                    && let Err(error) = request_x11_forwarding_for_shell(&channel, request).await
+                {
+                    if ssh_channel_error_is_transport_lost(&error.to_string()) {
+                        mark_transport_lost(format!("deferred X11 request failed: {error}"))
+                            .await;
+                    }
+                    let _ = output_tx
+                        .send(format!("\r\nFailed to request X11 forwarding: {error}\r\n").into_bytes())
+                        .await;
+                    return;
                 }
                 if let Err(error) = channel.request_shell(false).await {
                     if ssh_channel_error_is_transport_lost(&error.to_string()) {

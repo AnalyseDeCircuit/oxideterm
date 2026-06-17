@@ -51,7 +51,8 @@ pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
     KeyboardInteractiveResponses, ManagedKeyResolver, RemoteForwardHandler, RemoteForwardedTcpIp,
     SshCommandOutput, SshForwardStream, SshPromptError, SshPromptHandler, SshPtyHandle,
-    SshShellChannel, SshTransportClient, SshTransportCommand, SshTransportError,
+    SshShellChannel, SshTransportClient, SshTransportCommand, SshTransportError, X11ForwardHandler,
+    X11ForwardedChannel,
 };
 pub use upstream_proxy::{
     UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyError, UpstreamProxyProtocol,

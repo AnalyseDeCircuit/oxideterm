@@ -7522,6 +7522,7 @@ dependencies = [
  "dashmap",
  "oxideterm-backend-classification",
  "oxideterm-ssh",
+ "oxideterm-x11-forwarding",
  "rand 0.10.1",
  "russh",
  "serde",
@@ -7974,6 +7975,7 @@ dependencies = [
  "oxideterm-connection-monitor",
  "oxideterm-sftp",
  "oxideterm-topology",
+ "oxideterm-x11-forwarding",
  "parking_lot",
  "rand 0.10.1",
  "russh",
@@ -8126,6 +8128,18 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "oxideterm-x11-forwarding"
+version = "2.0.0-gpui-preview.8"
+dependencies = [
+ "rand 0.8.6",
+ "serde",
+ "subtle",
+ "thiserror 2.0.18",
+ "tokio",
  "zeroize",
 ]
 

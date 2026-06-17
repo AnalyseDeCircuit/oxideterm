@@ -10,6 +10,7 @@ runtime = [
   "dep:dashmap",
   "dep:oxideterm-backend-classification",
   "dep:oxideterm-ssh",
+  "dep:oxideterm-x11-forwarding",
   "dep:tokio",
   "dep:tracing",
 ]
@@ -19,6 +20,7 @@ chrono.workspace = true
 dashmap = { workspace = true, optional = true }
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification", optional = true }
 oxideterm-ssh = { path = "../oxideterm-ssh", optional = true }
+oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

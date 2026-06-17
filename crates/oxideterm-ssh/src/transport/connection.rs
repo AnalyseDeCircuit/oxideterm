@@ -2,6 +2,7 @@ struct PooledSshConnection {
     target: client::Handle<NativeClientHandler>,
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
     remote_forward_handler: RemoteForwardHandlerSlot,
+    x11_forward_handler: X11ForwardHandlerSlot,
     auth_banners: AuthBannerSink,
 }
 
@@ -31,12 +32,14 @@ impl PooledSshConnection {
     fn direct(
         handle: client::Handle<NativeClientHandler>,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        x11_forward_handler: X11ForwardHandlerSlot,
         auth_banners: AuthBannerSink,
     ) -> Self {
         Self {
             target: handle,
             _jump_handles: Vec::new(),
             remote_forward_handler,
+            x11_forward_handler,
             auth_banners,
         }
     }
@@ -45,12 +48,14 @@ impl PooledSshConnection {
         target: client::Handle<NativeClientHandler>,
         jump_handles: Vec<client::Handle<NativeClientHandler>>,
         remote_forward_handler: RemoteForwardHandlerSlot,
+        x11_forward_handler: X11ForwardHandlerSlot,
         auth_banners: AuthBannerSink,
     ) -> Self {
         Self {
             target,
             _jump_handles: jump_handles,
             remote_forward_handler,
+            x11_forward_handler,
             auth_banners,
         }
     }
@@ -135,6 +140,62 @@ impl SshConnectionHandle {
             open_direct_tcpip_stream_with_origin(handle, host, port, origin_host, origin_port)
                 .await?;
         Ok(Box::new(stream))
+    }
+
+    pub async fn open_x11_channel(
+        &self,
+        origin_host: &str,
+        origin_port: u16,
+    ) -> Result<BoxedSshForwardStream, SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for X11 forwarding".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed and cannot open an X11 channel".to_string(),
+            ));
+        }
+
+        let channel = pooled
+            .target
+            .channel_open_x11(origin_host, origin_port as u32)
+            .await
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        Ok(Box::new(channel.into_stream()))
+    }
+
+    pub async fn allocate_remote_x11_display(
+        &self,
+        allocator: &X11RemoteDisplayAllocator,
+        command_timeout: Duration,
+    ) -> Result<u16, SshTransportError> {
+        let command = allocator.probe_command();
+        let output = self.run_command(&command, command_timeout, 4096).await?;
+        allocator
+            .parse_probe_output(&output)
+            .map_err(|error| SshTransportError::Channel(error.to_string()))
+    }
+
+    pub async fn install_remote_x11_authority(
+        &self,
+        update: &X11RemoteXauthUpdate,
+        command_timeout: Duration,
+    ) -> Result<(), SshTransportError> {
+        let command = update.command();
+        // The command carries the fake X11 cookie. Keep it inside Zeroizing and
+        // return only a redacted failure surface if the remote xauth call fails.
+        let output = self
+            .run_command_capture(command.as_str(), command_timeout, 4096)
+            .await?;
+        if output.exit_code == Some(0) {
+            Ok(())
+        } else {
+            Err(SshTransportError::Channel(
+                "remote xauth update failed".to_string(),
+            ))
+        }
     }
 
     pub async fn preflight_host_key_via_direct_tcpip(
@@ -421,6 +482,28 @@ impl SshConnectionHandle {
     pub fn clear_remote_forward_handler(&self) {
         if let Some(pooled) = self.physical::<PooledSshConnection>() {
             *pooled.remote_forward_handler.write() = None;
+        }
+    }
+
+    pub fn set_x11_forward_handler(
+        &self,
+        handler: Arc<dyn X11ForwardHandler>,
+    ) -> Result<(), SshTransportError> {
+        let Some(pooled) = self.physical::<PooledSshConnection>() else {
+            return Err(SshTransportError::ConnectionFailed(
+                "no active SSH connection is available for X11 forwarding".to_string(),
+            ));
+        };
+        *pooled.x11_forward_handler.write() = Some(X11ForwardRegistration {
+            connection_id: self.connection_id().to_string(),
+            handler,
+        });
+        Ok(())
+    }
+
+    pub fn clear_x11_forward_handler(&self) {
+        if let Some(pooled) = self.physical::<PooledSshConnection>() {
+            *pooled.x11_forward_handler.write() = None;
         }
     }
 }
