@@ -908,11 +908,11 @@ impl WorkspaceApp {
                             if workspace.any_terminal_recording_active(cx) {
                                 cx.notify();
                             }
-                            if workspace.active_privilege_prompt_helper_should_refresh(cx) {
-                                // Tauri TerminalCommandBar polls the visible buffer only
-                                // when an SSH saved connection has privilege metadata.
-                                // Native uses the workspace heartbeat for the same
-                                // scoped refresh so the chip appears as prompts arrive.
+                            if workspace.sync_active_privilege_prompt_inline_hint(cx) {
+                                // Privilege prompts are rendered as terminal ghost text,
+                                // so the workspace heartbeat only mirrors the prompt
+                                // state into the active pane instead of repainting a
+                                // command-bar chip.
                                 cx.notify();
                             }
                             if workspace.active_ime_target_blinks_caret() {

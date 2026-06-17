@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "Enregistre les identifiants locaux sudo/su de cet appareil. Les secrets restent dans le périmètre du trousseau d’élévation et ne sont envoyés qu’après un clic explicite.",
       "privilege_username_placeholder": "Utilisateur local actuel"
     },
+    "privilege_credentials": {
+      "title": "Identifiants d’élévation",
+      "description": "Gérer au même endroit les identifiants sudo, su et invites personnalisées pour les shells locaux et les connexions enregistrées.",
+      "scopes": "Périmètres d’identifiants",
+      "local_scope": "Shell local",
+      "local_scope_hint": "Identifiants utilisés par les terminaux locaux sur cet appareil",
+      "credential_count": "{{count}} identifiant(s)",
+      "disabled": "Désactivé"
+    },
     "tabs": {
       "general": "Général",
       "terminal": "Terminal",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "Base de connaissances",
       "local": "Terminal local",
+      "privilege": "Identifiants d’élévation",
       "reconnect": "Reconnexion",
       "help": "Aide et À propos",
       "keybindings": "Raccourcis clavier",

@@ -32,6 +32,9 @@ use crate::command_facts::{
     CommandFactLedger, TerminalAiCommandRecord, TerminalAutosuggestCommandRecord,
     TerminalAutosuggestInputState, TerminalCommandFact,
 };
+use crate::privilege_prompt::{
+    PrivilegeInputObservation, PrivilegePromptSnapshot, PrivilegePromptTracker,
+};
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 use oxideterm_terminal_recording::{
@@ -72,6 +75,13 @@ pub enum TerminalInputInterceptorResult {
     Suppress,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TerminalSearchStatus {
+    pub query: Option<String>,
+    pub active_match: Option<usize>,
+    pub match_count: usize,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct TerminalEventEffect {
     needs_notify: bool,
@@ -109,6 +119,7 @@ pub struct TerminalPane {
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
     input_locked: bool,
     marked_text: Option<String>,
+    privilege_prompt_inline_hint: Option<String>,
     search_query: Option<String>,
     selected_search_match: Option<usize>,
     hovered_link: Option<TerminalLinkRange>,
@@ -122,6 +133,7 @@ pub struct TerminalPane {
     selected_command_mark_id: Option<String>,
     command_mark_id_aliases: HashMap<String, String>,
     input_tracker: TerminalInputTracker,
+    privilege_prompt_tracker: PrivilegePromptTracker,
     command_fact_ledger: CommandFactLedger,
     recorder: Option<TerminalRecorder>,
     bell_flash: bool,
@@ -367,6 +379,7 @@ impl TerminalPane {
             plugin_input_interceptor: None,
             input_locked: false,
             marked_text: None,
+            privilege_prompt_inline_hint: None,
             search_query: None,
             selected_search_match: None,
             hovered_link: None,
@@ -385,6 +398,7 @@ impl TerminalPane {
             selected_command_mark_id: None,
             command_mark_id_aliases: HashMap::new(),
             input_tracker: TerminalInputTracker::default(),
+            privilege_prompt_tracker: PrivilegePromptTracker::default(),
             command_fact_ledger: CommandFactLedger::default(),
             recorder: None,
             bell_flash: false,
@@ -536,6 +550,38 @@ impl TerminalPane {
             .autosuggest_ghost_text(&self.input_tracker.state())
     }
 
+    fn terminal_ghost_text(&self) -> Option<String> {
+        self.privilege_prompt_inline_hint
+            .clone()
+            .or_else(|| self.autosuggest_ghost_text())
+    }
+
+    pub fn privilege_prompt_snapshot(&self) -> Option<PrivilegePromptSnapshot> {
+        self.privilege_prompt_tracker.snapshot(Instant::now())
+    }
+
+    pub fn privilege_prompt_fallback_suppressed(&self) -> bool {
+        self.privilege_prompt_tracker
+            .suppresses_fallback_prompt_detection(Instant::now())
+    }
+
+    pub fn set_privilege_prompt_inline_hint(
+        &mut self,
+        hint: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.privilege_prompt_inline_hint == hint {
+            return false;
+        }
+        self.privilege_prompt_inline_hint = hint;
+        cx.notify();
+        true
+    }
+
+    fn clear_privilege_prompt_inline_hint(&mut self) -> bool {
+        self.privilege_prompt_inline_hint.take().is_some()
+    }
+
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
         if self.preferences.terminal_encoding != preferences.terminal_encoding {
             self.terminal
@@ -590,17 +636,48 @@ impl TerminalPane {
         query: Option<String>,
         selected_match: Option<usize>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> TerminalSearchStatus {
         self.search_query = query;
-        self.selected_search_match = selected_match;
-        if self.search_query.is_some() {
+        let match_count = self.search_match_count();
+        self.selected_search_match = if match_count == 0 {
+            None
+        } else {
+            selected_match
+                .or(Some(0))
+                .filter(|index| *index < match_count)
+        };
+        if self.selected_search_match.is_some() {
             self.scroll_to_selected_search_match(cx);
         }
         cx.notify();
+        self.search_status()
     }
 
-    pub fn select_next_search_result(&mut self, forward: bool, cx: &mut Context<Self>) {
+    pub fn select_next_search_result(
+        &mut self,
+        forward: bool,
+        cx: &mut Context<Self>,
+    ) -> TerminalSearchStatus {
         self.select_next_search_match(forward, cx);
+        self.search_status()
+    }
+
+    pub fn search_status(&self) -> TerminalSearchStatus {
+        let match_count = self.search_match_count();
+        TerminalSearchStatus {
+            query: self.search_query.clone(),
+            active_match: self
+                .selected_search_match
+                .filter(|index| *index < match_count),
+            match_count,
+        }
+    }
+
+    fn search_match_count(&self) -> usize {
+        self.search_query
+            .as_deref()
+            .map(|query| self.terminal.lock().search_matches(query).len())
+            .unwrap_or_default()
     }
 
     pub fn copy_to_clipboard(&mut self, cx: &mut Context<Self>) {
@@ -619,6 +696,16 @@ impl TerminalPane {
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
             return;
         };
+        let now = Instant::now();
+        if self.privilege_prompt_tracker.snapshot(now).is_some()
+            && self
+                .privilege_prompt_tracker
+                .observe_user_input_bytes(&bytes, now)
+                == PrivilegeInputObservation::SecretEntry
+            && self.clear_privilege_prompt_inline_hint()
+        {
+            cx.notify();
+        }
         // Preserve bracketed paste encoding when hook output is still text;
         // binary hook output falls back to raw protocol bytes.
         let result = match std::str::from_utf8(&bytes) {
@@ -639,6 +726,8 @@ impl TerminalPane {
         }
         let mut input = command.replace("\r\n", "\r").replace('\n', "\r");
         input.push('\r');
+        self.privilege_prompt_tracker
+            .observe_user_input_bytes(input.as_bytes(), Instant::now());
         self.observe_autosuggest_input_bytes(input.as_bytes());
         self.send_text(&input, cx);
     }
@@ -663,6 +752,9 @@ impl TerminalPane {
         // directly to the PTY. It must not pass through plugin interception,
         // autosuggest/history observation, AI context, or terminal recording.
         if self.terminal.lock().write_protocol_bytes(bytes).is_ok() {
+            self.privilege_prompt_tracker
+                .mark_secret_filled(Instant::now());
+            self.clear_privilege_prompt_inline_hint();
             self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
@@ -882,6 +974,8 @@ impl TerminalPane {
     ) -> TerminalEventEffect {
         match event {
             TerminalEvent::Output(bytes) => {
+                self.privilege_prompt_tracker
+                    .observe_output_bytes(&bytes, Instant::now());
                 if let Some(recorder) = self.recorder.as_mut() {
                     recorder.record_output(&bytes);
                 }
@@ -1121,6 +1215,16 @@ impl TerminalPane {
     }
 
     fn observe_user_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+        if self
+            .privilege_prompt_tracker
+            .observe_user_input_bytes(bytes, Instant::now())
+            == PrivilegeInputObservation::SecretEntry
+        {
+            if self.clear_privilege_prompt_inline_hint() {
+                cx.notify();
+            }
+            return;
+        }
         let Some(command) = self.observe_autosuggest_input_bytes(bytes) else {
             return;
         };

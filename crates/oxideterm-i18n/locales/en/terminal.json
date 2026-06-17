@@ -157,10 +157,13 @@
       "fill": "Fill password",
       "filling": "Filling...",
       "fill_title": "Fill {{label}}",
+      "enter_fill": "Enter to fill",
+      "enter_fill_title": "Press Enter or click to fill {{label}}",
+      "inline_fill_hint": "Press Enter to use saved privilege credential",
       "load_failed": "Could not load privilege credential",
       "send_failed": "Could not send privilege credential",
-      "manage": "Save credential",
-      "manage_title": "Save a privilege credential for this connection",
+      "manage": "Privilege credentials",
+      "manage_title": "Open privilege credential settings for this scope",
       "local_manage_unavailable": "Local shell privilege credential management is not available yet."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Search",
     "previous": "prev",
     "next": "next",
-    "close": "x"
+    "close": "x",
+    "no_results": "No results",
+    "visible_terminal_hint": "Search the visible terminal scrollback."
   },
   "workspace": {
     "new_local_terminal": "New Local Terminal"

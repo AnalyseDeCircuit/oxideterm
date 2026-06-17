@@ -179,514 +179,82 @@ impl WorkspaceApp {
         }
     }
 
-    fn reset_local_privilege_credential_draft(&mut self, cx: &mut Context<Self>) {
-        // UI drafts are ordinary strings for text editing; clear them explicitly
-        // when leaving an edit operation so stale secrets do not remain in the
-        // settings page state.
-        zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
-        self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
-        self.settings_local_privilege_error = None;
-        self.focused_settings_input = None;
-        self.settings_input_draft.clear();
-        self.close_settings_select();
-        cx.notify();
-    }
-
-    fn edit_local_privilege_credential(
-        &mut self,
-        credential: SavedPrivilegeCredential,
-        cx: &mut Context<Self>,
-    ) {
-        zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
-        self.settings_local_privilege_draft.credential_id = Some(credential.id);
-        self.settings_local_privilege_draft.label = credential.label;
-        self.settings_local_privilege_draft.kind = credential.kind;
-        self.settings_local_privilege_draft.username_hint =
-            credential.username_hint.unwrap_or_default();
-        self.settings_local_privilege_draft.prompt_patterns =
-            credential.prompt_patterns.join("\n");
-        self.settings_local_privilege_draft.secret.clear();
-        self.settings_local_privilege_draft.enabled = credential.enabled;
-        self.settings_local_privilege_error = None;
-        self.focused_settings_input = Some(SettingsInput::LocalPrivilegeLabel);
-        self.settings_input_draft = self.settings_local_privilege_draft.label.clone();
-        self.close_settings_select();
-        cx.notify();
-    }
-
-    fn save_local_privilege_credential(&mut self, cx: &mut Context<Self>) {
-        let draft = self.settings_local_privilege_draft.clone();
-        let label = draft.label.trim().to_string();
-        if label.is_empty() {
-            return;
-        }
-        let prompt_patterns = draft
-            .prompt_patterns
-            .lines()
-            .map(str::trim)
-            .filter(|line: &&str| !line.is_empty())
-            .map(ToOwned::to_owned)
-            .collect::<Vec<_>>();
-        // Local shell credentials are scoped to the app/device, not an SSH
-        // SavedConnection. Store only metadata in config; cleartext crosses
-        // this boundary once and is then owned by the privilege keychain layer.
-        let secret = (!draft.secret.is_empty())
-            .then(|| SecretString::from(zeroize::Zeroizing::new(draft.secret.clone())));
-        let request = SavePrivilegeCredentialRequest {
-            connection_id: LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string(),
-            credential_id: draft.credential_id.clone(),
-            label,
-            kind: draft.kind,
-            username_hint: draft
-                .username_hint
-                .trim()
-                .is_empty()
-                .then_some(None)
-                .unwrap_or_else(|| Some(draft.username_hint.trim().to_string())),
-            prompt_patterns,
-            secret,
-            enabled: draft.enabled,
-            require_click_to_send: true,
-        };
-        match self.connection_store.save_privilege_credential(request) {
-            Ok(_) => {
-                zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
-                self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
-                self.settings_local_privilege_error = None;
-                self.focused_settings_input = None;
-                self.settings_input_draft.clear();
-                self.queue_cloud_sync_dirty_refresh(cx);
-            }
-            Err(error) => {
-                self.settings_local_privilege_error = Some(error.to_string());
-            }
-        }
-        self.close_settings_select();
-        cx.notify();
-    }
-
-    fn delete_local_privilege_credential(&mut self, credential_id: String, cx: &mut Context<Self>) {
-        match self.connection_store.delete_privilege_credential(
-            LOCAL_SHELL_PRIVILEGE_CONNECTION_ID,
-            &credential_id,
-        ) {
-            Ok(_) => {
-                if self.settings_local_privilege_draft.credential_id.as_deref()
-                    == Some(credential_id.as_str())
-                {
-                    zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
-                    self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
-                }
-                self.settings_local_privilege_error = None;
-                self.queue_cloud_sync_dirty_refresh(cx);
-            }
-            Err(error) => {
-                self.settings_local_privilege_error = Some(error.to_string());
-            }
-        }
-        self.close_settings_select();
-        cx.notify();
-    }
-
     fn local_privilege_credentials_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let credentials = self
+        let credential_count = self
             .connection_store
             .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
+            .map(|credentials| credentials.len())
             .unwrap_or_default();
-        let mut list = div().flex().flex_col().gap(px(8.0));
-        if credentials.is_empty() {
-            list = list.child(
-                div()
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgba((theme.border << 8) | 0x80))
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("sessionManager.privilege_credentials.empty")),
-            );
-        } else {
-            for credential in credentials.iter().cloned() {
-                let edit_credential = credential.clone();
-                let delete_id = credential.id.clone();
-                list = list.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .rounded(px(self.tokens.radii.md))
-                        .border_1()
-                        .border_color(rgba((theme.border << 8) | 0x80))
-                        .bg(rgba((theme.bg_panel << 8) | 0x4d))
-                        .px(px(8.0))
-                        .py(px(6.0))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::KeyRound,
-                            16.0,
-                            rgba(0xfde68aff),
-                        ))
-                        .child(
-                            div()
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .text_color(rgb(theme.text))
-                                        .child(credential.label.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(theme.text_muted))
-                                        .child(self.settings_privilege_kind_label(credential.kind)),
-                                ),
-                        )
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("sessionManager.privilege_credentials.edit"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Ghost,
-                                    size: ButtonSize::Sm,
-                                    ..ButtonOptions::default()
-                                },
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.edit_local_privilege_credential(edit_credential.clone(), cx);
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.workspace_icon_action_button(
-                            LucideIcon::Trash2,
-                            14.0,
-                            rgb(theme.text_muted),
-                            IconButtonOptions {
-                                hover_background: Some(rgb(theme.bg_hover)),
-                                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
-                            },
-                            move |this, _event, _window, cx| {
-                                this.delete_local_privilege_credential(delete_id.clone(), cx);
-                                cx.stop_propagation();
-                            },
-                            cx,
-                        )),
-                );
-            }
-        }
-
-        let form = div()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
+        let scope_id = LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
+        let summary = div()
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
             .bg(rgba((theme.bg << 8) | 0x80))
             .p(px(12.0))
-            .child(self.local_privilege_text_field(
-                "sessionManager.privilege_credentials.label",
-                SettingsInput::LocalPrivilegeLabel,
-                self.settings_local_privilege_draft.label.clone(),
-                "sessionManager.privilege_credentials.label_placeholder",
-                false,
-                cx,
-            ))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
             .child(
                 div()
-                    .grid()
-                    .grid_cols(2)
-                    .gap(px(12.0))
-                    .child(self.local_privilege_kind_field(cx))
-                    .child(self.local_privilege_text_field(
-                        "sessionManager.privilege_credentials.username_hint",
-                        SettingsInput::LocalPrivilegeUsernameHint,
-                        self.settings_local_privilege_draft.username_hint.clone(),
-                        "settings_view.local_terminal.privilege_username_placeholder",
-                        false,
-                        cx,
-                    )),
-            )
-            .child(self.local_privilege_text_field(
-                "sessionManager.privilege_credentials.secret",
-                SettingsInput::LocalPrivilegeSecret,
-                self.settings_local_privilege_draft.secret.clone(),
-                if self
-                    .settings_local_privilege_draft
-                    .credential_id
-                    .is_some()
-                {
-                    "sessionManager.privilege_credentials.secret_keep_placeholder"
-                } else {
-                    "sessionManager.privilege_credentials.secret_placeholder"
-                },
-                true,
-                cx,
-            ))
-            .child(self.local_privilege_prompt_patterns_field(cx))
-            .child(self.local_privilege_hint(
-                self.i18n
-                    .t("sessionManager.privilege_credentials.prompt_patterns_hint"),
-            ))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.settings_local_privilege_draft.enabled =
-                                !this.settings_local_privilege_draft.enabled;
-                            this.settings_local_privilege_error = None;
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )
-                    .child(checkbox(
-                        &self.tokens,
-                        String::new(),
-                        self.settings_local_privilege_draft.enabled,
-                    ))
+                    .min_w(px(0.0))
                     .child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
                             .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
-                            .child(self.i18n.t("sessionManager.privilege_credentials.enabled")),
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::KeyRound,
+                                16.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .child(self.i18n_replace(
+                                "settings_view.privilege_credentials.credential_count",
+                                &[("count", credential_count.to_string())],
+                            )),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("settings_view.privilege_credentials.description")),
                     ),
             )
-            .when_some(self.settings_local_privilege_error.clone(), |panel, error| {
-                panel.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.error))
-                        .child(error),
-                )
-            })
             .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap(px(8.0))
-                    .when(
-                        self.settings_local_privilege_draft.credential_id.is_some(),
-                        |row| {
-                            row.child(self.workspace_toolbar_action_button(
-                                self.i18n
-                                    .t("sessionManager.privilege_credentials.cancel_edit"),
-                                None,
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Ghost,
-                                        size: ButtonSize::Sm,
-                                        ..ButtonOptions::default()
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.reset_local_privilege_credential_draft(cx);
-                                    cx.stop_propagation();
-                                }),
-                            ))
-                        },
-                    )
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("sessionManager.privilege_credentials.save"),
-                        Some(
-                            Self::render_lucide_icon(
-                                LucideIcon::Save,
-                                14.0,
-                                rgb(theme.text_muted),
-                            )
+                self.workspace_toolbar_action_button(
+                    self.i18n.t("terminal.privilege_helper.manage"),
+                    Some(
+                        Self::render_lucide_icon(LucideIcon::Settings, 14.0, rgb(theme.text_muted))
                             .into_any_element(),
-                        ),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Sm,
-                                disabled: self
-                                    .settings_local_privilege_draft
-                                    .label
-                                    .trim()
-                                    .is_empty(),
-                                ..ButtonOptions::default()
-                            },
-                            ..ToolbarButtonOptions::default()
+                    ),
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Sm,
+                            ..ButtonOptions::default()
                         },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.save_local_privilege_credential(cx);
-                            cx.stop_propagation();
-                        }),
-                    )),
+                        ..ToolbarButtonOptions::default()
+                    },
+                    cx.listener(move |this, _event, window, cx| {
+                        // Local terminal settings intentionally delegate
+                        // credential editing to the unified privilege surface.
+                        this.open_privilege_credentials_settings(Some(scope_id.clone()), window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
             );
 
         self.settings_card(
             "settings_view.local_terminal.privilege_credentials",
             "settings_view.local_terminal.privilege_credentials_hint",
-            vec![list.into_any_element(), form.into_any_element()],
+            vec![summary.into_any_element()],
         )
-    }
-
-    fn local_privilege_kind_field(&self, cx: &mut Context<Self>) -> AnyElement {
-        form_field(
-            &self.tokens,
-            self.i18n
-                .t("sessionManager.privilege_credentials.kind_label"),
-            self.settings_select_control(
-                SettingsSelect::LocalPrivilegeKind,
-                self.settings_privilege_kind_label(self.settings_local_privilege_draft.kind),
-                false,
-                Some(self.tokens.metrics.settings_select_width),
-                cx,
-            ),
-        )
-    }
-
-    fn local_privilege_text_field(
-        &self,
-        label_key: &'static str,
-        input: SettingsInput,
-        value: String,
-        placeholder_key: &'static str,
-        secret: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        form_field(
-            &self.tokens,
-            self.i18n.t(label_key),
-            if secret {
-                self.settings_secret_text_input_control(
-                    input,
-                    value,
-                    self.i18n.t(placeholder_key),
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                )
-            } else {
-                self.settings_text_input_control(
-                    input,
-                    value,
-                    self.i18n.t(placeholder_key),
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                )
-            },
-        )
-    }
-
-    fn local_privilege_prompt_patterns_field(&self, cx: &mut Context<Self>) -> AnyElement {
-        let input = SettingsInput::LocalPrivilegePromptPatterns;
-        let focused = self.focused_settings_input == Some(input);
-        let value = if focused {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_local_privilege_draft.prompt_patterns.clone()
-        };
-        let target = WorkspaceImeTarget::Settings(input);
-        let workspace = cx.entity();
-        let theme = self.tokens.ui;
-        let line_height = input.textarea_line_height();
-        let placeholder = value.is_empty();
-        let visible_value = if placeholder {
-            self.i18n
-                .t("sessionManager.privilege_credentials.prompt_patterns_placeholder")
-        } else {
-            value
-        };
-        let mut textarea = div()
-            .w_full()
-            .min_h(px(80.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(if focused {
-                rgba((theme.accent << 8) | 0x99)
-            } else {
-                rgb(theme.border)
-            })
-            .bg(rgb(theme.bg))
-            .px(px(12.0))
-            .py(px(8.0))
-            .flex()
-            .flex_col()
-            .items_start()
-            .cursor(CursorStyle::IBeam)
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .line_height(px(line_height))
-            .text_color(rgb(theme.text))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
-                    this.focus_settings_input(input, current, cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                }),
-            );
-        textarea = self.render_settings_multiline_textarea_lines(
-            textarea,
-            target,
-            &visible_value,
-            placeholder,
-            line_height,
-        );
-        if let Some(marked) = self.marked_text_for_target(target) {
-            textarea = textarea.child(
-                div()
-                    .underline()
-                    .text_color(rgb(theme.text))
-                    .child(marked.to_string()),
-            );
-        }
-        let control =
-            text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            });
-        form_field(
-            &self.tokens,
-            self.i18n
-                .t("sessionManager.privilege_credentials.prompt_patterns"),
-            control.into_any_element(),
-        )
-    }
-
-    fn settings_privilege_kind_label(&self, kind: PrivilegeCredentialKind) -> String {
-        // Settings owns its own label helper so the local-shell form does not
-        // depend on private new-connection rendering helpers.
-        let key = match kind {
-            PrivilegeCredentialKind::SudoPassword => {
-                "sessionManager.privilege_credentials.kind.sudo_password"
-            }
-            PrivilegeCredentialKind::SuPassword => {
-                "sessionManager.privilege_credentials.kind.su_password"
-            }
-            PrivilegeCredentialKind::CustomPrompt => {
-                "sessionManager.privilege_credentials.kind.custom_prompt"
-            }
-        };
-        self.i18n.t(key)
-    }
-
-    fn local_privilege_hint(&self, text: String) -> AnyElement {
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(text)
-            .into_any_element()
     }
 
     fn settings_reconnect_section(

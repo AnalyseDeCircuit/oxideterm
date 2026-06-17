@@ -157,10 +157,13 @@
       "fill": "填充密码",
       "filling": "填充中...",
       "fill_title": "填充 {{label}}",
+      "enter_fill": "按 Enter 填充",
+      "enter_fill_title": "按 Enter 或点击填充 {{label}}",
+      "inline_fill_hint": "按 Enter 填入已保存的提权密码",
       "load_failed": "无法加载提权凭据",
       "send_failed": "无法发送提权凭据",
-      "manage": "保存凭据",
-      "manage_title": "为此连接保存提权凭据",
+      "manage": "提权凭据",
+      "manage_title": "打开此作用域的提权凭据设置",
       "local_manage_unavailable": "本地 Shell 的提权凭据管理尚未开放。"
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "搜索",
     "previous": "上一个",
     "next": "下一个",
-    "close": "x"
+    "close": "x",
+    "no_results": "无结果",
+    "visible_terminal_hint": "搜索当前可见的终端滚动缓冲。"
   },
   "workspace": {
     "new_local_terminal": "新建本地终端"

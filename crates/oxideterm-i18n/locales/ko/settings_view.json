@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "이 장치의 로컬 sudo/su 도우미 자격 증명을 저장합니다. 비밀 값은 권한 상승 키체인 범위에만 보관되며 명시적으로 클릭한 뒤에만 전송됩니다.",
       "privilege_username_placeholder": "현재 로컬 사용자"
     },
+    "privilege_credentials": {
+      "title": "권한 상승 자격 증명",
+      "description": "로컬 셸과 저장된 연결의 sudo, su, 사용자 지정 권한 상승 프롬프트 자격 증명을 한곳에서 관리합니다.",
+      "scopes": "자격 증명 범위",
+      "local_scope": "로컬 셸",
+      "local_scope_hint": "이 장치의 로컬 터미널에서 사용하는 자격 증명",
+      "credential_count": "자격 증명 {{count}}개",
+      "disabled": "비활성화됨"
+    },
     "tabs": {
       "general": "일반",
       "terminal": "터미널",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "지식 베이스",
       "local": "로컬 터미널",
+      "privilege": "권한 상승 자격 증명",
       "reconnect": "자동 재연결",
       "help": "도움말 및 정보",
       "keybindings": "키 바인딩",

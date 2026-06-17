@@ -13,11 +13,6 @@ use oxideterm_terminal_recording::format_recording_elapsed;
 pub(in crate::workspace) mod completion;
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
-const TAURI_PRIVILEGE_CHIP_BORDER: u32 = 0xfbbf244d; // Tauri border-amber-400/30
-const TAURI_PRIVILEGE_CHIP_BG: u32 = 0xfbbf241a; // Tauri bg-amber-400/10
-const TAURI_PRIVILEGE_CHIP_HOVER_BORDER: u32 = 0xfcd34d80; // Tauri hover:border-amber-300/50
-const TAURI_PRIVILEGE_CHIP_HOVER_BG: u32 = 0xfbbf2426; // Tauri hover:bg-amber-400/15
-const TAURI_PRIVILEGE_CHIP_TEXT: u32 = 0xfde68aff; // Tauri text-amber-200
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MatchedPrivilegeCredential {
@@ -29,7 +24,28 @@ struct MatchedPrivilegeCredential {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PrivilegePromptHelperState {
     connection_id: String,
+    prompt: PrivilegePromptMatch,
     matches: Vec<MatchedPrivilegeCredential>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PrivilegeScopeCandidateKind {
+    Primary,
+    EndpointRecovery,
+    RuntimeFallback,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PrivilegeScopeCandidate {
+    connection_id: String,
+    kind: PrivilegeScopeCandidateKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PrivilegeScopeCredentialCandidate {
+    connection_id: String,
+    kind: PrivilegeScopeCandidateKind,
+    credentials: Vec<SavedPrivilegeCredential>,
 }
 
 fn tab_kind_allows_privilege_prompt_helper(tab_kind: &TabKind) -> bool {
@@ -67,15 +83,27 @@ fn privilege_credential_matches_prompt(
                     .is_none_or(|hint| prompt_username == hint)
             })
         }
-        PrivilegePromptMatch::Su { .. } => {
+        PrivilegePromptMatch::Su { target_user, .. } => {
             if !matches!(
                 credential.kind,
                 PrivilegeCredentialKind::SuPassword | PrivilegeCredentialKind::CustomPrompt
             ) {
                 return false;
             }
-            credential.kind != PrivilegeCredentialKind::CustomPrompt
-                || privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
+            match credential.kind {
+                PrivilegeCredentialKind::SuPassword => {
+                    target_user.as_ref().is_none_or(|prompt_user| {
+                        credential
+                            .username_hint
+                            .as_ref()
+                            .is_none_or(|hint| prompt_user == hint)
+                    })
+                }
+                PrivilegeCredentialKind::CustomPrompt => {
+                    privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
+                }
+                PrivilegeCredentialKind::SudoPassword => false,
+            }
         }
         PrivilegePromptMatch::Custom { credential_id, .. } => credential.id == *credential_id,
         PrivilegePromptMatch::GenericPassword { .. } => match credential.kind {
@@ -106,12 +134,21 @@ fn privilege_prompt_matches_custom_patterns(
         .any(|pattern| !pattern.is_empty() && prompt_text.contains(&pattern))
 }
 
+#[cfg(test)]
 fn build_privilege_prompt_helper_state(
     connection_id: String,
     credentials: &[SavedPrivilegeCredential],
     visible_text: &str,
 ) -> Option<PrivilegePromptHelperState> {
-    let prompt = detect_privilege_prompt(visible_text)?;
+    let prompt = choose_privilege_prompt(credentials, visible_text, None)?;
+    build_privilege_prompt_helper_state_from_prompt(connection_id, credentials, prompt)
+}
+
+fn build_privilege_prompt_helper_state_from_prompt(
+    connection_id: String,
+    credentials: &[SavedPrivilegeCredential],
+    prompt: PrivilegePromptMatch,
+) -> Option<PrivilegePromptHelperState> {
     let matches = credentials
         .iter()
         .filter(|credential| privilege_credential_matches_prompt(credential, &prompt))
@@ -123,24 +160,118 @@ fn build_privilege_prompt_helper_state(
         .collect();
     Some(PrivilegePromptHelperState {
         connection_id,
+        prompt,
         matches,
     })
 }
 
-fn select_remote_privilege_scope(
+fn prompt_state_allows_inline_fill(state: &PrivilegePromptHelperState) -> bool {
+    !matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. })
+        && state.matches.len() == 1
+}
+
+fn prompt_state_without_fill_matches(
+    mut state: PrivilegePromptHelperState,
+) -> PrivilegePromptHelperState {
+    state.matches.clear();
+    state
+}
+
+fn select_privilege_prompt_helper_state_from_scope_candidates(
+    candidates: Vec<PrivilegeScopeCredentialCandidate>,
+    visible_text: &str,
+    tracked_prompt: Option<PrivilegePromptMatch>,
+) -> Option<PrivilegePromptHelperState> {
+    let mut first_state = None;
+    let mut first_matched_state = None;
+    let mut recovery_single_state = None;
+    let mut recovery_single_count = 0usize;
+
+    for candidate in candidates {
+        let Some(prompt) =
+            choose_privilege_prompt(&candidate.credentials, visible_text, tracked_prompt.clone())
+        else {
+            continue;
+        };
+        let Some(state) = build_privilege_prompt_helper_state_from_prompt(
+            candidate.connection_id,
+            &candidate.credentials,
+            prompt,
+        ) else {
+            continue;
+        };
+        let fillable = prompt_state_allows_inline_fill(&state);
+
+        if candidate.kind == PrivilegeScopeCandidateKind::Primary && fillable {
+            // A primary scope is the explicit terminal owner or its saved-node
+            // lineage. When it matches exactly one metadata credential, keep that
+            // owner instead of scanning aliases for another possible secret.
+            return Some(state);
+        }
+        if candidate.kind == PrivilegeScopeCandidateKind::EndpointRecovery && fillable {
+            recovery_single_count += 1;
+            if recovery_single_state.is_none() {
+                recovery_single_state = Some(state.clone());
+            }
+        }
+        if !state.matches.is_empty() && first_matched_state.is_none() {
+            first_matched_state = Some(state.clone());
+        }
+        if first_state.is_none() {
+            first_state = Some(state);
+        }
+    }
+
+    if recovery_single_count == 1 {
+        return recovery_single_state;
+    }
+    if recovery_single_count > 1 {
+        // Multiple saved aliases for the same SSH endpoint can all contain a
+        // matching sudo/su credential. Keep the prompt visible to the state
+        // machine, but do not silently choose which secret Enter should send.
+        return first_state.map(prompt_state_without_fill_matches);
+    }
+    first_matched_state.or(first_state)
+}
+
+fn choose_privilege_prompt(
+    credentials: &[SavedPrivilegeCredential],
+    visible_text: &str,
+    tracked_prompt: Option<PrivilegePromptMatch>,
+) -> Option<PrivilegePromptMatch> {
+    match tracked_prompt {
+        Some(prompt @ (PrivilegePromptMatch::Sudo { .. } | PrivilegePromptMatch::Su { .. })) => {
+            Some(prompt)
+        }
+        Some(prompt @ PrivilegePromptMatch::GenericPassword { .. }) => {
+            detect_custom_prompt_from_credentials(credentials, visible_text).or(Some(prompt))
+        }
+        Some(prompt @ PrivilegePromptMatch::Custom { .. }) => Some(prompt),
+        None => detect_custom_prompt_from_credentials(credentials, visible_text)
+            .or_else(|| detect_privilege_prompt(visible_text)),
+    }
+}
+
+fn detect_custom_prompt_from_credentials(
+    credentials: &[SavedPrivilegeCredential],
+    visible_text: &str,
+) -> Option<PrivilegePromptMatch> {
+    credentials.iter().find_map(|credential| {
+        if !credential.enabled || credential.kind != PrivilegeCredentialKind::CustomPrompt {
+            return None;
+        }
+        // Custom privilege prompts are user-authored fragments. They must be
+        // allowed to trigger even when the prompt is not a built-in `Password:`
+        // shape; otherwise the "custom" kind silently behaves like a no-op.
+        detect_custom_privilege_prompt(visible_text, &credential.id, &credential.prompt_patterns)
+    })
+}
+
+fn valid_explicit_privilege_scope(
     explicit_session_scope: Option<String>,
-    node_saved_connection_id: Option<String>,
-    runtime_origin_saved_connection_id: Option<String>,
-    saved_node_connection_id: Option<String>,
-    unique_config_connection_id: Option<String>,
-    runtime_connection_id: Option<String>,
+    is_saved_connection_scope: impl Fn(&str) -> bool,
 ) -> Option<String> {
-    explicit_session_scope
-        .or(node_saved_connection_id)
-        .or(runtime_origin_saved_connection_id)
-        .or(saved_node_connection_id)
-        .or(unique_config_connection_id)
-        .or(runtime_connection_id)
+    explicit_session_scope.filter(|scope| is_saved_connection_scope(scope))
 }
 
 impl WorkspaceApp {
@@ -210,7 +341,24 @@ impl WorkspaceApp {
         )
     }
 
-    fn active_privilege_connection_id(&self) -> Option<String> {
+    fn push_privilege_scope_candidate(
+        candidates: &mut Vec<PrivilegeScopeCandidate>,
+        seen: &mut std::collections::HashSet<String>,
+        connection_id: Option<String>,
+        kind: PrivilegeScopeCandidateKind,
+    ) {
+        let Some(connection_id) = connection_id else {
+            return;
+        };
+        if seen.insert(connection_id.clone()) {
+            candidates.push(PrivilegeScopeCandidate {
+                connection_id,
+                kind,
+            });
+        }
+    }
+
+    fn active_privilege_scope_candidates(&self) -> Option<Vec<PrivilegeScopeCandidate>> {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal)
@@ -219,7 +367,10 @@ impl WorkspaceApp {
             // Local shell sudo/su prompts have no SavedConnection owner. Use a
             // dedicated store scope so secrets are never confused with SSH
             // connection credentials.
-            return Some(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string());
+            return Some(vec![PrivilegeScopeCandidate {
+                connection_id: LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string(),
+                kind: PrivilegeScopeCandidateKind::Primary,
+            }]);
         }
 
         let session_id = self.active_terminal_session_id()?;
@@ -230,35 +381,101 @@ impl WorkspaceApp {
         // session-tree mirror before giving up: restored/expanded nodes may
         // have their origin in NodeRuntimeStore even when the UI node snapshot
         // was created before the saved id was attached.
+        let node_config = node.map(|node| node.config.clone()).or_else(|| {
+            self.node_runtime_store
+                .snapshot(node_id)
+                .map(|snapshot| snapshot.config)
+        });
+        let saved_connection_scope_exists =
+            |scope: &str| self.connection_store.get(scope).is_some();
         let explicit_session_scope = self
             .terminal_privilege_connection_ids
             .get(&session_id)
-            .cloned();
-        let node_saved_connection_id = node.and_then(|node| node.saved_connection_id.clone());
+            .cloned()
+            .and_then(|scope| {
+                // The per-terminal privilege owner is the saved connection that
+                // opened this PTY. It may intentionally differ from the runtime
+                // SSH endpoint after auto-route, SSH config HostName expansion,
+                // or node reuse, so only validate that it is still a saved
+                // connection row. Endpoint-based recovery below remains a
+                // fallback for older sessions that never recorded this owner.
+                valid_explicit_privilege_scope(Some(scope), saved_connection_scope_exists)
+            });
+        let node_saved_connection_id = node
+            .and_then(|node| node.saved_connection_id.clone())
+            .filter(|scope| saved_connection_scope_exists(scope));
         let runtime_origin_saved_connection_id = self
             .node_runtime_store
             .snapshot(node_id)
-            .and_then(|snapshot| snapshot.origin.saved_connection_id().map(str::to_string));
+            .and_then(|snapshot| snapshot.origin.saved_connection_id().map(str::to_string))
+            .filter(|scope| saved_connection_scope_exists(scope));
         let saved_node_connection_id =
             self.saved_ssh_nodes
                 .iter()
                 .find_map(|(saved_connection_id, saved_node_id)| {
-                    (saved_node_id == node_id).then(|| saved_connection_id.clone())
+                    (saved_node_id == node_id && saved_connection_scope_exists(saved_connection_id))
+                        .then(|| saved_connection_id.clone())
                 });
         let unique_config_connection_id = self.saved_connection_id_for_node_snapshot(node_id, node);
         let runtime_connection_id = self.node_router.connection_id_for_node(node_id);
+        let mut candidates = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         // Tauri passes `privilegeConnectionId ?? connectionId` to the command bar.
         // Keep all saved-connection recovery paths ahead of the transient runtime
-        // id so fill chips can only match saved metadata when a safe owner exists,
-        // while direct SSH tabs still surface a detected prompt management chip.
-        select_remote_privilege_scope(
+        // id so inline fill only uses saved metadata when a safe owner exists,
+        // while direct SSH tabs can still keep a detected prompt state alive.
+        Self::push_privilege_scope_candidate(
+            &mut candidates,
+            &mut seen,
             explicit_session_scope,
+            PrivilegeScopeCandidateKind::Primary,
+        );
+        Self::push_privilege_scope_candidate(
+            &mut candidates,
+            &mut seen,
             node_saved_connection_id,
+            PrivilegeScopeCandidateKind::EndpointRecovery,
+        );
+        Self::push_privilege_scope_candidate(
+            &mut candidates,
+            &mut seen,
             runtime_origin_saved_connection_id,
+            PrivilegeScopeCandidateKind::EndpointRecovery,
+        );
+        Self::push_privilege_scope_candidate(
+            &mut candidates,
+            &mut seen,
             saved_node_connection_id,
+            PrivilegeScopeCandidateKind::EndpointRecovery,
+        );
+        Self::push_privilege_scope_candidate(
+            &mut candidates,
+            &mut seen,
             unique_config_connection_id,
+            PrivilegeScopeCandidateKind::EndpointRecovery,
+        );
+        if let Some(config) = node_config.as_ref() {
+            for connection in self.connection_store.connections() {
+                if connection.host == config.host
+                    && connection.port == config.port
+                    && connection.username == config.username
+                {
+                    Self::push_privilege_scope_candidate(
+                        &mut candidates,
+                        &mut seen,
+                        Some(connection.id.clone()),
+                        PrivilegeScopeCandidateKind::EndpointRecovery,
+                    );
+                }
+            }
+        }
+        Self::push_privilege_scope_candidate(
+            &mut candidates,
+            &mut seen,
             runtime_connection_id,
-        )
+            PrivilegeScopeCandidateKind::RuntimeFallback,
+        );
+        Some(candidates)
     }
 
     fn active_privilege_prompt_state(
@@ -269,28 +486,90 @@ impl WorkspaceApp {
         if !tab_kind_allows_privilege_prompt_helper(&active_tab.kind) {
             return None;
         }
-        let visible_text = self.active_pane()?.read(cx).visible_text_snapshot();
-        let _prompt = detect_privilege_prompt(&visible_text)?;
-        let connection_id = self.active_privilege_connection_id()?;
+        let active_pane = self.active_pane()?;
+        let pane = active_pane.read(cx);
+        let visible_text = pane.privilege_prompt_text_snapshot();
+        let tracked_prompt = pane
+            .privilege_prompt_snapshot()
+            .map(|snapshot| snapshot.prompt);
+        if tracked_prompt.is_none() && pane.privilege_prompt_fallback_suppressed() {
+            return None;
+        }
         // Tauri keeps the prompt state alive even when credential metadata
-        // cannot be loaded; the chip then becomes a management affordance. Do
-        // not let a missing credential row or transient keychain/config error
-        // suppress the detected sudo/su prompt.
-        let credentials = self
-            .connection_store
-            .list_privilege_credentials(&connection_id)
-            .unwrap_or_default();
-        build_privilege_prompt_helper_state(connection_id, &credentials, &visible_text)
+        // cannot be loaded. Do not let a missing credential row or transient
+        // keychain/config error suppress the detected sudo/su prompt.
+        let candidates = self
+            .active_privilege_scope_candidates()?
+            .into_iter()
+            .map(|candidate| PrivilegeScopeCredentialCandidate {
+                credentials: self
+                    .connection_store
+                    .list_privilege_credentials(&candidate.connection_id)
+                    .unwrap_or_default(),
+                connection_id: candidate.connection_id,
+                kind: candidate.kind,
+            })
+            .collect::<Vec<_>>();
+        select_privilege_prompt_helper_state_from_scope_candidates(
+            candidates,
+            &visible_text,
+            tracked_prompt,
+        )
     }
 
-    pub(in crate::workspace) fn active_privilege_prompt_helper_should_refresh(
-        &self,
+    pub(in crate::workspace) fn sync_active_privilege_prompt_inline_hint(
+        &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.settings_store.settings().terminal.command_bar.enabled {
+        let Some(active_pane) = self.active_pane() else {
+            return false;
+        };
+        let hint = self.active_privilege_prompt_inline_hint(cx);
+        active_pane.update(cx, |pane, cx| {
+            pane.set_privilege_prompt_inline_hint(hint, cx)
+        })
+    }
+
+    fn active_privilege_prompt_inline_hint(&self, cx: &mut Context<Self>) -> Option<String> {
+        let state = self.active_privilege_prompt_state(cx)?;
+        if matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. })
+            || state.matches.len() != 1
+        {
+            return None;
+        }
+        Some(self.i18n.t("terminal.privilege_helper.inline_fill_hint"))
+    }
+
+    pub(in crate::workspace) fn handle_privilege_prompt_helper_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let modifiers = event.keystroke.modifiers;
+        if event.keystroke.key.as_str() != "enter"
+            || modifiers.platform
+            || modifiers.control
+            || modifiers.alt
+            || modifiers.shift
+        {
             return false;
         }
-        self.active_privilege_prompt_state(cx).is_some()
+
+        let Some(state) = self.active_privilege_prompt_state(cx) else {
+            return false;
+        };
+        if matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. }) {
+            return false;
+        }
+        let [matched] = state.matches.as_slice() else {
+            return false;
+        };
+        // The inline hint is the confirmation affordance: Enter is accepted only
+        // when prompt detection produces exactly one scoped credential, so a
+        // generic `Password:` line never guesses between sudo/su candidates.
+        self.fill_privilege_prompt_match(matched.clone(), window, cx);
+        true
     }
 
     fn fill_privilege_prompt_match(
@@ -332,33 +611,6 @@ impl WorkspaceApp {
         }
         self.focus_active_pane(window, cx);
         cx.notify();
-    }
-
-    fn manage_active_privilege_prompt_credentials(
-        &mut self,
-        connection_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if connection_id == LOCAL_SHELL_PRIVILEGE_CONNECTION_ID {
-            self.settings_page.set_active_tab(SettingsTab::Local);
-            self.open_settings(window, cx);
-            cx.notify();
-            return;
-        }
-        if self.connection_store.get(&connection_id).is_none() {
-            self.push_command_palette_toast(
-                self.i18n.t("terminal.privilege_helper.load_failed"),
-                Some(format!("Connection not found: {connection_id}")),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        }
-        // The no-credential prompt state is a management affordance only. It
-        // opens the same saved-connection editor as Tauri and never reads a
-        // keychain item until the user explicitly saves and later clicks Fill.
-        self.open_saved_connection_editor(&connection_id, None, window, cx);
     }
 
     pub(in crate::workspace) fn render_terminal_surface(
@@ -470,7 +722,6 @@ impl WorkspaceApp {
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
         let timestamps_active = self.active_terminal_timestamps_enabled(cx);
-        let privilege_prompt_state = self.active_privilege_prompt_state(cx);
         let input_toggle_tooltip_id = "terminal-command-input-toggle";
         let input_toggle_title = if input_collapsed {
             self.i18n.t("terminal.command_bar.expand_input")
@@ -545,10 +796,7 @@ impl WorkspaceApp {
                                             this.terminal_command_suggestion_highlighted = None;
                                             this.close_terminal_quick_commands_popover();
                                         }
-                                        this.clear_workspace_tooltip(
-                                            input_toggle_tooltip_id,
-                                            cx,
-                                        );
+                                        this.clear_workspace_tooltip(input_toggle_tooltip_id, cx);
                                         cx.stop_propagation();
                                         cx.notify();
                                     },
@@ -557,17 +805,15 @@ impl WorkspaceApp {
                                 .id(input_toggle_tooltip_id)
                                 .on_mouse_move({
                                     let title = input_toggle_title.clone();
-                                    cx.listener(
-                                        move |this, event: &MouseMoveEvent, _window, cx| {
-                                            this.queue_workspace_tooltip(
-                                                input_toggle_tooltip_id,
-                                                title.clone(),
-                                                f32::from(event.position.x) + 12.0,
-                                                f32::from(event.position.y) + 16.0,
-                                                cx,
-                                            );
-                                        },
-                                    )
+                                    cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                                        this.queue_workspace_tooltip(
+                                            input_toggle_tooltip_id,
+                                            title.clone(),
+                                            f32::from(event.position.x) + 12.0,
+                                            f32::from(event.position.y) + 16.0,
+                                            cx,
+                                        );
+                                    })
                                 })
                                 .on_hover(cx.listener(
                                     move |this, hovered: &bool, _window, cx| {
@@ -619,131 +865,6 @@ impl WorkspaceApp {
                                     )
                                 },
                             )
-                            .when_some(privilege_prompt_state, |mut actions, state| {
-                                for (index, matched) in state.matches.iter().cloned().enumerate() {
-                                    let tooltip_id = format!("terminal-privilege-helper-fill-{index}");
-                                    let title = self.i18n_replace(
-                                        "terminal.privilege_helper.fill_title",
-                                        &[("label", matched.label.clone())],
-                                    );
-                                    actions = actions.child(
-                                        div()
-                                            .h(px(20.0))
-                                            .px(px(6.0))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .rounded(px(self.tokens.radii.md))
-                                            .border_1()
-                                            .border_color(rgba(TAURI_PRIVILEGE_CHIP_BORDER))
-                                            .bg(rgba(TAURI_PRIVILEGE_CHIP_BG))
-                                            .text_size(px(11.0))
-                                            .text_color(rgba(TAURI_PRIVILEGE_CHIP_TEXT))
-                                            .id(("terminal-privilege-helper-fill", index))
-                                            .on_mouse_move({
-                                                let title = title.clone();
-                                                let tooltip_id = tooltip_id.clone();
-                                                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                                                    this.queue_workspace_tooltip(
-                                                        tooltip_id.clone(),
-                                                        title.clone(),
-                                                        f32::from(event.position.x) + 12.0,
-                                                        f32::from(event.position.y) + 16.0,
-                                                        cx,
-                                                    );
-                                                })
-                                            })
-                                            .on_hover({
-                                                let tooltip_id = tooltip_id.clone();
-                                                cx.listener(move |this, hovered: &bool, _window, cx| {
-                                                    if !*hovered {
-                                                        this.clear_workspace_tooltip(&tooltip_id, cx);
-                                                    }
-                                                })
-                                            })
-                                            .hover(|style| {
-                                                style
-                                                    .border_color(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BORDER))
-                                                    .bg(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BG))
-                                            })
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(move |this, _event, window, cx| {
-                                                    this.fill_privilege_prompt_match(matched.clone(), window, cx);
-                                                    cx.stop_propagation();
-                                                }),
-                                            )
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::KeyRound,
-                                                12.0,
-                                                rgba(TAURI_PRIVILEGE_CHIP_TEXT),
-                                            ))
-                                            .child(self.i18n.t("terminal.privilege_helper.fill")),
-                                    );
-                                }
-                                if state.matches.is_empty() {
-                                    let title = self.i18n.t("terminal.privilege_helper.manage_title");
-                                    let connection_id = state.connection_id.clone();
-                                    actions = actions.child(
-                                        div()
-                                            .h(px(20.0))
-                                            .px(px(6.0))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .rounded(px(self.tokens.radii.md))
-                                            .border_1()
-                                            .border_color(rgba(TAURI_PRIVILEGE_CHIP_BORDER))
-                                            .bg(rgba(TAURI_PRIVILEGE_CHIP_BG))
-                                            .text_size(px(11.0))
-                                            .text_color(rgba(TAURI_PRIVILEGE_CHIP_TEXT))
-                                            .id("terminal-privilege-helper-manage")
-                                            .on_mouse_move({
-                                                let title = title.clone();
-                                                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                                                    this.queue_workspace_tooltip(
-                                                        "terminal-privilege-helper-manage",
-                                                        title.clone(),
-                                                        f32::from(event.position.x) + 12.0,
-                                                        f32::from(event.position.y) + 16.0,
-                                                        cx,
-                                                    );
-                                                })
-                                            })
-                                            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                                                if !*hovered {
-                                                    this.clear_workspace_tooltip(
-                                                        "terminal-privilege-helper-manage",
-                                                        cx,
-                                                    );
-                                                }
-                                            }))
-                                            .hover(|style| {
-                                                style
-                                                    .border_color(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BORDER))
-                                                    .bg(rgba(TAURI_PRIVILEGE_CHIP_HOVER_BG))
-                                            })
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(move |this, _event, window, cx| {
-                                                    this.manage_active_privilege_prompt_credentials(
-                                                        connection_id.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                    cx.stop_propagation();
-                                                }),
-                                            )
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::KeyRound,
-                                                12.0,
-                                                rgba(TAURI_PRIVILEGE_CHIP_TEXT),
-                                            ))
-                                            .child(self.i18n.t("terminal.privilege_helper.manage")),
-                                    );
-                                }
-                                actions
-                            })
                             .when(is_local_terminal, |actions| {
                                 actions
                                     .child(self.terminal_command_action_button(
@@ -808,6 +929,29 @@ impl WorkspaceApp {
                                         });
                                     }
                                 },
+                            ))
+                            .child(self.terminal_command_action_button(
+                                LucideIcon::Search,
+                                if self.search.visible {
+                                    rgb(theme.accent)
+                                } else {
+                                    rgb(theme.text_muted)
+                                },
+                                false,
+                                Some(if self.search.visible {
+                                    rgba((theme.accent << 8) | 0x26)
+                                } else {
+                                    rgba(0x00000000)
+                                }),
+                                |this, _event, window, cx| {
+                                    if this.search.visible {
+                                        this.close_search(window, cx);
+                                    } else {
+                                        this.open_search(window, cx);
+                                    }
+                                    cx.stop_propagation();
+                                },
+                                cx,
                             ))
                             .child(self.terminal_command_action_button(
                                 LucideIcon::Clock,
@@ -923,181 +1067,183 @@ impl WorkspaceApp {
             .when(!input_collapsed, |bar| {
                 bar.child(
                     div()
-                    .mt(px(2.0))
-                    .pt(px(4.0))
-                    .border_t_1()
-                    .border_color(if focused {
-                        rgba((theme.accent << 8) | COMMAND_BAR_FOCUSED_BORDER_ALPHA)
-                    } else {
-                        rgba((theme.border << 8) | COMMAND_BAR_INPUT_BORDER_ALPHA)
-                    })
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .cursor_text()
-                            // Tauri only focuses the command textarea when the
-                            // row background or textarea area receives the
-                            // pointer. Keep the quick-command button outside
-                            // this hit region so its click cannot be captured
-                            // by IME selection before the toggle handler runs.
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(
-                                    move |this, event: &gpui::MouseDownEvent, window, cx| {
-                                        this.terminal_command_bar_focused = true;
-                                        this.ime_marked_text = None;
-                                        window.focus(&this.focus_handle);
-                                        this.begin_ime_selection_from_mouse_down(
-                                            WorkspaceImeTarget::TerminalCommandBar,
-                                            event,
-                                            window,
-                                            cx,
+                        .mt(px(2.0))
+                        .pt(px(4.0))
+                        .border_t_1()
+                        .border_color(if focused {
+                            rgba((theme.accent << 8) | COMMAND_BAR_FOCUSED_BORDER_ALPHA)
+                        } else {
+                            rgba((theme.border << 8) | COMMAND_BAR_INPUT_BORDER_ALPHA)
+                        })
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .cursor_text()
+                                // Tauri only focuses the command textarea when the
+                                // row background or textarea area receives the
+                                // pointer. Keep the quick-command button outside
+                                // this hit region so its click cannot be captured
+                                // by IME selection before the toggle handler runs.
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(
+                                        move |this, event: &gpui::MouseDownEvent, window, cx| {
+                                            this.terminal_command_bar_focused = true;
+                                            this.ime_marked_text = None;
+                                            window.focus(&this.focus_handle);
+                                            this.begin_ime_selection_from_mouse_down(
+                                                WorkspaceImeTarget::TerminalCommandBar,
+                                                event,
+                                                window,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        },
+                                    ),
+                                )
+                                .on_mouse_move(cx.listener(
+                                    |this, event: &gpui::MouseMoveEvent, window, cx| {
+                                        this.update_ime_selection_drag_from_mouse_move(
+                                            event, window, cx,
                                         );
-                                        cx.stop_propagation();
                                     },
-                                ),
-                            )
-                            .on_mouse_move(cx.listener(
-                                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                                    this.update_ime_selection_drag_from_mouse_move(
-                                        event, window, cx,
-                                    );
-                                },
-                            ))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::ChevronRight,
-                                16.0,
-                                rgb(theme.text_muted),
-                            ))
-                            .child(text_input_anchor_probe(
-                                target.anchor_id(),
-                                div()
-                                    .h(px(24.0))
-                                    .flex_1()
-                                    .flex()
-                                    .items_center()
-                                    .overflow_hidden()
-                                    .text_size(px(13.0))
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .text_color(if showing_placeholder {
-                                        rgb(theme.text_muted)
-                                    } else {
-                                        rgb(theme.text)
-                                    })
-                                    .when(focused && showing_placeholder, |input| {
-                                        input.child(text_caret(
-                                            &self.tokens,
-                                            self.new_connection_caret_visible,
+                                ))
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::ChevronRight,
+                                    16.0,
+                                    rgb(theme.text_muted),
+                                ))
+                                .child(text_input_anchor_probe(
+                                    target.anchor_id(),
+                                    div()
+                                        .h(px(24.0))
+                                        .flex_1()
+                                        .flex()
+                                        .items_center()
+                                        .overflow_hidden()
+                                        .text_size(px(13.0))
+                                        .font_family(settings_mono_font_family(
+                                            self.settings_store.settings(),
                                         ))
-                                    })
-                                    // Tauri uses a real textarea, so the painted caret
-                                    // follows selectionStart instead of always sitting
-                                    // at the end of the value. Keep native rendering
-                                    // tied to the shared IME range for click/arrow parity.
-                                    .child(if showing_placeholder {
-                                        div().child(command_text).into_any_element()
-                                    } else {
-                                        text_input_value_segments_with_color(
-                                            &self.tokens,
-                                            &command_text,
-                                            false,
-                                            selection_range,
-                                            caret_offset,
-                                            self.new_connection_caret_visible,
-                                            Some(theme.text),
-                                        )
-                                        .into_any_element()
-                                    })
-                                    .when_some(marked_text, |input, marked| {
-                                        input.child(
-                                            div()
-                                                .underline()
-                                                .text_color(rgb(theme.text))
-                                                .child(marked.to_string()),
-                                        )
-                                    })
-                                    .when(
-                                        focused
-                                            && !showing_placeholder
-                                            && !shows_selection
-                                            && !shows_positioned_caret,
-                                        |input| {
+                                        .text_color(if showing_placeholder {
+                                            rgb(theme.text_muted)
+                                        } else {
+                                            rgb(theme.text)
+                                        })
+                                        .when(focused && showing_placeholder, |input| {
                                             input.child(text_caret(
                                                 &self.tokens,
                                                 self.new_connection_caret_visible,
                                             ))
-                                        },
-                                    )
-                                    .when_some(ghost_text, |input, ghost| {
-                                        input.child(
-                                            div()
-                                                .text_color(rgba((theme.text_muted << 8) | 0x99))
-                                                .child(ghost),
+                                        })
+                                        // Tauri uses a real textarea, so the painted caret
+                                        // follows selectionStart instead of always sitting
+                                        // at the end of the value. Keep native rendering
+                                        // tied to the shared IME range for click/arrow parity.
+                                        .child(if showing_placeholder {
+                                            div().child(command_text).into_any_element()
+                                        } else {
+                                            text_input_value_segments_with_color(
+                                                &self.tokens,
+                                                &command_text,
+                                                false,
+                                                selection_range,
+                                                caret_offset,
+                                                self.new_connection_caret_visible,
+                                                Some(theme.text),
+                                            )
+                                            .into_any_element()
+                                        })
+                                        .when_some(marked_text, |input, marked| {
+                                            input.child(
+                                                div()
+                                                    .underline()
+                                                    .text_color(rgb(theme.text))
+                                                    .child(marked.to_string()),
+                                            )
+                                        })
+                                        .when(
+                                            focused
+                                                && !showing_placeholder
+                                                && !shows_selection
+                                                && !shows_positioned_caret,
+                                            |input| {
+                                                input.child(text_caret(
+                                                    &self.tokens,
+                                                    self.new_connection_caret_visible,
+                                                ))
+                                            },
                                         )
-                                    }),
-                                {
-                                    let workspace = workspace.clone();
-                                    move |anchor, _window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            this.update_text_input_anchor(anchor, cx);
-                                        });
-                                    }
-                                },
-                            )),
-                    )
-                    .when(quick_commands_enabled, |input_row| {
-                        input_row.child(
-                            div()
-                                .size(px(24.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(self.tokens.radii.md))
-                                .cursor_pointer()
-                                .bg(if self.terminal_quick_commands_open {
-                                    rgba((theme.accent << 8) | 0x1a)
-                                } else {
-                                    rgba(0x00000000)
-                                })
-                                .text_color(if self.terminal_quick_commands_open {
-                                    rgb(theme.accent)
-                                } else {
-                                    rgb(theme.text_muted)
-                                })
-                                .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.terminal_quick_commands_open =
-                                            !this.terminal_quick_commands_open;
-                                        this.dismiss_terminal_broadcast_menu();
-                                        if !this.terminal_quick_commands_open {
-                                            this.close_terminal_quick_commands_popover();
+                                        .when_some(ghost_text, |input, ghost| {
+                                            input.child(
+                                                div()
+                                                    .text_color(rgba(
+                                                        (theme.text_muted << 8) | 0x99,
+                                                    ))
+                                                    .child(ghost),
+                                            )
+                                        }),
+                                    {
+                                        let workspace = workspace.clone();
+                                        move |anchor, _window, cx| {
+                                            let _ = workspace.update(cx, |this, cx| {
+                                                this.update_text_input_anchor(anchor, cx);
+                                            });
                                         }
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                )
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::Zap,
-                                    14.0,
-                                    if self.terminal_quick_commands_open {
-                                        rgb(theme.accent)
-                                    } else {
-                                        rgb(theme.text_muted)
                                     },
                                 )),
                         )
-                    }),
+                        .when(quick_commands_enabled, |input_row| {
+                            input_row.child(
+                                div()
+                                    .size(px(24.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(self.tokens.radii.md))
+                                    .cursor_pointer()
+                                    .bg(if self.terminal_quick_commands_open {
+                                        rgba((theme.accent << 8) | 0x1a)
+                                    } else {
+                                        rgba(0x00000000)
+                                    })
+                                    .text_color(if self.terminal_quick_commands_open {
+                                        rgb(theme.accent)
+                                    } else {
+                                        rgb(theme.text_muted)
+                                    })
+                                    .hover(move |style| style.bg(rgb(theme.bg_hover)))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            this.terminal_quick_commands_open =
+                                                !this.terminal_quick_commands_open;
+                                            this.dismiss_terminal_broadcast_menu();
+                                            if !this.terminal_quick_commands_open {
+                                                this.close_terminal_quick_commands_popover();
+                                            }
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child(Self::render_lucide_icon(
+                                        LucideIcon::Zap,
+                                        14.0,
+                                        if self.terminal_quick_commands_open {
+                                            rgb(theme.accent)
+                                        } else {
+                                            rgb(theme.text_muted)
+                                        },
+                                    )),
+                            )
+                        }),
                 )
             });
         select_anchor_probe(
@@ -1376,7 +1522,8 @@ mod privilege_prompt_helper_tests {
     use super::*;
     use chrono::Utc;
 
-    fn saved_privilege_credential(
+    fn saved_privilege_credential_for_connection(
+        connection_id: &str,
         id: &str,
         kind: PrivilegeCredentialKind,
         username_hint: Option<&str>,
@@ -1384,17 +1531,44 @@ mod privilege_prompt_helper_tests {
         let now = Utc::now();
         SavedPrivilegeCredential {
             id: id.to_string(),
-            connection_id: "conn-1".to_string(),
+            connection_id: connection_id.to_string(),
             label: id.to_string(),
             kind,
             username_hint: username_hint.map(str::to_string),
             prompt_patterns: Vec::new(),
-            keychain_id: Some(format!("privilege:v1:conn-1:{id}")),
+            keychain_id: Some(format!("privilege:v1:{connection_id}:{id}")),
             plaintext_secret: None,
             enabled: true,
             require_click_to_send: true,
             created_at: now,
             updated_at: now,
+        }
+    }
+
+    fn saved_privilege_credential(
+        id: &str,
+        kind: PrivilegeCredentialKind,
+        username_hint: Option<&str>,
+    ) -> SavedPrivilegeCredential {
+        saved_privilege_credential_for_connection("conn-1", id, kind, username_hint)
+    }
+
+    fn custom_privilege_credential(id: &str, patterns: &[&str]) -> SavedPrivilegeCredential {
+        let mut credential =
+            saved_privilege_credential(id, PrivilegeCredentialKind::CustomPrompt, None);
+        credential.prompt_patterns = patterns.iter().map(|pattern| pattern.to_string()).collect();
+        credential
+    }
+
+    fn scope_candidate(
+        connection_id: &str,
+        kind: PrivilegeScopeCandidateKind,
+        credentials: Vec<SavedPrivilegeCredential>,
+    ) -> PrivilegeScopeCredentialCandidate {
+        PrivilegeScopeCredentialCandidate {
+            connection_id: connection_id.to_string(),
+            kind,
+            credentials,
         }
     }
 
@@ -1413,32 +1587,129 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
-    fn remote_privilege_scope_prefers_saved_owner_over_runtime_connection() {
+    fn explicit_privilege_scope_uses_saved_connection_owner_without_endpoint_check() {
         assert_eq!(
-            select_remote_privilege_scope(
-                Some("saved-session".to_string()),
-                Some("saved-node".to_string()),
-                Some("saved-origin".to_string()),
-                Some("saved-map".to_string()),
-                Some("saved-config".to_string()),
-                Some("runtime-connection".to_string()),
-            ),
-            Some("saved-session".to_string())
+            valid_explicit_privilege_scope(Some("home-local".to_string()), |scope| {
+                scope == "home-local"
+            }),
+            Some("home-local".to_string())
+        );
+        assert_eq!(
+            valid_explicit_privilege_scope(Some("runtime-node".to_string()), |scope| {
+                scope == "home-local"
+            }),
+            None
         );
     }
 
     #[test]
-    fn remote_privilege_scope_uses_runtime_connection_as_tauri_fallback() {
+    fn remote_privilege_scope_recovers_from_primary_scope_without_matching_credentials() {
+        let state = select_privilege_prompt_helper_state_from_scope_candidates(
+            vec![
+                scope_candidate(
+                    "old-owner",
+                    PrivilegeScopeCandidateKind::Primary,
+                    vec![saved_privilege_credential_for_connection(
+                        "old-owner",
+                        "other-user",
+                        PrivilegeCredentialKind::SudoPassword,
+                        Some("other"),
+                    )],
+                ),
+                scope_candidate(
+                    "home-local",
+                    PrivilegeScopeCandidateKind::EndpointRecovery,
+                    vec![saved_privilege_credential_for_connection(
+                        "home-local",
+                        "matching-sudo",
+                        PrivilegeCredentialKind::SudoPassword,
+                        Some("lipsc"),
+                    )],
+                ),
+            ],
+            "sudo yazi\n[sudo] lipsc 的密码:",
+            None,
+        )
+        .expect("endpoint recovery should find the only matching saved scope");
+
+        assert_eq!(state.connection_id, "home-local");
         assert_eq!(
-            select_remote_privilege_scope(
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some("runtime-connection".to_string()),
-            ),
-            Some("runtime-connection".to_string())
+            state.matches,
+            vec![MatchedPrivilegeCredential {
+                connection_id: "home-local".to_string(),
+                credential_id: "matching-sudo".to_string(),
+                label: "matching-sudo".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn remote_privilege_scope_keeps_primary_scope_when_it_matches_once() {
+        let state = select_privilege_prompt_helper_state_from_scope_candidates(
+            vec![
+                scope_candidate(
+                    "session-owner",
+                    PrivilegeScopeCandidateKind::Primary,
+                    vec![saved_privilege_credential_for_connection(
+                        "session-owner",
+                        "session-sudo",
+                        PrivilegeCredentialKind::SudoPassword,
+                        Some("lipsc"),
+                    )],
+                ),
+                scope_candidate(
+                    "endpoint-alias",
+                    PrivilegeScopeCandidateKind::EndpointRecovery,
+                    vec![saved_privilege_credential_for_connection(
+                        "endpoint-alias",
+                        "alias-sudo",
+                        PrivilegeCredentialKind::SudoPassword,
+                        Some("lipsc"),
+                    )],
+                ),
+            ],
+            "sudo yazi\n[sudo] lipsc 的密码:",
+            None,
+        )
+        .expect("primary scope should still win when it has an exact match");
+
+        assert_eq!(state.connection_id, "session-owner");
+        assert_eq!(state.matches[0].credential_id, "session-sudo");
+    }
+
+    #[test]
+    fn remote_privilege_scope_does_not_guess_between_multiple_endpoint_matches() {
+        let state = select_privilege_prompt_helper_state_from_scope_candidates(
+            vec![
+                scope_candidate(
+                    "alias-a",
+                    PrivilegeScopeCandidateKind::EndpointRecovery,
+                    vec![saved_privilege_credential_for_connection(
+                        "alias-a",
+                        "sudo-a",
+                        PrivilegeCredentialKind::SudoPassword,
+                        Some("lipsc"),
+                    )],
+                ),
+                scope_candidate(
+                    "alias-b",
+                    PrivilegeScopeCandidateKind::EndpointRecovery,
+                    vec![saved_privilege_credential_for_connection(
+                        "alias-b",
+                        "sudo-b",
+                        PrivilegeCredentialKind::SudoPassword,
+                        Some("lipsc"),
+                    )],
+                ),
+            ],
+            "sudo yazi\n[sudo] lipsc 的密码:",
+            None,
+        )
+        .expect("ambiguous aliases should still keep the detected prompt alive");
+
+        assert!(
+            state.matches.is_empty(),
+            "ambiguous endpoint recovery must not arm Enter with an arbitrary secret"
         );
     }
 
@@ -1455,6 +1726,10 @@ mod privilege_prompt_helper_tests {
             state,
             PrivilegePromptHelperState {
                 connection_id: "conn-1".to_string(),
+                prompt: PrivilegePromptMatch::Sudo {
+                    username: Some("lipsc".to_string()),
+                    prompt_text: "[sudo] lipsc 的密码:".to_string(),
+                },
                 matches: Vec::new(),
             }
         );
@@ -1492,6 +1767,60 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
+    fn generic_password_after_sudo_command_matches_sudo_credentials_only() {
+        let credentials = vec![
+            saved_privilege_credential("local-sudo", PrivilegeCredentialKind::SudoPassword, None),
+            saved_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
+        ];
+        let state = build_privilege_prompt_helper_state(
+            "local-shell:default".to_string(),
+            &credentials,
+            "❯ sudo yazi\nPassword:",
+        )
+        .expect("sudo command context should classify the generic password prompt");
+
+        assert_eq!(
+            state.matches,
+            vec![MatchedPrivilegeCredential {
+                connection_id: "local-shell:default".to_string(),
+                credential_id: "local-sudo".to_string(),
+                label: "local-sudo".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn generic_password_after_su_command_matches_target_hint() {
+        let credentials = vec![
+            saved_privilege_credential(
+                "root-su",
+                PrivilegeCredentialKind::SuPassword,
+                Some("root"),
+            ),
+            saved_privilege_credential(
+                "postgres-su",
+                PrivilegeCredentialKind::SuPassword,
+                Some("postgres"),
+            ),
+        ];
+        let state = build_privilege_prompt_helper_state(
+            "local-shell:default".to_string(),
+            &credentials,
+            "su postgres\nPassword:",
+        )
+        .expect("su command context should classify the generic password prompt");
+
+        assert_eq!(
+            state.matches,
+            vec![MatchedPrivilegeCredential {
+                connection_id: "local-shell:default".to_string(),
+                credential_id: "postgres-su".to_string(),
+                label: "postgres-su".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn generic_password_prompt_offers_scoped_click_only_candidates() {
         let credentials = vec![
             saved_privilege_credential(
@@ -1522,6 +1851,36 @@ mod privilege_prompt_helper_tests {
                     label: "local-su".to_string(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn custom_prompt_patterns_create_prompt_state_without_password_label() {
+        let credentials = vec![
+            saved_privilege_credential("local-sudo", PrivilegeCredentialKind::SudoPassword, None),
+            custom_privilege_credential("deploy-token", &["approval token"]),
+        ];
+        let state = build_privilege_prompt_helper_state(
+            "conn-1".to_string(),
+            &credentials,
+            "deploy-tool unlock\nEnter deployment approval token >",
+        )
+        .expect("custom privilege prompt should not depend on built-in password wording");
+
+        assert_eq!(
+            state.prompt,
+            PrivilegePromptMatch::Custom {
+                credential_id: "deploy-token".to_string(),
+                prompt_text: "Enter deployment approval token >".to_string(),
+            }
+        );
+        assert_eq!(
+            state.matches,
+            vec![MatchedPrivilegeCredential {
+                connection_id: "conn-1".to_string(),
+                credential_id: "deploy-token".to_string(),
+                label: "deploy-token".to_string(),
+            }]
         );
     }
 }

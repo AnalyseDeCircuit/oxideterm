@@ -2242,10 +2242,6 @@ fn new_connection_field_value(
         NewConnectionField::Passphrase => &form.passphrase,
         NewConnectionField::Group => &form.group,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
-        NewConnectionField::PrivilegeLabel => &form.privilege_draft.label,
-        NewConnectionField::PrivilegeUsernameHint => &form.privilege_draft.username_hint,
-        NewConnectionField::PrivilegeSecret => &form.privilege_draft.secret,
-        NewConnectionField::PrivilegePromptPatterns => &form.privilege_draft.prompt_patterns,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
         NewConnectionField::UpstreamProxyPort => &form.upstream_proxy_port,
         NewConnectionField::UpstreamProxyNoProxy => &form.upstream_proxy_no_proxy,
@@ -2283,10 +2279,6 @@ fn connection_field_value_mut(
         NewConnectionField::Passphrase => &mut form.passphrase,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
-        NewConnectionField::PrivilegeLabel => &mut form.privilege_draft.label,
-        NewConnectionField::PrivilegeUsernameHint => &mut form.privilege_draft.username_hint,
-        NewConnectionField::PrivilegeSecret => &mut form.privilege_draft.secret,
-        NewConnectionField::PrivilegePromptPatterns => &mut form.privilege_draft.prompt_patterns,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
         NewConnectionField::UpstreamProxyPort => &mut form.upstream_proxy_port,
         NewConnectionField::UpstreamProxyNoProxy => &mut form.upstream_proxy_no_proxy,
@@ -2379,12 +2371,6 @@ fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
     match target {
         WorkspaceImeTarget::ReadOnlyText(_) => true,
         WorkspaceImeTarget::Settings(input) => input.accepts_newline(),
-        WorkspaceImeTarget::NewConnection(NewConnectionField::PrivilegePromptPatterns) => {
-            // This field maps to Tauri's textarea. Mark it multiline for IME
-            // hit-testing so GPUI never sends the full newline-bearing value to
-            // the single-line text shaper.
-            true
-        }
         WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
         WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
         _ => false,
@@ -2928,16 +2914,6 @@ mod tests {
         ));
         assert!(!ime_target_should_blink_caret(
             WorkspaceImeTarget::ReadOnlyText(1)
-        ));
-    }
-
-    #[test]
-    fn privilege_prompt_patterns_is_a_multiline_new_connection_target() {
-        assert!(ime_target_accepts_newline(
-            WorkspaceImeTarget::NewConnection(NewConnectionField::PrivilegePromptPatterns,)
-        ));
-        assert!(!ime_target_accepts_newline(
-            WorkspaceImeTarget::NewConnection(NewConnectionField::PrivilegeLabel,)
         ));
     }
 

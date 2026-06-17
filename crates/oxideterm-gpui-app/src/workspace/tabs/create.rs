@@ -135,6 +135,8 @@ impl WorkspaceApp {
                 .and_then(|node| node.terminal_ids.first().copied())
             && self.focus_terminal_session(session_id, window, cx)
         {
+            self.set_terminal_privilege_scope(session_id, &saved_connection_id);
+            let _ = self.sync_active_privilege_prompt_inline_hint(cx);
             let _ = self.connection_store.mark_used(&saved_connection_id);
             return Ok(());
         }
@@ -200,6 +202,8 @@ impl WorkspaceApp {
                     .and_then(|node| node.terminal_ids.first().copied())
                     && self.focus_terminal_session(session_id, window, cx)
                 {
+                    self.set_terminal_privilege_scope(session_id, &saved_connection_id);
+                    let _ = self.sync_active_privilege_prompt_inline_hint(cx);
                     let _ = self.connection_store.mark_used(&saved_connection_id);
                     return Ok(());
                 }
@@ -315,6 +319,8 @@ impl WorkspaceApp {
         if !self.focus_terminal_session(session_id, window, cx) {
             return false;
         }
+        self.set_terminal_privilege_scope(session_id, saved_connection_id);
+        let _ = self.sync_active_privilege_prompt_inline_hint(cx);
         let _ = self.connection_store.mark_used(saved_connection_id);
         true
     }

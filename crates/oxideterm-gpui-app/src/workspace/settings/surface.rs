@@ -373,6 +373,20 @@ impl WorkspaceApp {
                     .tag()
                     .hash(&mut hasher);
             }
+            SettingsTab::Privilege => {
+                self.settings_page.privilege_scope_id.hash(&mut hasher);
+                self.connection_store.connections().len().hash(&mut hasher);
+                self.connection_store
+                    .connections()
+                    .iter()
+                    .map(|connection| connection.privilege_credentials.len())
+                    .sum::<usize>()
+                    .hash(&mut hasher);
+                self.settings_local_privilege_draft
+                    .credential_id
+                    .hash(&mut hasher);
+                self.settings_local_privilege_error.is_some().hash(&mut hasher);
+            }
             SettingsTab::Portable => {
                 self.portable_settings_refresh_pending.hash(&mut hasher);
                 self.portable_status_error.is_some().hash(&mut hasher);
@@ -502,6 +516,7 @@ impl WorkspaceApp {
             SettingsTab::Appearance => self.settings_appearance_section(section_index, cx),
             SettingsTab::Local => self.settings_local_section(section_index, cx),
             SettingsTab::Connections => self.settings_connections_section(section_index, cx),
+            SettingsTab::Privilege => self.settings_privilege_credentials_section(section_index, cx),
             SettingsTab::Ssh => self.settings_ssh_section(section_index, cx),
             SettingsTab::Reconnect => self.settings_reconnect_section(section_index, cx),
             SettingsTab::Network => self.settings_network_section(section_index, cx),
@@ -537,6 +552,10 @@ impl WorkspaceApp {
         let mut nav = div()
             .w(px(self.tokens.metrics.settings_nav_width))
             .h_full()
+            // Mirrors Tauri's `min-h-0` settings sidebar contract: the title
+            // stays fixed and the tab list owns vertical overflow instead of
+            // forcing the sidebar to grow with every added settings category.
+            .min_h(px(0.0))
             .flex()
             .flex_col()
             .pt(px(24.0))

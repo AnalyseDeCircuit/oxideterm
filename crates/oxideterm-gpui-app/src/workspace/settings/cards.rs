@@ -525,10 +525,6 @@ impl WorkspaceApp {
                         SelectAnchorId::NewConnectionJumpManagedKey
                     )
                     | (
-                        Some(NewConnectionSelect::PrivilegeKind),
-                        SelectAnchorId::NewConnectionPrivilegeKind
-                    )
-                    | (
                         Some(NewConnectionSelect::UpstreamProxyPolicy),
                         SelectAnchorId::NewConnectionUpstreamProxyPolicy
                     )

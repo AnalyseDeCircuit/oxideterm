@@ -157,10 +157,13 @@
       "fill": "Remplir le mot de passe",
       "filling": "Remplissage...",
       "fill_title": "Remplir {{label}}",
+      "enter_fill": "Entrée pour remplir",
+      "enter_fill_title": "Appuyez sur Entrée ou cliquez pour remplir {{label}}",
+      "inline_fill_hint": "Appuyez sur Entrée pour utiliser l’identifiant d’élévation enregistré",
       "load_failed": "Impossible de charger l’identifiant de privilège",
       "send_failed": "Impossible d’envoyer l’identifiant de privilège",
-      "manage": "Enregistrer l’identifiant",
-      "manage_title": "Enregistrer un identifiant privilégié pour cette connexion",
+      "manage": "Identifiants d’élévation",
+      "manage_title": "Ouvrir les réglages d’identifiants d’élévation pour ce périmètre",
       "local_manage_unavailable": "La gestion des identifiants d’élévation du shell local n’est pas encore disponible."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Rechercher",
     "previous": "préc",
     "next": "suiv",
-    "close": "x"
+    "close": "x",
+    "no_results": "Aucun résultat",
+    "visible_terminal_hint": "Recherche dans le défilement visible du terminal."
   },
   "workspace": {
     "new_local_terminal": "Nouveau terminal local"

@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "保存這台裝置上的本機 sudo/su 助手憑證。祕密只保存在提權鑰匙圈作用域內，且只會在你明確點擊後送出。",
       "privilege_username_placeholder": "目前本機使用者"
     },
+    "privilege_credentials": {
+      "title": "提權憑證",
+      "description": "集中管理本機 Shell 和已儲存連線的 sudo、su 與自訂提權提示憑證。",
+      "scopes": "憑證作用域",
+      "local_scope": "本機 Shell",
+      "local_scope_hint": "此裝置本機終端機使用的憑證",
+      "credential_count": "{{count}} 個憑證",
+      "disabled": "已停用"
+    },
     "tabs": {
       "general": "一般",
       "terminal": "終端機",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "知識庫",
       "local": "本機終端機",
+      "privilege": "提權憑證",
       "reconnect": "自動重連",
       "help": "說明與關於",
       "keybindings": "快捷鍵",

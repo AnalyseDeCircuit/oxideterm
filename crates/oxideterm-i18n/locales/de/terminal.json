@@ -157,10 +157,13 @@
       "fill": "Passwort einfügen",
       "filling": "Füge ein...",
       "fill_title": "{{label}} einfügen",
+      "enter_fill": "Enter zum Einfügen",
+      "enter_fill_title": "Enter drücken oder klicken, um {{label}} einzufügen",
+      "inline_fill_hint": "Enter drücken, um gespeicherte Privileg-Anmeldedaten zu verwenden",
       "load_failed": "Privileg-Anmeldedaten konnten nicht geladen werden",
       "send_failed": "Privileg-Anmeldedaten konnten nicht gesendet werden",
-      "manage": "Zugang speichern",
-      "manage_title": "Privileg-Zugang für diese Verbindung speichern",
+      "manage": "Privileg-Anmeldedaten",
+      "manage_title": "Privileg-Anmeldedaten für diesen Bereich öffnen",
       "local_manage_unavailable": "Die Verwaltung von Privileg-Anmeldedaten für die lokale Shell ist noch nicht verfügbar."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Suchen",
     "previous": "zurück",
     "next": "weiter",
-    "close": "x"
+    "close": "x",
+    "no_results": "Keine Ergebnisse",
+    "visible_terminal_hint": "Durchsucht den sichtbaren Terminal-Scrollback."
   },
   "workspace": {
     "new_local_terminal": "Neues lokales Terminal"

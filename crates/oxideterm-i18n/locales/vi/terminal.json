@@ -157,10 +157,13 @@
       "fill": "Điền mật khẩu",
       "filling": "Đang điền...",
       "fill_title": "Điền {{label}}",
+      "enter_fill": "Enter để điền",
+      "enter_fill_title": "Nhấn Enter hoặc bấm để điền {{label}}",
+      "inline_fill_hint": "Nhấn Enter để dùng thông tin xác thực đặc quyền đã lưu",
       "load_failed": "Không thể tải thông tin xác thực đặc quyền",
       "send_failed": "Không thể gửi thông tin xác thực đặc quyền",
-      "manage": "Lưu thông tin xác thực",
-      "manage_title": "Lưu thông tin xác thực đặc quyền cho kết nối này",
+      "manage": "Thông tin xác thực đặc quyền",
+      "manage_title": "Mở cài đặt thông tin xác thực đặc quyền cho phạm vi này",
       "local_manage_unavailable": "Quản lý thông tin xác thực đặc quyền cho shell cục bộ chưa khả dụng."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Tìm kiếm",
     "previous": "trước",
     "next": "tiếp",
-    "close": "x"
+    "close": "x",
+    "no_results": "Không có kết quả",
+    "visible_terminal_hint": "Tìm trong vùng cuộn hiện đang hiển thị của terminal."
   },
   "workspace": {
     "new_local_terminal": "Terminal cục bộ mới"

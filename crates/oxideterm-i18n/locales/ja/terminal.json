@@ -157,10 +157,13 @@
       "fill": "パスワード入力",
       "filling": "入力中...",
       "fill_title": "{{label}} を入力",
+      "enter_fill": "Enter で入力",
+      "enter_fill_title": "Enter またはクリックで {{label}} を入力",
+      "inline_fill_hint": "Enter で保存済みの権限昇格資格情報を使用",
       "load_failed": "権限昇格用の認証情報を読み込めませんでした",
       "send_failed": "権限昇格用の認証情報を送信できませんでした",
-      "manage": "認証情報を保存",
-      "manage_title": "この接続の昇格認証情報を保存",
+      "manage": "権限昇格資格情報",
+      "manage_title": "このスコープの権限昇格資格情報設定を開く",
       "local_manage_unavailable": "ローカル Shell の権限昇格用資格情報管理はまだ利用できません。"
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "検索",
     "previous": "前",
     "next": "次",
-    "close": "x"
+    "close": "x",
+    "no_results": "結果なし",
+    "visible_terminal_hint": "表示中のターミナルスクロールバックを検索します。"
   },
   "workspace": {
     "new_local_terminal": "新しいローカルターミナル"

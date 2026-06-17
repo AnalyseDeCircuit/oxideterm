@@ -38,6 +38,15 @@
       "privilege_credentials_hint": "この端末のローカル sudo/su ヘルパー資格情報を保存します。シークレットは権限昇格用キーチェーンスコープにのみ保存され、明示的にクリックした場合だけ送信されます。",
       "privilege_username_placeholder": "現在のローカルユーザー"
     },
+    "privilege_credentials": {
+      "title": "権限昇格資格情報",
+      "description": "ローカルシェルと保存済み接続の sudo、su、カスタム権限昇格プロンプト資格情報を一か所で管理します。",
+      "scopes": "資格情報スコープ",
+      "local_scope": "ローカルシェル",
+      "local_scope_hint": "この端末のローカルターミナルで使用する資格情報",
+      "credential_count": "{{count}} 件の資格情報",
+      "disabled": "無効"
+    },
     "tabs": {
       "general": "一般",
       "terminal": "ターミナル",
@@ -49,6 +58,7 @@
       "ai": "OxideSens",
       "knowledge": "ナレッジベース",
       "local": "ローカルターミナル",
+      "privilege": "権限昇格資格情報",
       "reconnect": "自動再接続",
       "help": "ヘルプと詳細",
       "keybindings": "キーバインド",

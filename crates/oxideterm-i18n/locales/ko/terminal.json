@@ -157,10 +157,13 @@
       "fill": "비밀번호 입력",
       "filling": "입력 중...",
       "fill_title": "{{label}} 입력",
+      "enter_fill": "Enter로 입력",
+      "enter_fill_title": "Enter를 누르거나 클릭하여 {{label}} 입력",
+      "inline_fill_hint": "Enter로 저장된 권한 상승 자격 증명 사용",
       "load_failed": "권한 자격 증명을 불러올 수 없습니다",
       "send_failed": "권한 자격 증명을 보낼 수 없습니다",
-      "manage": "자격 증명 저장",
-      "manage_title": "이 연결의 권한 자격 증명 저장",
+      "manage": "권한 상승 자격 증명",
+      "manage_title": "이 범위의 권한 상승 자격 증명 설정 열기",
       "local_manage_unavailable": "로컬 Shell 권한 상승 자격 증명 관리는 아직 사용할 수 없습니다."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "검색",
     "previous": "이전",
     "next": "다음",
-    "close": "x"
+    "close": "x",
+    "no_results": "결과 없음",
+    "visible_terminal_hint": "현재 보이는 터미널 스크롤백을 검색합니다."
   },
   "workspace": {
     "new_local_terminal": "새 로컬 터미널"

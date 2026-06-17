@@ -26,6 +26,7 @@ pub fn settings_tab_from_ai_section(section: &str) -> Option<SettingsTab> {
         "appearance" => Some(SettingsTab::Appearance),
         "local" | "local_terminal" => Some(SettingsTab::Local),
         "connections" | "connection_manager" => Some(SettingsTab::Connections),
+        "privilege" | "privilege_credentials" | "sudo" | "su" => Some(SettingsTab::Privilege),
         "ssh" => Some(SettingsTab::Ssh),
         "reconnect" => Some(SettingsTab::Reconnect),
         "sftp" => Some(SettingsTab::Sftp),

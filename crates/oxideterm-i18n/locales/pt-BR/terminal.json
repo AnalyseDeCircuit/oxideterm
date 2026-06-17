@@ -157,10 +157,13 @@
       "fill": "Preencher senha",
       "filling": "Preenchendo...",
       "fill_title": "Preencher {{label}}",
+      "enter_fill": "Enter para preencher",
+      "enter_fill_title": "Pressione Enter ou clique para preencher {{label}}",
+      "inline_fill_hint": "Pressione Enter para usar a credencial de privilégio salva",
       "load_failed": "Não foi possível carregar a credencial de privilégio",
       "send_failed": "Não foi possível enviar a credencial de privilégio",
-      "manage": "Salvar credencial",
-      "manage_title": "Salvar uma credencial privilegiada para esta conexão",
+      "manage": "Credenciais de privilégio",
+      "manage_title": "Abrir configurações de credenciais de privilégio para este escopo",
       "local_manage_unavailable": "O gerenciamento de credenciais de privilégio do shell local ainda não está disponível."
     }
   },
@@ -168,7 +171,9 @@
     "placeholder": "Buscar",
     "previous": "ant",
     "next": "próx",
-    "close": "x"
+    "close": "x",
+    "no_results": "Nenhum resultado",
+    "visible_terminal_hint": "Pesquisa o scrollback visível do terminal."
   },
   "workspace": {
     "new_local_terminal": "Novo terminal local"
