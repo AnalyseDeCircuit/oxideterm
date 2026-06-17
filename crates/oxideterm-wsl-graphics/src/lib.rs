@@ -6,7 +6,6 @@
 //! This crate intentionally owns the Windows/WSLg command semantics so UI crates
 //! can render launcher or graphics state without reimplementing `wsl.exe` parsing.
 
-pub mod bridge;
 mod error;
 mod model;
 pub mod session;

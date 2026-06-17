@@ -7,6 +7,7 @@ mod connection_monitor;
 mod file_manager;
 mod forwards;
 mod graphics;
+mod graphics_vnc;
 mod ide;
 mod ime;
 mod launcher;

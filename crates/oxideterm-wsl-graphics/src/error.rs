@@ -28,8 +28,6 @@ pub enum WslGraphicsError {
     InvalidAppArgv(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
-    #[error("WebSocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("{WSL_GRAPHICS_UNAVAILABLE}")]
     UnsupportedPlatform,
 }

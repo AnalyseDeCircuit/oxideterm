@@ -33,8 +33,7 @@ pub enum GraphicsSessionMode {
 #[serde(rename_all = "camelCase")]
 pub struct WslGraphicsSession {
     pub id: String,
-    pub ws_port: u16,
-    pub ws_token: String,
+    pub vnc_port: u16,
     pub distro: String,
     pub desktop_name: String,
     pub mode: GraphicsSessionMode,
