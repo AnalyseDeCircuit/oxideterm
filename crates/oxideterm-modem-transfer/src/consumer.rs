@@ -173,28 +173,35 @@ impl ModemConsumer {
         {
             self.start_transfer(protocol_bytes, request.clone());
             events.push(ModemConsumerEvent::TransferStarted(request));
-        } else {
+        } else if should_wait_for_protocol_confirmation(start.protocol, protocol_bytes) {
             self.pending = Some(PendingTransfer {
                 protocol: start.protocol,
                 bytes: protocol_bytes.to_vec(),
             });
+        } else {
+            self.remember_plain_output(protocol_bytes);
+            events.push(ModemConsumerEvent::WriteTerminal(protocol_bytes.to_vec()));
         }
 
         events
     }
 
     fn process_pending_server_output(&mut self, bytes: &[u8]) -> Vec<ModemConsumerEvent> {
-        let pending = self.pending.as_mut().expect("pending transfer");
+        let mut pending = self.pending.take().expect("pending transfer");
         pending.bytes.extend_from_slice(bytes);
         if let Some(request) =
             request_for_protocol(pending.protocol, &pending.bytes, &self.plain_history)
         {
-            let initial = std::mem::take(&mut pending.bytes);
-            self.pending = None;
+            let initial = pending.bytes;
             self.start_transfer(&initial, request.clone());
             vec![ModemConsumerEvent::TransferStarted(request)]
-        } else {
+        } else if should_wait_for_protocol_confirmation(pending.protocol, &pending.bytes) {
+            self.pending = Some(pending);
             Vec::new()
+        } else {
+            let plain = pending.bytes;
+            self.remember_plain_output(&plain);
+            vec![ModemConsumerEvent::WriteTerminal(plain)]
         }
     }
 
@@ -242,10 +249,10 @@ fn request_for_protocol(
             }
             _ => (protocol, ModemTransferDirection::Download),
         },
-        DetectedModemProtocol::XymodemNegotiation => (
-            xymodem_negotiation_protocol_hint(plain_history).unwrap_or(protocol),
-            ModemTransferDirection::Upload,
-        ),
+        DetectedModemProtocol::XymodemNegotiation => {
+            let protocol = xymodem_negotiation_protocol_hint(plain_history)?;
+            (protocol, ModemTransferDirection::Upload)
+        }
         DetectedModemProtocol::Xmodem | DetectedModemProtocol::Ymodem => {
             (protocol, ModemTransferDirection::Download)
         }
@@ -254,6 +261,13 @@ fn request_for_protocol(
         protocol,
         direction,
     })
+}
+
+fn should_wait_for_protocol_confirmation(protocol: DetectedModemProtocol, bytes: &[u8]) -> bool {
+    // Only framed ZMODEM headers have enough structure to justify holding output
+    // while waiting for more bytes; lone X/YMODEM negotiation bytes are common text.
+    matches!(protocol, DetectedModemProtocol::Zmodem)
+        && matches!(parse_zmodem_header_prefix(bytes), Ok(None))
 }
 
 fn xymodem_negotiation_protocol_hint(plain_history: &[u8]) -> Option<DetectedModemProtocol> {
@@ -355,5 +369,44 @@ mod tests {
                 direction: ModemTransferDirection::Upload
             }))
         ));
+    }
+
+    #[test]
+    fn uppercase_c_in_plain_output_does_not_start_xymodem() {
+        let mut consumer = ModemConsumer::new();
+        let events = consumer.process_server_output(b"SECURITY.md\r\n");
+        assert_eq!(terminal_bytes(&events), b"SECURITY.md\r\n");
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, ModemConsumerEvent::TransferStarted(_)))
+        );
+        assert!(consumer.active_transfer().is_none());
+    }
+
+    #[test]
+    fn uppercase_c_false_positive_does_not_swallow_later_output() {
+        let mut consumer = ModemConsumer::new();
+        assert_eq!(
+            consumer.process_server_output(b"C"),
+            vec![ModemConsumerEvent::WriteTerminal(b"C".to_vec())]
+        );
+        assert_eq!(
+            consumer.process_server_output(b"ontinued\r\n"),
+            vec![ModemConsumerEvent::WriteTerminal(b"ontinued\r\n".to_vec())]
+        );
+        assert!(consumer.active_transfer().is_none());
+    }
+
+    fn terminal_bytes(events: &[ModemConsumerEvent]) -> Vec<u8> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ModemConsumerEvent::WriteTerminal(bytes) => Some(bytes.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect()
     }
 }

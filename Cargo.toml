@@ -72,16 +72,18 @@ version = "2.0.0-gpui-preview.8"
 alacritty_terminal = "0.26.0"
 agent-client-protocol = "=0.14.0"
 anyhow = "1.0"
+async-trait = "0.1"
 async-process = "2.5"
 argon2 = { version = "0.5", default-features = false, features = ["std"] }
 base64 = "0.22"
+bytes = "1.11"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 clap_complete = "4.5"
 crossbeam-channel = "0.5"
 dashmap = "6.1"
-dirs = "6"
+dirs = "5"
 encoding_rs = "0.8"
 futures-util = "0.3"
 futures = "0.3"
@@ -156,10 +158,13 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 unicode-width = "0.2.2"
 uuid = { version = "1.23", features = ["v4", "serde"] }
+wasmtime = "39.0.0"
+wasmtime-wasi = "39.0.0"
 windows = "0.61"
 windows-core = "0.61"
 whoami = "1.6"
 zeroize = { version = "1.8", features = ["serde"] }
+zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
 
 [profile.release]
 lto = "thin"

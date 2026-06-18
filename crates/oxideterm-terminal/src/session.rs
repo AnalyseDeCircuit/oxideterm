@@ -24,7 +24,7 @@ use oxideterm_ssh::{
 use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TerminalEncoding, TerminalInputEncoder, TerminalOutputDecoder,
 };
-use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions};
+use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions, TerminalGraphicsSegment};
 use oxideterm_trzsz::{TrzszConsumer, TrzszConsumerEvent, TrzszTransfer, TrzszTransferPolicy};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::{

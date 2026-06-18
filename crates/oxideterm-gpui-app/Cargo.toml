@@ -67,7 +67,7 @@ sysinfo.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 walkdir = "2"
-zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
+zip.workspace = true
 zeroize.workspace = true
 
 [build-dependencies]

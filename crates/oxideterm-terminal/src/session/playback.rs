@@ -8,6 +8,7 @@ struct PlaybackTerminalSession {
     graphics_options: GraphicsOptions,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
+    graphics_alt_screen_active: bool,
     shell_integration: TerminalShellIntegration,
     scrollback_lines: usize,
 }
@@ -42,6 +43,7 @@ impl PlaybackTerminalSession {
             graphics_options: graphics_options.clone(),
             graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
+            graphics_alt_screen_active: false,
             shell_integration: TerminalShellIntegration::default(),
             scrollback_lines,
         }
@@ -58,6 +60,7 @@ impl PlaybackTerminalSession {
         self.parser = Processor::new();
         self.graphics_ingress = GraphicsIngress::new(self.graphics_options.clone());
         self.graphics = TerminalGraphicsState::default();
+        self.graphics_alt_screen_active = false;
         self.shell_integration = TerminalShellIntegration::default();
         self.pending_events.clear();
         while self.event_rx.try_recv().is_ok() {}
@@ -69,25 +72,28 @@ impl PlaybackTerminalSession {
         }
         let mut term = self.term.lock();
         let cursor = Cell::new(graphics_cursor_from_term(&term, self.size));
-        let events = self.graphics_ingress.advance_with(
+        self.graphics_ingress.advance_ordered(
             bytes,
-            |terminal_bytes| {
-                self.shell_integration.advance(
-                    &mut self.parser,
-                    &mut *term,
-                    terminal_bytes,
-                    |event| self.pending_events.push(event),
-                );
-                cursor.set(graphics_cursor_from_term(&term, self.size));
+            |segment| match segment {
+                TerminalGraphicsSegment::Terminal(terminal_bytes) => {
+                    self.shell_integration.advance(
+                        &mut self.parser,
+                        &mut *term,
+                        &terminal_bytes,
+                        |event| self.pending_events.push(event),
+                    );
+                    self.graphics
+                        .clear_for_alt_screen_transition(&term, &mut self.graphics_alt_screen_active);
+                    cursor.set(graphics_cursor_from_term(&term, self.size));
+                }
+                TerminalGraphicsSegment::Event(event) => {
+                    if let Some(response) = self.graphics.handle_event(event) {
+                        let _ = response;
+                    }
+                }
             },
             || cursor.get(),
         );
-        drop(term);
-        for event in events {
-            if let Some(response) = self.graphics.handle_event(event) {
-                let _ = response;
-            }
-        }
     }
 
     fn drain_alacritty_events(&mut self) -> bool {
@@ -303,6 +309,7 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
     fn clear_buffer(&mut self) {
         let mut term = self.term.lock();
         clear_terminal_buffer(&mut term);
+        self.graphics.clear();
     }
 
     fn buffer_text(&self) -> String {

@@ -600,6 +600,7 @@ impl LocalPtySession {
     pub fn clear_buffer(&mut self) {
         let mut term = self.term.lock();
         crate::session::clear_terminal_buffer(&mut term);
+        self.graphics.clear();
     }
 
     pub fn snapshot(&self) -> TerminalSnapshot {

@@ -24,7 +24,7 @@ use std::{
 use alacritty_terminal::{
     event::{Event, EventListener, Notify, OnResize, WindowSize},
     sync::FairMutex,
-    term::Term,
+    term::{Term, TermMode},
     tty::{self, EventedPty, EventedReadWrite},
     vte::ansi,
 };
@@ -33,7 +33,9 @@ use oxideterm_modem_transfer::{ModemConsumer, ModemConsumerEvent, ModemTransfer}
 use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TerminalEncoding, TerminalOutputDecoder,
 };
-use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions, TerminalGraphicsEvent};
+use oxideterm_terminal_graphics::{
+    GraphicsIngress, GraphicsOptions, TerminalGraphicsEvent, TerminalGraphicsSegment,
+};
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
 use crate::{
@@ -141,44 +143,56 @@ where
 
         let cursor = Cell::new(graphics_cursor_from_term(terminal, size));
         let mut parsed_bytes = 0usize;
-        let events = state.graphics.advance_with(
-            bytes,
-            |terminal_bytes| {
-                if let Some(hint) = state.encoding_detector.observe(terminal_bytes) {
-                    let _ = event_tx.send(TerminalEvent::EncodingHint(hint));
-                }
-                let decoded = state.output_decoder.decode_to_utf8_bytes(terminal_bytes);
-                parsed_bytes += terminal_bytes.len();
-                if state.output_events_enabled && !decoded.is_empty() {
-                    // Tauri feeds decoded display text into TerminalRecorder after xterm
-                    // receives it. Keep the native recorder on the same side of encoding
-                    // detection instead of recording raw PTY bytes.
-                    let _ = event_tx.send(TerminalEvent::Output(decoded.as_ref().to_vec()));
-                }
-                state.shell_integration.advance(
-                    &mut state.parser,
-                    terminal,
-                    decoded.as_ref(),
-                    |event| {
-                        let _ = event_tx.send(event);
-                    },
-                );
-                cursor.set(graphics_cursor_from_term(terminal, size));
-            },
-            || cursor.get(),
-        );
-
         let mut graphics_changed = false;
-        for event in events {
-            match event {
-                TerminalGraphicsEvent::Respond(bytes) => {
-                    state.push_priority_write(Cow::Owned(bytes));
-                }
-                event => {
-                    graphics_changed = true;
-                    let _ = graphics_tx.send(event);
-                }
-            }
+        let mut priority_writes = Vec::new();
+        {
+            let graphics = &mut state.graphics;
+            let parser = &mut state.parser;
+            let encoding_detector = &mut state.encoding_detector;
+            let output_decoder = &mut state.output_decoder;
+            let output_events_enabled = state.output_events_enabled;
+            let shell_integration = &mut state.shell_integration;
+            let alt_screen_active = &mut state.alt_screen_active;
+            graphics.advance_ordered(
+                bytes,
+                |segment| match segment {
+                    TerminalGraphicsSegment::Terminal(terminal_bytes) => {
+                        if let Some(hint) = encoding_detector.observe(&terminal_bytes) {
+                            let _ = event_tx.send(TerminalEvent::EncodingHint(hint));
+                        }
+                        let decoded = output_decoder.decode_to_utf8_bytes(&terminal_bytes);
+                        parsed_bytes += terminal_bytes.len();
+                        if output_events_enabled && !decoded.is_empty() {
+                            // Tauri feeds decoded display text into TerminalRecorder after xterm
+                            // receives it. Keep the native recorder on the same side of encoding
+                            // detection instead of recording raw PTY bytes.
+                            let _ = event_tx.send(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                        }
+                        shell_integration.advance(parser, terminal, decoded.as_ref(), |event| {
+                            let _ = event_tx.send(event);
+                        });
+                        if let Some(event) =
+                            LocalGraphicsState::alt_screen_clear_event(alt_screen_active, terminal)
+                        {
+                            graphics_changed = true;
+                            let _ = graphics_tx.send(event);
+                        }
+                        cursor.set(graphics_cursor_from_term(terminal, size));
+                    }
+                    TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Respond(bytes)) => {
+                        priority_writes.push(Cow::Owned(bytes));
+                    }
+                    TerminalGraphicsSegment::Event(event) => {
+                        graphics_changed = true;
+                        let _ = graphics_tx.send(event);
+                    }
+                },
+                || cursor.get(),
+            );
+        }
+
+        for bytes in priority_writes {
+            state.push_priority_write(bytes);
         }
 
         (parsed_bytes, graphics_changed)
@@ -699,6 +713,7 @@ struct LocalGraphicsState {
     encoding_detector: EncodingMismatchDetector,
     shell_integration: TerminalShellIntegration,
     modem_consumer: ModemConsumer,
+    alt_screen_active: bool,
 }
 
 impl LocalGraphicsState {
@@ -720,6 +735,7 @@ impl LocalGraphicsState {
             encoding_detector: EncodingMismatchDetector::new(encoding),
             shell_integration: TerminalShellIntegration::default(),
             modem_consumer: ModemConsumer::with_wake(modem_wake),
+            alt_screen_active: false,
         }
     }
 
@@ -767,6 +783,21 @@ impl LocalGraphicsState {
 
         self.write_list.push_front(bytes);
         self.ensure_next();
+    }
+
+    fn alt_screen_clear_event<U: EventListener>(
+        alt_screen_active: &mut bool,
+        terminal: &Term<U>,
+    ) -> Option<TerminalGraphicsEvent> {
+        let next_active = terminal.mode().contains(TermMode::ALT_SCREEN);
+        if next_active == *alt_screen_active {
+            return None;
+        }
+
+        *alt_screen_active = next_active;
+        // Local PTY graphics events are applied on the UI/session side, so emit a
+        // protocol-level clear at the same ordered point as the screen switch.
+        Some(TerminalGraphicsEvent::Delete { id: None })
     }
 }
 

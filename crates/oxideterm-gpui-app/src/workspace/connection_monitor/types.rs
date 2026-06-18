@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use gpui::{MouseButton, PathBuilder, canvas, fill, point, rgba};
+use gpui::{MouseButton, PathBuilder, Rgba, canvas, fill, point, rgb, rgba};
 use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
@@ -198,6 +198,14 @@ const TOPOLOGY_PAN_INITIAL_X: f32 = 0.0;
 const TOPOLOGY_PAN_INITIAL_Y: f32 = 50.0;
 const TOPOLOGY_MENU_WIDTH: f32 = 180.0;
 const TOPOLOGY_MENU_MAX_HEIGHT: f32 = 250.0;
+
+fn connection_monitor_surface_bg(theme_bg: u32, has_background: bool) -> Rgba {
+    if has_background {
+        rgba(0x00000000)
+    } else {
+        rgb(theme_bg)
+    }
+}
 
 #[derive(Clone, Copy)]
 struct TopologyTransform {

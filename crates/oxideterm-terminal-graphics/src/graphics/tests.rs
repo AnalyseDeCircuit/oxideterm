@@ -24,6 +24,33 @@ mod tests {
     }
 
     #[test]
+    fn ordered_advance_preserves_terminal_and_graphics_sequence() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let payload = BASE64.encode([0, 255, 0, 255]);
+        let sequence = format!("before\x1b_Ga=T,f=32,s=1,v=1,i=42,C=1;{payload}\x1b\\after");
+        let mut seen = Vec::new();
+
+        ingress.advance_ordered(
+            sequence.as_bytes(),
+            |segment| match segment {
+                TerminalGraphicsSegment::Terminal(bytes) => {
+                    seen.push(format!("terminal:{}", String::from_utf8(bytes).unwrap()));
+                }
+                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::ImageReady(_)) => {
+                    seen.push("image".to_string());
+                }
+                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Place(_)) => {
+                    seen.push("place".to_string());
+                }
+                TerminalGraphicsSegment::Event(_) => {}
+            },
+            cursor,
+        );
+
+        assert_eq!(seen, ["terminal:before", "image", "place", "terminal:after"]);
+    }
+
+    #[test]
     fn split_osc_sequence_is_consumed() {
         let mut png = RgbaImage::new(1, 1);
         png.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));

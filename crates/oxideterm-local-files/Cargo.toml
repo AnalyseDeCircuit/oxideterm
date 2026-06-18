@@ -11,4 +11,4 @@ serde.workspace = true
 sha2.workspace = true
 sysinfo.workspace = true
 walkdir = "2"
-zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }
+zip.workspace = true

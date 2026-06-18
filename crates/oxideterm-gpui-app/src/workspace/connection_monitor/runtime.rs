@@ -9,13 +9,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self.terminal_background_preferences("runtime").is_some();
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(theme.bg))
+            // Tauri makes page roots transparent when TabBgWrapper is active.
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
-            .child(self.render_connection_runtime_header(cx))
+            .child(self.render_connection_runtime_header(has_background, cx))
             .child(match self.active_connection_runtime_section {
                 ConnectionRuntimeSection::Overview => self.render_connection_runtime_overview(cx),
                 ConnectionRuntimeSection::Pool => self.render_connection_runtime_pool(cx),
@@ -25,7 +27,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_connection_runtime_header(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_connection_runtime_header(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
             .flex_none()
@@ -37,7 +43,9 @@ impl WorkspaceApp {
             .py(px(RUNTIME_HEADER_PADDING_Y))
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
+            // Preserve Tauri's background-image contract: the shared image layer
+            // sits behind the tab while ordinary header content stays readable.
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .child(
                 div()
                     .flex()

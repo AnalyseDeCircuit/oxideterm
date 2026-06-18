@@ -14,6 +14,7 @@ pub struct SshPtySession {
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
+    graphics_alt_screen_active: bool,
     output_queue: VecDeque<Vec<u8>>,
     output_queue_bytes: usize,
     magic_scan: MagicScanWindow,
@@ -120,6 +121,7 @@ impl SshPtySession {
             title: None,
             graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
+            graphics_alt_screen_active: false,
             output_queue: VecDeque::new(),
             output_queue_bytes: 0,
             magic_scan: MagicScanWindow::default(),
@@ -240,34 +242,42 @@ impl SshPtySession {
             cell_height: self.resize.cell_height,
         };
         let cursor = Cell::new(graphics_cursor_from_term(&term, size));
-        let events = self.graphics_ingress.advance_with(
+        let mut protocol_responses = Vec::new();
+        self.graphics_ingress.advance_ordered(
             bytes,
-            |terminal_bytes| {
-                if let Some(hint) = self.encoding_detector.observe(terminal_bytes) {
-                    self.pending_events.push(TerminalEvent::EncodingHint(hint));
+            |segment| match segment {
+                TerminalGraphicsSegment::Terminal(terminal_bytes) => {
+                    if let Some(hint) = self.encoding_detector.observe(&terminal_bytes) {
+                        self.pending_events.push(TerminalEvent::EncodingHint(hint));
+                    }
+                    let decoded = self.output_decoder.decode_to_utf8_bytes(&terminal_bytes);
+                    if self.output_events_enabled && !decoded.is_empty() {
+                        // Match the Tauri hook boundary: recording observes UTF-8
+                        // display output after terminal decoding, not SSH bytes.
+                        self.pending_events
+                            .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                    }
+                    self.shell_integration.advance(
+                        &mut self.parser,
+                        &mut *term,
+                        decoded.as_ref(),
+                        |event| self.pending_events.push(event),
+                    );
+                    self.graphics
+                        .clear_for_alt_screen_transition(&term, &mut self.graphics_alt_screen_active);
+                    cursor.set(graphics_cursor_from_term(&term, size));
                 }
-                let decoded = self.output_decoder.decode_to_utf8_bytes(terminal_bytes);
-                if self.output_events_enabled && !decoded.is_empty() {
-                    // Match the Tauri hook boundary: recording observes UTF-8
-                    // display output after terminal decoding, not SSH bytes.
-                    self.pending_events
-                        .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                TerminalGraphicsSegment::Event(event) => {
+                    if let Some(response) = self.graphics.handle_event(event) {
+                        protocol_responses.push(response);
+                    }
                 }
-                self.shell_integration.advance(
-                    &mut self.parser,
-                    &mut *term,
-                    decoded.as_ref(),
-                    |event| self.pending_events.push(event),
-                );
-                cursor.set(graphics_cursor_from_term(&term, size));
             },
             || cursor.get(),
         );
         drop(term);
-        for event in events {
-            if let Some(response) = self.graphics.handle_event(event) {
-                let _ = self.write_protocol_bytes(&response);
-            }
+        for response in protocol_responses {
+            let _ = self.write_protocol_bytes(&response);
         }
     }
 
@@ -786,6 +796,7 @@ impl TerminalSessionBackend for SshPtySession {
     fn clear_buffer(&mut self) {
         let mut term = self.term.lock();
         clear_terminal_buffer(&mut term);
+        self.graphics.clear();
     }
 
     fn command_output_text(&self, mark: &TerminalCommandMark) -> String {

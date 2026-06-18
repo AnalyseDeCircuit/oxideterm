@@ -152,12 +152,29 @@ impl GraphicsIngress {
         F: FnMut(&[u8]),
         C: FnMut() -> GraphicsCursor,
     {
+        let mut events = Vec::new();
+        self.advance_ordered(
+            bytes,
+            |segment| match segment {
+                TerminalGraphicsSegment::Terminal(terminal_bytes) => emit_terminal(&terminal_bytes),
+                TerminalGraphicsSegment::Event(event) => events.push(event),
+            },
+            &mut cursor,
+        );
+
+        events
+    }
+
+    pub fn advance_ordered<F, C>(&mut self, bytes: &[u8], mut emit: F, mut cursor: C)
+    where
+        F: FnMut(TerminalGraphicsSegment),
+        C: FnMut() -> GraphicsCursor,
+    {
         if !self.options.enabled {
-            emit_terminal(bytes);
-            return Vec::new();
+            emit(TerminalGraphicsSegment::Terminal(bytes.to_vec()));
+            return;
         }
 
-        let mut events = Vec::new();
         let mut terminal_bytes = Vec::new();
         for &byte in bytes {
             let before_state = self.state.clone();
@@ -166,22 +183,27 @@ impl GraphicsIngress {
             terminal_bytes.extend(result.terminal_bytes);
             if !result.events.is_empty() {
                 if !terminal_bytes.is_empty() {
-                    emit_terminal(&terminal_bytes);
-                    terminal_bytes.clear();
+                    emit(TerminalGraphicsSegment::Terminal(std::mem::take(
+                        &mut terminal_bytes,
+                    )));
                 }
-                events.extend(result.events);
+                // Preserve protocol ordering for callers that must synchronize
+                // graphics state with terminal side effects such as screen swaps.
+                for event in result.events {
+                    emit(TerminalGraphicsSegment::Event(event));
+                }
             } else if entered_control_sequence(&before_state, &self.state)
                 && !terminal_bytes.is_empty()
             {
-                emit_terminal(&terminal_bytes);
-                terminal_bytes.clear();
+                emit(TerminalGraphicsSegment::Terminal(std::mem::take(
+                    &mut terminal_bytes,
+                )));
             }
         }
 
         if !terminal_bytes.is_empty() {
-            emit_terminal(&terminal_bytes);
+            emit(TerminalGraphicsSegment::Terminal(terminal_bytes));
         }
-        events
     }
 
     fn advance_byte(&mut self, byte: u8, cursor: GraphicsCursor, result: &mut GraphicsAdvance) {

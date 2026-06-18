@@ -10,7 +10,7 @@ mod tests {
         term::Config,
         vte::ansi::{Color, NamedColor, Processor, Rgb, StdSyncHandler},
     };
-    use oxideterm_terminal_graphics::GraphicsIngress;
+    use oxideterm_terminal_graphics::{GraphicsIngress, TerminalGraphicsSegment};
 
     use crate::{
         color::{
@@ -471,6 +471,47 @@ wait
         assert_eq!(image.cols, 1);
         assert_eq!(image.rows, 1);
         assert!(image.data.is_some());
+    }
+
+    #[test]
+    fn yazi_kgp_old_image_is_cleared_after_alt_screen_exit() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 24,
+            cell_width: 10,
+            cell_height: 20,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        let mut alt_screen_active = false;
+        let cursor = std::cell::Cell::new(graphics_cursor_from_term(&term.borrow(), size));
+        let payload = "AAAA/////wAAAP8A";
+        let sequence = format!(
+            "\x1b[?1049h\x1b7\x1b[6;41H\x1b_Gq=2,a=T,z=-1,C=1,f=24,s=2,v=2,m=0;{payload}\x1b\\\x1b8\x1b[?1049l"
+        );
+
+        ingress.advance_ordered(
+            sequence.as_bytes(),
+            |segment| match segment {
+                TerminalGraphicsSegment::Terminal(bytes) => {
+                    let mut term = term.borrow_mut();
+                    parser.advance(&mut *term, &bytes);
+                    graphics.clear_for_alt_screen_transition(&term, &mut alt_screen_active);
+                    cursor.set(graphics_cursor_from_term(&term, size));
+                }
+                TerminalGraphicsSegment::Event(event) => {
+                    graphics.handle_event(event);
+                }
+            },
+            || cursor.get(),
+        );
+
+        let term = term.borrow();
+        let snapshot = snapshot_from_term(&term, size, &graphics);
+        assert!(!term.mode().contains(TermMode::ALT_SCREEN));
+        assert!(snapshot.images.is_empty());
     }
 
     #[test]

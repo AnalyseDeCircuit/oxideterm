@@ -3,12 +3,13 @@ use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 impl WorkspaceApp {
     pub(super) fn render_topology_surface(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self.terminal_background_preferences("topology").is_some();
         div()
             .size_full()
             .flex()
             .flex_col()
             .overflow_hidden()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             .child(
                 div()
@@ -50,24 +51,25 @@ impl WorkspaceApp {
                     .flex_1()
                     .relative()
                     .overflow_hidden()
-                    .child(self.render_connection_topology(cx)),
+                    .child(self.render_connection_topology(has_background, cx)),
             )
             .into_any_element()
     }
 
     pub(super) fn render_connection_runtime_topology(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self.terminal_background_preferences("runtime").is_some();
         div()
             .id("connection-runtime-topology")
             .flex_1()
             .min_h_0()
             .relative()
             .overflow_hidden()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             // Runtime already labels this section as Connection Matrix, so the
             // embedded graph starts directly at the canvas.
-            .child(self.render_connection_topology(cx))
+            .child(self.render_connection_topology(has_background, cx))
             .into_any_element()
     }
 
@@ -363,7 +365,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_connection_topology(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_connection_topology(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some(snapshot) = self.connection_monitor.topology_snapshot.as_ref() else {
             return monitor_center_state(
@@ -418,7 +424,7 @@ impl WorkspaceApp {
             .relative()
             .size_full()
             .overflow_hidden()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .rounded(px(self.tokens.radii.lg))
             .cursor(if self.connection_monitor.topology_drag.is_some() {
                 CursorStyle::ClosedHand
@@ -464,7 +470,9 @@ impl WorkspaceApp {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, _| {
-                        window.paint_quad(fill(bounds.clone(), rgb(theme.bg)));
+                        if !has_background {
+                            window.paint_quad(fill(bounds.clone(), rgb(theme.bg)));
+                        }
                         let mut y = 0.0;
                         while y <= f32::from(bounds.size.height) {
                             let mut x = 0.0;
@@ -624,7 +632,7 @@ impl WorkspaceApp {
         div()
             .size_full()
             .overflow_hidden()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .child(graph)
             .into_any_element()
     }

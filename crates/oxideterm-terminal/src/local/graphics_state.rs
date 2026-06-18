@@ -78,10 +78,7 @@ impl TerminalGraphicsState {
                     self.remove_image(id);
                     self.placements.retain(|placement| placement.id != id);
                 } else {
-                    self.images.clear();
-                    self.placements.clear();
-                    self.image_order.clear();
-                    self.storage_bytes = 0;
+                    self.clear();
                 }
                 None
             }
@@ -91,6 +88,31 @@ impl TerminalGraphicsState {
                 None
             }
         }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.images.clear();
+        self.placements.clear();
+        self.image_order.clear();
+        self.storage_bytes = 0;
+    }
+
+    pub(crate) fn clear_for_alt_screen_transition<T: EventListener>(
+        &mut self,
+        term: &Term<T>,
+        alt_screen_active: &mut bool,
+    ) -> bool {
+        let next_active = term.mode().contains(TermMode::ALT_SCREEN);
+        if next_active == *alt_screen_active {
+            return false;
+        }
+
+        *alt_screen_active = next_active;
+        // Graphics placements are not screen-buffer scoped yet, so clear them on
+        // normal/alternate buffer switches to avoid drawing TUI images on the
+        // restored shell screen.
+        self.clear();
+        true
     }
 
     fn visible_images(&self, display_offset: usize, rows: usize) -> Vec<TerminalImageSnapshot> {

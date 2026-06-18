@@ -30,6 +30,19 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn connection_monitor_surface_bg_is_transparent_when_background_is_active() {
+        let theme_bg = 0x112233;
+        assert_eq!(
+            connection_monitor_surface_bg(theme_bg, true),
+            rgba(0x00000000)
+        );
+        assert_eq!(
+            connection_monitor_surface_bg(theme_bg, false),
+            rgb(theme_bg)
+        );
+    }
+
     fn connection_options(count: usize) -> Vec<MonitorConnectionOption> {
         (0..count)
             .map(|index| MonitorConnectionOption {

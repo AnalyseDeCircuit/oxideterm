@@ -20,6 +20,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self
+            .terminal_background_preferences("connection_monitor")
+            .is_some();
         self.sync_connection_monitor_section_list_state();
         let state = self.connection_monitor_section_list_state.clone();
         let workspace = cx.entity();
@@ -27,7 +30,7 @@ impl WorkspaceApp {
         div()
             .id("connection-monitor-scroll")
             .size_full()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             .child(tauri_virtual_list(state, spec, move |index, _window, cx| {
                 workspace.update(cx, |this, cx| {
@@ -159,13 +162,16 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let stats = self.connection_monitor.pool_stats.as_ref();
         let idle_timeout_secs = stats.map_or(0, |stats| stats.idle_timeout_secs);
+        let has_background = self
+            .terminal_background_preferences("connection_pool")
+            .is_some();
         self.sync_connection_pool_body_list_state();
 
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             .child(
                 div()
@@ -227,6 +233,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let stats = self.connection_monitor.pool_stats.as_ref();
         let idle_timeout_secs = stats.map_or(0, |stats| stats.idle_timeout_secs);
+        let has_background = self.terminal_background_preferences("runtime").is_some();
         self.sync_connection_pool_body_list_state();
 
         div()
@@ -235,7 +242,7 @@ impl WorkspaceApp {
             .min_h_0()
             .flex()
             .flex_col()
-            .bg(rgb(theme.bg))
+            .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             // Runtime already owns the title and section switcher. Keep this
             // embedded pool view to the table/body chrome only.
