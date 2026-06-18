@@ -1,6 +1,6 @@
 # Connections and Forwards
 
-Use the Sessions, Connection Pool, Connection Monitor, and forwarding surfaces for normal SSH work. The CLI companion is only for headless validation, export, and repeatable setup.
+Use the Sessions, Connection Pool, Connection Monitor, Host Tools, graphics/VNC, and forwarding surfaces for normal SSH work. The CLI companion is only for headless validation, export, and repeatable setup.
 
 ## Saved Connections
 
@@ -18,8 +18,10 @@ Saved profiles and live runtime nodes are different things:
 - SSH node: the live or reconnecting runtime state for a host.
 - Terminal session: a visible shell attached to an SSH node.
 - SFTP session: a file browsing or transfer surface attached to an SSH node.
+- Host Tools snapshot: a resource view sampled through the owning SSH node.
+- Graphics/VNC session: a visual viewer attached to a node-owned graphics runtime.
 
-Use Connection Pool and Connection Monitor when a terminal looks stuck, SFTP cannot read a directory, or reconnect behavior is unclear. Reconnect the runtime from the app state; do not delete and recreate the saved profile just to reconnect.
+Use Connection Pool and Connection Monitor when a terminal looks stuck, SFTP cannot read a directory, Host Tools look stale, a graphics/VNC viewer disconnects, or reconnect behavior is unclear. Reconnect the runtime from the app state; do not delete and recreate the saved profile just to reconnect.
 
 ## Connecting
 
@@ -29,9 +31,21 @@ Typical flow:
 2. Select a saved connection or create one.
 3. Open the connection.
 4. Wait for the SSH node and terminal tab to become live.
-5. If needed, open SFTP, IDE, or forwarding from the same connected node.
+5. If needed, open SFTP, IDE, Host Tools, graphics/VNC, or forwarding from the same connected node.
 
 For unstable hosts, keep Connection Monitor open while testing. It shows whether a node is connected, connecting, stale, or unavailable.
+
+## Host Tools
+
+Host Tools are node-level views for inspecting the remote environment. Use them for processes, Docker, services, tmux, packages, logs, ports, filesystems, scheduled tasks, and metrics.
+
+Resource snapshots can become stale independently of the terminal tab. Refresh the Host Tools page or reconnect the owning node before retrying actions. Host Tools actions should remain explicit and reviewable; do not use them as hidden background cleanup.
+
+## Graphics And VNC
+
+Graphics/VNC sessions are visual app surfaces attached to a connected node. They are useful when a remote workflow needs a desktop or graphical application rather than terminal output.
+
+The viewer state is separate from terminal scrollback and saved connection data. If the viewer disconnects, reconnect or restart the graphics session from the node context; do not duplicate the saved SSH profile.
 
 ## Serial Terminals
 

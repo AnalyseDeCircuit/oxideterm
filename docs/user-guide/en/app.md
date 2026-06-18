@@ -1,6 +1,6 @@
 # Application Guide
 
-This guide introduces the OxideTerm desktop app. Use it for day-to-day terminal, SSH, file, forwarding, AI, plugin, sync, and settings work. The `oxideterm` CLI is a separate companion for automation, diagnostics, CI, migration, and recovery.
+This guide introduces the OxideTerm desktop app. Use it for day-to-day terminal, SSH, file, forwarding, Host Tools, graphics/VNC, AI, plugin, sync, and settings work. The `oxideterm` CLI is a separate companion for automation, diagnostics, CI, migration, and recovery.
 
 ## First Run
 
@@ -12,7 +12,7 @@ Recommended first pass:
 2. Type a simple command such as `pwd` or `echo ok`.
 3. Open Settings and review terminal font, theme, shell, and AI settings.
 4. Add one saved SSH connection.
-5. Connect to the host and verify terminal input, file browsing, and connection status.
+5. Connect to the host and verify terminal input, file browsing, Host Tools, and connection status.
 
 ## App Layout
 
@@ -22,15 +22,16 @@ Primary areas:
 
 - Sessions: saved connections, active SSH nodes, and terminal sessions.
 - Connection pool: reusable connection/runtime state.
-- Connection monitor: health and reconnect status.
+- Connection monitor and Host Tools: health, reconnect status, processes, Docker, services, tmux, packages, logs, ports, filesystems, and metrics.
 - Connection matrix: a broader connection overview.
 - File manager and SFTP: browse, preview, upload, download, and edit remote files.
+- Graphics/VNC: open visual remote sessions when a connected node supports them.
 - Plugins: install, enable, disable, and configure plugins.
 - Cloud sync: sync app state and inspect sync status.
 - Notifications: review app events and warnings.
 - Settings: configure app behavior.
 
-Tabs are the main work surface. A tab can hold a local terminal, SSH terminal, SFTP view, IDE workspace, settings page, file manager, plugin manager, monitor, or other app surface.
+Tabs are the main work surface. A tab can hold a local terminal, SSH terminal, SFTP view, IDE workspace, graphics/VNC view, settings page, file manager, plugin manager, monitor, or other app surface.
 
 ## Tabs and Panes
 
@@ -45,6 +46,13 @@ Typical terminal workflow:
 3. Split the terminal if needed.
 4. Use command marks and shell history to follow command output.
 5. Keep the connection monitor visible for long-running or unstable sessions.
+
+Terminal-adjacent helpers stay tied to the active terminal pane:
+
+- Use the terminal context menu or command bar for copy, paste, search, command selection, and explicit transfer actions.
+- Configure terminal background images from Settings; the background is visual state, not terminal scrollback.
+- When an X/Y/ZMODEM prompt appears after a real transfer command such as `rz`, `sz`, `rx`, or `rb`, choose the local file or directory and watch progress from the visible prompt/notification.
+- Manage privilege credentials from Settings. Do not place sudo/su passwords in connection names, notes, quick commands, AI prompts, logs, or support bundles.
 
 ## Saved Connections
 
@@ -64,6 +72,8 @@ From the Sessions area, select a saved connection and open it. The app creates r
 
 If a host disconnects, use the connection pool or monitor to understand whether the runtime is reconnecting, stale, or unavailable. Reconnect from the app state instead of recreating the saved profile.
 
+Host Tools and graphics/VNC sessions also belong to the connected node. Opening or closing those views should not rewrite the saved profile, and stale resource snapshots should be refreshed or reconnected from the node state.
+
 ## SFTP and Remote Files
 
 Use SFTP or the file manager for remote file operations:
@@ -73,6 +83,8 @@ Use SFTP or the file manager for remote file operations:
 - Upload and download files.
 - Start large transfers and track their progress.
 - Retry transfers after reconnecting an unstable host.
+
+Terminal-native modem transfers are separate from SFTP. Use them when the remote program expects X/Y/ZMODEM protocol bytes through the current terminal channel.
 
 Before overwriting important remote files, confirm the path and keep a backup. Remote file writes are real writes on the target system.
 
@@ -91,6 +103,12 @@ Use the forwarding UI for local, remote, and dynamic forwards:
 - Dynamic forward: create a SOCKS-style tunnel.
 
 Use auto-start only for forwards that should start whenever the owning connection opens. Keep the connection monitor visible when testing a new forward.
+
+## Host Tools and Graphics
+
+Use Host Tools from the connected-node context when you need a read-oriented view of processes, containers, services, tmux, packages, logs, ports, filesystems, scheduled tasks, or host metrics. Actions that change host state should be reviewed in the app confirmation flow before execution.
+
+Use graphics/VNC sessions for remote visual workflows. The viewer is an app surface attached to the connected node; rendered frames are not terminal output, and closing the viewer is separate from deleting the saved connection.
 
 ## AI Sidebar
 
@@ -112,7 +130,8 @@ Use Settings for interactive configuration:
 
 - General app behavior.
 - Appearance and theme.
-- Terminal renderer, shell, font, encoding, and local terminal behavior.
+- Terminal renderer, shell, font, encoding, background images, transfer helpers, and local terminal behavior.
+- Privilege credentials and their prompt/scope settings.
 - SSH, reconnect, SFTP, and IDE behavior.
 - AI providers, model selection, memory, tool use, and knowledge settings.
 - Keybindings, help, and update information.

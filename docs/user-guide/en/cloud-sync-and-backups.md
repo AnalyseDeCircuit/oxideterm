@@ -22,13 +22,13 @@ Create a backup before high-impact operations:
 - `.oxide` imports.
 - Cloud sync apply or conflict resolution.
 - Plugin state migrations.
-- Settings changes that affect terminal, SSH, AI, or sync behavior.
+- Settings changes that affect terminal, SSH, privilege credentials, AI, or sync behavior.
 
 Use the app's backup or restore surface to inspect what will change before applying it. For important restores, check the plan first, apply the smallest needed section, then reopen the affected app surface and verify the result.
 
 ## Support Bundles
 
-Use support bundles when you need to share diagnostics. Review the generated bundle before sending it. It should contain paths, counts, warnings, revisions, and secret hints rather than secret values.
+Use support bundles when you need to share diagnostics. Review the generated bundle before sending it. It should contain paths, counts, warnings, revisions, and secret hints rather than secret values, including for privilege credentials.
 
 ## CLI Companion
 

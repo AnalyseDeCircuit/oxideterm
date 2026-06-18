@@ -8,7 +8,7 @@ On macOS, packaged artifacts include a `.dmg`, an `.app.zip`, and a portable arc
 
 ## First Launch
 
-Open the OxideTerm desktop app first. The main window is a tabbed SSH workspace with a left activity bar for sessions, files, forwarding, plugins, cloud sync, notifications, and settings.
+Open the OxideTerm desktop app first. The main window is a tabbed SSH workspace with a left activity bar for sessions, files, forwarding, Host Tools, graphics/VNC, plugins, cloud sync, notifications, and settings.
 
 Start with a local terminal tab:
 
@@ -18,15 +18,17 @@ Start with a local terminal tab:
 4. Add one saved SSH connection.
 5. Connect to the host and confirm the terminal opens.
 
-After that, try the app surfaces you expect to use most: SFTP/file manager, connection monitor, port forwarding, IDE workspace, AI sidebar, and plugin manager.
+After that, try the app surfaces you expect to use most: SFTP/file manager, connection monitor, Host Tools, port forwarding, graphics/VNC, IDE workspace, AI sidebar, and plugin manager.
 
 ## Check The App
 
 After the first local terminal and first SSH connection work, check the app surfaces you expect to use:
 
 - Sessions: saved connections and active SSH nodes.
-- Connection monitor: connection health, stale nodes, and reconnect state.
+- Connection monitor and Host Tools: connection health, stale nodes, reconnect state, host resources, and action results.
 - File manager or SFTP: remote directory browsing and transfers.
+- Terminal helpers: context menu actions, command bar actions, background image settings, and X/Y/ZMODEM transfer prompts.
+- Graphics/VNC: visual remote sessions when the connected node supports them.
 - IDE workspace: remote project folders and editor tabs.
 - AI sidebar: current workspace context and tool approvals.
 - Plugins: installed plugins and plugin settings.
@@ -74,11 +76,11 @@ Profile data is stored under `profiles/<name>` inside the selected config direct
 
 ## Safe Write Pattern
 
-For everyday app use, make ordinary configuration changes from Settings, the connection manager, the plugin manager, or the cloud sync surface. For scripted CLI writes, inspect the plan first, then repeat with `--yes` only when the change is expected:
+For everyday app use, make ordinary configuration changes from Settings, the connection manager, the privilege credentials page, the plugin manager, or the cloud sync surface. For scripted CLI writes, inspect the plan first, then repeat with `--yes` only when the change is expected:
 
 ```sh
 oxideterm settings set terminal.fontSize 14 --dry-run --json
 oxideterm settings set terminal.fontSize 14 --yes
 ```
 
-Backups and restore flows should be used before high-risk changes such as bulk imports, cloud-sync apply, or `.oxide` imports.
+Backups and restore flows should be used before high-risk changes such as bulk imports, cloud-sync apply, privilege credential changes, or `.oxide` imports.

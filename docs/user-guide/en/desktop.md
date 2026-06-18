@@ -2,7 +2,7 @@
 
 ## First Launch
 
-Open OxideTerm, then check the left activity bar for the main work areas: sessions, connection pool, connection monitor, connection matrix, plugins, cloud sync, file manager, notifications, and settings.
+Open OxideTerm, then check the left activity bar for the main work areas: sessions, connection pool, connection monitor, Host Tools, graphics/VNC, plugins, cloud sync, file manager, notifications, and settings.
 
 If the app starts with no sessions, create a local shell tab first. This verifies the terminal renderer, shell integration, input handling, and theme settings before you add remote hosts.
 
@@ -12,7 +12,8 @@ Use the activity bar as the entry point for app surfaces:
 
 - Sessions: create, open, group, and monitor SSH work.
 - File manager and SFTP: browse files and manage transfers.
-- Connection pool and monitor: inspect connection runtime state.
+- Connection pool, monitor, and Host Tools: inspect connection runtime state, resource snapshots, processes, containers, services, tmux, logs, ports, and metrics.
+- Graphics/VNC: open visual sessions attached to a connected node.
 - Plugins: manage installed plugins and plugin settings.
 - Cloud sync: inspect sync status and run sync actions.
 - Notifications: review recent warnings and errors.
@@ -33,6 +34,8 @@ Common pane patterns:
 - Keep one monitoring pane open for logs while another pane performs edits or deploy steps.
 - Close only the pane or tab you no longer need; keep the saved connection profile intact.
 
+Use the terminal context menu and command bar for explicit pane actions such as copy, paste, search, command selection, and terminal-native file transfers. Background images and terminal image placements are visual/rendering state; if a full-screen TUI leaves stale image content behind, clear or reopen the pane rather than editing saved connection data.
+
 ## Saved Connections
 
 Use saved connections for hosts you expect to reuse. Set the host, user, port, group, color, tags, auth method, and optional post-connect command. Prefer SSH agent or key-based auth where possible.
@@ -51,6 +54,10 @@ Runtime state answers different questions than saved profiles:
 - Runtime node: is that host currently connected or reconnecting?
 - Terminal session: which visible shell is attached to the runtime?
 - SFTP session: is file browsing using a live transport?
+- Host Tools snapshot: what did the last resource sampler observe?
+- Graphics/VNC session: is the visual viewer connected to a live node-owned session?
+
+Use Host Tools for read-oriented host inspection. Keep destructive host actions explicit and review app confirmation output before running them.
 
 ## File Manager and SFTP
 
@@ -81,6 +88,8 @@ For scripted or repeatable changes, use the CLI with `--dry-run` first. The CLI 
 Use tabs and the activity bar for normal navigation. Use the command palette when you know the action name but do not want to leave the keyboard.
 
 If a surface opens the wrong context, switch back to the Sessions view, select the intended connection or tab, and reopen the surface from there.
+
+For context-sensitive helpers such as privilege prompts or modem transfers, make the intended terminal pane active first. The helper should act on the active pane/session rather than on a prompt string, tab title, or saved host label.
 
 ## Updates
 
