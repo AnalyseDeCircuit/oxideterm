@@ -5,6 +5,7 @@ use gpui::{
     point, px, rgb, rgba, size,
 };
 use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
+use unicode_width::UnicodeWidthChar;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{
@@ -316,6 +317,94 @@ pub(crate) fn paint_text_run(
             Some(metrics.cell_width),
         )
         .paint(position, metrics.line_height, window, cx);
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TerminalGhostTextSegment {
+    pub(crate) col_offset: usize,
+    pub(crate) text: String,
+    pub(crate) cells: usize,
+    pub(crate) cell_stride: usize,
+}
+
+pub(crate) fn paint_ghost_text_run(
+    run: &BatchedTextRun,
+    origin: gpui::Point<Pixels>,
+    metrics: &TerminalMetrics,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for segment in ghost_text_grid_segments(&run.text) {
+        let position = origin
+            + point(
+                px((run.col + segment.col_offset) as f32 * metrics.cell_width_f32()),
+                px(run.row as f32 * metrics.line_height_f32()),
+            );
+        let mut style = run.style.clone();
+        style.len = segment.text.len();
+        let _ = window
+            .text_system()
+            .shape_line(
+                SharedString::from(segment.text),
+                metrics.font_size,
+                &[style],
+                Some(px(segment.cell_stride as f32 * metrics.cell_width_f32())),
+            )
+            .paint(position, metrics.line_height, window, cx);
+    }
+}
+
+pub(crate) fn ghost_text_grid_segments(text: &str) -> Vec<TerminalGhostTextSegment> {
+    // GPUI can force one glyph advance for a shaped line, but terminal ghost
+    // text needs mixed advances: ASCII at one cell and CJK at two cells.
+    // Segmenting keeps every run on the terminal grid without touching normal
+    // terminal-buffer text rendering.
+    let mut segments = Vec::new();
+    let mut current_text = String::new();
+    let mut current_cells = 0;
+    let mut current_col_offset = 0;
+    let mut current_cell_stride = None;
+    let mut col_offset = 0;
+
+    for ch in text.chars() {
+        let cell_stride = ch.width().unwrap_or(0);
+        if cell_stride == 0 {
+            current_text.push(ch);
+            continue;
+        }
+
+        if current_cell_stride.is_none() {
+            current_col_offset = col_offset;
+            current_cell_stride = Some(cell_stride);
+        } else if current_cell_stride != Some(cell_stride) {
+            if !current_text.is_empty() {
+                segments.push(TerminalGhostTextSegment {
+                    col_offset: current_col_offset,
+                    text: std::mem::take(&mut current_text),
+                    cells: current_cells,
+                    cell_stride: current_cell_stride.unwrap_or(1),
+                });
+            }
+            current_col_offset = col_offset;
+            current_cell_stride = Some(cell_stride);
+            current_cells = 0;
+        }
+
+        current_text.push(ch);
+        current_cells += cell_stride;
+        col_offset += cell_stride;
+    }
+
+    if !current_text.is_empty() {
+        segments.push(TerminalGhostTextSegment {
+            col_offset: current_col_offset,
+            text: current_text,
+            cells: current_cells,
+            cell_stride: current_cell_stride.unwrap_or(1),
+        });
+    }
+
+    segments
 }
 
 fn paint_powerline_separators(

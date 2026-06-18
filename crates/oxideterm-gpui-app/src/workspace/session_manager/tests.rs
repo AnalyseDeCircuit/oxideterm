@@ -1,6 +1,33 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxideterm_gpui_ui::TauriTableMetrics;
+
+    const MANAGER_COL_CHECKBOX: f32 = 32.0;
+    const MANAGER_COL_NAME_BASIS: f32 = 140.0;
+    const MANAGER_COL_HOST: f32 = 130.0;
+    const MANAGER_COL_PORT: f32 = 50.0;
+    const MANAGER_COL_USERNAME: f32 = 90.0;
+    const MANAGER_COL_AUTH: f32 = 72.0;
+    const MANAGER_COL_GROUP: f32 = 100.0;
+    const MANAGER_COL_LAST_USED: f32 = 90.0;
+    const MANAGER_COL_ACTIONS: f32 = 84.0;
+
+    fn manager_table_min_width_for_metrics(metrics: TauriTableMetrics) -> f32 {
+        // Tauri ConnectionTable columns: px-2 wrapper plus w-8, w-[140px],
+        // w-[130px], w-[50px], w-[90px], w-[72px], w-[100px], w-[90px],
+        // and sticky w-[84px] actions.
+        metrics.padding_x * 2.0
+            + MANAGER_COL_CHECKBOX
+            + MANAGER_COL_NAME_BASIS
+            + MANAGER_COL_HOST
+            + MANAGER_COL_PORT
+            + MANAGER_COL_USERNAME
+            + MANAGER_COL_AUTH
+            + MANAGER_COL_GROUP
+            + MANAGER_COL_LAST_USED
+            + MANAGER_COL_ACTIONS
+    }
 
     fn base_form() -> NewConnectionForm {
         NewConnectionForm {

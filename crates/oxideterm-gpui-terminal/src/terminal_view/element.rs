@@ -15,6 +15,7 @@ use oxideterm_terminal::{
 };
 use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row};
 use parking_lot::Mutex;
+use unicode_width::UnicodeWidthChar;
 
 use crate::app::{TerminalInputHandler, TerminalPane, TerminalRenderedImage};
 use crate::terminal_ui::*;
@@ -27,9 +28,9 @@ mod paint;
 mod style;
 
 pub(crate) use layout::*;
-#[cfg(test)]
-pub(crate) use paint::powerline_separator_points;
 use paint::*;
+#[cfg(test)]
+pub(crate) use paint::{ghost_text_grid_segments, powerline_separator_points};
 pub(crate) use style::*;
 
 pub(crate) struct TerminalElement {
@@ -928,7 +929,7 @@ impl TerminalElement {
             return None;
         }
 
-        let visible_text = text.chars().take(remaining_cells).collect::<String>();
+        let (visible_text, visible_cells) = ghost_text_prefix_for_cells(text, remaining_cells);
         if visible_text.is_empty() {
             return None;
         }
@@ -936,11 +937,32 @@ impl TerminalElement {
         Some(BatchedTextRun {
             row: self.snapshot.cursor_row,
             col,
-            cells: visible_text.chars().count(),
+            cells: visible_cells,
             style: ghost_text_run(&visible_text, &self.theme, &self.metrics),
             text: visible_text,
         })
     }
+}
+
+fn ghost_text_prefix_for_cells(text: &str, max_cells: usize) -> (String, usize) {
+    // Ghost text is painted on the terminal grid, so clipping must use terminal
+    // cell width rather than Rust char count. Otherwise CJK hints can overlap
+    // the following columns while the layout believes they still fit.
+    let mut prefix = String::new();
+    let mut cells = 0;
+    for ch in text.chars() {
+        let width = ch.width().unwrap_or(0);
+        if width == 0 {
+            prefix.push(ch);
+            continue;
+        }
+        if cells + width > max_cells {
+            break;
+        }
+        prefix.push(ch);
+        cells += width;
+    }
+    (prefix, cells)
 }
 
 fn visual_line_for_row_with_bidi(
@@ -1575,7 +1597,7 @@ impl Element for TerminalElement {
                     paint_text_run(run, origin, &self.metrics, window, cx);
                 }
                 if let Some(ghost_text) = &layout.ghost_text {
-                    paint_text_run(ghost_text, origin, &self.metrics, window, cx);
+                    paint_ghost_text_run(ghost_text, origin, &self.metrics, window, cx);
                 }
                 if let Some(marked_text) = &layout.marked_text {
                     paint_text_run(marked_text, origin, &self.metrics, window, cx);

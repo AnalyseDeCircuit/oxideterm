@@ -638,10 +638,17 @@ impl WorkspaceApp {
     }
 
     fn settings_privilege_scope_rows(&self) -> Vec<SettingsPrivilegeScopeRow> {
-        // SSH sudo/su autofill is disabled. Keep the privilege credential page
-        // scoped to local shells so users cannot save remote sudo secrets that
-        // the terminal intentionally ignores.
-        vec![self.settings_local_privilege_scope_row()]
+        let mut rows = vec![self.settings_local_privilege_scope_row()];
+        // Saved SSH connections already own privilege credential metadata in the
+        // connection store. Expose those explicit scopes instead of letting the
+        // terminal helper infer remote secrets from host/title/runtime matches.
+        rows.extend(
+            self.connection_store
+                .connections()
+                .iter()
+                .map(|connection| self.settings_saved_connection_privilege_scope_row(connection)),
+        );
+        rows
     }
 
     fn settings_local_privilege_scope_row(&self) -> SettingsPrivilegeScopeRow {
@@ -666,10 +673,29 @@ impl WorkspaceApp {
         }
     }
 
+    fn settings_saved_connection_privilege_scope_row(
+        &self,
+        connection: &oxideterm_connections::SavedConnection,
+    ) -> SettingsPrivilegeScopeRow {
+        SettingsPrivilegeScopeRow {
+            id: connection.id.clone(),
+            title: connection.name.clone(),
+            subtitle: format!("{}@{}:{}", connection.username, connection.host, connection.port),
+            username_placeholder: connection.username.clone(),
+            credential_count: connection.privilege_credentials.len(),
+            local: false,
+        }
+    }
+
     fn settings_privilege_active_scope_id(&self) -> String {
         let selected = self.settings_page.privilege_scope_id.as_deref();
-        if selected == Some(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID) {
-            return LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
+        if let Some(selected) = selected
+            && self
+                .settings_privilege_scope_rows()
+                .iter()
+                .any(|scope| scope.id == selected)
+        {
+            return selected.to_string();
         }
         LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string()
     }

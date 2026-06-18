@@ -89,6 +89,84 @@ fn terminal_element_truncates_autosuggest_ghost_text_to_visible_columns() {
 }
 
 #[test]
+fn terminal_element_counts_wide_ghost_text_cells() {
+    let mut snapshot = selection_snapshot("Password:");
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 9;
+    snapshot.lines[0].cells_mut()[9].cursor = true;
+    snapshot.lines[0].refresh_signature();
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .ghost_text(Some("按Enter 填充保存的密码".to_string()))
+    .layout();
+
+    let ghost_text = layout.ghost_text.expect("ghost text");
+    assert_eq!(ghost_text.col, 9);
+    assert_eq!(ghost_text.cells, 22);
+}
+
+#[test]
+fn terminal_element_segments_mixed_width_ghost_text_for_grid_painting() {
+    let segments = ghost_text_grid_segments("按Enter 填充已保存的提权密码");
+
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments[0].text, "按");
+    assert_eq!(segments[0].col_offset, 0);
+    assert_eq!(segments[0].cell_stride, 2);
+    assert_eq!(segments[1].text, "Enter ");
+    assert_eq!(segments[1].col_offset, 2);
+    assert_eq!(segments[1].cell_stride, 1);
+    assert_eq!(segments[2].text, "填充已保存的提权密码");
+    assert_eq!(segments[2].col_offset, 8);
+    assert_eq!(segments[2].cell_stride, 2);
+    assert_eq!(
+        segments.iter().map(|segment| segment.cells).sum::<usize>(),
+        28
+    );
+}
+
+#[test]
+fn terminal_element_truncates_wide_ghost_text_by_cells() {
+    let mut snapshot = selection_snapshot("Password:");
+    snapshot.cols = 12;
+    snapshot.lines[0].cells_mut().truncate(12);
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 9;
+    snapshot.lines[0].cells_mut()[9].cursor = true;
+    snapshot.lines[0].refresh_signature();
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .ghost_text(Some("按Enter".to_string()))
+    .layout();
+
+    let ghost_text = layout.ghost_text.expect("ghost text");
+    assert_eq!(ghost_text.text, "按E");
+    assert_eq!(ghost_text.cells, 3);
+}
+
+#[test]
 fn terminal_element_hides_autosuggest_ghost_text_during_ime_composition() {
     let mut snapshot = selection_snapshot("git");
     snapshot.cursor_row = 0;

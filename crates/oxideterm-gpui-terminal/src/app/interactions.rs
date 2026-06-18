@@ -1,19 +1,25 @@
 use std::{env, time::Duration};
 
 use gpui::{
-    ClipboardItem, Context, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, ScrollWheelEvent, Timer, TouchPhase, px,
+    ClipboardItem, Context, KeyDownEvent, KeyUpEvent, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, ScrollWheelEvent, Timer, TouchPhase, px,
 };
 use oxideterm_terminal::{TermMode, TerminalRow, TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row;
 
 use super::{ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane};
-use crate::privilege_prompt::PrivilegePromptMatch;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
 const TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS: u64 = 16;
 const TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS: i32 = 4;
+const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
+
+fn log_privilege_prompt_terminal(args: std::fmt::Arguments<'_>) {
+    if env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
+        eprintln!("[oxideterm:privilege] {args}");
+    }
+}
 
 #[derive(Clone, Copy)]
 struct TerminalWheelScrollDelta {
@@ -48,22 +54,23 @@ impl TerminalPane {
             }
         }
 
-        if key == "enter"
-            && !modifiers.platform
-            && !modifiers.control
-            && !modifiers.alt
-            && !modifiers.shift
-            && self.privilege_prompt_inline_hint.is_some()
-            && self.privilege_prompt_snapshot().is_some_and(|snapshot| {
-                !matches!(
-                    snapshot.prompt,
-                    PrivilegePromptMatch::GenericPassword { .. }
-                )
-            })
-        {
-            // The workspace owns secret lookup and PTY writes. The terminal only
-            // captures Enter before it becomes a normal newline while the visible
-            // inline hint confirms there is exactly one scoped credential.
+        let has_privilege_prompt_inline_hint = self.privilege_prompt_inline_hint.is_some();
+        let privilege_prompt_submit = privilege_prompt_enter_requests_submit(
+            key,
+            modifiers,
+            has_privilege_prompt_inline_hint,
+        );
+        if key == "enter" && !modifiers.platform && !modifiers.control && !modifiers.alt {
+            log_privilege_prompt_terminal(format_args!(
+                "pane enter: shift={} has_inline_hint={} submit_request={}",
+                modifiers.shift, has_privilege_prompt_inline_hint, privilege_prompt_submit
+            ));
+        }
+        if privilege_prompt_submit {
+            // The workspace owns secret lookup and PTY writes. The terminal
+            // captures Enter before it becomes a normal newline, but only
+            // after Workspace confirms the active scope has one fillable
+            // credential and mirrors that as the visible inline hint.
             self.privilege_prompt_submit_requested = true;
             cx.notify();
             return true;
@@ -970,6 +977,18 @@ fn smart_copy_selection_is_owned_by_terminal_ui(mode: TermMode) -> bool {
     !mode.contains(TermMode::ALT_SCREEN) && !mouse_tracking_active(mode)
 }
 
+fn privilege_prompt_enter_requests_submit(
+    key: &str,
+    modifiers: Modifiers,
+    has_inline_hint: bool,
+) -> bool {
+    if key != "enter" || modifiers.platform || modifiers.control || modifiers.alt || modifiers.shift
+    {
+        return false;
+    }
+    has_inline_hint
+}
+
 fn snapshot_text_from_rows(rows: &[TerminalRow]) -> String {
     rows.iter()
         .map(|row| row.text().trim_end().to_string())
@@ -1094,6 +1113,36 @@ mod tests {
             terminal_selection_autoscroll_delta_rows(px(250.0), px(100.0), px(200.0), px(10.0)),
             -TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS
         );
+    }
+
+    #[test]
+    fn privilege_prompt_enter_requires_inline_hint() {
+        assert!(!privilege_prompt_enter_requests_submit(
+            "enter",
+            Modifiers::default(),
+            false
+        ));
+    }
+
+    #[test]
+    fn privilege_prompt_enter_requests_submit_for_inline_hint() {
+        assert!(privilege_prompt_enter_requests_submit(
+            "enter",
+            Modifiers::default(),
+            true
+        ));
+    }
+
+    #[test]
+    fn privilege_prompt_modified_enter_does_not_request_submit() {
+        assert!(!privilege_prompt_enter_requests_submit(
+            "enter",
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+            true
+        ));
     }
 
     #[test]

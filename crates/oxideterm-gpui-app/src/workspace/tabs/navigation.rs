@@ -1360,6 +1360,32 @@ mod tests {
     }
 
     #[test]
+    fn attaching_terminal_without_saved_id_keeps_existing_node_owner() {
+        let mut node = WorkspaceSshNode {
+            saved_connection_id: Some("prod".to_string()),
+            config: SshConfig::default(),
+            title: "Production".to_string(),
+            terminal_ids: vec![TerminalSessionId(1)],
+            readiness: NodeReadiness::Ready,
+        };
+
+        // A later terminal is a consumer of the existing node owner, not a new
+        // privilege scope that can clear or replace that owner.
+        attach_terminal_to_existing_ssh_node(
+            &mut node,
+            None,
+            SshConfig::default(),
+            TerminalSessionId(2),
+        );
+
+        assert_eq!(node.saved_connection_id.as_deref(), Some("prod"));
+        assert_eq!(
+            node.terminal_ids,
+            vec![TerminalSessionId(1), TerminalSessionId(2)]
+        );
+    }
+
+    #[test]
     fn tabbar_wheel_matches_tauri_delta_y_adapter() {
         assert_eq!(tabbar_tauri_wheel_scroll_delta(0.0, 24.0), 24.0);
         assert_eq!(tabbar_tauri_wheel_scroll_delta(18.0, 24.0), 24.0);

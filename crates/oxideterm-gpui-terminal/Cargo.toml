@@ -19,3 +19,4 @@ oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 parking_lot.workspace = true
 regex.workspace = true
 serde_json.workspace = true
+unicode-width.workspace = true

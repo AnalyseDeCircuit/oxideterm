@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, hash_map::DefaultHasher},
+    env,
     hash::{Hash, Hasher},
     ops::Range,
     sync::{
@@ -59,6 +60,20 @@ use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
+const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
+
+fn log_privilege_prompt_terminal_pane(args: std::fmt::Arguments<'_>) {
+    if env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
+        eprintln!("[oxideterm:privilege] {args}");
+    }
+}
+
+fn privilege_input_observation_name(observation: PrivilegeInputObservation) -> &'static str {
+    match observation {
+        PrivilegeInputObservation::Normal => "normal",
+        PrivilegeInputObservation::SecretEntry => "secret-entry",
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerminalCursorAnchor {
@@ -705,15 +720,10 @@ impl TerminalPane {
             return;
         };
         let now = Instant::now();
-        if self.privilege_prompt_tracker.snapshot(now).is_some()
-            && self
-                .privilege_prompt_tracker
-                .observe_user_input_bytes(&bytes, now)
-                == PrivilegeInputObservation::SecretEntry
-            && self.clear_privilege_prompt_inline_hint()
-        {
-            cx.notify();
-        }
+        // Pasted terminal input can include the sudo command while the later
+        // prompt is a bare `Password:`. Feed it through the privilege tracker
+        // without recording the paste as command history or exposing content.
+        self.observe_privilege_input("paste", &bytes, now, cx);
         // Preserve bracketed paste encoding when hook output is still text;
         // binary hook output falls back to raw protocol bytes.
         let result = match std::str::from_utf8(&bytes) {
@@ -734,8 +744,7 @@ impl TerminalPane {
         }
         let mut input = command.replace("\r\n", "\r").replace('\n', "\r");
         input.push('\r');
-        self.privilege_prompt_tracker
-            .observe_user_input_bytes(input.as_bytes(), Instant::now());
+        self.observe_privilege_input("command-line", input.as_bytes(), Instant::now(), cx);
         self.observe_autosuggest_input_bytes(input.as_bytes());
         self.send_text(&input, cx);
     }
@@ -1095,6 +1104,14 @@ impl TerminalPane {
                                 self.command_mark_id_aliases
                                     .insert(shell_command_id, frontend_command_id);
                             }
+                            if let Some(command) = mark.command.as_deref() {
+                                // Shell integration is the terminal-owned
+                                // submitted-command source. Feed it to the
+                                // privilege tracker so bare sudo prompts do not
+                                // depend on lossy key/IME reconstruction.
+                                self.privilege_prompt_tracker
+                                    .observe_submitted_command(command, Instant::now());
+                            }
                             self.command_fact_ledger.create_from_mark(&mark);
                             self.command_marks.push(mark);
                             self.trim_command_marks();
@@ -1180,7 +1197,7 @@ impl TerminalPane {
         let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
             return;
         };
-        self.observe_user_input(&bytes, cx);
+        self.observe_user_input("protocol", &bytes, cx);
         self.send_protocol_bytes(&bytes, cx);
     }
 
@@ -1206,7 +1223,7 @@ impl TerminalPane {
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
             return;
         };
-        self.observe_user_input(&bytes, cx);
+        self.observe_user_input("text", &bytes, cx);
         self.send_protocol_bytes(&bytes, cx);
     }
 
@@ -1222,20 +1239,21 @@ impl TerminalPane {
         }
     }
 
-    fn observe_user_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
-        if self
-            .privilege_prompt_tracker
-            .observe_user_input_bytes(bytes, Instant::now())
+    fn observe_user_input(&mut self, source: &'static str, bytes: &[u8], cx: &mut Context<Self>) {
+        let now = Instant::now();
+        if self.observe_privilege_input(source, bytes, now, cx)
             == PrivilegeInputObservation::SecretEntry
         {
-            if self.clear_privilege_prompt_inline_hint() {
-                cx.notify();
-            }
             return;
         }
         let Some(command) = self.observe_autosuggest_input_bytes(bytes) else {
             return;
         };
+        // The autosuggest input tracker owns the current editable command line.
+        // Arm sudo/su detection from its completed command on Enter so bare
+        // prompts such as macOS `Password:` do not depend on viewport parsing.
+        self.privilege_prompt_tracker
+            .observe_submitted_command(&command, now);
         if self.shell_integration_status.detected
             || !self.settings.command_marks_user_input_observed
         {
@@ -1246,6 +1264,31 @@ impl TerminalPane {
             TerminalCommandMarkDetectionSource::UserInputObserved,
             cx,
         );
+    }
+
+    fn observe_privilege_input(
+        &mut self,
+        source: &'static str,
+        bytes: &[u8],
+        now: Instant,
+        cx: &mut Context<Self>,
+    ) -> PrivilegeInputObservation {
+        let observation = self
+            .privilege_prompt_tracker
+            .observe_user_input_bytes(bytes, now);
+        log_privilege_prompt_terminal_pane(format_args!(
+            "input observed: source={} has_cr={} has_lf={} observation={}",
+            source,
+            bytes.contains(&b'\r'),
+            bytes.contains(&b'\n'),
+            privilege_input_observation_name(observation)
+        ));
+        if observation == PrivilegeInputObservation::SecretEntry
+            && self.clear_privilege_prompt_inline_hint()
+        {
+            cx.notify();
+        }
+        observation
     }
 
     fn observe_autosuggest_input_bytes(&mut self, bytes: &[u8]) -> Option<String> {

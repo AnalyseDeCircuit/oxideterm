@@ -153,6 +153,7 @@ ts-parser-perl = "1.0.2"
 unicode-bidi = "0.3"
 unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
+unicode-width = "0.2.2"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 windows = "0.61"
 windows-core = "0.61"

@@ -1,3 +1,17 @@
+fn attach_saved_owner_to_reused_ssh_node(
+    node: &mut WorkspaceSshNode,
+    saved_connection_id: &str,
+) -> bool {
+    // Saved SSH credentials are node-owned. Attach an owner only when the user
+    // reached this node through an explicit saved-connection action.
+    let saved_connection_id = saved_connection_id.trim();
+    if saved_connection_id.is_empty() || node.saved_connection_id.is_some() {
+        return false;
+    }
+    node.saved_connection_id = Some(saved_connection_id.to_string());
+    true
+}
+
 impl WorkspaceApp {
     pub(super) fn create_local_terminal_tab(
         &mut self,
@@ -128,37 +142,37 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
-        if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
-            && let Some(session_id) = self
+        if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned() {
+            self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
+            if let Some(session_id) = self
                 .ssh_nodes
                 .get(&node_id)
                 .and_then(|node| node.terminal_ids.first().copied())
-            && self.focus_terminal_session(session_id, window, cx)
-        {
-            let _ = self.connection_store.mark_used(&saved_connection_id);
-            return Ok(());
-        }
-        if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned()
-            && let Some(node) = self.ssh_nodes.get(&node_id).cloned()
-        {
-            let node_config = self
-                .config_with_host_key_acceptance_for_node(&node_id, &config)
-                .unwrap_or(node.config);
-            // Tauri passes the saved connection's current post-connect command
-            // to createTerminalForNode even when the live node already exists.
-            let post_connect_command = config.post_connect_command.clone();
-            self.queue_ssh_terminal_tab_for_node_with_mark_used(
-                node_id,
-                post_connect_command,
-                node_config,
-                title,
-                Some(saved_connection_id.clone()),
-                Some(saved_connection_id.clone()),
-                None,
-                window,
-                cx,
-            )?;
-            return Ok(());
+                && self.focus_terminal_session(session_id, window, cx)
+            {
+                let _ = self.connection_store.mark_used(&saved_connection_id);
+                return Ok(());
+            }
+            if let Some(node) = self.ssh_nodes.get(&node_id).cloned() {
+                let node_config = self
+                    .config_with_host_key_acceptance_for_node(&node_id, &config)
+                    .unwrap_or(node.config);
+                // Tauri passes the saved connection's current post-connect command
+                // to createTerminalForNode even when the live node already exists.
+                let post_connect_command = config.post_connect_command.clone();
+                self.queue_ssh_terminal_tab_for_node_with_mark_used(
+                    node_id,
+                    post_connect_command,
+                    node_config,
+                    title,
+                    Some(saved_connection_id.clone()),
+                    Some(saved_connection_id.clone()),
+                    None,
+                    window,
+                    cx,
+                )?;
+                return Ok(());
+            }
         }
 
         if config
@@ -194,6 +208,10 @@ impl WorkspaceApp {
             if let Some(existing_node_id) = self.existing_direct_root_node_for_saved_config(&config)
             {
                 self.ensure_workspace_ssh_node_from_runtime(&existing_node_id);
+                self.associate_existing_node_with_saved_connection(
+                    &existing_node_id,
+                    &saved_connection_id,
+                );
                 if let Some(session_id) = self
                     .ssh_nodes
                     .get(&existing_node_id)
@@ -204,9 +222,10 @@ impl WorkspaceApp {
                     return Ok(());
                 }
                 if let Some(node) = self.ssh_nodes.get(&existing_node_id).cloned() {
-                    // Tauri's saved direct-open path reuses an existing root
-                    // node by host/port/user without rewriting the node origin
-                    // to the saved connection. Keep the same tree owner here.
+                    // This branch reuses a root node only because the user
+                    // explicitly opened this saved connection. The association
+                    // above gives every terminal on that reused node one owner
+                    // without letting sudo helper code infer one from host text.
                     let node_config = self
                         .config_with_host_key_acceptance_for_node(&existing_node_id, &config)
                         .unwrap_or(node.config);
@@ -252,6 +271,54 @@ impl WorkspaceApp {
                 );
             }
             result
+        }
+    }
+
+    fn associate_existing_node_with_saved_connection(
+        &mut self,
+        node_id: &NodeId,
+        saved_connection_id: &str,
+    ) {
+        let saved_connection_id = saved_connection_id.trim();
+        if saved_connection_id.is_empty() {
+            return;
+        }
+        let attached = self
+            .ssh_nodes
+            .get_mut(node_id)
+            .is_some_and(|node| attach_saved_owner_to_reused_ssh_node(node, saved_connection_id));
+        let owned_by_saved_connection = self.ssh_nodes.get(node_id).is_some_and(|node| {
+            node.saved_connection_id.as_deref() == Some(saved_connection_id)
+        });
+        if !attached && !owned_by_saved_connection {
+            return;
+        }
+
+        let saved_connection_id = saved_connection_id.trim().to_string();
+        self.saved_ssh_nodes
+            .insert(saved_connection_id.clone(), node_id.clone());
+        let runtime_origin_needs_owner = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .is_some_and(|snapshot| {
+                snapshot.origin.saved_connection_id() != Some(saved_connection_id.as_str())
+            });
+        if (attached || runtime_origin_needs_owner)
+            && let Some(snapshot) = self.node_runtime_store.snapshot(node_id)
+        {
+            // This is an explicit saved-connection open that reaches an
+            // existing node. Promote runtime origin so persisted node ownership
+            // and SSH privilege scope agree after restart.
+            self.node_runtime_store.upsert_node_with_origin(
+                node_id.clone(),
+                snapshot.config,
+                NodeOrigin::Restored {
+                    saved_connection_id,
+                },
+            );
+        }
+        if attached || runtime_origin_needs_owner {
+            self.persist_session_tree_snapshot();
         }
     }
 
@@ -359,6 +426,7 @@ impl WorkspaceApp {
                     terminal_ids: Vec::new(),
                     readiness: NodeReadiness::Disconnected,
                 });
+            self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
             return node_id;
         }
 
@@ -762,6 +830,9 @@ impl WorkspaceApp {
                 terminal_ids: Vec::new(),
                 readiness: NodeReadiness::Disconnected,
             });
+        if let Some(saved_connection_id) = saved_connection_id.as_deref() {
+            self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
+        }
         if self.node_is_ready_for_terminal(&node_id) {
             self.create_ssh_terminal_tab_for_node(
                 post_connect_command,
@@ -1015,5 +1086,44 @@ fn ssh_config_from_proxy_hop(hop: &ProxyHopConfig) -> SshConfig {
         trust_host_key: hop.trust_host_key,
         expected_host_key_fingerprint: hop.expected_host_key_fingerprint.clone(),
         ..SshConfig::default()
+    }
+}
+
+#[cfg(test)]
+mod create_tests {
+    use super::*;
+
+    #[test]
+    fn reused_ssh_node_without_owner_accepts_explicit_saved_owner() {
+        let mut node = WorkspaceSshNode {
+            saved_connection_id: None,
+            config: SshConfig::default(),
+            title: "lipsc@100.118.61.75".to_string(),
+            terminal_ids: vec![TerminalSessionId(1)],
+            readiness: NodeReadiness::Ready,
+        };
+
+        assert!(attach_saved_owner_to_reused_ssh_node(
+            &mut node,
+            "home-100"
+        ));
+        assert_eq!(node.saved_connection_id.as_deref(), Some("home-100"));
+    }
+
+    #[test]
+    fn reused_ssh_node_keeps_existing_saved_owner() {
+        let mut node = WorkspaceSshNode {
+            saved_connection_id: Some("existing-owner".to_string()),
+            config: SshConfig::default(),
+            title: "Production".to_string(),
+            terminal_ids: vec![TerminalSessionId(1)],
+            readiness: NodeReadiness::Ready,
+        };
+
+        assert!(!attach_saved_owner_to_reused_ssh_node(
+            &mut node,
+            "other-owner"
+        ));
+        assert_eq!(node.saved_connection_id.as_deref(), Some("existing-owner"));
     }
 }

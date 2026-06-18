@@ -13,6 +13,7 @@ use oxideterm_terminal_recording::format_recording_elapsed;
 pub(in crate::workspace) mod completion;
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
+const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MatchedPrivilegeCredential {
@@ -29,9 +30,84 @@ struct PrivilegePromptHelperState {
 }
 
 fn tab_kind_allows_privilege_prompt_helper(tab_kind: &TabKind) -> bool {
-    // SSH sudo/su autofill is intentionally disabled. Keep this helper scoped
-    // to local shell tabs so remote sudo prompts never bind to saved SSH hosts.
-    matches!(tab_kind, TabKind::LocalTerminal)
+    // Local shells use an app-level scope. SSH terminals are allowed only after
+    // active_privilege_scope_credentials resolves the active terminal through
+    // the node ownership maps, never through host/title/runtime heuristics.
+    matches!(tab_kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+}
+
+fn log_privilege_prompt_helper(args: std::fmt::Arguments<'_>) {
+    if std::env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
+        eprintln!("[oxideterm:privilege] {args}");
+    }
+}
+
+fn privilege_prompt_kind_name(prompt: &PrivilegePromptMatch) -> &'static str {
+    match prompt {
+        PrivilegePromptMatch::Sudo { .. } => "sudo",
+        PrivilegePromptMatch::Su { .. } => "su",
+        PrivilegePromptMatch::Custom { .. } => "custom",
+        PrivilegePromptMatch::GenericPassword { .. } => "generic-password",
+    }
+}
+
+fn tab_kind_privilege_scope_name(tab_kind: &TabKind) -> &'static str {
+    match tab_kind {
+        TabKind::LocalTerminal => "local-terminal",
+        TabKind::SshTerminal => "ssh-terminal",
+        _ => "unsupported",
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PrivilegePromptTextShape {
+    chars: usize,
+    lines: usize,
+    has_ascii_colon: bool,
+    has_fullwidth_colon: bool,
+    ends_with_prompt_colon: bool,
+    contains_sudo_marker: bool,
+    starts_with_sudo_marker: bool,
+    contains_password_word: bool,
+    contains_cjk_password: bool,
+    contains_escape: bool,
+}
+
+fn privilege_prompt_text_shape(text: &str) -> PrivilegePromptTextShape {
+    let trimmed = text.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let compact_cjk: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    PrivilegePromptTextShape {
+        chars: text.chars().count(),
+        lines: text.lines().count(),
+        has_ascii_colon: text.contains(':'),
+        has_fullwidth_colon: text.contains('：'),
+        ends_with_prompt_colon: trimmed.ends_with(':') || trimmed.ends_with('：'),
+        contains_sudo_marker: lower.contains("[sudo"),
+        starts_with_sudo_marker: lower.starts_with("[sudo"),
+        contains_password_word: lower.contains("password"),
+        contains_cjk_password: compact_cjk.contains("密码")
+            || compact_cjk.contains("密碼")
+            || compact_cjk.contains("口令"),
+        contains_escape: text.contains('\x1b'),
+    }
+}
+
+fn saved_ssh_privilege_scope_id(
+    node_saved_connection_id: Option<&str>,
+    node_origin: Option<&NodeOrigin>,
+) -> Option<String> {
+    node_saved_connection_id
+        .map(str::trim)
+        .filter(|connection_id| !connection_id.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            node_origin
+                .and_then(NodeOrigin::saved_connection_id)
+                .map(str::trim)
+                .filter(|connection_id| !connection_id.is_empty())
+                .map(ToOwned::to_owned)
+        })
 }
 
 fn privilege_credential_matches_prompt(
@@ -154,6 +230,13 @@ fn build_privilege_prompt_helper_state_from_prompt(
     })
 }
 
+fn privilege_prompt_state_allows_confirmed_fill(state: &PrivilegePromptHelperState) -> bool {
+    // The UI confirmation boundary is the visible inline hint or the active
+    // Enter press. A bare `Password:` prompt is fillable only after scoped
+    // credential matching leaves one unambiguous candidate.
+    state.matches.len() == 1
+}
+
 fn choose_privilege_prompt(
     credentials: &[SavedPrivilegeCredential],
     visible_text: &str,
@@ -219,51 +302,182 @@ impl WorkspaceApp {
     fn active_privilege_scope_credentials(
         &self,
     ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
-        if self
-            .active_tab()
-            .is_some_and(|tab| tab.kind == TabKind::LocalTerminal)
-            && !self.active_tab_has_serial_terminal()
-        {
-            // Local shell sudo/su prompts have no SavedConnection owner. Use a
-            // dedicated store scope so secrets are never confused with SSH
-            // connection credentials.
-            let connection_id = LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
-            let credentials = self
-                .connection_store
-                .list_privilege_credentials(&connection_id)
-                .unwrap_or_default();
-            return Some((connection_id, credentials));
+        let Some(active_tab) = self.active_tab() else {
+            log_privilege_prompt_helper(format_args!("scope unavailable: no active tab"));
+            return None;
+        };
+        match &active_tab.kind {
+            TabKind::LocalTerminal => {
+                if self.active_tab_has_serial_terminal() {
+                    log_privilege_prompt_helper(format_args!(
+                        "scope unavailable: local tab is backed by a serial terminal"
+                    ));
+                    return None;
+                }
+                // Local shell sudo/su prompts have no SavedConnection owner. Use a
+                // dedicated store scope so secrets are never confused with SSH
+                // connection credentials.
+                let connection_id = LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
+                let credentials = self
+                    .connection_store
+                    .list_privilege_credentials(&connection_id)
+                    .unwrap_or_default();
+                log_privilege_prompt_helper(format_args!(
+                    "scope resolved: scope=local credentials_count={}",
+                    credentials.len()
+                ));
+                Some((connection_id, credentials))
+            }
+            TabKind::SshTerminal => {
+                let Some(session_id) = self.active_terminal_session_id() else {
+                    log_privilege_prompt_helper(format_args!(
+                        "scope unavailable: ssh tab has no active terminal session"
+                    ));
+                    return None;
+                };
+                let Some(node_id) = self.terminal_ssh_nodes.get(&session_id) else {
+                    log_privilege_prompt_helper(format_args!(
+                        "scope unavailable: ssh terminal session has no node mapping"
+                    ));
+                    return None;
+                };
+                let Some(connection_id) = self.ssh_privilege_scope_id_for_node(node_id) else {
+                    log_privilege_prompt_helper(format_args!(
+                        "scope unavailable: ssh node has no saved owner"
+                    ));
+                    return None;
+                };
+                if self.connection_store.get(&connection_id).is_none() {
+                    log_privilege_prompt_helper(format_args!(
+                        "scope unavailable: ssh saved owner is missing from connection store"
+                    ));
+                    return None;
+                }
+                let credentials = self
+                    .connection_store
+                    .list_privilege_credentials(&connection_id)
+                    .unwrap_or_default();
+                log_privilege_prompt_helper(format_args!(
+                    "scope resolved: scope=ssh credentials_count={}",
+                    credentials.len()
+                ));
+                Some((connection_id, credentials))
+            }
+            tab_kind => {
+                log_privilege_prompt_helper(format_args!(
+                    "scope unavailable: tab_kind={}",
+                    tab_kind_privilege_scope_name(tab_kind)
+                ));
+                None
+            }
         }
-        None
+    }
+
+    fn ssh_privilege_scope_id_for_node(&self, node_id: &NodeId) -> Option<String> {
+        let node_saved_connection_id = self
+            .ssh_nodes
+            .get(node_id)
+            .and_then(|node| node.saved_connection_id.as_deref());
+        let node_origin = self
+            .node_runtime_store
+            .snapshot(node_id)
+            .map(|snapshot| snapshot.origin);
+        let has_origin_saved_owner = node_origin
+            .as_ref()
+            .and_then(NodeOrigin::saved_connection_id)
+            .is_some_and(|connection_id| !connection_id.trim().is_empty());
+        // SSH privilege credentials are scoped to the node owner. Do not recover
+        // a saved connection by matching host/port/user/title or by using the
+        // runtime connection id; reused node terminals must share this same owner.
+        let scope_id = saved_ssh_privilege_scope_id(node_saved_connection_id, node_origin.as_ref());
+        log_privilege_prompt_helper(format_args!(
+            "ssh scope lookup: has_node_saved_owner={} has_runtime_snapshot={} has_origin_saved_owner={} resolved={}",
+            node_saved_connection_id.is_some_and(|connection_id| !connection_id.trim().is_empty()),
+            node_origin.is_some(),
+            has_origin_saved_owner,
+            scope_id.is_some()
+        ));
+        scope_id
     }
 
     fn active_privilege_prompt_state(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<PrivilegePromptHelperState> {
-        let active_tab = self.active_tab()?;
+        let Some(active_tab) = self.active_tab() else {
+            log_privilege_prompt_helper(format_args!("state unavailable: no active tab"));
+            return None;
+        };
         if !tab_kind_allows_privilege_prompt_helper(&active_tab.kind) {
+            log_privilege_prompt_helper(format_args!(
+                "state unavailable: unsupported tab_kind={}",
+                tab_kind_privilege_scope_name(&active_tab.kind)
+            ));
             return None;
         }
-        let active_pane = self.active_pane()?;
+        let Some(active_pane) = self.active_pane() else {
+            log_privilege_prompt_helper(format_args!("state unavailable: no active pane"));
+            return None;
+        };
         let pane = active_pane.read(cx);
         let visible_text = pane.privilege_prompt_text_snapshot();
+        let visible_shape = privilege_prompt_text_shape(&visible_text);
         let tracked_prompt = pane
             .privilege_prompt_snapshot()
             .map(|snapshot| snapshot.prompt);
+        let tracked_prompt_kind = tracked_prompt
+            .as_ref()
+            .map(privilege_prompt_kind_name)
+            .unwrap_or("none");
         if tracked_prompt.is_none() && pane.privilege_prompt_fallback_suppressed() {
+            log_privilege_prompt_helper(format_args!(
+                "state unavailable: fallback suppressed visible_chars={}",
+                visible_shape.chars
+            ));
             return None;
         }
         // Tauri keeps the prompt state alive even when credential metadata
         // cannot be loaded. Do not let a missing credential row or transient
         // keychain/config error suppress the detected sudo/su prompt.
-        let (connection_id, credentials) = self.active_privilege_scope_credentials()?;
-        build_privilege_prompt_helper_state_with_tracked_prompt(
+        let Some((connection_id, credentials)) = self.active_privilege_scope_credentials() else {
+            log_privilege_prompt_helper(format_args!(
+                "state unavailable: no credential scope tracked_prompt={} visible_chars={}",
+                tracked_prompt_kind, visible_shape.chars
+            ));
+            return None;
+        };
+        let state = build_privilege_prompt_helper_state_with_tracked_prompt(
             connection_id,
             &credentials,
             &visible_text,
             tracked_prompt,
-        )
+        );
+        match &state {
+            Some(state) => log_privilege_prompt_helper(format_args!(
+                "state ready: prompt_kind={} matches_count={} credentials_count={} tracked_prompt={} visible_chars={}",
+                privilege_prompt_kind_name(&state.prompt),
+                state.matches.len(),
+                credentials.len(),
+                tracked_prompt_kind,
+                visible_shape.chars
+            )),
+            None => log_privilege_prompt_helper(format_args!(
+                "state unavailable: no prompt match credentials_count={} tracked_prompt={} visible_chars={} visible_lines={} has_ascii_colon={} has_fullwidth_colon={} ends_colon={} contains_sudo_marker={} starts_sudo_marker={} contains_password_word={} contains_cjk_password={} contains_escape={}",
+                credentials.len(),
+                tracked_prompt_kind,
+                visible_shape.chars,
+                visible_shape.lines,
+                visible_shape.has_ascii_colon,
+                visible_shape.has_fullwidth_colon,
+                visible_shape.ends_with_prompt_colon,
+                visible_shape.contains_sudo_marker,
+                visible_shape.starts_with_sudo_marker,
+                visible_shape.contains_password_word,
+                visible_shape.contains_cjk_password,
+                visible_shape.contains_escape
+            )),
+        }
+        state
     }
 
     pub(in crate::workspace) fn sync_active_privilege_prompt_inline_hint(
@@ -280,12 +494,23 @@ impl WorkspaceApp {
     }
 
     fn active_privilege_prompt_inline_hint(&self, cx: &mut Context<Self>) -> Option<String> {
-        let state = self.active_privilege_prompt_state(cx)?;
-        if matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. })
-            || state.matches.len() != 1
-        {
+        let Some(state) = self.active_privilege_prompt_state(cx) else {
+            log_privilege_prompt_helper(format_args!("hint unavailable: no prompt state"));
+            return None;
+        };
+        let prompt_kind = privilege_prompt_kind_name(&state.prompt);
+        if !privilege_prompt_state_allows_confirmed_fill(&state) {
+            log_privilege_prompt_helper(format_args!(
+                "hint suppressed: prompt_kind={} matches_count={}",
+                prompt_kind,
+                state.matches.len()
+            ));
             return None;
         }
+        log_privilege_prompt_helper(format_args!(
+            "hint ready: prompt_kind={} matches_count=1",
+            prompt_kind
+        ));
         Some(self.i18n.t("terminal.privilege_helper.inline_fill_hint"))
     }
 
@@ -305,18 +530,29 @@ impl WorkspaceApp {
             return false;
         }
 
+        log_privilege_prompt_helper(format_args!("root enter: evaluating privilege helper"));
         let Some(state) = self.active_privilege_prompt_state(cx) else {
+            log_privilege_prompt_helper(format_args!("root enter: no prompt state"));
             return false;
         };
-        if matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. }) {
+        if !privilege_prompt_state_allows_confirmed_fill(&state) {
+            log_privilege_prompt_helper(format_args!(
+                "root enter: ignored match_count={}",
+                state.matches.len()
+            ));
             return false;
-        }
+        };
         let [matched] = state.matches.as_slice() else {
             return false;
         };
         // The inline hint is the confirmation affordance: Enter is accepted only
-        // when prompt detection produces exactly one scoped credential, so a
-        // generic `Password:` line never guesses between sudo/su candidates.
+        // when prompt detection produces exactly one scoped credential. Bare
+        // `Password:` prompts therefore work for macOS sudo without guessing
+        // between multiple saved sudo/su candidates.
+        log_privilege_prompt_helper(format_args!(
+            "root enter: filling prompt_kind={}",
+            privilege_prompt_kind_name(&state.prompt)
+        ));
         self.fill_privilege_prompt_match(matched.clone(), window, cx);
         true
     }
@@ -335,17 +571,29 @@ impl WorkspaceApp {
             return false;
         }
 
+        log_privilege_prompt_helper(format_args!(
+            "terminal submit request: evaluating privilege helper"
+        ));
         let Some(state) = self.active_privilege_prompt_state(cx) else {
+            log_privilege_prompt_helper(format_args!("terminal submit request: no prompt state"));
             return false;
         };
-        if matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. }) {
+        if !privilege_prompt_state_allows_confirmed_fill(&state) {
+            log_privilege_prompt_helper(format_args!(
+                "terminal submit request: ignored match_count={}",
+                state.matches.len()
+            ));
             return false;
-        }
+        };
         let [matched] = state.matches.as_slice() else {
             return false;
         };
         // TerminalPane captures Enter before it is written as a plain newline;
         // Workspace still owns the secret lookup and one-shot PTY handoff.
+        log_privilege_prompt_helper(format_args!(
+            "terminal submit request: filling prompt_kind={}",
+            privilege_prompt_kind_name(&state.prompt)
+        ));
         self.fill_privilege_prompt_match(matched.clone(), window, cx);
         true
     }
@@ -356,12 +604,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        log_privilege_prompt_helper(format_args!("fill: loading scoped credential secret"));
         let secret = match self
             .connection_store
             .get_privilege_credential_secret(&matched.connection_id, &matched.credential_id)
         {
             Ok(secret) => secret,
             Err(error) => {
+                log_privilege_prompt_helper(format_args!("fill: secret load failed"));
                 self.push_command_palette_toast(
                     self.i18n.t("terminal.privilege_helper.load_failed"),
                     Some(error.to_string()),
@@ -371,6 +621,7 @@ impl WorkspaceApp {
                 return;
             }
         };
+        log_privilege_prompt_helper(format_args!("fill: secret loaded"));
         // The newline-bearing buffer is the only owned cleartext copy in the
         // GPUI layer. It is zeroized after the PTY write attempt, matching the
         // Tauri click-only secret handoff without involving command history.
@@ -380,6 +631,7 @@ impl WorkspaceApp {
                 pane.send_privilege_secret_input_bytes(secret_line.as_bytes(), cx)
             })
         });
+        log_privilege_prompt_helper(format_args!("fill: write attempted sent={sent}"));
         if !sent {
             self.push_command_palette_toast(
                 self.i18n.t("terminal.privilege_helper.send_failed"),
@@ -1346,10 +1598,56 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
-    fn ssh_terminal_prompt_helper_is_disabled() {
-        assert!(!tab_kind_allows_privilege_prompt_helper(
+    fn ssh_terminal_prompt_helper_is_tab_eligible() {
+        assert!(tab_kind_allows_privilege_prompt_helper(
             &TabKind::SshTerminal
         ));
+    }
+
+    #[test]
+    fn ssh_privilege_scope_prefers_explicit_node_saved_owner() {
+        let origin = NodeOrigin::Restored {
+            saved_connection_id: "restored-conn".to_string(),
+        };
+
+        assert_eq!(
+            saved_ssh_privilege_scope_id(Some("node-owner"), Some(&origin)).as_deref(),
+            Some("node-owner")
+        );
+    }
+
+    #[test]
+    fn ssh_privilege_scope_uses_restored_or_manual_preset_origin() {
+        let restored = NodeOrigin::Restored {
+            saved_connection_id: "restored-conn".to_string(),
+        };
+        let manual_preset = NodeOrigin::ManualPreset {
+            saved_connection_id: "jump-chain".to_string(),
+            hop_index: 1,
+        };
+
+        assert_eq!(
+            saved_ssh_privilege_scope_id(None, Some(&restored)).as_deref(),
+            Some("restored-conn")
+        );
+        assert_eq!(
+            saved_ssh_privilege_scope_id(None, Some(&manual_preset)).as_deref(),
+            Some("jump-chain")
+        );
+    }
+
+    #[test]
+    fn ssh_privilege_scope_does_not_guess_unsaved_node_owner() {
+        let direct = NodeOrigin::Direct;
+        let auto_route = NodeOrigin::AutoRoute {
+            target_host: "db.internal".to_string(),
+            route_id: "route-1".to_string(),
+            hop_index: 0,
+        };
+
+        assert_eq!(saved_ssh_privilege_scope_id(None, Some(&direct)), None);
+        assert_eq!(saved_ssh_privilege_scope_id(None, Some(&auto_route)), None);
+        assert_eq!(saved_ssh_privilege_scope_id(None, None), None);
     }
 
     #[test]
@@ -1460,6 +1758,27 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
+    fn single_generic_password_candidate_allows_confirmed_fill() {
+        let credentials = vec![saved_privilege_credential(
+            "local-sudo",
+            PrivilegeCredentialKind::SudoPassword,
+            None,
+        )];
+        let state = build_privilege_prompt_helper_state(
+            "local-shell:default".to_string(),
+            &credentials,
+            "Password:",
+        )
+        .expect("bare macOS sudo prompt should create a scoped prompt state");
+
+        assert!(matches!(
+            state.prompt,
+            PrivilegePromptMatch::GenericPassword { .. }
+        ));
+        assert!(privilege_prompt_state_allows_confirmed_fill(&state));
+    }
+
+    #[test]
     fn generic_password_prompt_offers_scoped_click_only_candidates() {
         let credentials = vec![
             saved_privilege_credential(
@@ -1491,6 +1810,7 @@ mod privilege_prompt_helper_tests {
                 },
             ]
         );
+        assert!(!privilege_prompt_state_allows_confirmed_fill(&state));
     }
 
     #[test]

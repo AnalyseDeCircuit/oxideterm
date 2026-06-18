@@ -7192,6 +7192,7 @@ dependencies = [
  "parking_lot",
  "regex",
  "serde_json",
+ "unicode-width",
 ]
 
 [[package]]
