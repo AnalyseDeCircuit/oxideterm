@@ -205,6 +205,12 @@ pub(crate) struct WindowsTerminalJob {
 }
 
 #[cfg(windows)]
+// Windows kernel HANDLE values are process-wide references. This type owns a
+// job handle and only closes or terminates it through Win32 APIs, so moving
+// ownership to the terminal session's worker boundary is safe.
+unsafe impl Send for WindowsTerminalJob {}
+
+#[cfg(windows)]
 impl WindowsTerminalJob {
     pub(crate) fn for_shell(shell_pid: Option<u32>) -> Option<Self> {
         let pid = shell_pid?;

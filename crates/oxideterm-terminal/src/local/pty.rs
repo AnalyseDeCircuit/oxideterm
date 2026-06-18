@@ -132,6 +132,9 @@ impl LocalPtySession {
             0,
         )
         .context("failed to spawn local shell PTY")?;
+        #[cfg(target_os = "windows")]
+        let shell_pid = windows_shell_pid(&pty);
+        #[cfg(not(target_os = "windows"))]
         let shell_pid = Some(pty.child().id());
         #[cfg(windows)]
         let process_job = WindowsTerminalJob::for_shell(shell_pid);
@@ -622,6 +625,13 @@ impl LocalPtySession {
             rows,
         )
     }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_shell_pid(pty: &tty::Pty) -> Option<u32> {
+    let handle = windows::Win32::Foundation::HANDLE(pty.child_watcher().raw_handle());
+    let pid = unsafe { windows::Win32::System::Threading::GetProcessId(handle) };
+    (pid != 0).then_some(pid)
 }
 
 pub(crate) fn snapshot_from_term<T: EventListener>(
