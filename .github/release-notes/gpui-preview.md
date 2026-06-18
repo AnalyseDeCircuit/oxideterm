@@ -11,17 +11,18 @@ If you just want the most stable daily-use OxideTerm release, do not download th
 - Built from the same product direction as OxideTerm: local-first remote server work over SSH, with terminal, SFTP, port forwarding, connection management, file workflows, and OxideSens AI context.
 - Intended for users who are comfortable testing early builds and filing detailed issues.
 
-## GPUI Preview 8 Highlights
+## GPUI Preview 9 Highlights
 
-This preview focuses on connection ownership, saved connection coverage, and release polish.
+This preview focuses on terminal polish, host tooling, settings coverage, and native workflow breadth.
 
-- SSH drill-down and jump workflows now keep saved presets in the session manager instead of adding ambiguous actions to the running session tree.
-- Telnet profiles can now be saved from the connection form and managed through the session manager.
-- Serial profile persistence remains aligned with the saved connection model so local serial terminals can round-trip through the same management surface.
-- The README set was refreshed across localized documents to describe SSH, Telnet, SFTP, port forwarding, serial terminals, and the native workspace model more accurately.
-- Security copy now scopes the SSH dependency claim to OpenSSL/libssh2 instead of overclaiming the full dependency tree.
-- Localized README wording was tightened to avoid awkward English/local-language mixing and CJK spacing artifacts.
-- Native plugin process-runtime tests were made less sensitive to scheduler load during full workspace test runs.
+- Host Tools gained broader monitoring surfaces for processes, Docker, services, tmux, packages, logs, ports, filesystems, scheduled tasks, and runtime health.
+- VNC graphics support is now available in the native app for remote visual workflows.
+- Terminal privilege credentials now have native settings management and local/SSH sudo helper improvements.
+- Terminal context actions, command-bar behavior, smooth scrolling, IME handling, and selection/menu interactions were refined.
+- Native terminal graphics handling was tightened so yazi image previews do not leave stale image blocks after exiting alternate-screen apps.
+- X/Y/ZMODEM transfer support was added to native terminal sessions, with more conservative protocol detection.
+- Background image settings and runtime surfaces now apply more consistently across terminal-adjacent tabs.
+- SFTP transfer scheduling, directory loading, and remote session behavior were improved.
 
 ## What To Test
 
