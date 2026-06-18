@@ -48,6 +48,10 @@ mod interactions;
 mod render;
 mod scrollbar;
 
+use crate::modem_worker::{
+    ModemPromptSelection, ModemWorkerEvent, ModemWorkerJob, ModemWorkerProgress,
+    format_modem_bytes, run_modem_worker_job,
+};
 use crate::trzsz_worker::{
     TrzszPromptRequest, TrzszPromptSelection, TrzszWorkerEvent, TrzszWorkerJob,
     run_trzsz_worker_job,
@@ -131,6 +135,7 @@ pub struct TerminalPane {
     selection: Option<TerminalSelection>,
     pending_paste: Option<String>,
     context_menu: Option<TerminalContextMenu>,
+    context_action_requested: Option<TerminalContextAction>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
     input_locked: bool,
     marked_text: Option<String>,
@@ -182,14 +187,42 @@ pub struct TerminalPane {
     trzsz_owner_id: String,
     trzsz_prompt_active: bool,
     trzsz_connection_lost: bool,
+    modem_prompt_active: bool,
+    modem_connection_lost: bool,
+    modem_progress: Option<ModemProgressState>,
     _subscriptions: Vec<Subscription>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct TerminalContextMenu {
     pub x: f32,
     pub y: f32,
-    pub can_copy: bool,
+    pub has_selection: bool,
+    pub reference_line: usize,
+    pub command_mark_id: Option<String>,
+    pub has_previous_command: bool,
+    pub has_next_command: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalContextAction {
+    SendSelectionToAi,
+    FillCommandBarFromSelection,
+    OpenSearch,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ModemProgressState {
+    pub file_name: Option<String>,
+    pub transferred_text: String,
+    pub total_text: Option<String>,
+    pub percent: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TerminalCommandNavigationDirection {
+    Previous,
+    Next,
 }
 
 const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
@@ -201,6 +234,7 @@ static NEXT_COMMAND_MARK_ID: AtomicU64 = AtomicU64::new(1);
 
 include!("app_recording.rs");
 include!("app_command_marks.rs");
+include!("app_modem.rs");
 include!("app_trzsz.rs");
 
 impl TerminalPane {
@@ -392,6 +426,7 @@ impl TerminalPane {
             selection: None,
             pending_paste: None,
             context_menu: None,
+            context_action_requested: None,
             plugin_input_interceptor: None,
             input_locked: false,
             marked_text: None,
@@ -456,6 +491,9 @@ impl TerminalPane {
             trzsz_owner_id,
             trzsz_prompt_active: false,
             trzsz_connection_lost: false,
+            modem_prompt_active: false,
+            modem_connection_lost: false,
+            modem_progress: None,
             _subscriptions: vec![focus_in, focus_out],
         })
     }
@@ -586,6 +624,10 @@ impl TerminalPane {
         let requested = self.privilege_prompt_submit_requested;
         self.privilege_prompt_submit_requested = false;
         requested
+    }
+
+    pub fn take_context_action_request(&mut self) -> Option<TerminalContextAction> {
+        self.context_action_requested.take()
     }
 
     pub fn set_privilege_prompt_inline_hint(
@@ -1026,6 +1068,7 @@ impl TerminalPane {
             }
             TerminalEvent::ChildExited(code) => {
                 self.notify_trzsz_connection_lost_if_active();
+                self.notify_modem_connection_lost_if_active();
                 self.terminal_exited = true;
                 self.title = match code {
                     Some(code) => format!("Process exited ({code})").into(),
@@ -1050,6 +1093,10 @@ impl TerminalPane {
                     },
                     cx,
                 );
+                TerminalEventEffect::notify()
+            }
+            TerminalEvent::ModemTransferPrompt { request, transfer } => {
+                self.handle_modem_transfer_prompt(request, transfer, cx);
                 TerminalEventEffect::notify()
             }
             TerminalEvent::EncodingHint(hint) => {

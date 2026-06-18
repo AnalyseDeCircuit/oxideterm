@@ -59,6 +59,21 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::set_output_events_enabled(self, enabled);
     }
 
+    fn start_modem_transfer(
+        &mut self,
+        request: TerminalModemTransferRequest,
+    ) -> Option<ModemTransfer> {
+        LocalPtySession::start_modem_transfer(self, request)
+    }
+
+    fn interrupt_modem_transfer(&mut self) {
+        LocalPtySession::interrupt_modem_transfer(self);
+    }
+
+    fn finish_modem_transfer(&mut self) {
+        LocalPtySession::finish_modem_transfer(self);
+    }
+
     fn mode(&self) -> TermMode {
         LocalPtySession::mode(self)
     }

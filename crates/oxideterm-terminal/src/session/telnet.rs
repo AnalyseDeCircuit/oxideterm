@@ -38,6 +38,7 @@ pub struct TelnetSession {
     output_events_enabled: bool,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
+    modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
 }
 
@@ -274,6 +275,7 @@ impl TelnetSession {
             output_events_enabled: false,
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
+            modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
         }
     }
@@ -363,6 +365,11 @@ impl TelnetSession {
     fn feed_transport_output(&mut self, bytes: &[u8]) {
         let processed_output = self.process_terminal_output(bytes);
         let bytes = processed_output.as_ref();
+        let events = self.modem_consumer.process_server_output(bytes);
+        self.handle_modem_consumer_events(events);
+    }
+
+    fn feed_plain_transport_output(&mut self, bytes: &[u8]) {
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
@@ -401,6 +408,34 @@ impl TelnetSession {
         for event in events {
             if let Some(response) = self.graphics.handle_event(event) {
                 let _ = self.write_protocol_bytes(&response);
+            }
+        }
+    }
+
+    fn flush_modem_server_writes(&mut self) -> bool {
+        let mut changed = false;
+        for bytes in self.modem_consumer.take_server_writes() {
+            let _ = self.write_protocol_bytes(&bytes);
+            changed = true;
+        }
+        changed
+    }
+
+    fn handle_modem_consumer_events(&mut self, events: Vec<ModemConsumerEvent>) {
+        for event in events {
+            match event {
+                ModemConsumerEvent::WriteTerminal(bytes) => self.feed_plain_transport_output(&bytes),
+                ModemConsumerEvent::SendServer(bytes) => {
+                    let _ = self.write_protocol_bytes(&bytes);
+                }
+                ModemConsumerEvent::TransferStarted(request) => {
+                    if let Some(transfer) = self.modem_consumer.active_transfer().cloned() {
+                        self.pending_events
+                            .push(TerminalEvent::ModemTransferPrompt { request, transfer });
+                    }
+                }
+                ModemConsumerEvent::TransferDataQueued => {}
+                ModemConsumerEvent::TransferCancelRequested => {}
             }
         }
     }
@@ -506,6 +541,9 @@ impl TerminalSessionBackend for TelnetSession {
     fn read_pending_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
         let started = Instant::now();
         let mut report = self.drain_worker_events_with_budget(budget);
+        if self.flush_modem_server_writes() {
+            report.mark_changed();
+        }
         while report.events_drained < budget.max_events {
             let Ok(event) = self.event_rx.try_recv() else {
                 break;
@@ -568,6 +606,21 @@ impl TerminalSessionBackend for TelnetSession {
 
     fn set_output_events_enabled(&mut self, enabled: bool) {
         self.output_events_enabled = enabled;
+    }
+
+    fn start_modem_transfer(
+        &mut self,
+        request: TerminalModemTransferRequest,
+    ) -> Option<ModemTransfer> {
+        self.modem_consumer.start_manual_transfer(request)
+    }
+
+    fn interrupt_modem_transfer(&mut self) {
+        self.modem_consumer.interrupt_transfer();
+    }
+
+    fn finish_modem_transfer(&mut self) {
+        self.modem_consumer.finish_transfer();
     }
 
     fn mode(&self) -> TermMode {

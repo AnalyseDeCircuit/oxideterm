@@ -11,7 +11,24 @@
     "command_selection": {
       "actions": "Thao tác chọn lệnh",
       "copy": "Sao chép",
-      "copy_title": "Sao chép đầu ra lệnh"
+      "copy_title": "Sao chép đầu ra lệnh",
+      "copy_command": "Sao chép lệnh",
+      "send_to_ai": "Gửi tới OxideSens",
+      "fill_command_bar": "Điền vào thanh lệnh",
+      "find": "Tìm...",
+      "select_command": "Chọn lệnh",
+      "previous_command": "Lệnh trước",
+      "next_command": "Lệnh tiếp theo",
+      "clear_screen": "Xóa màn hình"
+    },
+    "modem": {
+      "binary_transfer": "Truyền nhị phân",
+      "xmodem_upload": "Tải lên XMODEM",
+      "xmodem_receive": "Nhận XMODEM",
+      "ymodem_upload": "Tải lên YMODEM",
+      "ymodem_receive": "Nhận YMODEM",
+      "zmodem_upload": "Tải lên ZMODEM",
+      "zmodem_receive": "Nhận ZMODEM"
     },
     "recording": {
       "started": "Terminal recording started",

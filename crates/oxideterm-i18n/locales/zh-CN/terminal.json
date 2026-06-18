@@ -47,7 +47,24 @@
     "command_selection": {
       "actions": "命令选区操作",
       "copy": "复制",
-      "copy_title": "复制命令输出"
+      "copy_title": "复制命令输出",
+      "copy_command": "复制命令",
+      "send_to_ai": "发送到 OxideSens",
+      "fill_command_bar": "填入命令栏",
+      "find": "查找...",
+      "select_command": "选择命令",
+      "previous_command": "上一个命令",
+      "next_command": "下一个命令",
+      "clear_screen": "清屏"
+    },
+    "modem": {
+      "binary_transfer": "二进制传输",
+      "xmodem_upload": "XMODEM 上传",
+      "xmodem_receive": "XMODEM 接收",
+      "ymodem_upload": "YMODEM 上传",
+      "ymodem_receive": "YMODEM 接收",
+      "zmodem_upload": "ZMODEM 上传",
+      "zmodem_receive": "ZMODEM 接收"
     },
     "recording": {
       "started": "终端录制已开始",

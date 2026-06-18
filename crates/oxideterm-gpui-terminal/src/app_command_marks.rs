@@ -91,6 +91,158 @@ impl TerminalPane {
             .max(mark.start_line)
     }
 
+    pub(crate) fn absolute_line_for_position(&self, position: Point<Pixels>) -> usize {
+        let point = self.terminal_point_for_position(position);
+        self.snapshot
+            .scrollback_lines
+            .saturating_add(point.row)
+            .saturating_sub(self.snapshot.display_offset)
+    }
+
+    pub(crate) fn command_mark_id_at_absolute_line(&self, absolute_line: usize) -> Option<String> {
+        if !self.settings.command_marks_enabled {
+            return None;
+        }
+        self.command_marks
+            .iter()
+            .rev()
+            .find(|mark| {
+                let end_line = self.selectable_command_mark_end_line(mark);
+                absolute_line >= mark.start_line && absolute_line <= end_line
+            })
+            .map(|mark| mark.command_id.clone())
+    }
+
+    pub(crate) fn command_mark_start_line(&self, command_mark_id: &str) -> Option<usize> {
+        self.command_marks
+            .iter()
+            .find(|mark| mark.command_id == command_mark_id)
+            .map(|mark| mark.start_line)
+    }
+
+    pub(crate) fn command_mark_has_command_text(&self, command_mark_id: Option<&str>) -> bool {
+        command_mark_id
+            .and_then(|id| {
+                self.command_marks
+                    .iter()
+                    .find(|mark| mark.command_id == id)
+                    .and_then(|mark| mark.command.as_deref())
+            })
+            .is_some_and(|command| !command.trim().is_empty())
+    }
+
+    pub(crate) fn previous_command_mark_id_before_line(
+        &self,
+        absolute_line: usize,
+    ) -> Option<String> {
+        if !self.settings.command_marks_enabled {
+            return None;
+        }
+        self.command_marks
+            .iter()
+            .rev()
+            .find(|mark| mark.start_line < absolute_line)
+            .map(|mark| mark.command_id.clone())
+    }
+
+    pub(crate) fn next_command_mark_id_after_line(
+        &self,
+        absolute_line: usize,
+    ) -> Option<String> {
+        if !self.settings.command_marks_enabled {
+            return None;
+        }
+        self.command_marks
+            .iter()
+            .find(|mark| mark.start_line > absolute_line)
+            .map(|mark| mark.command_id.clone())
+    }
+
+    pub(crate) fn copy_command_mark_command_to_clipboard(
+        &mut self,
+        command_mark_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(command) = command_mark_id.and_then(|id| {
+            self.command_marks
+                .iter()
+                .find(|mark| mark.command_id == id)
+                .and_then(|mark| mark.command.as_deref())
+                .map(str::to_string)
+        }) else {
+            return;
+        };
+        if command.trim().is_empty() {
+            return;
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(command));
+    }
+
+    pub(crate) fn select_command_mark_by_id(
+        &mut self,
+        command_mark_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = command_mark_id.filter(|id| {
+            self.command_marks
+                .iter()
+                .any(|mark| mark.command_id == id.as_str())
+        });
+        if self.selected_command_mark_id == selected {
+            return;
+        }
+        self.selected_command_mark_id = selected;
+        cx.notify();
+    }
+
+    pub(crate) fn jump_to_command_mark_from_context_menu(
+        &mut self,
+        reference_line: usize,
+        direction: TerminalCommandNavigationDirection,
+        cx: &mut Context<Self>,
+    ) {
+        let target_id = match direction {
+            TerminalCommandNavigationDirection::Previous => {
+                self.previous_command_mark_id_before_line(reference_line)
+            }
+            TerminalCommandNavigationDirection::Next => {
+                self.next_command_mark_id_after_line(reference_line)
+            }
+        };
+        let Some(target_id) = target_id else {
+            return;
+        };
+        let Some(target_line) = self.command_mark_start_line(&target_id) else {
+            return;
+        };
+        self.selected_command_mark_id = Some(target_id);
+        self.scroll_to_absolute_line(target_line, cx);
+    }
+
+    pub(crate) fn clear_screen_from_context_menu(&mut self, cx: &mut Context<Self>) {
+        // Ctrl-L asks the running shell/TUI to redraw without deleting scrollback
+        // or invalidating command facts the way a terminal reset would.
+        self.send_user_protocol_bytes(&[0x0c], cx);
+    }
+
+    fn scroll_to_absolute_line(&mut self, absolute_line: usize, cx: &mut Context<Self>) {
+        let desired_row = (self.snapshot.rows / 3).max(1);
+        let target_offset = self
+            .snapshot
+            .scrollback_lines
+            .saturating_add(desired_row)
+            .saturating_sub(absolute_line)
+            .min(self.snapshot.scrollback_lines);
+        let snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.scroll_to_display_offset(target_offset);
+            terminal.snapshot()
+        };
+        self.clear_smooth_scroll_remainder();
+        self.snapshot = self.stamp_snapshot(snapshot);
+        cx.notify();
+    }
+
     fn line_text(&self, absolute_line: usize) -> Option<String> {
         let viewport_start = self
             .snapshot

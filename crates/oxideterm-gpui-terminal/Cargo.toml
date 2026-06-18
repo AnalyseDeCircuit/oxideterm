@@ -10,11 +10,14 @@ chrono.workspace = true
 gpui.workspace = true
 image.workspace = true
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-terminal-unicode = { path = "../oxideterm-terminal-unicode" }
+oxideterm-theme = { path = "../oxideterm-theme" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 parking_lot.workspace = true
 regex.workspace = true

@@ -29,6 +29,7 @@ use alacritty_terminal::{
     vte::ansi,
 };
 use crossbeam_channel::Sender as CrossbeamSender;
+use oxideterm_modem_transfer::{ModemConsumer, ModemConsumerEvent, ModemTransfer};
 use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TerminalEncoding, TerminalOutputDecoder,
 };
@@ -57,6 +58,12 @@ pub(crate) enum LocalGraphicsMsg {
     SetEncoding(TerminalEncoding),
     SetOutputProcessor(Option<TerminalOutputProcessor>),
     SetOutputEventsEnabled(bool),
+    StartModemTransfer {
+        request: crate::TerminalModemTransferRequest,
+        response_tx: Sender<Option<ModemTransfer>>,
+    },
+    FinishModemTransfer,
+    InterruptModemTransfer,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -177,6 +184,95 @@ where
         (parsed_bytes, graphics_changed)
     }
 
+    fn advance_plain_output(
+        state: &mut LocalGraphicsState,
+        terminal: &mut Term<U>,
+        bytes: &[u8],
+        size: TerminalSize,
+        magic_tx: &CrossbeamSender<TerminalMagicKind>,
+        event_tx: &CrossbeamSender<TerminalEvent>,
+        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+    ) -> (usize, bool) {
+        state
+            .utf8_guard
+            .push(bytes)
+            .map(|guarded| {
+                Self::advance_guarded_bytes(
+                    state,
+                    terminal,
+                    &guarded,
+                    size,
+                    magic_tx,
+                    event_tx,
+                    graphics_tx,
+                )
+            })
+            .unwrap_or_default()
+    }
+
+    fn advance_processed_output(
+        state: &mut LocalGraphicsState,
+        terminal: &mut Term<U>,
+        bytes: &[u8],
+        size: TerminalSize,
+        magic_tx: &CrossbeamSender<TerminalMagicKind>,
+        event_tx: &CrossbeamSender<TerminalEvent>,
+        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+    ) -> (usize, bool) {
+        let events = state.modem_consumer.process_server_output(bytes);
+        Self::handle_modem_consumer_events(
+            state,
+            terminal,
+            events,
+            size,
+            magic_tx,
+            event_tx,
+            graphics_tx,
+        )
+    }
+
+    fn handle_modem_consumer_events(
+        state: &mut LocalGraphicsState,
+        terminal: &mut Term<U>,
+        events: Vec<ModemConsumerEvent>,
+        size: TerminalSize,
+        magic_tx: &CrossbeamSender<TerminalMagicKind>,
+        event_tx: &CrossbeamSender<TerminalEvent>,
+        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+    ) -> (usize, bool) {
+        let mut parsed_bytes = 0usize;
+        let mut graphics_changed = false;
+        for event in events {
+            match event {
+                ModemConsumerEvent::WriteTerminal(bytes) => {
+                    let (bytes, changed) = Self::advance_plain_output(
+                        state,
+                        terminal,
+                        &bytes,
+                        size,
+                        magic_tx,
+                        event_tx,
+                        graphics_tx,
+                    );
+                    parsed_bytes += bytes;
+                    graphics_changed |= changed;
+                }
+                ModemConsumerEvent::SendServer(bytes) => {
+                    state.push_priority_write(Cow::Owned(bytes));
+                }
+                ModemConsumerEvent::TransferStarted(request) => {
+                    if let Some(transfer) = state.modem_consumer.active_transfer().cloned() {
+                        let _ =
+                            event_tx.send(TerminalEvent::ModemTransferPrompt { request, transfer });
+                    }
+                }
+                ModemConsumerEvent::TransferDataQueued => {}
+                ModemConsumerEvent::TransferCancelRequested => {}
+            }
+        }
+        (parsed_bytes, graphics_changed)
+    }
+
     pub(crate) fn channel(&self) -> LocalGraphicsEventLoopSender {
         LocalGraphicsEventLoopSender {
             sender: self.tx.clone(),
@@ -206,6 +302,18 @@ where
                 }
                 LocalGraphicsMsg::SetOutputEventsEnabled(enabled) => {
                     state.output_events_enabled = enabled;
+                }
+                LocalGraphicsMsg::StartModemTransfer {
+                    request,
+                    response_tx,
+                } => {
+                    let _ = response_tx.send(state.modem_consumer.start_manual_transfer(request));
+                }
+                LocalGraphicsMsg::FinishModemTransfer => {
+                    state.modem_consumer.finish_transfer();
+                }
+                LocalGraphicsMsg::InterruptModemTransfer => {
+                    state.modem_consumer.interrupt_transfer();
                 }
                 LocalGraphicsMsg::Shutdown => return false,
             }
@@ -252,21 +360,17 @@ where
                 }),
             };
 
-            let mut parsed_bytes = 0usize;
             let processed_output = state.process_output(&buf[..unprocessed]);
-            if let Some(guarded) = state.utf8_guard.push(&processed_output) {
-                let (bytes, changed) = Self::advance_guarded_bytes(
-                    state,
-                    terminal,
-                    &guarded,
-                    self.size,
-                    &self.magic_tx,
-                    &self.event_tx,
-                    &self.graphics_tx,
-                );
-                parsed_bytes = bytes;
-                graphics_changed |= changed;
-            }
+            let (parsed_bytes, changed) = Self::advance_processed_output(
+                state,
+                terminal,
+                processed_output.as_ref(),
+                self.size,
+                &self.magic_tx,
+                &self.event_tx,
+                &self.graphics_tx,
+            );
+            graphics_changed |= changed;
 
             processed += parsed_bytes;
             unprocessed = 0;
@@ -366,12 +470,29 @@ where
         Ok(())
     }
 
+    fn flush_modem_server_writes(&mut self, state: &mut LocalGraphicsState) -> bool {
+        let mut queued = false;
+        for bytes in state.modem_consumer.take_server_writes() {
+            state.push_priority_write(Cow::Owned(bytes));
+            queued = true;
+        }
+        queued
+    }
+
     pub(crate) fn spawn(mut self) -> JoinHandle<()> {
         std::thread::Builder::new()
             .name("OxideTerm PTY graphics reader".to_string())
             .spawn(move || {
-                let mut state =
-                    LocalGraphicsState::new(self.graphics_options.clone(), self.encoding);
+                let modem_poller = self.poll.clone();
+                let mut state = LocalGraphicsState::new(
+                    self.graphics_options.clone(),
+                    self.encoding,
+                    Arc::new(move || {
+                        // Modem workers run outside this event loop, so wake the
+                        // poller when they enqueue protocol bytes for the PTY.
+                        let _ = modem_poller.notify();
+                    }),
+                );
                 let mut buf = [0u8; LOCAL_PTY_READ_BUFFER_BYTES];
                 let poll_opts = PollMode::Level;
                 let mut interest = PollingEvent::readable(0);
@@ -400,7 +521,8 @@ where
                         }
                     }
 
-                    if events.is_empty() && self.rx.peek().is_none() {
+                    let modem_writes_queued = self.flush_modem_server_writes(&mut state);
+                    if events.is_empty() && self.rx.peek().is_none() && !modem_writes_queued {
                         state.parser.stop_sync(&mut *self.terminal.lock());
                         self.event_proxy.send_event(Event::Wakeup);
                         continue;
@@ -467,6 +589,14 @@ where
                             }
                             _ => {}
                         }
+                    }
+
+                    if modem_writes_queued && let Err(error) = self.pty_write(&mut state) {
+                        tracing::error!(
+                            %error,
+                            "local graphics event loop modem PTY write failed"
+                        );
+                        break 'event_loop;
                     }
 
                     let needs_write = state.needs_write();
@@ -568,10 +698,15 @@ struct LocalGraphicsState {
     output_decoder: TerminalOutputDecoder,
     encoding_detector: EncodingMismatchDetector,
     shell_integration: TerminalShellIntegration,
+    modem_consumer: ModemConsumer,
 }
 
 impl LocalGraphicsState {
-    fn new(graphics_options: GraphicsOptions, encoding: TerminalEncoding) -> Self {
+    fn new(
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        modem_wake: Arc<dyn Fn() + Send + Sync + 'static>,
+    ) -> Self {
         Self {
             write_list: VecDeque::new(),
             writing: None,
@@ -584,6 +719,7 @@ impl LocalGraphicsState {
             output_decoder: TerminalOutputDecoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             shell_integration: TerminalShellIntegration::default(),
+            modem_consumer: ModemConsumer::with_wake(modem_wake),
         }
     }
 

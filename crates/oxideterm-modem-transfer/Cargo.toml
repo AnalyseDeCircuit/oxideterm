@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-modem-transfer"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+thiserror.workspace = true

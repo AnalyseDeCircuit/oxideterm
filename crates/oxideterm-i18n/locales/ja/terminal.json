@@ -11,7 +11,24 @@
     "command_selection": {
       "actions": "コマンド選択アクション",
       "copy": "コピー",
-      "copy_title": "コマンド出力をコピー"
+      "copy_title": "コマンド出力をコピー",
+      "copy_command": "コマンドをコピー",
+      "send_to_ai": "OxideSensに送信",
+      "fill_command_bar": "コマンドバーに入力",
+      "find": "検索...",
+      "select_command": "コマンドを選択",
+      "previous_command": "前のコマンド",
+      "next_command": "次のコマンド",
+      "clear_screen": "画面をクリア"
+    },
+    "modem": {
+      "binary_transfer": "バイナリ転送",
+      "xmodem_upload": "XMODEM アップロード",
+      "xmodem_receive": "XMODEM 受信",
+      "ymodem_upload": "YMODEM アップロード",
+      "ymodem_receive": "YMODEM 受信",
+      "zmodem_upload": "ZMODEM アップロード",
+      "zmodem_receive": "ZMODEM 受信"
     },
     "recording": {
       "started": "Terminal recording started",

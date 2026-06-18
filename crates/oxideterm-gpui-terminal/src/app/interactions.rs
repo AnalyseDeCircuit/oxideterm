@@ -411,7 +411,10 @@ impl TerminalPane {
         true
     }
 
-    fn terminal_point_for_position(&self, position: gpui::Point<Pixels>) -> TerminalPoint {
+    pub(super) fn terminal_point_for_position(
+        &self,
+        position: gpui::Point<Pixels>,
+    ) -> TerminalPoint {
         let origin = self.content_origin();
         let col = ((f32::from(position.x - origin.x) - self.terminal_content_padding_x())
             / self.metrics.cell_width_f32())
@@ -794,13 +797,28 @@ impl TerminalPane {
             return;
         };
 
+        let reference_line = self.absolute_line_for_position(event.position);
+        let command_mark_id = self.command_mark_id_at_absolute_line(reference_line);
+        let navigation_line = command_mark_id
+            .as_deref()
+            .and_then(|id| self.command_mark_start_line(id))
+            .unwrap_or(reference_line);
+
         // The Tauri/Web terminal now owns a copy/paste context menu instead of
         // exposing the WebView menu. Store pane-local coordinates so the GPUI
         // overlay tracks the same terminal surface without affecting TUI mouse mode.
         self.context_menu = Some(TerminalContextMenu {
             x: f32::from(event.position.x - bounds.origin.x),
             y: f32::from(event.position.y - bounds.origin.y),
-            can_copy: self.selected_text_snapshot().is_some(),
+            has_selection: self.selected_text_snapshot().is_some(),
+            reference_line: navigation_line,
+            command_mark_id,
+            has_previous_command: self
+                .previous_command_mark_id_before_line(navigation_line)
+                .is_some(),
+            has_next_command: self
+                .next_command_mark_id_after_line(navigation_line)
+                .is_some(),
         });
         self.selecting = false;
         cx.notify();
@@ -892,21 +910,8 @@ impl TerminalPane {
         if !self.settings.command_marks_enabled {
             return;
         }
-        let point = self.terminal_point_for_position(position);
-        let absolute_line = self
-            .snapshot
-            .scrollback_lines
-            .saturating_add(point.row)
-            .saturating_sub(self.snapshot.display_offset);
-        let selected = self
-            .command_marks
-            .iter()
-            .rev()
-            .find(|mark| {
-                let end_line = self.selectable_command_mark_end_line(mark);
-                absolute_line >= mark.start_line && absolute_line <= end_line
-            })
-            .map(|mark| mark.command_id.clone());
+        let absolute_line = self.absolute_line_for_position(position);
+        let selected = self.command_mark_id_at_absolute_line(absolute_line);
         if self.selected_command_mark_id == selected {
             if selected.is_some() {
                 self.selected_command_mark_id = None;

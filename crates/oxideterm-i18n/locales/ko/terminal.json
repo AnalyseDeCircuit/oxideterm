@@ -11,7 +11,24 @@
     "command_selection": {
       "actions": "명령 선택 작업",
       "copy": "복사",
-      "copy_title": "명령 출력 복사"
+      "copy_title": "명령 출력 복사",
+      "copy_command": "명령 복사",
+      "send_to_ai": "OxideSens로 보내기",
+      "fill_command_bar": "명령 표시줄 채우기",
+      "find": "찾기...",
+      "select_command": "명령 선택",
+      "previous_command": "이전 명령",
+      "next_command": "다음 명령",
+      "clear_screen": "화면 지우기"
+    },
+    "modem": {
+      "binary_transfer": "바이너리 전송",
+      "xmodem_upload": "XMODEM 업로드",
+      "xmodem_receive": "XMODEM 수신",
+      "ymodem_upload": "YMODEM 업로드",
+      "ymodem_receive": "YMODEM 수신",
+      "zmodem_upload": "ZMODEM 업로드",
+      "zmodem_receive": "ZMODEM 수신"
     },
     "recording": {
       "started": "Terminal recording started",

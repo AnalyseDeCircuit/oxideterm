@@ -24,6 +24,7 @@ pub struct SshPtySession {
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     trzsz_consumer: Option<TrzszConsumer>,
+    modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
 }
 
@@ -129,6 +130,7 @@ impl SshPtySession {
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             trzsz_consumer,
+            modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
         }
     }
@@ -222,6 +224,11 @@ impl SshPtySession {
     }
 
     fn feed_transport_output_to_terminal(&mut self, bytes: &[u8]) {
+        let events = self.modem_consumer.process_server_output(bytes);
+        self.handle_modem_consumer_events(events);
+    }
+
+    fn feed_plain_transport_output_to_terminal(&mut self, bytes: &[u8]) {
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
@@ -319,6 +326,36 @@ impl SshPtySession {
             changed = true;
         }
         changed
+    }
+
+    fn flush_modem_server_writes(&mut self) -> bool {
+        let mut changed = false;
+        for bytes in self.modem_consumer.take_server_writes() {
+            let _ = self.send_command(SshTransportCommand::Data(bytes));
+            changed = true;
+        }
+        changed
+    }
+
+    fn handle_modem_consumer_events(&mut self, events: Vec<ModemConsumerEvent>) {
+        for event in events {
+            match event {
+                ModemConsumerEvent::WriteTerminal(bytes) => {
+                    self.feed_plain_transport_output_to_terminal(&bytes);
+                }
+                ModemConsumerEvent::SendServer(bytes) => {
+                    let _ = self.send_command(SshTransportCommand::Data(bytes));
+                }
+                ModemConsumerEvent::TransferStarted(request) => {
+                    if let Some(transfer) = self.modem_consumer.active_transfer().cloned() {
+                        self.pending_events
+                            .push(TerminalEvent::ModemTransferPrompt { request, transfer });
+                    }
+                }
+                ModemConsumerEvent::TransferDataQueued => {}
+                ModemConsumerEvent::TransferCancelRequested => {}
+            }
+        }
     }
 
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
@@ -486,6 +523,7 @@ impl TerminalSessionBackend for SshPtySession {
         let mut changed = self.process_connect_result();
         changed |= self.drain_transport_output().changed;
         changed |= self.flush_trzsz_server_writes();
+        changed |= self.flush_modem_server_writes();
         while let Ok(event) = self.event_rx.try_recv() {
             if self.handle_alacritty_event(event) {
                 changed = true;
@@ -502,6 +540,9 @@ impl TerminalSessionBackend for SshPtySession {
         }
         report.combine(self.drain_transport_output_with_budget(budget));
         if self.flush_trzsz_server_writes() {
+            report.mark_changed();
+        }
+        if self.flush_modem_server_writes() {
             report.mark_changed();
         }
 
@@ -608,6 +649,21 @@ impl TerminalSessionBackend for SshPtySession {
         if let Some(consumer) = self.trzsz_consumer.as_mut() {
             consumer.finish_transfer();
         }
+    }
+
+    fn start_modem_transfer(
+        &mut self,
+        request: TerminalModemTransferRequest,
+    ) -> Option<ModemTransfer> {
+        self.modem_consumer.start_manual_transfer(request)
+    }
+
+    fn interrupt_modem_transfer(&mut self) {
+        self.modem_consumer.interrupt_transfer();
+    }
+
+    fn finish_modem_transfer(&mut self) {
+        self.modem_consumer.finish_transfer();
     }
 
     fn mode(&self) -> TermMode {

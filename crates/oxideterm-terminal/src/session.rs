@@ -16,6 +16,7 @@ use alacritty_terminal::{
 };
 use anyhow::Result;
 use crossbeam_channel::{Receiver, unbounded};
+use oxideterm_modem_transfer::{ModemConsumer, ModemConsumerEvent, ModemTransfer};
 use oxideterm_ssh::{
     ConnectionConsumer, ManagedKeyResolver, SshConfig, SshConnectionHandle, SshConnectionRegistry,
     SshPromptHandler, SshPtyHandle, SshTransportClient, SshTransportCommand,
@@ -36,10 +37,11 @@ pub use crate::backpressure::{TerminalDrainBudget, TerminalDrainReport, Terminal
 
 use crate::{
     LocalEventListener, LocalPtyConfig, LocalPtySession, TermMode, TerminalCommandMark,
-    TerminalEvent, TerminalGraphicsState, TerminalLifecycle, TerminalProcessInfo,
-    TerminalSearchMatch, TerminalSize, TerminalSnapshot, append_grid_line_text,
-    backpressure::MagicScanWindow, focus_report_sequence, graphics_cursor_from_term,
-    search_logical_line_matches, shell_integration::TerminalShellIntegration, snapshot_from_term,
+    TerminalEvent, TerminalGraphicsState, TerminalLifecycle, TerminalModemTransferRequest,
+    TerminalProcessInfo, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
+    append_grid_line_text, backpressure::MagicScanWindow, focus_report_sequence,
+    graphics_cursor_from_term, search_logical_line_matches,
+    shell_integration::TerminalShellIntegration, snapshot_from_term,
     snapshot_from_term_with_display_offset,
 };
 

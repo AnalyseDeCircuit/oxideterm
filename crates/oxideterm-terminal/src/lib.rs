@@ -20,6 +20,7 @@ use alacritty_terminal::{
 };
 use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
+use oxideterm_modem_transfer::{ModemTransfer, ModemTransferRequest};
 use oxideterm_terminal_encoding::{EncodingHint, TerminalInputEncoder};
 use oxideterm_terminal_graphics::{
     DEFAULT_STORAGE_LIMIT_MB, GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement,
@@ -44,6 +45,10 @@ pub use data::{
     TerminalSearchRange, TerminalSnapshot,
 };
 pub use local_shell::{LocalPtyConfig, ShellInfo, default_shell, scan_shells};
+pub use oxideterm_modem_transfer::{
+    DetectedModemProtocol, ModemTransferDirection,
+    ModemTransferRequest as TerminalModemTransferRequest,
+};
 pub use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TERMINAL_ENCODINGS, TerminalEncoding,
     TerminalInputEncoder as RawTerminalInputEncoder, TerminalOutputDecoder,

@@ -2,7 +2,7 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-06-17T12:44:35.723269Z
+Generated: 2026-06-18T14:04:08.472023Z
 
 ## Summary
 

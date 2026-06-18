@@ -8,6 +8,7 @@ use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_terminal::{
     TerminalColor, TerminalCursorShape, TerminalEncoding, TrzszTransferPolicy,
 };
+use oxideterm_theme::{ThemeTokens, default_tokens};
 
 pub const MAX_HIGHLIGHT_RULES: usize = 32;
 pub const MAX_HIGHLIGHT_PATTERN_LENGTH: usize = 512;
@@ -69,6 +70,7 @@ pub struct TerminalUiPreferences {
     pub background: Option<TerminalBackgroundPreferences>,
     pub paste_labels: TerminalPasteLabels,
     pub command_selection_labels: TerminalCommandSelectionLabels,
+    pub modem_labels: TerminalModemLabels,
     pub trzsz_labels: TerminalTrzszLabels,
     pub notice_sink: Option<Arc<dyn Fn(TerminalNotice) + Send + Sync + 'static>>,
     pub highlight_rules: Arc<[TerminalHighlightRule]>,
@@ -104,6 +106,7 @@ impl Default for TerminalUiPreferences {
             background: None,
             paste_labels: TerminalPasteLabels::default(),
             command_selection_labels: TerminalCommandSelectionLabels::default(),
+            modem_labels: TerminalModemLabels::default(),
             trzsz_labels: TerminalTrzszLabels::default(),
             notice_sink: None,
             highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
@@ -185,6 +188,14 @@ pub struct TerminalCommandSelectionLabels {
     pub actions: String,
     pub copy: String,
     pub copy_title: String,
+    pub copy_command: String,
+    pub send_to_ai: String,
+    pub fill_command_bar: String,
+    pub find: String,
+    pub select_command: String,
+    pub previous_command: String,
+    pub next_command: String,
+    pub clear_screen: String,
 }
 
 impl Default for TerminalCommandSelectionLabels {
@@ -193,6 +204,39 @@ impl Default for TerminalCommandSelectionLabels {
             actions: "Command selection actions".to_string(),
             copy: "Copy".to_string(),
             copy_title: "Copy command output".to_string(),
+            copy_command: "Copy command".to_string(),
+            send_to_ai: "Send to OxideSens".to_string(),
+            fill_command_bar: "Fill command bar".to_string(),
+            find: "Find...".to_string(),
+            select_command: "Select command".to_string(),
+            previous_command: "Previous command".to_string(),
+            next_command: "Next command".to_string(),
+            clear_screen: "Clear screen".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalModemLabels {
+    pub binary_transfer: String,
+    pub xmodem_upload: String,
+    pub xmodem_receive: String,
+    pub ymodem_upload: String,
+    pub ymodem_receive: String,
+    pub zmodem_upload: String,
+    pub zmodem_receive: String,
+}
+
+impl Default for TerminalModemLabels {
+    fn default() -> Self {
+        Self {
+            binary_transfer: "Binary transfer".to_string(),
+            xmodem_upload: "XMODEM upload".to_string(),
+            xmodem_receive: "XMODEM receive".to_string(),
+            ymodem_upload: "YMODEM upload".to_string(),
+            ymodem_receive: "YMODEM receive".to_string(),
+            zmodem_upload: "ZMODEM upload".to_string(),
+            zmodem_receive: "ZMODEM receive".to_string(),
         }
     }
 }
@@ -417,6 +461,9 @@ impl TerminalUiSettings {
 
 #[derive(Clone)]
 pub struct TerminalUiTheme {
+    // Terminal-owned overlays still use app-level UI tokens for Radix-mapped
+    // surfaces such as context menus; terminal colors alone are not enough.
+    pub tokens: ThemeTokens,
     pub background: u32,
     pub(crate) bell_background: u32,
     pub foreground: u32,
@@ -425,12 +472,7 @@ pub struct TerminalUiTheme {
 
 impl Default for TerminalUiTheme {
     fn default() -> Self {
-        Self {
-            background: OXIDETERM_TERMINAL_BACKGROUND,
-            bell_background: 0x17131a,
-            foreground: OXIDETERM_TERMINAL_FOREGROUND,
-            header_foreground: 0x8bbdff,
-        }
+        Self::from_tokens(default_tokens())
     }
 }
 
@@ -445,10 +487,21 @@ pub(crate) fn terminal_color_from_hex(hex: u32) -> TerminalColor {
 impl TerminalUiTheme {
     pub fn new(background: u32, foreground: u32, cursor: u32) -> Self {
         Self {
+            tokens: default_tokens(),
             background,
             bell_background: 0x17131a,
             foreground,
             header_foreground: cursor,
+        }
+    }
+
+    pub fn from_tokens(tokens: ThemeTokens) -> Self {
+        Self {
+            background: tokens.terminal.background,
+            bell_background: 0x17131a,
+            foreground: tokens.terminal.foreground,
+            header_foreground: tokens.terminal.cursor,
+            tokens,
         }
     }
 }

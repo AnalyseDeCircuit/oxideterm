@@ -606,9 +606,12 @@ pub enum SettingsTabIcon {
 pub enum SettingsBackgroundTabIcon {
     Activity,
     ArrowLeftRight,
+    Bell,
+    Cloud,
     Code2,
     Folder,
     FolderInput,
+    Gauge,
     ListTree,
     Monitor,
     Network,

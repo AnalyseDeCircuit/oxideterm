@@ -11,7 +11,24 @@
     "command_selection": {
       "actions": "命令選取操作",
       "copy": "複製",
-      "copy_title": "複製命令輸出"
+      "copy_title": "複製命令輸出",
+      "copy_command": "複製命令",
+      "send_to_ai": "傳送到 OxideSens",
+      "fill_command_bar": "填入命令欄",
+      "find": "尋找...",
+      "select_command": "選取命令",
+      "previous_command": "上一個命令",
+      "next_command": "下一個命令",
+      "clear_screen": "清除螢幕"
+    },
+    "modem": {
+      "binary_transfer": "二進位傳輸",
+      "xmodem_upload": "XMODEM 上傳",
+      "xmodem_receive": "XMODEM 接收",
+      "ymodem_upload": "YMODEM 上傳",
+      "ymodem_receive": "YMODEM 接收",
+      "zmodem_upload": "ZMODEM 上傳",
+      "zmodem_receive": "ZMODEM 接收"
     },
     "recording": {
       "started": "終端錄製已開始",

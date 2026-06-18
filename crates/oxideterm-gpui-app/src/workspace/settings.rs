@@ -175,9 +175,12 @@ fn settings_background_tab_lucide(icon: SettingsBackgroundTabIcon) -> LucideIcon
     match icon {
         SettingsBackgroundTabIcon::Activity => LucideIcon::Activity,
         SettingsBackgroundTabIcon::ArrowLeftRight => LucideIcon::ArrowLeftRight,
+        SettingsBackgroundTabIcon::Bell => LucideIcon::Bell,
+        SettingsBackgroundTabIcon::Cloud => LucideIcon::Cloud,
         SettingsBackgroundTabIcon::Code2 => LucideIcon::Code2,
         SettingsBackgroundTabIcon::Folder => LucideIcon::Folder,
         SettingsBackgroundTabIcon::FolderInput => LucideIcon::FolderInput,
+        SettingsBackgroundTabIcon::Gauge => LucideIcon::Gauge,
         SettingsBackgroundTabIcon::ListTree => LucideIcon::ListTree,
         SettingsBackgroundTabIcon::Monitor => LucideIcon::Monitor,
         SettingsBackgroundTabIcon::Network => LucideIcon::Network,

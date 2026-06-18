@@ -11,7 +11,24 @@
     "command_selection": {
       "actions": "Ações de seleção de comando",
       "copy": "Copiar",
-      "copy_title": "Copiar saída do comando"
+      "copy_title": "Copiar saída do comando",
+      "copy_command": "Copiar comando",
+      "send_to_ai": "Enviar para OxideSens",
+      "fill_command_bar": "Preencher barra de comandos",
+      "find": "Buscar...",
+      "select_command": "Selecionar comando",
+      "previous_command": "Comando anterior",
+      "next_command": "Próximo comando",
+      "clear_screen": "Limpar tela"
+    },
+    "modem": {
+      "binary_transfer": "Transferência binária",
+      "xmodem_upload": "Enviar via XMODEM",
+      "xmodem_receive": "Receber via XMODEM",
+      "ymodem_upload": "Enviar via YMODEM",
+      "ymodem_receive": "Receber via YMODEM",
+      "zmodem_upload": "Enviar via ZMODEM",
+      "zmodem_receive": "Receber via ZMODEM"
     },
     "recording": {
       "started": "Terminal recording started",

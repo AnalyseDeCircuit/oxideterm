@@ -247,6 +247,21 @@ impl TerminalSession {
         self.backend.finish_trzsz_transfer();
     }
 
+    pub fn start_modem_transfer(
+        &mut self,
+        request: TerminalModemTransferRequest,
+    ) -> Option<ModemTransfer> {
+        self.backend.start_modem_transfer(request)
+    }
+
+    pub fn interrupt_modem_transfer(&mut self) {
+        self.backend.interrupt_modem_transfer();
+    }
+
+    pub fn finish_modem_transfer(&mut self) {
+        self.backend.finish_modem_transfer();
+    }
+
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.backend.lifecycle()
     }

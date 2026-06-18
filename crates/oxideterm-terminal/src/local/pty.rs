@@ -297,6 +297,27 @@ impl LocalPtySession {
             .send(LocalGraphicsMsg::SetOutputEventsEnabled(enabled));
     }
 
+    pub fn start_modem_transfer(
+        &mut self,
+        request: TerminalModemTransferRequest,
+    ) -> Option<ModemTransfer> {
+        let (response_tx, response_rx) = std::sync::mpsc::channel();
+        let message = LocalGraphicsMsg::StartModemTransfer {
+            request,
+            response_tx,
+        };
+        self.notifier.0.send(message).ok()?;
+        response_rx.recv_timeout(std::time::Duration::from_secs(1)).ok()?
+    }
+
+    pub fn interrupt_modem_transfer(&mut self) {
+        let _ = self.notifier.0.send(LocalGraphicsMsg::InterruptModemTransfer);
+    }
+
+    pub fn finish_modem_transfer(&mut self) {
+        let _ = self.notifier.0.send(LocalGraphicsMsg::FinishModemTransfer);
+    }
+
     pub fn lifecycle(&self) -> TerminalLifecycle {
         self.lifecycle.clone()
     }

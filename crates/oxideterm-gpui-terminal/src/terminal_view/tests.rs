@@ -372,8 +372,10 @@ fn copy_policy_defaults_keep_current_terminal_behavior() {
 #[test]
 fn terminal_theme_defaults_match_current_terminal_palette() {
     let theme = TerminalUiTheme::default();
-    assert_eq!(theme.background, OXIDETERM_TERMINAL_BACKGROUND);
-    assert_eq!(theme.foreground, 0xe6e8eb);
+    let tokens = oxideterm_theme::default_tokens();
+    assert_eq!(theme.background, tokens.terminal.background);
+    assert_eq!(theme.foreground, tokens.terminal.foreground);
+    assert_eq!(theme.header_foreground, tokens.terminal.cursor);
 }
 
 #[test]

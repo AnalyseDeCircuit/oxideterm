@@ -910,6 +910,11 @@ impl WorkspaceApp {
                             if workspace.handle_active_privilege_prompt_submit_request(window, cx) {
                                 cx.notify();
                             }
+                            let handled_context_action =
+                                workspace.handle_active_terminal_context_action_request(window, cx);
+                            if handled_context_action {
+                                cx.notify();
+                            }
                             if workspace.sync_active_privilege_prompt_inline_hint(cx) {
                                 // Privilege prompts are rendered as terminal ghost text,
                                 // so the workspace heartbeat only mirrors the prompt
@@ -1035,6 +1040,23 @@ impl WorkspaceApp {
                 actions: self.i18n.t("terminal.command_selection.actions"),
                 copy: self.i18n.t("terminal.command_selection.copy"),
                 copy_title: self.i18n.t("terminal.command_selection.copy_title"),
+                copy_command: self.i18n.t("terminal.command_selection.copy_command"),
+                send_to_ai: self.i18n.t("terminal.command_selection.send_to_ai"),
+                fill_command_bar: self.i18n.t("terminal.command_selection.fill_command_bar"),
+                find: self.i18n.t("terminal.command_selection.find"),
+                select_command: self.i18n.t("terminal.command_selection.select_command"),
+                previous_command: self.i18n.t("terminal.command_selection.previous_command"),
+                next_command: self.i18n.t("terminal.command_selection.next_command"),
+                clear_screen: self.i18n.t("terminal.command_selection.clear_screen"),
+            },
+            modem_labels: TerminalModemLabels {
+                binary_transfer: self.i18n.t("terminal.modem.binary_transfer"),
+                xmodem_upload: self.i18n.t("terminal.modem.xmodem_upload"),
+                xmodem_receive: self.i18n.t("terminal.modem.xmodem_receive"),
+                ymodem_upload: self.i18n.t("terminal.modem.ymodem_upload"),
+                ymodem_receive: self.i18n.t("terminal.modem.ymodem_receive"),
+                zmodem_upload: self.i18n.t("terminal.modem.zmodem_upload"),
+                zmodem_receive: self.i18n.t("terminal.modem.zmodem_receive"),
             },
             trzsz_labels: TerminalTrzszLabels {
                 select_upload_directory_title: self
@@ -1132,11 +1154,7 @@ impl WorkspaceApp {
                     .collect::<Vec<_>>(),
             ),
             trzsz_policy,
-            theme: TerminalUiTheme::new(
-                self.tokens.terminal.background,
-                self.tokens.terminal.foreground,
-                self.tokens.terminal.cursor,
-            ),
+            theme: TerminalUiTheme::from_tokens(self.tokens),
         }
     }
 

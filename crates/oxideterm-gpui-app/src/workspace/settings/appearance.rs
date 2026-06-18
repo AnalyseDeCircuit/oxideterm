@@ -175,7 +175,7 @@ impl WorkspaceApp {
                 cx,
             ));
         }
-        rows.push(self.appearance_background_gallery(settings, cx));
+        rows.push(self.appearance_background_image_slot(settings, cx));
         if has_background_image {
             // Matches BackgroundImageSection.tsx: sliders, fit select, and tab
             // pills live directly after the gallery with normal `space-y-4`
@@ -1258,11 +1258,22 @@ impl WorkspaceApp {
         });
     }
 
-    fn appearance_background_gallery(
+    fn appearance_background_image_slot(
         &self,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let has_background_image = settings.terminal.background_image.is_some();
+        let pick_label = if has_background_image {
+            self.i18n.t("settings_view.terminal.bg_change")
+        } else {
+            self.i18n.t("settings_view.terminal.bg_add")
+        };
+        let pick_icon = if has_background_image {
+            LucideIcon::Image
+        } else {
+            LucideIcon::Plus
+        };
         let actions = div()
             .flex()
             .flex_row()
@@ -1270,19 +1281,19 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .child(
                 self.appearance_action_button(
-                    LucideIcon::Plus,
-                    self.i18n.t("settings_view.terminal.bg_add"),
+                    pick_icon,
+                    pick_label,
                     cx.listener(|this, _event, _window, cx| {
                         this.pick_background_image(cx);
                         cx.stop_propagation();
                     }),
                 ),
             )
-            .when(settings.terminal.background_image.is_some(), |actions| {
+            .when(has_background_image, |actions| {
                 actions.child(
                     settings_background_clear_all_button(
                         &self.tokens,
-                        self.i18n.t("settings_view.terminal.bg_clear_all"),
+                        self.i18n.t("settings_view.terminal.bg_clear"),
                         Self::render_lucide_icon(
                             LucideIcon::Trash2,
                             14.0,
@@ -1305,13 +1316,13 @@ impl WorkspaceApp {
             .into_any_element();
         settings_background_gallery(
             &self.tokens,
-            self.i18n.t("settings_view.terminal.bg_gallery"),
+            self.i18n.t("settings_view.terminal.bg_label"),
             actions,
-            self.background_thumbnails(settings, cx),
+            self.background_image_slot_content(settings, cx),
         )
     }
 
-    fn background_thumbnails(
+    fn background_image_slot_content(
         &self,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,

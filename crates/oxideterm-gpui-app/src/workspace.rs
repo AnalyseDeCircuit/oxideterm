@@ -31,6 +31,7 @@ mod sidebar;
 mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
+mod terminal_context_actions;
 mod virtual_list;
 
 use std::{
@@ -125,12 +126,13 @@ use oxideterm_gpui_platform::{
 };
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SharedTerminalSession, TerminalBackgroundFit,
-    TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalHighlightRenderMode,
-    TerminalHighlightRule as UiHighlightRule, TerminalInputInterceptor,
-    TerminalInputInterceptorResult, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
-    TerminalPane, TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus,
-    TerminalSearchStatus, TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
-    detect_custom_privilege_prompt, detect_privilege_prompt,
+    TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalContextAction,
+    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
+    TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice,
+    TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPasteLabels,
+    TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus, TerminalTrzszLabels,
+    TerminalUiPreferences, TerminalUiTheme, detect_custom_privilege_prompt,
+    detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,

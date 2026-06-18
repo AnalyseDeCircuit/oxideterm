@@ -47,7 +47,24 @@
     "command_selection": {
       "actions": "Command selection actions",
       "copy": "Copy",
-      "copy_title": "Copy command output"
+      "copy_title": "Copy command output",
+      "copy_command": "Copy command",
+      "send_to_ai": "Send to OxideSens",
+      "fill_command_bar": "Fill command bar",
+      "find": "Find...",
+      "select_command": "Select command",
+      "previous_command": "Previous command",
+      "next_command": "Next command",
+      "clear_screen": "Clear screen"
+    },
+    "modem": {
+      "binary_transfer": "Binary transfer",
+      "xmodem_upload": "XMODEM upload",
+      "xmodem_receive": "XMODEM receive",
+      "ymodem_upload": "YMODEM upload",
+      "ymodem_receive": "YMODEM receive",
+      "zmodem_upload": "ZMODEM upload",
+      "zmodem_receive": "ZMODEM receive"
     },
     "recording": {
       "started": "Terminal recording started",

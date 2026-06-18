@@ -24,6 +24,10 @@ pub enum TerminalEvent {
         selection: TrzszTransferSelection,
         remote_is_windows: bool,
     },
+    ModemTransferPrompt {
+        request: ModemTransferRequest,
+        transfer: ModemTransfer,
+    },
     ShellIntegration(ShellIntegrationEvent),
     CommandMark(TerminalCommandMarkEvent),
     CwdChanged {

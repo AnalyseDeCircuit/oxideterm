@@ -11,7 +11,24 @@
     "command_selection": {
       "actions": "Aktionen für Befehlsauswahl",
       "copy": "Kopieren",
-      "copy_title": "Befehlsausgabe kopieren"
+      "copy_title": "Befehlsausgabe kopieren",
+      "copy_command": "Befehl kopieren",
+      "send_to_ai": "An OxideSens senden",
+      "fill_command_bar": "Befehlsleiste füllen",
+      "find": "Suchen...",
+      "select_command": "Befehl auswählen",
+      "previous_command": "Vorheriger Befehl",
+      "next_command": "Nächster Befehl",
+      "clear_screen": "Bildschirm leeren"
+    },
+    "modem": {
+      "binary_transfer": "Binärübertragung",
+      "xmodem_upload": "XMODEM hochladen",
+      "xmodem_receive": "XMODEM empfangen",
+      "ymodem_upload": "YMODEM hochladen",
+      "ymodem_receive": "YMODEM empfangen",
+      "zmodem_upload": "ZMODEM hochladen",
+      "zmodem_receive": "ZMODEM empfangen"
     },
     "recording": {
       "started": "Terminal recording started",

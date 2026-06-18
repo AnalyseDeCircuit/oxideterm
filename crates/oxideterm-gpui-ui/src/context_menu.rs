@@ -10,6 +10,22 @@ use crate::modal::popover_backdrop;
 const CONTEXT_MENU_SURFACE_ALPHA: u32 = 0xf2;
 const CONTEXT_MENU_DISABLED_OPACITY: f32 = 0.5;
 const CONTEXT_MENU_RADIO_DOT_SIZE: f32 = 8.0;
+const CONTEXT_MENU_LINE_HEIGHT_RATIO: f32 = 1.35;
+
+pub fn context_menu_line_height(tokens: &ThemeTokens) -> f32 {
+    // Menu overlays can be mounted under terminal/editor roots that set their
+    // own text metrics. Normalize the line box so rows do not inherit those
+    // larger surface-specific line heights.
+    tokens.metrics.ui_text_sm * CONTEXT_MENU_LINE_HEIGHT_RATIO
+}
+
+pub fn context_menu_item_height_estimate(tokens: &ThemeTokens) -> f32 {
+    context_menu_line_height(tokens) + tokens.metrics.ui_menu_item_padding_y * 2.0
+}
+
+pub fn context_menu_separator_height_estimate(tokens: &ThemeTokens) -> f32 {
+    1.0 + tokens.metrics.ui_menu_padding * 2.0
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContextMenuItemKind {
@@ -117,6 +133,7 @@ pub fn context_menu_content(tokens: &ThemeTokens) -> Div {
             (tokens.ui.bg_elevated << 8) | CONTEXT_MENU_SURFACE_ALPHA,
         ))
         .p(px(tokens.metrics.ui_menu_padding))
+        .line_height(px(context_menu_line_height(tokens)))
         .text_color(rgb(tokens.ui.text))
         .shadow_xl()
 }
@@ -229,6 +246,7 @@ pub fn context_menu_label(tokens: &ThemeTokens, label: impl Into<String>, inset:
         }))
         .py(px(tokens.metrics.ui_menu_item_padding_y))
         .text_size(px(tokens.metrics.ui_text_sm))
+        .line_height(px(context_menu_line_height(tokens)))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(tokens.ui.text_muted))
         .child(label.into())
@@ -277,6 +295,7 @@ pub fn context_menu_item_row(
         .pl(px(left_padding))
         .py(px(tokens.metrics.ui_menu_item_padding_y))
         .text_size(px(tokens.metrics.ui_text_sm))
+        .line_height(px(context_menu_line_height(tokens)))
         .text_color(rgb(tokens.ui.text))
         .opacity(if disabled {
             CONTEXT_MENU_DISABLED_OPACITY
@@ -337,8 +356,13 @@ fn context_menu_chevron(tokens: &ThemeTokens, chevron: impl Into<String>) -> Div
 #[cfg(test)]
 mod tests {
     use gpui::CursorStyle;
+    use oxideterm_theme::{ThemeTokens, theme_by_id};
 
-    use super::{context_menu_action_cursor, context_menu_item_is_actionable};
+    use super::{
+        context_menu_action_cursor, context_menu_item_height_estimate,
+        context_menu_item_is_actionable, context_menu_line_height,
+        context_menu_separator_height_estimate,
+    };
 
     #[test]
     fn context_menu_action_guard_blocks_disabled_or_loading_items() {
@@ -361,6 +385,20 @@ mod tests {
         assert_eq!(
             context_menu_action_cursor(true, false),
             CursorStyle::OperationNotAllowed
+        );
+    }
+
+    #[test]
+    fn context_menu_height_estimates_use_normalized_line_height() {
+        let tokens = ThemeTokens::from_builtin(theme_by_id("default"));
+
+        assert_eq!(
+            context_menu_item_height_estimate(&tokens),
+            context_menu_line_height(&tokens) + tokens.metrics.ui_menu_item_padding_y * 2.0
+        );
+        assert_eq!(
+            context_menu_separator_height_estimate(&tokens),
+            1.0 + tokens.metrics.ui_menu_padding * 2.0
         );
     }
 }

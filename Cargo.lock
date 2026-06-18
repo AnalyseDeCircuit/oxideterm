@@ -7182,12 +7182,15 @@ dependencies = [
  "chrono",
  "gpui",
  "image",
+ "oxideterm-gpui-ui",
+ "oxideterm-modem-transfer",
  "oxideterm-render-policy",
  "oxideterm-settings",
  "oxideterm-ssh",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
  "oxideterm-terminal-unicode",
+ "oxideterm-theme",
  "oxideterm-trzsz",
  "parking_lot",
  "regex",
@@ -7258,6 +7261,13 @@ dependencies = [
  "sysinfo 0.33.1",
  "walkdir",
  "zip",
+]
+
+[[package]]
+name = "oxideterm-modem-transfer"
+version = "2.0.0-gpui-preview.8"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -7476,6 +7486,7 @@ dependencies = [
  "anyhow",
  "crossbeam-channel",
  "libc",
+ "oxideterm-modem-transfer",
  "oxideterm-ssh",
  "oxideterm-terminal-encoding",
  "oxideterm-terminal-graphics",

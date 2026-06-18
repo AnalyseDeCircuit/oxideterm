@@ -63,6 +63,14 @@ pub trait TerminalSessionBackend: Send {
     fn feed_trzsz_terminal_output(&mut self, _bytes: &[u8]) {}
     fn interrupt_trzsz_transfer(&mut self) {}
     fn finish_trzsz_transfer(&mut self) {}
+    fn start_modem_transfer(
+        &mut self,
+        _request: TerminalModemTransferRequest,
+    ) -> Option<ModemTransfer> {
+        None
+    }
+    fn interrupt_modem_transfer(&mut self) {}
+    fn finish_modem_transfer(&mut self) {}
     fn mode(&self) -> TermMode;
     fn set_focused(&mut self, focused: bool) -> Result<()>;
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()>;
