@@ -1,8 +1,7 @@
 use std::fmt;
 
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, PrivilegeCredentialKind, SavedPrivilegeCredential,
-    SavedUpstreamProxyProtocol,
+    AuthType, ConnectionInfo, PrivilegeCredentialKind, SavedUpstreamProxyProtocol,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -274,7 +273,6 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) post_connect_command: String,
-    pub(in crate::workspace) privilege_credentials: Vec<SavedPrivilegeCredential>,
     pub(in crate::workspace) color: String,
     pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
@@ -336,7 +334,6 @@ impl fmt::Debug for NewConnectionForm {
             .field("save_password", &self.save_password)
             .field("group", &self.group)
             .field("post_connect_command", &self.post_connect_command)
-            .field("privilege_credentials", &self.privilege_credentials)
             .field("color", &self.color)
             .field("tags", &self.tags)
             .field("proxy_hops", &self.proxy_hops)
@@ -399,7 +396,6 @@ impl Default for NewConnectionForm {
             save_password: false,
             group: String::new(),
             post_connect_command: String::new(),
-            privilege_credentials: Vec::new(),
             color: String::new(),
             tags: Vec::new(),
             proxy_hops: Vec::new(),

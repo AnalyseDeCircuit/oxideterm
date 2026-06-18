@@ -638,21 +638,10 @@ impl WorkspaceApp {
     }
 
     fn settings_privilege_scope_rows(&self) -> Vec<SettingsPrivilegeScopeRow> {
-        let mut rows = vec![self.settings_local_privilege_scope_row()];
-        rows.extend(
-            self.connection_store
-                .connections()
-                .iter()
-                .map(|connection| SettingsPrivilegeScopeRow {
-                    id: connection.id.clone(),
-                    title: connection.name.clone(),
-                    subtitle: format!("{}@{}:{}", connection.username, connection.host, connection.port),
-                    username_placeholder: connection.username.clone(),
-                    credential_count: connection.privilege_credentials.len(),
-                    local: false,
-                }),
-        );
-        rows
+        // SSH sudo/su autofill is disabled. Keep the privilege credential page
+        // scoped to local shells so users cannot save remote sudo secrets that
+        // the terminal intentionally ignores.
+        vec![self.settings_local_privilege_scope_row()]
     }
 
     fn settings_local_privilege_scope_row(&self) -> SettingsPrivilegeScopeRow {
@@ -681,15 +670,6 @@ impl WorkspaceApp {
         let selected = self.settings_page.privilege_scope_id.as_deref();
         if selected == Some(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID) {
             return LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
-        }
-        if let Some(selected) = selected
-            && self
-                .connection_store
-                .connections()
-                .iter()
-                .any(|connection| connection.id == selected)
-        {
-            return selected.to_string();
         }
         LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string()
     }
@@ -781,11 +761,6 @@ impl WorkspaceApp {
         };
         match self.connection_store.save_privilege_credential(request) {
             Ok(_) => {
-                if scope_id != LOCAL_SHELL_PRIVILEGE_CONNECTION_ID
-                    && self.ensure_matching_ssh_terminal_privilege_scope(&scope_id)
-                {
-                    let _ = self.sync_active_privilege_prompt_inline_hint(cx);
-                }
                 zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
                 self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
                 self.settings_local_privilege_error = None;

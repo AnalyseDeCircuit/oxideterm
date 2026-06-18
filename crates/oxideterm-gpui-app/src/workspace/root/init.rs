@@ -531,7 +531,6 @@ impl WorkspaceApp {
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             terminal_ssh_nodes: HashMap::new(),
-            terminal_privilege_connection_ids: HashMap::new(),
             pending_ssh_terminal_opens: VecDeque::new(),
             expanded_ssh_nodes: HashSet::new(),
             active_ssh_node_id: None,
@@ -906,6 +905,9 @@ impl WorkspaceApp {
                             workspace.maybe_start_forwards_port_scan(cx);
                             workspace.maybe_refresh_forwards_stats(cx);
                             if workspace.any_terminal_recording_active(cx) {
+                                cx.notify();
+                            }
+                            if workspace.handle_active_privilege_prompt_submit_request(window, cx) {
                                 cx.notify();
                             }
                             if workspace.sync_active_privilege_prompt_inline_hint(cx) {

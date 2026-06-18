@@ -8,6 +8,7 @@ use oxideterm_terminal::{TermMode, TerminalRow, TerminalSearchMatch, TerminalSna
 use oxideterm_terminal_unicode::visual_line_for_row;
 
 use super::{ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane};
+use crate::privilege_prompt::PrivilegePromptMatch;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
@@ -45,6 +46,27 @@ impl TerminalPane {
                 }
                 _ => {}
             }
+        }
+
+        if key == "enter"
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+            && !modifiers.shift
+            && self.privilege_prompt_inline_hint.is_some()
+            && self.privilege_prompt_snapshot().is_some_and(|snapshot| {
+                !matches!(
+                    snapshot.prompt,
+                    PrivilegePromptMatch::GenericPassword { .. }
+                )
+            })
+        {
+            // The workspace owns secret lookup and PTY writes. The terminal only
+            // captures Enter before it becomes a normal newline while the visible
+            // inline hint confirms there is exactly one scoped credential.
+            self.privilege_prompt_submit_requested = true;
+            cx.notify();
+            return true;
         }
 
         if modifiers.platform && modifiers.shift && key.eq_ignore_ascii_case("k") {

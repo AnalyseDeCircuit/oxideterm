@@ -28,31 +28,10 @@ struct PrivilegePromptHelperState {
     matches: Vec<MatchedPrivilegeCredential>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PrivilegeScopeCandidateKind {
-    Primary,
-    EndpointRecovery,
-    RuntimeFallback,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PrivilegeScopeCandidate {
-    connection_id: String,
-    kind: PrivilegeScopeCandidateKind,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PrivilegeScopeCredentialCandidate {
-    connection_id: String,
-    kind: PrivilegeScopeCandidateKind,
-    credentials: Vec<SavedPrivilegeCredential>,
-}
-
 fn tab_kind_allows_privilege_prompt_helper(tab_kind: &TabKind) -> bool {
-    // Tauri passes readVisibleBuffer/sendPrivilegeInput through both SSH and
-    // local terminal views. Serial/telnet panes live under LocalTerminal tabs
-    // too, so the caller still filters those transport variants separately.
-    matches!(tab_kind, TabKind::SshTerminal | TabKind::LocalTerminal)
+    // SSH sudo/su autofill is intentionally disabled. Keep this helper scoped
+    // to local shell tabs so remote sudo prompts never bind to saved SSH hosts.
+    matches!(tab_kind, TabKind::LocalTerminal)
 }
 
 fn privilege_credential_matches_prompt(
@@ -144,6 +123,16 @@ fn build_privilege_prompt_helper_state(
     build_privilege_prompt_helper_state_from_prompt(connection_id, credentials, prompt)
 }
 
+fn build_privilege_prompt_helper_state_with_tracked_prompt(
+    connection_id: String,
+    credentials: &[SavedPrivilegeCredential],
+    visible_text: &str,
+    tracked_prompt: Option<PrivilegePromptMatch>,
+) -> Option<PrivilegePromptHelperState> {
+    let prompt = choose_privilege_prompt(credentials, visible_text, tracked_prompt)?;
+    build_privilege_prompt_helper_state_from_prompt(connection_id, credentials, prompt)
+}
+
 fn build_privilege_prompt_helper_state_from_prompt(
     connection_id: String,
     credentials: &[SavedPrivilegeCredential],
@@ -163,75 +152,6 @@ fn build_privilege_prompt_helper_state_from_prompt(
         prompt,
         matches,
     })
-}
-
-fn prompt_state_allows_inline_fill(state: &PrivilegePromptHelperState) -> bool {
-    !matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. })
-        && state.matches.len() == 1
-}
-
-fn prompt_state_without_fill_matches(
-    mut state: PrivilegePromptHelperState,
-) -> PrivilegePromptHelperState {
-    state.matches.clear();
-    state
-}
-
-fn select_privilege_prompt_helper_state_from_scope_candidates(
-    candidates: Vec<PrivilegeScopeCredentialCandidate>,
-    visible_text: &str,
-    tracked_prompt: Option<PrivilegePromptMatch>,
-) -> Option<PrivilegePromptHelperState> {
-    let mut first_state = None;
-    let mut first_matched_state = None;
-    let mut recovery_single_state = None;
-    let mut recovery_single_count = 0usize;
-
-    for candidate in candidates {
-        let Some(prompt) =
-            choose_privilege_prompt(&candidate.credentials, visible_text, tracked_prompt.clone())
-        else {
-            continue;
-        };
-        let Some(state) = build_privilege_prompt_helper_state_from_prompt(
-            candidate.connection_id,
-            &candidate.credentials,
-            prompt,
-        ) else {
-            continue;
-        };
-        let fillable = prompt_state_allows_inline_fill(&state);
-
-        if candidate.kind == PrivilegeScopeCandidateKind::Primary && fillable {
-            // A primary scope is the explicit terminal owner or its saved-node
-            // lineage. When it matches exactly one metadata credential, keep that
-            // owner instead of scanning aliases for another possible secret.
-            return Some(state);
-        }
-        if candidate.kind == PrivilegeScopeCandidateKind::EndpointRecovery && fillable {
-            recovery_single_count += 1;
-            if recovery_single_state.is_none() {
-                recovery_single_state = Some(state.clone());
-            }
-        }
-        if !state.matches.is_empty() && first_matched_state.is_none() {
-            first_matched_state = Some(state.clone());
-        }
-        if first_state.is_none() {
-            first_state = Some(state);
-        }
-    }
-
-    if recovery_single_count == 1 {
-        return recovery_single_state;
-    }
-    if recovery_single_count > 1 {
-        // Multiple saved aliases for the same SSH endpoint can all contain a
-        // matching sudo/su credential. Keep the prompt visible to the state
-        // machine, but do not silently choose which secret Enter should send.
-        return first_state.map(prompt_state_without_fill_matches);
-    }
-    first_matched_state.or(first_state)
 }
 
 fn choose_privilege_prompt(
@@ -267,52 +187,7 @@ fn detect_custom_prompt_from_credentials(
     })
 }
 
-fn valid_explicit_privilege_scope(
-    explicit_session_scope: Option<String>,
-    is_saved_connection_scope: impl Fn(&str) -> bool,
-) -> Option<String> {
-    explicit_session_scope.filter(|scope| is_saved_connection_scope(scope))
-}
-
 impl WorkspaceApp {
-    fn saved_connection_id_for_node_snapshot(
-        &self,
-        node_id: &NodeId,
-        node: Option<&WorkspaceSshNode>,
-    ) -> Option<String> {
-        let config = node.map(|node| node.config.clone()).or_else(|| {
-            self.node_runtime_store
-                .snapshot(node_id)
-                .map(|snapshot| snapshot.config)
-        })?;
-        let title = node.map(|node| node.title.as_str());
-        let candidates = self
-            .connection_store
-            .connections()
-            .iter()
-            .filter(|connection| {
-                connection.host == config.host
-                    && connection.port == config.port
-                    && connection.username == config.username
-            })
-            .collect::<Vec<_>>();
-        if let Some(title) = title
-            && let Some(connection) = candidates
-                .iter()
-                .copied()
-                .find(|connection| connection.name == title)
-        {
-            return Some(connection.id.clone());
-        }
-        // Use a config match as a last resort only when it is unique. Privilege
-        // helper credentials are secrets; ambiguous host aliases must not pick
-        // a saved connection by accident.
-        match candidates.as_slice() {
-            [connection] => Some(connection.id.clone()),
-            _ => None,
-        }
-    }
-
     fn terminal_command_action_button(
         &self,
         icon: LucideIcon,
@@ -341,24 +216,9 @@ impl WorkspaceApp {
         )
     }
 
-    fn push_privilege_scope_candidate(
-        candidates: &mut Vec<PrivilegeScopeCandidate>,
-        seen: &mut std::collections::HashSet<String>,
-        connection_id: Option<String>,
-        kind: PrivilegeScopeCandidateKind,
-    ) {
-        let Some(connection_id) = connection_id else {
-            return;
-        };
-        if seen.insert(connection_id.clone()) {
-            candidates.push(PrivilegeScopeCandidate {
-                connection_id,
-                kind,
-            });
-        }
-    }
-
-    fn active_privilege_scope_candidates(&self) -> Option<Vec<PrivilegeScopeCandidate>> {
+    fn active_privilege_scope_credentials(
+        &self,
+    ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal)
@@ -367,115 +227,14 @@ impl WorkspaceApp {
             // Local shell sudo/su prompts have no SavedConnection owner. Use a
             // dedicated store scope so secrets are never confused with SSH
             // connection credentials.
-            return Some(vec![PrivilegeScopeCandidate {
-                connection_id: LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string(),
-                kind: PrivilegeScopeCandidateKind::Primary,
-            }]);
+            let connection_id = LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
+            let credentials = self
+                .connection_store
+                .list_privilege_credentials(&connection_id)
+                .unwrap_or_default();
+            return Some((connection_id, credentials));
         }
-
-        let session_id = self.active_terminal_session_id()?;
-        let node_id = self.terminal_ssh_nodes.get(&session_id)?;
-        let node = self.ssh_nodes.get(node_id);
-        // Privilege credentials are stored on SavedConnection metadata, not on
-        // transient SSH transport handles. Resolve the owner from every native
-        // session-tree mirror before giving up: restored/expanded nodes may
-        // have their origin in NodeRuntimeStore even when the UI node snapshot
-        // was created before the saved id was attached.
-        let node_config = node.map(|node| node.config.clone()).or_else(|| {
-            self.node_runtime_store
-                .snapshot(node_id)
-                .map(|snapshot| snapshot.config)
-        });
-        let saved_connection_scope_exists =
-            |scope: &str| self.connection_store.get(scope).is_some();
-        let explicit_session_scope = self
-            .terminal_privilege_connection_ids
-            .get(&session_id)
-            .cloned()
-            .and_then(|scope| {
-                // The per-terminal privilege owner is the saved connection that
-                // opened this PTY. It may intentionally differ from the runtime
-                // SSH endpoint after auto-route, SSH config HostName expansion,
-                // or node reuse, so only validate that it is still a saved
-                // connection row. Endpoint-based recovery below remains a
-                // fallback for older sessions that never recorded this owner.
-                valid_explicit_privilege_scope(Some(scope), saved_connection_scope_exists)
-            });
-        let node_saved_connection_id = node
-            .and_then(|node| node.saved_connection_id.clone())
-            .filter(|scope| saved_connection_scope_exists(scope));
-        let runtime_origin_saved_connection_id = self
-            .node_runtime_store
-            .snapshot(node_id)
-            .and_then(|snapshot| snapshot.origin.saved_connection_id().map(str::to_string))
-            .filter(|scope| saved_connection_scope_exists(scope));
-        let saved_node_connection_id =
-            self.saved_ssh_nodes
-                .iter()
-                .find_map(|(saved_connection_id, saved_node_id)| {
-                    (saved_node_id == node_id && saved_connection_scope_exists(saved_connection_id))
-                        .then(|| saved_connection_id.clone())
-                });
-        let unique_config_connection_id = self.saved_connection_id_for_node_snapshot(node_id, node);
-        let runtime_connection_id = self.node_router.connection_id_for_node(node_id);
-        let mut candidates = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        // Tauri passes `privilegeConnectionId ?? connectionId` to the command bar.
-        // Keep all saved-connection recovery paths ahead of the transient runtime
-        // id so inline fill only uses saved metadata when a safe owner exists,
-        // while direct SSH tabs can still keep a detected prompt state alive.
-        Self::push_privilege_scope_candidate(
-            &mut candidates,
-            &mut seen,
-            explicit_session_scope,
-            PrivilegeScopeCandidateKind::Primary,
-        );
-        Self::push_privilege_scope_candidate(
-            &mut candidates,
-            &mut seen,
-            node_saved_connection_id,
-            PrivilegeScopeCandidateKind::EndpointRecovery,
-        );
-        Self::push_privilege_scope_candidate(
-            &mut candidates,
-            &mut seen,
-            runtime_origin_saved_connection_id,
-            PrivilegeScopeCandidateKind::EndpointRecovery,
-        );
-        Self::push_privilege_scope_candidate(
-            &mut candidates,
-            &mut seen,
-            saved_node_connection_id,
-            PrivilegeScopeCandidateKind::EndpointRecovery,
-        );
-        Self::push_privilege_scope_candidate(
-            &mut candidates,
-            &mut seen,
-            unique_config_connection_id,
-            PrivilegeScopeCandidateKind::EndpointRecovery,
-        );
-        if let Some(config) = node_config.as_ref() {
-            for connection in self.connection_store.connections() {
-                if connection.host == config.host
-                    && connection.port == config.port
-                    && connection.username == config.username
-                {
-                    Self::push_privilege_scope_candidate(
-                        &mut candidates,
-                        &mut seen,
-                        Some(connection.id.clone()),
-                        PrivilegeScopeCandidateKind::EndpointRecovery,
-                    );
-                }
-            }
-        }
-        Self::push_privilege_scope_candidate(
-            &mut candidates,
-            &mut seen,
-            runtime_connection_id,
-            PrivilegeScopeCandidateKind::RuntimeFallback,
-        );
-        Some(candidates)
+        None
     }
 
     fn active_privilege_prompt_state(
@@ -498,20 +257,10 @@ impl WorkspaceApp {
         // Tauri keeps the prompt state alive even when credential metadata
         // cannot be loaded. Do not let a missing credential row or transient
         // keychain/config error suppress the detected sudo/su prompt.
-        let candidates = self
-            .active_privilege_scope_candidates()?
-            .into_iter()
-            .map(|candidate| PrivilegeScopeCredentialCandidate {
-                credentials: self
-                    .connection_store
-                    .list_privilege_credentials(&candidate.connection_id)
-                    .unwrap_or_default(),
-                connection_id: candidate.connection_id,
-                kind: candidate.kind,
-            })
-            .collect::<Vec<_>>();
-        select_privilege_prompt_helper_state_from_scope_candidates(
-            candidates,
+        let (connection_id, credentials) = self.active_privilege_scope_credentials()?;
+        build_privilege_prompt_helper_state_with_tracked_prompt(
+            connection_id,
+            &credentials,
             &visible_text,
             tracked_prompt,
         )
@@ -568,6 +317,35 @@ impl WorkspaceApp {
         // The inline hint is the confirmation affordance: Enter is accepted only
         // when prompt detection produces exactly one scoped credential, so a
         // generic `Password:` line never guesses between sudo/su candidates.
+        self.fill_privilege_prompt_match(matched.clone(), window, cx);
+        true
+    }
+
+    pub(in crate::workspace) fn handle_active_privilege_prompt_submit_request(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(active_pane) = self.active_pane() else {
+            return false;
+        };
+        let requested =
+            active_pane.update(cx, |pane, _cx| pane.take_privilege_prompt_submit_request());
+        if !requested {
+            return false;
+        }
+
+        let Some(state) = self.active_privilege_prompt_state(cx) else {
+            return false;
+        };
+        if matches!(state.prompt, PrivilegePromptMatch::GenericPassword { .. }) {
+            return false;
+        }
+        let [matched] = state.matches.as_slice() else {
+            return false;
+        };
+        // TerminalPane captures Enter before it is written as a plain newline;
+        // Workspace still owns the secret lookup and one-shot PTY handoff.
         self.fill_privilege_prompt_match(matched.clone(), window, cx);
         true
     }
@@ -1560,18 +1338,6 @@ mod privilege_prompt_helper_tests {
         credential
     }
 
-    fn scope_candidate(
-        connection_id: &str,
-        kind: PrivilegeScopeCandidateKind,
-        credentials: Vec<SavedPrivilegeCredential>,
-    ) -> PrivilegeScopeCredentialCandidate {
-        PrivilegeScopeCredentialCandidate {
-            connection_id: connection_id.to_string(),
-            kind,
-            credentials,
-        }
-    }
-
     #[test]
     fn local_terminal_prompt_helper_is_enabled() {
         assert!(tab_kind_allows_privilege_prompt_helper(
@@ -1580,137 +1346,10 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
-    fn ssh_terminal_prompt_helper_is_enabled() {
-        assert!(tab_kind_allows_privilege_prompt_helper(
+    fn ssh_terminal_prompt_helper_is_disabled() {
+        assert!(!tab_kind_allows_privilege_prompt_helper(
             &TabKind::SshTerminal
         ));
-    }
-
-    #[test]
-    fn explicit_privilege_scope_uses_saved_connection_owner_without_endpoint_check() {
-        assert_eq!(
-            valid_explicit_privilege_scope(Some("home-local".to_string()), |scope| {
-                scope == "home-local"
-            }),
-            Some("home-local".to_string())
-        );
-        assert_eq!(
-            valid_explicit_privilege_scope(Some("runtime-node".to_string()), |scope| {
-                scope == "home-local"
-            }),
-            None
-        );
-    }
-
-    #[test]
-    fn remote_privilege_scope_recovers_from_primary_scope_without_matching_credentials() {
-        let state = select_privilege_prompt_helper_state_from_scope_candidates(
-            vec![
-                scope_candidate(
-                    "old-owner",
-                    PrivilegeScopeCandidateKind::Primary,
-                    vec![saved_privilege_credential_for_connection(
-                        "old-owner",
-                        "other-user",
-                        PrivilegeCredentialKind::SudoPassword,
-                        Some("other"),
-                    )],
-                ),
-                scope_candidate(
-                    "home-local",
-                    PrivilegeScopeCandidateKind::EndpointRecovery,
-                    vec![saved_privilege_credential_for_connection(
-                        "home-local",
-                        "matching-sudo",
-                        PrivilegeCredentialKind::SudoPassword,
-                        Some("lipsc"),
-                    )],
-                ),
-            ],
-            "sudo yazi\n[sudo] lipsc 的密码:",
-            None,
-        )
-        .expect("endpoint recovery should find the only matching saved scope");
-
-        assert_eq!(state.connection_id, "home-local");
-        assert_eq!(
-            state.matches,
-            vec![MatchedPrivilegeCredential {
-                connection_id: "home-local".to_string(),
-                credential_id: "matching-sudo".to_string(),
-                label: "matching-sudo".to_string(),
-            }]
-        );
-    }
-
-    #[test]
-    fn remote_privilege_scope_keeps_primary_scope_when_it_matches_once() {
-        let state = select_privilege_prompt_helper_state_from_scope_candidates(
-            vec![
-                scope_candidate(
-                    "session-owner",
-                    PrivilegeScopeCandidateKind::Primary,
-                    vec![saved_privilege_credential_for_connection(
-                        "session-owner",
-                        "session-sudo",
-                        PrivilegeCredentialKind::SudoPassword,
-                        Some("lipsc"),
-                    )],
-                ),
-                scope_candidate(
-                    "endpoint-alias",
-                    PrivilegeScopeCandidateKind::EndpointRecovery,
-                    vec![saved_privilege_credential_for_connection(
-                        "endpoint-alias",
-                        "alias-sudo",
-                        PrivilegeCredentialKind::SudoPassword,
-                        Some("lipsc"),
-                    )],
-                ),
-            ],
-            "sudo yazi\n[sudo] lipsc 的密码:",
-            None,
-        )
-        .expect("primary scope should still win when it has an exact match");
-
-        assert_eq!(state.connection_id, "session-owner");
-        assert_eq!(state.matches[0].credential_id, "session-sudo");
-    }
-
-    #[test]
-    fn remote_privilege_scope_does_not_guess_between_multiple_endpoint_matches() {
-        let state = select_privilege_prompt_helper_state_from_scope_candidates(
-            vec![
-                scope_candidate(
-                    "alias-a",
-                    PrivilegeScopeCandidateKind::EndpointRecovery,
-                    vec![saved_privilege_credential_for_connection(
-                        "alias-a",
-                        "sudo-a",
-                        PrivilegeCredentialKind::SudoPassword,
-                        Some("lipsc"),
-                    )],
-                ),
-                scope_candidate(
-                    "alias-b",
-                    PrivilegeScopeCandidateKind::EndpointRecovery,
-                    vec![saved_privilege_credential_for_connection(
-                        "alias-b",
-                        "sudo-b",
-                        PrivilegeCredentialKind::SudoPassword,
-                        Some("lipsc"),
-                    )],
-                ),
-            ],
-            "sudo yazi\n[sudo] lipsc 的密码:",
-            None,
-        )
-        .expect("ambiguous aliases should still keep the detected prompt alive");
-
-        assert!(
-            state.matches.is_empty(),
-            "ambiguous endpoint recovery must not arm Enter with an arbitrary secret"
-        );
     }
 
     #[test]

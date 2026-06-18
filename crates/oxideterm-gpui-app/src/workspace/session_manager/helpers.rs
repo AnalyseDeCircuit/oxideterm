@@ -331,7 +331,6 @@ pub(super) fn form_from_saved_connection(
         color: conn.color.clone().unwrap_or_default(),
         tags: conn.tags.clone(),
         post_connect_command: conn.post_connect_command().unwrap_or_default().to_string(),
-        privilege_credentials: conn.privilege_credentials.clone(),
         upstream_proxy_policy: upstream_proxy_form.policy,
         upstream_proxy_protocol: upstream_proxy_form.protocol,
         upstream_proxy_host: upstream_proxy_form.host,
