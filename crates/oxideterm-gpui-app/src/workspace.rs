@@ -855,7 +855,6 @@ pub(crate) struct WorkspaceApp {
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
-    terminal_privilege_connection_ids: HashMap<TerminalSessionId, String>,
     pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     expanded_ssh_nodes: HashSet<NodeId>,
     active_ssh_node_id: Option<NodeId>,

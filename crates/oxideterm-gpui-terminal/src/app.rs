@@ -120,6 +120,7 @@ pub struct TerminalPane {
     input_locked: bool,
     marked_text: Option<String>,
     privilege_prompt_inline_hint: Option<String>,
+    privilege_prompt_submit_requested: bool,
     search_query: Option<String>,
     selected_search_match: Option<usize>,
     hovered_link: Option<TerminalLinkRange>,
@@ -380,6 +381,7 @@ impl TerminalPane {
             input_locked: false,
             marked_text: None,
             privilege_prompt_inline_hint: None,
+            privilege_prompt_submit_requested: false,
             search_query: None,
             selected_search_match: None,
             hovered_link: None,
@@ -563,6 +565,12 @@ impl TerminalPane {
     pub fn privilege_prompt_fallback_suppressed(&self) -> bool {
         self.privilege_prompt_tracker
             .suppresses_fallback_prompt_detection(Instant::now())
+    }
+
+    pub fn take_privilege_prompt_submit_request(&mut self) -> bool {
+        let requested = self.privilege_prompt_submit_requested;
+        self.privilege_prompt_submit_requested = false;
+        requested
     }
 
     pub fn set_privilege_prompt_inline_hint(

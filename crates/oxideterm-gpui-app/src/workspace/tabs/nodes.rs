@@ -1165,17 +1165,8 @@ impl WorkspaceApp {
             }) else {
                 continue;
             };
-            let privilege_connection_id = self
-                .terminal_privilege_connection_ids
-                .get(&old_session_id)
-                .cloned();
             let Ok((new_pane_id, new_session_id)) =
-                self.create_ssh_terminal_pane_for_existing_node(
-                    node_id,
-                    privilege_connection_id,
-                    window,
-                    cx,
-                )
+                self.create_ssh_terminal_pane_for_existing_node(node_id, window, cx)
             else {
                 continue;
             };
