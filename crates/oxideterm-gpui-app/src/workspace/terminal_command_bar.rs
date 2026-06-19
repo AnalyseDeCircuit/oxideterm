@@ -21,6 +21,7 @@ pub(in crate::workspace) mod completion;
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
 const TERMINAL_GIT_BRANCH_MENU_WIDTH: f32 = 720.0;
+const TERMINAL_GIT_BRANCH_MENU_BODY_MAX_HEIGHT: f32 = 520.0;
 const TERMINAL_GIT_BRANCH_MENU_MARGIN: f32 = 12.0;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 
@@ -498,7 +499,9 @@ impl WorkspaceApp {
             64.0
         };
         let snapshot = self.active_terminal_git_snapshot(cx);
-        let operation = snapshot.and_then(|snapshot| snapshot.status.operation());
+        let operation = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.status.operation());
         let active_section = match (self.terminal_git_branch_picker.active_section, operation) {
             (TerminalGitPanelSection::Resolve, None) => TerminalGitPanelSection::Changes,
             (section, _) => section,
@@ -511,6 +514,7 @@ impl WorkspaceApp {
                 .left(px(left))
                 .w(px(TERMINAL_GIT_BRANCH_MENU_WIDTH))
                 .max_w(relative(0.96))
+                .overflow_hidden()
                 .rounded(px(self.tokens.radii.lg))
                 .border_1()
                 .border_color(rgb(theme.border))
@@ -528,8 +532,12 @@ impl WorkspaceApp {
                 .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
                     cx.stop_propagation();
                 }),
-        )
-        .child(self.render_terminal_git_section_tabs(active_section, operation, cx));
+        );
+
+        if let Some(snapshot) = snapshot.clone() {
+            panel = panel.child(self.render_terminal_git_context_header(snapshot));
+        }
+        panel = panel.child(self.render_terminal_git_section_tabs(active_section, operation, cx));
 
         let section = match active_section {
             TerminalGitPanelSection::Branches => self.render_terminal_git_branches_section(cx),
@@ -543,9 +551,131 @@ impl WorkspaceApp {
                 self.render_terminal_git_resolve_section(operation, cx)
             }
         };
-        panel = panel.child(section);
+        panel = panel.child(
+            div()
+                .min_h(px(0.0))
+                .max_h(px(TERMINAL_GIT_BRANCH_MENU_BODY_MAX_HEIGHT))
+                .overflow_y_scrollbar()
+                .child(section),
+        );
 
         panel.into_any_element()
+    }
+
+    fn render_terminal_git_context_header(
+        &self,
+        snapshot: oxideterm_environment::GitRepositorySnapshot,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let branch_label = if snapshot.branch.is_detached() {
+            format!("detached {}", snapshot.branch.display_text())
+        } else {
+            snapshot.branch.display_text().to_string()
+        };
+        let repo_root = snapshot.repo_root;
+        let status = snapshot.status;
+        let mut metrics = div()
+            .flex_none()
+            .max_w(px(320.0))
+            .min_w(px(0.0))
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(4.0));
+
+        // The header is a probe result, not a command preview. It keeps the
+        // popover tied to the active terminal/worktree before any action runs.
+        if let Some(upstream) = status.upstream() {
+            metrics = metrics
+                .child(self.render_terminal_git_data_hint_with_width(upstream.to_string(), 260.0));
+        }
+        if status.ahead() > 0 {
+            metrics = metrics.child(self.render_terminal_git_icon_count_chip(
+                LucideIcon::ArrowUp,
+                status.ahead(),
+                rgba(0x86efacff),
+            ));
+        }
+        if status.behind() > 0 {
+            metrics = metrics.child(self.render_terminal_git_icon_count_chip(
+                LucideIcon::ArrowDown,
+                status.behind(),
+                rgba(0x67e8f9ff),
+            ));
+        }
+        if status.staged() > 0 {
+            metrics = metrics.child(self.render_terminal_git_label_count_chip(
+                "terminal.git.path_state_staged",
+                status.staged(),
+                rgba(0x86efacff),
+            ));
+        }
+        if status.modified() > 0 {
+            metrics = metrics.child(self.render_terminal_git_label_count_chip(
+                "terminal.git.path_state_modified",
+                status.modified(),
+                rgba(0xfbbf24ff),
+            ));
+        }
+        if status.untracked() > 0 {
+            metrics = metrics.child(self.render_terminal_git_label_count_chip(
+                "terminal.git.path_state_untracked",
+                status.untracked(),
+                rgba(0x67e8f9ff),
+            ));
+        }
+        if status.conflicts() > 0 {
+            metrics = metrics.child(self.render_terminal_git_label_count_chip(
+                "terminal.git.path_state_conflict",
+                status.conflicts(),
+                rgba(0xf87171ff),
+            ));
+        }
+
+        div()
+            .min_h(px(42.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .bg(rgba((theme.bg_panel << 8) | 0x70))
+            .px(px(10.0))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(Self::render_lucide_icon(
+                LucideIcon::FolderOpen,
+                14.0,
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(12.0))
+                            .font_family(self.terminal_git_mono_font())
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(repo_root),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(11.0))
+                            .font_family(self.terminal_git_mono_font())
+                            .text_color(rgb(theme.accent))
+                            .child(branch_label),
+                    ),
+            )
+            .child(metrics)
+            .into_any_element()
     }
 
     fn render_terminal_git_section_tabs(
@@ -688,9 +818,6 @@ impl WorkspaceApp {
                 .max_h(px(280.0))
                 .min_h(px(0.0))
                 .overflow_y_scrollbar()
-                .on_scroll_wheel(|_, _, cx| {
-                    cx.stop_propagation();
-                })
                 .flex()
                 .flex_col()
                 .gap(px(2.0));
@@ -710,25 +837,127 @@ impl WorkspaceApp {
             .active_terminal_git_snapshot(cx)
             .map(|snapshot| snapshot.status.paths().to_vec())
             .unwrap_or_default();
-        let mut list = div().flex().flex_col().gap(px(2.0));
-        for action in [
-            TerminalGitRepositoryAction::StageAll,
-            TerminalGitRepositoryAction::UnstageAll,
-            TerminalGitRepositoryAction::Diff,
-            TerminalGitRepositoryAction::DiffStaged,
-            TerminalGitRepositoryAction::Status,
-        ] {
-            list = list.child(self.render_terminal_git_action_row(action, cx));
-        }
-        let mut section = div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(self.render_terminal_git_action_panel(list));
-        if !changed_paths.is_empty() {
+        let mut section = div().flex().flex_col().gap(px(8.0));
+
+        if changed_paths.is_empty() {
+            section = section.child(self.render_terminal_git_clean_changes_state());
+        } else {
             section = section.child(self.render_terminal_git_path_list(changed_paths, cx));
         }
+
+        section = section.child(self.render_terminal_git_action_toolbar(
+            &[
+                TerminalGitRepositoryAction::StageAll,
+                TerminalGitRepositoryAction::UnstageAll,
+                TerminalGitRepositoryAction::Diff,
+                TerminalGitRepositoryAction::DiffStaged,
+                TerminalGitRepositoryAction::Status,
+            ],
+            cx,
+        ));
         section.into_any_element()
+    }
+
+    fn render_terminal_git_clean_changes_state(&self) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .min_h(px(96.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .bg(rgba((theme.bg_panel << 8) | 0x4d))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .child(Self::render_lucide_icon(
+                LucideIcon::CheckCircle,
+                18.0,
+                rgba(0x86efacff),
+            ))
+            .child(
+                div()
+                    .text_size(px(13.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(self.i18n.t("terminal.git.clean_title")),
+            )
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.i18n.t("terminal.git.clean_description")),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_git_action_toolbar(
+        &self,
+        actions: &[TerminalGitRepositoryAction],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let mut toolbar = div()
+            .min_h(px(36.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .p(px(4.0))
+            .overflow_x_scrollbar()
+            .on_scroll_wheel(|_, _, cx| {
+                cx.stop_propagation();
+            })
+            .flex()
+            .items_center()
+            .gap(px(6.0));
+
+        // Keep action buttons in one row; localized labels may overflow
+        // horizontally, but should never wrap into a second visual row.
+        for action in actions {
+            toolbar = toolbar.child(self.render_terminal_git_toolbar_action_button(*action, cx));
+        }
+        toolbar.into_any_element()
+    }
+
+    fn render_terminal_git_toolbar_action_button(
+        &self,
+        action: TerminalGitRepositoryAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let label = self.i18n.t(action.label_key());
+        let icon = terminal_git_action_icon(action);
+        div()
+            .flex_none()
+            .h(px(28.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .whitespace_nowrap()
+            .text_size(px(11.0))
+            .text_color(rgb(theme.text))
+            .cursor_pointer()
+            .hover(move |style| {
+                style
+                    .bg(rgb(theme.bg_hover))
+                    .border_color(rgba((theme.accent << 8) | 0x66))
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.run_terminal_git_repository_action(action, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
+            .child(label)
+            .into_any_element()
     }
 
     fn render_terminal_git_commit_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -835,9 +1064,17 @@ impl WorkspaceApp {
             .max_h(px(340.0))
             .min_h(px(0.0))
             .overflow_y_scrollbar()
-            .on_scroll_wheel(|_, _, cx| {
-                cx.stop_propagation();
-            })
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .p(px(4.0))
+            .child(list)
+            .into_any_element()
+    }
+
+    fn render_terminal_git_plain_panel(&self, list: gpui::Div) -> AnyElement {
+        div()
+            .min_h(px(0.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
@@ -921,11 +1158,85 @@ impl WorkspaceApp {
         paths: Vec<GitChangedPath>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let paths = paths.into_iter().take(80).collect::<Vec<_>>();
         let mut list = div().flex().flex_col().gap(px(2.0));
-        for path in paths.into_iter().take(80) {
+        list = self.append_terminal_git_path_group(
+            list,
+            "terminal.git.group_conflicts",
+            LucideIcon::AlertTriangle,
+            rgba(0xf87171ff),
+            paths.iter().filter(|path| path.conflict()).cloned(),
+            cx,
+        );
+        list = self.append_terminal_git_path_group(
+            list,
+            "terminal.git.group_staged",
+            LucideIcon::CheckCircle,
+            rgba(0x86efacff),
+            paths.iter().filter(|path| path.staged()).cloned(),
+            cx,
+        );
+        list = self.append_terminal_git_path_group(
+            list,
+            "terminal.git.group_modified",
+            LucideIcon::Pencil,
+            rgba(0xfbbf24ff),
+            paths
+                .iter()
+                .filter(|path| path.modified() && !path.conflict())
+                .cloned(),
+            cx,
+        );
+        list = self.append_terminal_git_path_group(
+            list,
+            "terminal.git.group_untracked",
+            LucideIcon::FilePlus,
+            rgba(0x67e8f9ff),
+            paths
+                .iter()
+                .filter(|path| path.untracked() && !path.conflict())
+                .cloned(),
+            cx,
+        );
+        self.render_terminal_git_plain_panel(list)
+    }
+
+    fn append_terminal_git_path_group(
+        &self,
+        mut list: gpui::Div,
+        label_key: &'static str,
+        icon: LucideIcon,
+        color: Rgba,
+        paths: impl Iterator<Item = GitChangedPath>,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let paths = paths.collect::<Vec<_>>();
+        if paths.is_empty() {
+            return list;
+        }
+
+        // Grouping mirrors source-control UIs while preserving terminal-owned
+        // execution: rows describe current probe results, buttons send commands.
+        list = list.child(
+            div()
+                .h(px(26.0))
+                .px(px(8.0))
+                .mt(px(4.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(11.0))
+                .font_family(self.terminal_git_mono_font())
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(Self::render_lucide_icon(icon, 12.0, color))
+                .child(div().flex_1().min_w(px(0.0)).child(self.i18n.t(label_key)))
+                .child(self.render_terminal_git_icon_count_chip(icon, paths.len() as u32, color)),
+        );
+        for path in paths {
             list = list.child(self.render_terminal_git_path_row(path, cx));
         }
-        self.render_terminal_git_action_panel(list)
+        list
     }
 
     fn render_terminal_git_path_row(
@@ -967,6 +1278,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .truncate()
+                            .font_family(self.terminal_git_mono_font())
                             .text_color(rgb(theme.text))
                             .child(path_label),
                     )
@@ -975,6 +1287,7 @@ impl WorkspaceApp {
                             div()
                                 .truncate()
                                 .text_size(px(10.0))
+                                .font_family(self.terminal_git_mono_font())
                                 .text_color(rgb(theme.text_muted))
                                 .child(path.original_path().unwrap_or_default().to_string()),
                         )
@@ -1345,13 +1658,23 @@ impl WorkspaceApp {
     }
 
     fn render_terminal_git_data_hint(&self, text: String) -> AnyElement {
+        self.render_terminal_git_data_hint_with_width(text, 160.0)
+    }
+
+    fn render_terminal_git_data_hint_with_width(&self, text: String, max_width: f32) -> AnyElement {
         div()
-            .max_w(px(160.0))
+            .max_w(px(max_width))
+            .min_w(px(0.0))
             .truncate()
             .text_size(px(11.0))
+            .font_family(self.terminal_git_mono_font())
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(text)
             .into_any_element()
+    }
+
+    fn terminal_git_mono_font(&self) -> gpui::SharedString {
+        settings_mono_font_family(self.settings_store.settings())
     }
 
     fn render_terminal_git_label_count_chip(
@@ -1524,11 +1847,36 @@ impl WorkspaceApp {
             .as_deref()
             .is_some_and(|name| name == branch.name());
         let current = branch.current();
-        let linked_worktree = branch.worktree_path().is_some() && !current;
+        let worktree_path = branch.worktree_path().map(str::to_string);
+        let linked_worktree = worktree_path.is_some() && !current;
+        let mut branch_identity = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(1.0))
+            .child(
+                div()
+                    .truncate()
+                    .font_family(self.terminal_git_mono_font())
+                    .child(branch_name.clone()),
+            );
+        if let Some(worktree_path) = worktree_path {
+            branch_identity = branch_identity.child(
+                div()
+                    .truncate()
+                    .text_size(px(10.0))
+                    .font_family(self.terminal_git_mono_font())
+                    .text_color(rgb(theme.text_muted))
+                    .child(worktree_path),
+            );
+        }
+
         div()
-            .h(px(30.0))
+            .min_h(px(if linked_worktree { 42.0 } else { 30.0 }))
             .rounded(px(self.tokens.radii.md))
             .px(px(8.0))
+            .py(px(4.0))
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -1584,7 +1932,7 @@ impl WorkspaceApp {
                     rgb(theme.text_muted)
                 },
             ))
-            .child(div().flex_1().min_w(px(0.0)).truncate().child(branch_name))
+            .child(branch_identity)
             .into_any_element()
     }
 
