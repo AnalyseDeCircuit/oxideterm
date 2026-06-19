@@ -202,6 +202,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_active_text_input_transpose(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_terminal_git_branch_picker_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_active_text_input_navigation(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -300,6 +303,9 @@ impl Render for WorkspaceApp {
                     && this.quick_commands.focused_input.is_some()
                 {
                     this.handle_quick_commands_key(event, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.handle_terminal_git_branch_picker_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_terminal_command_overlay_escape(event, cx) {

@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "git": {
+      "search_branches": "ブランチを検索...",
+      "loading_branches": "ブランチを読み込み中...",
+      "no_branches": "一致するブランチがありません",
+      "branch_not_repository": "現在のディレクトリは Git リポジトリではありません。",
+      "branch_git_unavailable": "この環境では Git を利用できません。",
+      "branch_cwd_unavailable": "現在の作業ディレクトリを取得できません。",
+      "branch_node_unavailable": "SSH ノードはまだ Git 操作の準備ができていません。",
+      "checkout_success": "{{branch}} に切り替えました",
+      "checkout_failed": "{{branch}} に切り替えられませんでした"
+    },
     "ai": {
       "title": "OxideSens",
       "api_key_required": "APIキーが必要です",

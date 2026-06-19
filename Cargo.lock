@@ -6965,6 +6965,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-environment"
+version = "2.0.0-gpui-preview.9"
+
+[[package]]
 name = "oxideterm-forwarding"
 version = "2.0.0-gpui-preview.9"
 dependencies = [
@@ -7010,6 +7014,7 @@ dependencies = [
  "oxideterm-code-editor",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
+ "oxideterm-environment",
  "oxideterm-forwarding",
  "oxideterm-gpui-cloud-sync",
  "oxideterm-gpui-ide",

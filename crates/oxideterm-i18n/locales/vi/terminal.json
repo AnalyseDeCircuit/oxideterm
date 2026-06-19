@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "git": {
+      "search_branches": "Tìm nhánh...",
+      "loading_branches": "Đang tải nhánh...",
+      "no_branches": "Không có nhánh phù hợp",
+      "branch_not_repository": "Thư mục hiện tại không phải là kho Git.",
+      "branch_git_unavailable": "Git không khả dụng trong môi trường này.",
+      "branch_cwd_unavailable": "Không lấy được thư mục làm việc hiện tại.",
+      "branch_node_unavailable": "Nút SSH chưa sẵn sàng cho thao tác Git.",
+      "checkout_success": "Đã chuyển sang {{branch}}",
+      "checkout_failed": "Không thể chuyển sang {{branch}}"
+    },
     "ai": {
       "title": "OxideSens",
       "api_key_required": "Cần API Key",

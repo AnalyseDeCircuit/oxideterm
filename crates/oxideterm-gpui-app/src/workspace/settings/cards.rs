@@ -585,6 +585,8 @@ impl WorkspaceApp {
                 && self.terminal_broadcast_menu_open)
             || (anchor.id == SelectAnchorId::TerminalCommandBar
                 && self.terminal_quick_commands_open)
+            || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
+                && self.terminal_git_branch_picker.open)
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
                 && self.session_manager.view_mode_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
@@ -744,6 +746,9 @@ impl WorkspaceApp {
         }
         if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
             self.close_terminal_quick_commands_popover();
+            changed = true;
+        }
+        if self.close_terminal_git_branch_picker() {
             changed = true;
         }
         if self.session_manager.focused_input.take().is_some() {
@@ -1362,6 +1367,7 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             // width against the command bar. Keep the bar rect warm so the
             // first open and later resizes can compute the same adaptive width.
             | SelectAnchorId::TerminalCommandBar
+            | SelectAnchorId::TerminalGitBranchMenu
             | SelectAnchorId::TerminalCastSeekbar
             // Session Manager toolbar menus use window-anchored overlays, so
             // their trigger bounds must be cached before pointer-down.

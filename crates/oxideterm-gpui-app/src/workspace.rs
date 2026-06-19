@@ -32,6 +32,7 @@ mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
 mod terminal_context_actions;
+mod terminal_git;
 mod virtual_list;
 
 use std::{
@@ -591,6 +592,10 @@ pub(crate) struct WorkspaceApp {
     terminal_broadcast_menu_open: bool,
     terminal_quick_commands_open: bool,
     terminal_quick_command_pending: Option<String>,
+    terminal_git_store: oxideterm_environment::GitStatusStore,
+    terminal_git_tx: std::sync::mpsc::Sender<terminal_git::TerminalGitDelivery>,
+    terminal_git_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,
+    terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     detached_local_terminals_popover_open: bool,

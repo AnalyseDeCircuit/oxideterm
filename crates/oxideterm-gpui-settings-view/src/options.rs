@@ -412,6 +412,10 @@ pub fn set_command_bar_legacy_toolbar(settings: &mut PersistedSettings, value: b
     settings.terminal.command_bar.show_legacy_toolbar = value;
 }
 
+pub fn set_command_bar_git_status(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.command_bar.git_status = value;
+}
+
 pub fn set_quick_commands_enabled(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.command_bar.quick_commands_enabled = value;
 }

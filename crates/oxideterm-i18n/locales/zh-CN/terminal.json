@@ -146,6 +146,17 @@
       "icon_docker": "Docker",
       "icon_zap": "自定义"
     },
+    "git": {
+      "search_branches": "搜索分支...",
+      "loading_branches": "正在加载分支...",
+      "no_branches": "没有匹配的分支",
+      "branch_not_repository": "当前目录不是 Git 仓库。",
+      "branch_git_unavailable": "当前环境不可用 Git。",
+      "branch_cwd_unavailable": "无法获取当前工作目录。",
+      "branch_node_unavailable": "SSH 节点尚未就绪，无法执行 Git 操作。",
+      "checkout_success": "已切换到 {{branch}}",
+      "checkout_failed": "无法切换到 {{branch}}"
+    },
     "ai": {
       "title": "OxideSens",
       "api_key_required": "需要 API Key",

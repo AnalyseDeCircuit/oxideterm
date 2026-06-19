@@ -34,6 +34,7 @@ pub(super) enum WorkspaceImeTarget {
     ShortcutsModalSearch,
     Search,
     TerminalCommandBar,
+    TerminalGitBranchSearch,
     TerminalCastSearch,
     HostProcessSearch,
     HostProcessRenice,
@@ -91,6 +92,7 @@ impl WorkspaceImeTarget {
             Self::ShortcutsModalSearch => 5,
             Self::Search => 1,
             Self::TerminalCommandBar => 2,
+            Self::TerminalGitBranchSearch => 17,
             Self::TerminalCastSearch => 3,
             Self::HostProcessSearch => 6,
             Self::HostProcessRenice => 7,
@@ -487,6 +489,10 @@ impl WorkspaceApp {
             && let Some(input) = self.quick_commands.focused_input
         {
             return Some(WorkspaceImeTarget::QuickCommand(input));
+        }
+
+        if self.terminal_git_branch_picker.open {
+            return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
         }
 
         if self.auto_route_modal.open
@@ -1170,6 +1176,10 @@ impl WorkspaceApp {
             WorkspaceImeTarget::TerminalCommandBar => self
                 .terminal_command_bar_focused
                 .then(|| self.terminal_command_bar_draft.clone()),
+            WorkspaceImeTarget::TerminalGitBranchSearch => self
+                .terminal_git_branch_picker
+                .open
+                .then(|| self.terminal_git_branch_picker.query.clone()),
             WorkspaceImeTarget::TerminalCastSearch => self
                 .terminal_cast_player
                 .as_ref()
@@ -1869,6 +1879,20 @@ impl WorkspaceApp {
                     );
                     self.terminal_command_suggestions_open = false;
                     self.terminal_command_suggestion_highlighted = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TerminalGitBranchSearch => {
+                if self.terminal_git_branch_picker.open {
+                    replace_utf16(
+                        &mut self.terminal_git_branch_picker.query,
+                        replacement_range,
+                        text,
+                    );
+                    // Filtering rebuilds the visible branch rows; drop the stale
+                    // highlighted branch until keyboard navigation chooses one.
+                    self.terminal_git_branch_picker.highlighted_branch = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

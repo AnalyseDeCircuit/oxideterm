@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "git": {
+      "search_branches": "Branches suchen...",
+      "loading_branches": "Branches werden geladen...",
+      "no_branches": "Keine passenden Branches",
+      "branch_not_repository": "Das aktuelle Verzeichnis ist kein Git-Repository.",
+      "branch_git_unavailable": "Git ist in dieser Umgebung nicht verfügbar.",
+      "branch_cwd_unavailable": "Das aktuelle Arbeitsverzeichnis ist nicht verfügbar.",
+      "branch_node_unavailable": "Der SSH-Knoten ist für Git-Vorgänge noch nicht bereit.",
+      "checkout_success": "Zu {{branch}} gewechselt",
+      "checkout_failed": "Wechsel zu {{branch}} fehlgeschlagen"
+    },
     "ai": {
       "title": "OxideSens",
       "api_key_required": "API-Schlüssel erforderlich",

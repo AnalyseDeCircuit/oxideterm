@@ -6,13 +6,16 @@ use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 use oxideterm_gpui_ui::text_input::{
-    text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
+    TextInputView, text_caret, text_input, text_input_anchor_probe,
+    text_input_value_segments_with_color,
 };
 use oxideterm_terminal_recording::format_recording_elapsed;
 
 pub(in crate::workspace) mod completion;
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
+const TERMINAL_GIT_BRANCH_MENU_WIDTH: f32 = 360.0;
+const TERMINAL_GIT_BRANCH_MENU_MARGIN: f32 = 12.0;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -297,6 +300,324 @@ impl WorkspaceApp {
             listener,
             cx,
         )
+    }
+
+    fn render_terminal_git_chip(
+        &self,
+        snapshot: oxideterm_environment::GitRepositorySnapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = if snapshot.branch.is_detached() {
+            format!("detached {}", snapshot.branch.display_text())
+        } else {
+            snapshot.branch.display_text().to_string()
+        };
+        let workspace = cx.entity();
+        let active = self.terminal_git_branch_picker.open;
+
+        select_anchor_probe(
+            SelectAnchorId::TerminalGitBranchMenu,
+            div()
+                .h(px(20.0))
+                .max_w(px(180.0))
+                .flex_none()
+                .px(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(if active {
+                    rgba((self.tokens.ui.accent << 8) | 0x99)
+                } else {
+                    rgba(0x22c55e4d)
+                })
+                .bg(if active {
+                    rgba((self.tokens.ui.accent << 8) | 0x1f)
+                } else {
+                    rgba(0x22c55e1a)
+                })
+                .text_size(px(11.0))
+                .text_color(if active {
+                    rgb(self.tokens.ui.accent)
+                } else {
+                    rgba(0x86efacff)
+                })
+                .cursor_pointer()
+                .hover(|style| style.bg(rgba(0x22c55e26)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        if this.terminal_git_branch_picker.open {
+                            this.close_terminal_git_branch_picker();
+                            cx.notify();
+                        } else {
+                            this.open_terminal_git_branch_picker(cx);
+                        }
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(Self::render_lucide_icon(
+                    LucideIcon::GitFork,
+                    12.0,
+                    if active {
+                        rgb(self.tokens.ui.accent)
+                    } else {
+                        rgba(0x86efacff)
+                    },
+                ))
+                .child(div().min_w(px(0.0)).truncate().child(label)),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_terminal_git_branch_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let left = self.terminal_git_branch_picker_left();
+        let bottom = if self.terminal_command_input_collapsed {
+            32.0
+        } else {
+            64.0
+        };
+        let visible_branches = self.visible_terminal_git_branches();
+        let loading = self.terminal_git_branch_picker.loading;
+        let error = self.terminal_git_branch_picker.error.clone();
+
+        let mut panel = context_menu_event_boundary(
+            div()
+                .absolute()
+                .bottom(px(bottom))
+                .left(px(left))
+                .w(px(TERMINAL_GIT_BRANCH_MENU_WIDTH))
+                .max_w(relative(0.96))
+                .rounded(px(self.tokens.radii.lg))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgba((theme.bg_elevated << 8) | 0xf5))
+                .shadow_lg()
+                .occlude()
+                .p(px(8.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .text_size(px(12.0))
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .on_scroll_wheel(|_, _, cx| {
+                    cx.stop_propagation();
+                }),
+        )
+        .child(self.render_terminal_git_branch_search(cx));
+
+        if loading {
+            panel = panel.child(self.render_terminal_git_branch_message(
+                LucideIcon::LoaderCircle,
+                self.i18n.t("terminal.git.loading_branches"),
+            ));
+        } else if let Some(error) = error {
+            panel = panel.child(self.render_terminal_git_branch_error(error));
+        } else if visible_branches.is_empty() {
+            panel = panel.child(self.render_terminal_git_branch_message(
+                LucideIcon::Search,
+                self.i18n.t("terminal.git.no_branches"),
+            ));
+        } else {
+            let mut list = div()
+                .max_h(px(280.0))
+                .overflow_y_scrollbar()
+                .flex()
+                .flex_col()
+                .gap(px(2.0));
+            for branch in visible_branches {
+                list = list.child(self.render_terminal_git_branch_row(branch, cx));
+            }
+            panel = panel.child(list);
+        }
+
+        panel.into_any_element()
+    }
+
+    fn render_terminal_git_branch_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = WorkspaceImeTarget::TerminalGitBranchSearch;
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &self.terminal_git_branch_picker.query,
+                    placeholder: self.i18n.t("terminal.git.search_branches"),
+                    focused: self.terminal_git_branch_picker.open,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .h(px(32.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.ime_marked_text = None;
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            )),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_terminal_git_branch_row(
+        &self,
+        branch: oxideterm_environment::GitBranchReference,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let branch_name = branch.name().to_string();
+        let highlighted = self
+            .terminal_git_branch_picker
+            .highlighted_branch
+            .as_deref()
+            .is_some_and(|name| name == branch.name());
+        let switching = self
+            .terminal_git_branch_picker
+            .switching_branch
+            .as_deref()
+            .is_some_and(|name| name == branch.name());
+        let current = branch.current();
+        let linked_worktree = branch.worktree_path().is_some() && !current;
+        div()
+            .h(px(30.0))
+            .rounded(px(self.tokens.radii.md))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_pointer()
+            .bg(if highlighted {
+                rgba((theme.accent << 8) | 0x24)
+            } else {
+                rgba(0x00000000)
+            })
+            .text_color(if current {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.text)
+            })
+            .hover(move |style| style.bg(rgb(theme.bg_hover)))
+            .on_mouse_move(cx.listener({
+                let branch_name = branch_name.clone();
+                move |this, _event: &MouseMoveEvent, _window, cx| {
+                    if this
+                        .terminal_git_branch_picker
+                        .highlighted_branch
+                        .as_deref()
+                        != Some(branch_name.as_str())
+                    {
+                        this.terminal_git_branch_picker.highlighted_branch =
+                            Some(branch_name.clone());
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let branch = branch.clone();
+                    move |this, _event, _window, cx| {
+                        this.select_terminal_git_branch(branch.clone(), cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .child(Self::render_lucide_icon(
+                if switching {
+                    LucideIcon::LoaderCircle
+                } else if current {
+                    LucideIcon::Check
+                } else if linked_worktree {
+                    LucideIcon::FolderOpen
+                } else {
+                    LucideIcon::GitFork
+                },
+                13.0,
+                if current || highlighted {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text_muted)
+                },
+            ))
+            .child(div().flex_1().min_w(px(0.0)).truncate().child(branch_name))
+            .into_any_element()
+    }
+
+    fn render_terminal_git_branch_message(&self, icon: LucideIcon, message: String) -> AnyElement {
+        div()
+            .min_h(px(56.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(Self::render_lucide_icon(
+                icon,
+                14.0,
+                rgb(self.tokens.ui.text_muted),
+            ))
+            .child(message)
+            .into_any_element()
+    }
+
+    fn render_terminal_git_branch_error(&self, message: String) -> AnyElement {
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba(0xef44444d))
+            .bg(rgba(0xef44441a))
+            .p(px(8.0))
+            .text_color(rgba(0xfca5a5ff))
+            .child(message)
+            .into_any_element()
+    }
+
+    fn terminal_git_branch_picker_left(&self) -> f32 {
+        let Some(chip) = self
+            .select_anchors
+            .get(&SelectAnchorId::TerminalGitBranchMenu)
+        else {
+            return TERMINAL_GIT_BRANCH_MENU_MARGIN;
+        };
+        let Some(bar) = self.select_anchors.get(&SelectAnchorId::TerminalCommandBar) else {
+            return TERMINAL_GIT_BRANCH_MENU_MARGIN;
+        };
+        let bar_width = f32::from(bar.bounds.size.width);
+        let desired = f32::from(chip.bounds.left() - bar.bounds.left());
+        let max_left =
+            (bar_width - TERMINAL_GIT_BRANCH_MENU_WIDTH - TERMINAL_GIT_BRANCH_MENU_MARGIN)
+                .max(TERMINAL_GIT_BRANCH_MENU_MARGIN);
+        desired.clamp(TERMINAL_GIT_BRANCH_MENU_MARGIN, max_left)
     }
 
     fn active_privilege_scope_credentials(
@@ -720,6 +1041,7 @@ impl WorkspaceApp {
         // inference so local shells that are currently inside SSH show the
         // remote identity consistently in both places.
         let target_label = self.terminal_command_active_target_label(cx);
+        let git_snapshot = self.active_terminal_git_snapshot(cx);
         let active_pane_id = self.active_pane_id();
         let is_local_terminal = self
             .active_tab()
@@ -786,6 +1108,9 @@ impl WorkspaceApp {
                     bar.child(self.render_terminal_quick_commands_popover(cx))
                 },
             )
+            .when(self.terminal_git_branch_picker.open, |bar| {
+                bar.child(self.render_terminal_git_branch_picker(cx))
+            })
             .child(
                 div()
                     .min_h(px(24.0))
@@ -858,11 +1183,15 @@ impl WorkspaceApp {
                             )
                             .child(
                                 div()
+                                    .min_w(px(0.0))
                                     .truncate()
                                     .text_size(px(11.0))
                                     .text_color(rgb(theme.text_muted))
                                     .child(target_label),
-                            ),
+                            )
+                            .when_some(git_snapshot, |row, snapshot| {
+                                row.child(self.render_terminal_git_chip(snapshot, cx))
+                            }),
                     )
                     .child(
                         div()
@@ -1256,6 +1585,7 @@ impl WorkspaceApp {
                                             this.terminal_quick_commands_open =
                                                 !this.terminal_quick_commands_open;
                                             this.dismiss_terminal_broadcast_menu();
+                                            this.close_terminal_git_branch_picker();
                                             if !this.terminal_quick_commands_open {
                                                 this.close_terminal_quick_commands_popover();
                                             }

@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "git": {
+      "search_branches": "브랜치 검색...",
+      "loading_branches": "브랜치를 불러오는 중...",
+      "no_branches": "일치하는 브랜치가 없습니다",
+      "branch_not_repository": "현재 디렉터리는 Git 저장소가 아닙니다.",
+      "branch_git_unavailable": "이 환경에서 Git을 사용할 수 없습니다.",
+      "branch_cwd_unavailable": "현재 작업 디렉터리를 사용할 수 없습니다.",
+      "branch_node_unavailable": "SSH 노드가 아직 Git 작업을 수행할 준비가 되지 않았습니다.",
+      "checkout_success": "{{branch}}(으)로 전환했습니다",
+      "checkout_failed": "{{branch}}(으)로 전환할 수 없습니다"
+    },
     "ai": {
       "title": "OxideSens",
       "api_key_required": "API 키 필요",
