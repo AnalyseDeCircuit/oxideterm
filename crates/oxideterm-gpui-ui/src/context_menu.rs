@@ -111,13 +111,18 @@ pub fn context_menu_action(
 pub fn context_menu_event_boundary(menu: Div) -> Div {
     // Radix ContextMenuContent is an event island: pointer/wheel input inside
     // the menu does not reach the underlying trigger row, file list, or terminal.
+    context_menu_pointer_event_boundary(menu).on_scroll_wheel(|_, _, cx| {
+        cx.stop_propagation();
+    })
+}
+
+pub fn context_menu_pointer_event_boundary(menu: Div) -> Div {
+    // Scrollable menu-like popovers need nested scroll surfaces to receive
+    // wheel input, but pointer input should still stay inside the menu island.
     menu.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
         cx.stop_propagation();
     })
     .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-        cx.stop_propagation();
-    })
-    .on_scroll_wheel(|_, _, cx| {
         cx.stop_propagation();
     })
 }

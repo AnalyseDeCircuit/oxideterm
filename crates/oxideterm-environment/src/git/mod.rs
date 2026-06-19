@@ -13,9 +13,9 @@ pub mod probe;
 pub mod store;
 
 pub use model::{
-    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitOperationKind, GitProbeError,
-    GitProbeKey, GitProbeOutcome, GitProbeScope, GitRepositorySnapshot, GitRepositoryStatus,
-    GitStagedDiffContext, GitStagedDiffOutcome,
+    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath, GitOperationKind,
+    GitProbeError, GitProbeKey, GitProbeOutcome, GitProbeScope, GitRepositorySnapshot,
+    GitRepositoryStatus, GitStagedDiffContext, GitStagedDiffOutcome,
 };
 pub use parse::{
     GitCommandOutput, interpret_git_branch_list_output, interpret_git_branch_list_outputs,

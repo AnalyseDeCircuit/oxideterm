@@ -144,6 +144,7 @@ pub struct GitRepositoryStatus {
     untracked: u32,
     conflicts: u32,
     operation: Option<GitOperationKind>,
+    paths: Vec<GitChangedPath>,
 }
 
 impl GitRepositoryStatus {
@@ -167,11 +168,17 @@ impl GitRepositoryStatus {
             untracked,
             conflicts,
             operation: None,
+            paths: Vec::new(),
         }
     }
 
     pub fn with_operation(mut self, operation: Option<GitOperationKind>) -> Self {
         self.operation = operation;
+        self
+    }
+
+    pub fn with_paths(mut self, paths: Vec<GitChangedPath>) -> Self {
+        self.paths = paths;
         self
     }
 
@@ -207,6 +214,10 @@ impl GitRepositoryStatus {
         self.operation
     }
 
+    pub fn paths(&self) -> &[GitChangedPath] {
+        &self.paths
+    }
+
     pub fn dirty_count(&self) -> u32 {
         self.staged
             .saturating_add(self.modified)
@@ -220,6 +231,82 @@ impl GitRepositoryStatus {
 
     pub fn has_conflicts(&self) -> bool {
         self.conflicts > 0
+    }
+}
+
+/// One changed path from `git status --porcelain=v2`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitChangedPath {
+    path: String,
+    original_path: Option<String>,
+    staged: bool,
+    modified: bool,
+    untracked: bool,
+    conflict: bool,
+}
+
+impl GitChangedPath {
+    pub fn new(path: impl Into<String>) -> Option<Self> {
+        Self::from_parts(path, None::<String>, false, false, false, false)
+    }
+
+    pub fn from_parts(
+        path: impl Into<String>,
+        original_path: Option<impl Into<String>>,
+        staged: bool,
+        modified: bool,
+        untracked: bool,
+        conflict: bool,
+    ) -> Option<Self> {
+        let path = path.into();
+        let path = path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        let original_path = original_path
+            .map(Into::into)
+            .map(|path| path.trim().to_string())
+            .filter(|path| !path.is_empty());
+        Some(Self {
+            path: path.to_string(),
+            original_path,
+            staged,
+            modified,
+            untracked,
+            conflict,
+        })
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn original_path(&self) -> Option<&str> {
+        self.original_path.as_deref()
+    }
+
+    pub fn staged(&self) -> bool {
+        self.staged
+    }
+
+    pub fn modified(&self) -> bool {
+        self.modified
+    }
+
+    pub fn untracked(&self) -> bool {
+        self.untracked
+    }
+
+    pub fn conflict(&self) -> bool {
+        self.conflict
+    }
+
+    pub fn needs_worktree_diff(&self) -> bool {
+        self.modified || self.conflict
+    }
+
+    pub fn needs_staged_diff(&self) -> bool {
+        self.staged
     }
 }
 

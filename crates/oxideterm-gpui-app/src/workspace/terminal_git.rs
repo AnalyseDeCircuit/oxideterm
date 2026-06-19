@@ -64,6 +64,7 @@ pub(in crate::workspace) enum TerminalGitAiCommitMessageOutcome {
 #[derive(Default)]
 pub(in crate::workspace) struct TerminalGitBranchPickerState {
     pub open: bool,
+    pub active_section: TerminalGitPanelSection,
     pub key: Option<GitProbeKey>,
     pub query: String,
     pub branches: Vec<GitBranchReference>,
@@ -98,19 +99,68 @@ impl TerminalGitBranchPickerState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::workspace) enum TerminalGitPanelSection {
+    #[default]
+    Branches,
+    Changes,
+    Sync,
+    Stash,
+    Resolve,
+    Commit,
+    History,
+    Refs,
+}
+
+impl TerminalGitPanelSection {
+    pub(in crate::workspace) fn label_key(self) -> &'static str {
+        match self {
+            Self::Branches => "terminal.git.section_branches",
+            Self::Changes => "terminal.git.section_changes",
+            Self::Sync => "terminal.git.section_sync",
+            Self::Stash => "terminal.git.section_stash",
+            Self::Resolve => "terminal.git.section_resolve",
+            Self::Commit => "terminal.git.section_commit",
+            Self::History => "terminal.git.section_history",
+            Self::Refs => "terminal.git.section_refs",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TerminalGitRepositoryAction {
     Fetch,
     Pull,
     Push,
+    Publish,
     Status,
     Diff,
+    DiffStaged,
     Log,
     Stash,
+    StashList,
     StashPop,
     StageAll,
+    UnstageAll,
     Commit,
+    CommitVerbose,
+    CommitSignoff,
+    Amend,
+    AmendNoEdit,
     RebasePull,
+    RebaseInteractive,
+    FetchAll,
+    PushTags,
+    LogStat,
+    Reflog,
+    BranchVerbose,
+    RemoteList,
+    TagList,
+    WorktreeList,
+    StashShowLatest,
+    StashApplyLatest,
+    StashDropLatest,
+    ConflictFiles,
     Continue(GitOperationKind),
     Abort(GitOperationKind),
     Skip(GitOperationKind),
@@ -122,17 +172,109 @@ impl TerminalGitRepositoryAction {
             Self::Fetch => "terminal.git.action_fetch",
             Self::Pull => "terminal.git.action_pull",
             Self::Push => "terminal.git.action_push",
+            Self::Publish => "terminal.git.action_publish",
             Self::Status => "terminal.git.action_status",
             Self::Diff => "terminal.git.action_diff",
+            Self::DiffStaged => "terminal.git.action_diff_staged",
             Self::Log => "terminal.git.action_log",
             Self::Stash => "terminal.git.action_stash",
+            Self::StashList => "terminal.git.action_stash_list",
             Self::StashPop => "terminal.git.action_stash_pop",
             Self::StageAll => "terminal.git.action_stage_all",
+            Self::UnstageAll => "terminal.git.action_unstage_all",
             Self::Commit => "terminal.git.action_commit",
+            Self::CommitVerbose => "terminal.git.action_commit_verbose",
+            Self::CommitSignoff => "terminal.git.action_commit_signoff",
+            Self::Amend => "terminal.git.action_amend",
+            Self::AmendNoEdit => "terminal.git.action_amend_no_edit",
             Self::RebasePull => "terminal.git.action_rebase_pull",
+            Self::RebaseInteractive => "terminal.git.action_rebase_interactive",
+            Self::FetchAll => "terminal.git.action_fetch_all",
+            Self::PushTags => "terminal.git.action_push_tags",
+            Self::LogStat => "terminal.git.action_log_stat",
+            Self::Reflog => "terminal.git.action_reflog",
+            Self::BranchVerbose => "terminal.git.action_branch_verbose",
+            Self::RemoteList => "terminal.git.action_remote_list",
+            Self::TagList => "terminal.git.action_tag_list",
+            Self::WorktreeList => "terminal.git.action_worktree_list",
+            Self::StashShowLatest => "terminal.git.action_stash_show_latest",
+            Self::StashApplyLatest => "terminal.git.action_stash_apply_latest",
+            Self::StashDropLatest => "terminal.git.action_stash_drop_latest",
+            Self::ConflictFiles => "terminal.git.action_conflict_files",
             Self::Continue(_) => "terminal.git.action_continue",
             Self::Abort(_) => "terminal.git.action_abort",
             Self::Skip(_) => "terminal.git.action_skip",
+        }
+    }
+
+    pub(in crate::workspace) fn command_preview(self) -> &'static str {
+        match self {
+            TerminalGitRepositoryAction::Fetch => "git fetch --prune",
+            TerminalGitRepositoryAction::Pull => "git pull --ff-only",
+            TerminalGitRepositoryAction::Push => "git push",
+            TerminalGitRepositoryAction::Publish => "git push -u origin HEAD",
+            TerminalGitRepositoryAction::Status => "git status --short --branch",
+            TerminalGitRepositoryAction::Diff => "git diff --stat",
+            TerminalGitRepositoryAction::DiffStaged => "git diff --cached --stat",
+            TerminalGitRepositoryAction::Log => "git log --oneline --decorate --graph -20",
+            TerminalGitRepositoryAction::Stash => "git stash push",
+            TerminalGitRepositoryAction::StashList => "git stash list",
+            TerminalGitRepositoryAction::StashPop => "git stash pop",
+            TerminalGitRepositoryAction::StageAll => "git add -A",
+            TerminalGitRepositoryAction::UnstageAll => "git restore --staged .",
+            TerminalGitRepositoryAction::Commit => "git commit",
+            TerminalGitRepositoryAction::CommitVerbose => "git commit -v",
+            TerminalGitRepositoryAction::CommitSignoff => "git commit -s",
+            TerminalGitRepositoryAction::Amend => "git commit --amend",
+            TerminalGitRepositoryAction::AmendNoEdit => "git commit --amend --no-edit",
+            TerminalGitRepositoryAction::RebasePull => "git pull --rebase",
+            TerminalGitRepositoryAction::RebaseInteractive => "git rebase -i @{upstream}",
+            TerminalGitRepositoryAction::FetchAll => "git fetch --all --prune",
+            TerminalGitRepositoryAction::PushTags => "git push --tags",
+            TerminalGitRepositoryAction::LogStat => "git log --stat -20",
+            TerminalGitRepositoryAction::Reflog => "git reflog -20",
+            TerminalGitRepositoryAction::BranchVerbose => "git branch -vv",
+            TerminalGitRepositoryAction::RemoteList => "git remote -v",
+            TerminalGitRepositoryAction::TagList => "git tag --list",
+            TerminalGitRepositoryAction::WorktreeList => "git worktree list",
+            TerminalGitRepositoryAction::StashShowLatest => "git stash show -p stash@{0}",
+            TerminalGitRepositoryAction::StashApplyLatest => "git stash apply stash@{0}",
+            TerminalGitRepositoryAction::StashDropLatest => "git stash drop stash@{0}",
+            TerminalGitRepositoryAction::ConflictFiles => "git diff --name-only --diff-filter=U",
+            TerminalGitRepositoryAction::Continue(operation) => {
+                terminal_git_operation_command(operation, "continue")
+            }
+            TerminalGitRepositoryAction::Abort(operation) => {
+                terminal_git_operation_command(operation, "abort")
+            }
+            TerminalGitRepositoryAction::Skip(operation) => {
+                terminal_git_operation_command(operation, "skip")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TerminalGitPathAction {
+    Stage,
+    Unstage,
+    Diff,
+    DiffStaged,
+    Open,
+    Ours,
+    Theirs,
+}
+
+impl TerminalGitPathAction {
+    pub(in crate::workspace) fn label_key(self) -> &'static str {
+        match self {
+            Self::Stage => "terminal.git.path_action_stage",
+            Self::Unstage => "terminal.git.path_action_unstage",
+            Self::Diff => "terminal.git.path_action_diff",
+            Self::DiffStaged => "terminal.git.path_action_diff_staged",
+            Self::Open => "terminal.git.path_action_open",
+            Self::Ours => "terminal.git.path_action_ours",
+            Self::Theirs => "terminal.git.path_action_theirs",
         }
     }
 }
@@ -173,34 +315,37 @@ impl TerminalGitActionPlan {
         })
     }
 
+    fn create_branch_name(branch_name: &str) -> Option<Self> {
+        let branch_name = branch_name.trim();
+        terminal_git_accepts_single_arg(branch_name).then(|| Self {
+            command: terminal_git_create_branch_command(branch_name),
+        })
+    }
+
+    fn rename_current_branch(branch_name: &str) -> Option<Self> {
+        let branch_name = branch_name.trim();
+        terminal_git_accepts_single_arg(branch_name).then(|| Self {
+            command: terminal_git_rename_branch_command(branch_name),
+        })
+    }
+
+    fn track_remote_branch(branch_name: &str) -> Option<Self> {
+        let branch_name = branch_name.trim();
+        terminal_git_accepts_single_arg(branch_name).then(|| Self {
+            command: terminal_git_track_remote_command(branch_name),
+        })
+    }
+
     fn repository_action(action: TerminalGitRepositoryAction) -> Self {
-        let command = match action {
-            TerminalGitRepositoryAction::Fetch => "git fetch --prune",
-            // A one-click pull must not create a merge commit. If fast-forward
-            // is impossible, Git will explain the recovery path in the terminal.
-            TerminalGitRepositoryAction::Pull => "git pull --ff-only",
-            TerminalGitRepositoryAction::Push => "git push",
-            TerminalGitRepositoryAction::Status => "git status --short --branch",
-            TerminalGitRepositoryAction::Diff => "git diff --stat",
-            TerminalGitRepositoryAction::Log => "git log --oneline --decorate --graph -20",
-            TerminalGitRepositoryAction::Stash => "git stash push",
-            TerminalGitRepositoryAction::StashPop => "git stash pop",
-            TerminalGitRepositoryAction::StageAll => "git add -A",
-            TerminalGitRepositoryAction::Commit => "git commit",
-            TerminalGitRepositoryAction::RebasePull => "git pull --rebase",
-            TerminalGitRepositoryAction::Continue(operation) => {
-                terminal_git_operation_command(operation, "continue")
-            }
-            TerminalGitRepositoryAction::Abort(operation) => {
-                terminal_git_operation_command(operation, "abort")
-            }
-            TerminalGitRepositoryAction::Skip(operation) => {
-                terminal_git_operation_command(operation, "skip")
-            }
-        };
         Self {
-            command: command.to_string(),
+            command: action.command_preview().to_string(),
         }
+    }
+
+    fn path_action(action: TerminalGitPathAction, path: &str) -> Option<Self> {
+        terminal_git_accepts_path_arg(path).then(|| Self {
+            command: terminal_git_path_action_command(action, path),
+        })
     }
 }
 
@@ -279,6 +424,15 @@ impl WorkspaceApp {
         let Some(key) = self.active_terminal_git_key(cx) else {
             return;
         };
+        let active_section = if self
+            .active_terminal_git_snapshot(cx)
+            .and_then(|snapshot| snapshot.status.operation())
+            .is_some()
+        {
+            TerminalGitPanelSection::Resolve
+        } else {
+            TerminalGitPanelSection::Branches
+        };
 
         self.close_terminal_quick_commands_popover();
         self.dismiss_terminal_broadcast_menu();
@@ -290,6 +444,7 @@ impl WorkspaceApp {
 
         let generation = self.terminal_git_branch_picker.next_generation();
         self.terminal_git_branch_picker.open = true;
+        self.terminal_git_branch_picker.active_section = active_section;
         self.terminal_git_branch_picker.key = Some(key.clone());
         self.terminal_git_branch_picker.query.clear();
         self.terminal_git_branch_picker.branches.clear();
@@ -360,6 +515,38 @@ impl WorkspaceApp {
         Some(query.to_string())
     }
 
+    pub(in crate::workspace) fn terminal_git_query_create_branch_candidate(
+        &self,
+    ) -> Option<String> {
+        let query = self.terminal_git_branch_picker.query.trim();
+        if !terminal_git_accepts_single_arg(query) {
+            return None;
+        }
+        if self
+            .terminal_git_branch_picker
+            .branches
+            .iter()
+            .any(|branch| branch.name() == query)
+        {
+            return None;
+        }
+        Some(query.to_string())
+    }
+
+    pub(in crate::workspace) fn terminal_git_query_remote_tracking_candidate(
+        &self,
+    ) -> Option<String> {
+        let query = self.terminal_git_branch_picker.query.trim();
+        if !terminal_git_accepts_single_arg(query) || !query.contains('/') {
+            return None;
+        }
+        self.terminal_git_branch_picker
+            .branches
+            .iter()
+            .all(|branch| branch.name() != query)
+            .then(|| query.to_string())
+    }
+
     pub(in crate::workspace) fn checkout_terminal_git_query(&mut self, cx: &mut Context<Self>) {
         let Some(branch_name) = self.terminal_git_query_checkout_candidate() else {
             return;
@@ -380,6 +567,53 @@ impl WorkspaceApp {
             return;
         };
         let action_label = self.i18n.t("terminal.git.action_rebase");
+        let failure_message =
+            self.i18n_replace("terminal.git.command_failed", &[("action", action_label)]);
+        self.send_terminal_git_command(plan, failure_message, cx);
+    }
+
+    pub(in crate::workspace) fn create_terminal_git_query_branch(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(branch_name) = self.terminal_git_query_create_branch_candidate() else {
+            return;
+        };
+        let Some(plan) = TerminalGitActionPlan::create_branch_name(&branch_name) else {
+            return;
+        };
+        let failure_message =
+            self.i18n_replace("terminal.git.checkout_failed", &[("branch", branch_name)]);
+        self.send_terminal_git_command(plan, failure_message, cx);
+    }
+
+    pub(in crate::workspace) fn rename_terminal_git_query_branch(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(branch_name) = self.terminal_git_query_create_branch_candidate() else {
+            return;
+        };
+        let Some(plan) = TerminalGitActionPlan::rename_current_branch(&branch_name) else {
+            return;
+        };
+        let action_label = self.i18n.t("terminal.git.action_branch_rename");
+        let failure_message =
+            self.i18n_replace("terminal.git.command_failed", &[("action", action_label)]);
+        self.send_terminal_git_command(plan, failure_message, cx);
+    }
+
+    pub(in crate::workspace) fn track_terminal_git_query_remote_branch(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(branch_name) = self.terminal_git_query_remote_tracking_candidate() else {
+            return;
+        };
+        let Some(plan) = TerminalGitActionPlan::track_remote_branch(&branch_name) else {
+            return;
+        };
+        let action_label = self.i18n.t("terminal.git.action_branch_track_remote");
         let failure_message =
             self.i18n_replace("terminal.git.command_failed", &[("action", action_label)]);
         self.send_terminal_git_command(plan, failure_message, cx);
@@ -414,6 +648,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let plan = TerminalGitActionPlan::repository_action(action);
+        let action_label = self.i18n.t(action.label_key());
+        let failure_message =
+            self.i18n_replace("terminal.git.command_failed", &[("action", action_label)]);
+        self.send_terminal_git_command(plan, failure_message, cx);
+    }
+
+    pub(in crate::workspace) fn run_terminal_git_path_action(
+        &mut self,
+        action: TerminalGitPathAction,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(plan) = TerminalGitActionPlan::path_action(action, &path) else {
+            return;
+        };
         let action_label = self.i18n.t(action.label_key());
         let failure_message =
             self.i18n_replace("terminal.git.command_failed", &[("action", action_label)]);
@@ -566,26 +815,51 @@ impl WorkspaceApp {
                 true
             }
             "up" | "arrowup" => {
+                if self.terminal_git_branch_picker.active_section
+                    != TerminalGitPanelSection::Branches
+                {
+                    return false;
+                }
                 self.step_terminal_git_branch_highlight(false);
                 cx.notify();
                 true
             }
             "down" | "arrowdown" => {
+                if self.terminal_git_branch_picker.active_section
+                    != TerminalGitPanelSection::Branches
+                {
+                    return false;
+                }
                 self.step_terminal_git_branch_highlight(true);
                 cx.notify();
                 true
             }
             "home" => {
+                if self.terminal_git_branch_picker.active_section
+                    != TerminalGitPanelSection::Branches
+                {
+                    return false;
+                }
                 self.highlight_terminal_git_branch_edge(false);
                 cx.notify();
                 true
             }
             "end" => {
+                if self.terminal_git_branch_picker.active_section
+                    != TerminalGitPanelSection::Branches
+                {
+                    return false;
+                }
                 self.highlight_terminal_git_branch_edge(true);
                 cx.notify();
                 true
             }
             "enter" => {
+                if self.terminal_git_branch_picker.active_section
+                    != TerminalGitPanelSection::Branches
+                {
+                    return false;
+                }
                 let visible = self.visible_terminal_git_branches();
                 let branch = self
                     .terminal_git_branch_picker
@@ -1230,12 +1504,41 @@ fn terminal_git_checkout_command(branch: &str) -> String {
     format!("git checkout {}", shell_quote(branch))
 }
 
+fn terminal_git_create_branch_command(branch: &str) -> String {
+    format!("git checkout -b {}", shell_quote(branch))
+}
+
+fn terminal_git_rename_branch_command(branch: &str) -> String {
+    format!("git branch -m {}", shell_quote(branch))
+}
+
+fn terminal_git_track_remote_command(branch: &str) -> String {
+    format!("git switch --track {}", shell_quote(branch))
+}
+
 fn terminal_git_rebase_command(branch: &str) -> String {
     format!("git rebase {}", shell_quote(branch))
 }
 
 fn terminal_git_accepts_single_arg(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_control)
+}
+
+fn terminal_git_accepts_path_arg(value: &str) -> bool {
+    terminal_git_accepts_single_arg(value)
+}
+
+fn terminal_git_path_action_command(action: TerminalGitPathAction, path: &str) -> String {
+    let path = shell_quote(path);
+    match action {
+        TerminalGitPathAction::Stage => format!("git add -- {path}"),
+        TerminalGitPathAction::Unstage => format!("git restore --staged -- {path}"),
+        TerminalGitPathAction::Diff => format!("git diff -- {path}"),
+        TerminalGitPathAction::DiffStaged => format!("git diff --cached -- {path}"),
+        TerminalGitPathAction::Open => format!("${{EDITOR:-vi}} -- {path}"),
+        TerminalGitPathAction::Ours => format!("git checkout --ours -- {path}"),
+        TerminalGitPathAction::Theirs => format!("git checkout --theirs -- {path}"),
+    }
 }
 
 fn terminal_git_operation_kind_from_git_dir(git_dir: &std::path::Path) -> Option<GitOperationKind> {
@@ -1415,12 +1718,20 @@ mod tests {
             "git fetch --prune"
         );
         assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::FetchAll).command,
+            "git fetch --all --prune"
+        );
+        assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Pull).command,
             "git pull --ff-only"
         );
         assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Push).command,
             "git push"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Publish).command,
+            "git push -u origin HEAD"
         );
         assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Status).command,
@@ -1431,12 +1742,22 @@ mod tests {
             "git diff --stat"
         );
         assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::DiffStaged)
+                .command,
+            "git diff --cached --stat"
+        );
+        assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Log).command,
             "git log --oneline --decorate --graph -20"
         );
         assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Stash).command,
             "git stash push"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::StashList)
+                .command,
+            "git stash list"
         );
         assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::StashPop).command,
@@ -1447,13 +1768,95 @@ mod tests {
             "git add -A"
         );
         assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::UnstageAll)
+                .command,
+            "git restore --staged ."
+        );
+        assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Commit).command,
             "git commit"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::CommitVerbose)
+                .command,
+            "git commit -v"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::CommitSignoff)
+                .command,
+            "git commit -s"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Amend).command,
+            "git commit --amend"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::AmendNoEdit)
+                .command,
+            "git commit --amend --no-edit"
         );
         assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::RebasePull)
                 .command,
             "git pull --rebase"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(
+                TerminalGitRepositoryAction::RebaseInteractive
+            )
+            .command,
+            "git rebase -i @{upstream}"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::PushTags).command,
+            "git push --tags"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::LogStat).command,
+            "git log --stat -20"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Reflog).command,
+            "git reflog -20"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::BranchVerbose)
+                .command,
+            "git branch -vv"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::RemoteList)
+                .command,
+            "git remote -v"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::TagList).command,
+            "git tag --list"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::WorktreeList)
+                .command,
+            "git worktree list"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::StashShowLatest)
+                .command,
+            "git stash show -p stash@{0}"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::StashApplyLatest)
+                .command,
+            "git stash apply stash@{0}"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::StashDropLatest)
+                .command,
+            "git stash drop stash@{0}"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::ConflictFiles)
+                .command,
+            "git diff --name-only --diff-filter=U"
         );
         assert_eq!(
             TerminalGitActionPlan::repository_action(TerminalGitRepositoryAction::Continue(
@@ -1500,6 +1903,56 @@ mod tests {
                 .unwrap()
                 .command,
             "git rebase 'main branch'"
+        );
+    }
+
+    #[test]
+    fn create_branch_name_plan_quotes_new_branch() {
+        assert_eq!(
+            TerminalGitActionPlan::create_branch_name("feature/it works")
+                .unwrap()
+                .command,
+            "git checkout -b 'feature/it works'"
+        );
+    }
+
+    #[test]
+    fn create_branch_name_plan_rejects_control_characters() {
+        assert!(TerminalGitActionPlan::create_branch_name("feature\nbad").is_none());
+    }
+
+    #[test]
+    fn branch_query_plans_cover_rename_and_remote_tracking() {
+        assert_eq!(
+            TerminalGitActionPlan::rename_current_branch("feature/new")
+                .unwrap()
+                .command,
+            "git branch -m 'feature/new'"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::track_remote_branch("origin/feature/new")
+                .unwrap()
+                .command,
+            "git switch --track 'origin/feature/new'"
+        );
+    }
+
+    #[test]
+    fn path_action_plan_quotes_file_paths() {
+        assert_eq!(
+            TerminalGitActionPlan::path_action(TerminalGitPathAction::Stage, "src/it works.rs")
+                .unwrap()
+                .command,
+            "git add -- 'src/it works.rs'"
+        );
+        assert_eq!(
+            TerminalGitActionPlan::path_action(TerminalGitPathAction::DiffStaged, "a'b.rs")
+                .unwrap()
+                .command,
+            "git diff --cached -- 'a'\\''b.rs'"
+        );
+        assert!(
+            TerminalGitActionPlan::path_action(TerminalGitPathAction::Open, "bad\npath").is_none()
         );
     }
 

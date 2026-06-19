@@ -4,9 +4,9 @@
 use std::collections::{HashMap, HashSet};
 
 use super::model::{
-    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitOperationKind, GitProbeError,
-    GitProbeOutcome, GitRepositorySnapshot, GitRepositoryStatus, GitStagedDiffContext,
-    GitStagedDiffOutcome,
+    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath, GitOperationKind,
+    GitProbeError, GitProbeOutcome, GitRepositorySnapshot, GitRepositoryStatus,
+    GitStagedDiffContext, GitStagedDiffOutcome,
 };
 use super::probe::{SHELL_BRANCH_LIST_SENTINEL, SHELL_PROBE_SENTINEL, SHELL_STAGED_DIFF_SENTINEL};
 
@@ -176,6 +176,7 @@ pub fn parse_git_status_summary(output: &str) -> GitRepositoryStatus {
     let mut modified = 0;
     let mut untracked = 0;
     let mut conflicts = 0;
+    let mut paths = Vec::new();
 
     for line in output.lines() {
         if let Some(value) = line.strip_prefix("# branch.upstream ") {
@@ -195,20 +196,32 @@ pub fn parse_git_status_summary(output: &str) -> GitRepositoryStatus {
             if status.1 != '.' {
                 modified += 1;
             }
+            if let Some(path) = parse_porcelain_v2_changed_path(line, status.0, status.1) {
+                paths.push(path);
+            }
             continue;
         }
         if line.starts_with("u ") {
             conflicts += 1;
+            if let Some(path) = parse_porcelain_v2_conflict_path(line) {
+                paths.push(path);
+            }
             continue;
         }
-        if line.starts_with("? ") {
+        if let Some(path) = line.strip_prefix("? ") {
             untracked += 1;
+            if let Some(path) =
+                GitChangedPath::from_parts(path, None::<String>, false, false, true, false)
+            {
+                paths.push(path);
+            }
         }
     }
 
     GitRepositoryStatus::new(
         upstream, ahead, behind, staged, modified, untracked, conflicts,
     )
+    .with_paths(paths)
 }
 
 pub fn interpret_git_branch_list_output(branches: GitCommandOutput) -> GitBranchListOutcome {
@@ -485,6 +498,40 @@ fn porcelain_v2_xy(line: &str, record_kind: char) -> Option<(char, char)> {
     Some((x, y))
 }
 
+fn parse_porcelain_v2_changed_path(
+    line: &str,
+    staged: char,
+    modified: char,
+) -> Option<GitChangedPath> {
+    let record_kind = line.chars().next()?;
+    let path_field = match record_kind {
+        '1' => line.splitn(9, ' ').nth(8)?,
+        '2' => line.splitn(10, ' ').nth(9)?,
+        _ => return None,
+    };
+    let (path, original_path) = split_porcelain_path_pair(path_field);
+    GitChangedPath::from_parts(
+        path,
+        original_path,
+        staged != '.',
+        modified != '.',
+        false,
+        false,
+    )
+}
+
+fn parse_porcelain_v2_conflict_path(line: &str) -> Option<GitChangedPath> {
+    let path = line.splitn(11, ' ').nth(10)?;
+    GitChangedPath::from_parts(path, None::<String>, false, false, false, true)
+}
+
+fn split_porcelain_path_pair(path_field: &str) -> (&str, Option<&str>) {
+    path_field
+        .split_once('\t')
+        .map(|(path, original)| (path, Some(original)))
+        .unwrap_or((path_field, None))
+}
+
 fn field_value<'a>(fields: &'a [&str], key: &str) -> Option<&'a str> {
     fields.chunks_exact(2).find_map(|chunk| {
         if chunk[0] == key {
@@ -585,6 +632,15 @@ mod tests {
         assert_eq!(snapshot.status.untracked(), 1);
         assert_eq!(snapshot.status.conflicts(), 1);
         assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Rebase));
+        assert_eq!(snapshot.status.paths().len(), 5);
+        assert_eq!(snapshot.status.paths()[0].path(), "file.rs");
+        assert!(snapshot.status.paths()[0].staged());
+        assert!(!snapshot.status.paths()[0].modified());
+        assert_eq!(snapshot.status.paths()[2].path(), "old");
+        assert_eq!(snapshot.status.paths()[2].original_path(), Some("new"));
+        assert!(snapshot.status.paths()[3].conflict());
+        assert_eq!(snapshot.status.paths()[4].path(), "notes.txt");
+        assert!(snapshot.status.paths()[4].untracked());
         assert!(snapshot.status.is_dirty());
         assert!(snapshot.status.has_conflicts());
     }
@@ -606,6 +662,9 @@ mod tests {
         assert_eq!(snapshot.status.ahead(), 1);
         assert_eq!(snapshot.status.untracked(), 1);
         assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Merge));
+        assert_eq!(snapshot.status.paths().len(), 1);
+        assert_eq!(snapshot.status.paths()[0].path(), "scratch.txt");
+        assert!(snapshot.status.paths()[0].untracked());
     }
 
     #[test]

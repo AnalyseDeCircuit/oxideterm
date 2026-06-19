@@ -11,7 +11,7 @@ pub mod git;
 pub mod terminal_context;
 
 pub use git::{
-    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitCommandOutput,
+    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath, GitCommandOutput,
     GitOperationKind, GitProbeCommandArgs, GitProbeEntry, GitProbeError, GitProbeKey,
     GitProbeOutcome, GitProbeScope, GitProbeState, GitRepositorySnapshot, GitRepositoryStatus,
     GitStagedDiffContext, GitStagedDiffOutcome, GitStatusStore, git_absolute_git_dir_args,
