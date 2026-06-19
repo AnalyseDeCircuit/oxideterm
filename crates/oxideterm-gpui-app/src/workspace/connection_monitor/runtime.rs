@@ -193,8 +193,6 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
-                    .mx_auto()
                     .p(px(RUNTIME_CONTENT_PADDING))
                     .flex()
                     .flex_col()
@@ -363,8 +361,6 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
-                    .mx_auto()
                     .p(px(RUNTIME_CONTENT_PADDING))
                     .child(self.render_system_health_panel(false, cx)),
             )

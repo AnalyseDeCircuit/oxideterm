@@ -110,90 +110,117 @@ fn main() {
         std::process::exit(2);
     });
 
-    Application::new()
-        .with_assets(NativeAssets)
-        .run(move |cx: &mut App| {
-            app_icon::install_runtime_app_icon();
+    let application = Application::new().with_assets(NativeAssets);
+    application.on_reopen(|cx| {
+        if !cx.windows().is_empty() {
+            return;
+        }
 
-            let startup_settings = SettingsStore::load_default()
-                .map(|store| store.settings().clone())
-                .unwrap_or_default();
-            if let Err(error) =
-                bundled_fonts::load_terminal_font_open_critical(&startup_settings, &cx.text_system())
-            {
-                eprintln!(
-                    "failed to load selected bundled terminal font; falling back to system fonts: {error}"
-                );
-            }
-            let cjk_fallback_text_system = cx.text_system().clone();
-            let foreground = cx.foreground_executor();
-            foreground
-                .spawn(async move {
-                    // Mirrors Tauri's delayed CJK fallback warmup: keep window
-                    // and terminal startup responsive, then register Maple
-                    // Regular only.
-                    Timer::after(Duration::from_millis(500)).await;
-                    if let Err(error) = bundled_fonts::load_terminal_cjk_fallback_regular(
-                        &cjk_fallback_text_system,
-                    ) {
-                        eprintln!(
-                            "failed to load bundled CJK terminal fallback; falling back to system fonts: {error}"
-                        );
-                    }
-                    Timer::after(Duration::from_millis(5_000)).await;
-                    if let Err(error) =
-                        bundled_fonts::load_terminal_cjk_secondary_faces(&cjk_fallback_text_system)
-                    {
-                        eprintln!(
-                            "failed to load secondary bundled CJK terminal fonts; falling back to system fonts: {error}"
-                        );
-                    }
-                })
-                .detach();
-            oxideterm_code_editor::init(cx);
-            cx.activate(true);
-            cx.on_action(quit);
-            cx.bind_keys(platform::app_key_bindings(&startup_settings));
-            cx.set_menus(platform::app_menus(&I18n::default()));
-
-            let bounds = Bounds::centered(
-                None,
-                size(
-                    px(TAURI_DEFAULT_WINDOW_WIDTH),
-                    px(TAURI_DEFAULT_WINDOW_HEIGHT),
-                ),
-                cx,
+        // macOS keeps the application alive after closing the last window.
+        // Reopening from the Dock should create a fresh workspace window
+        // instead of leaving the app windowless.
+        if let Err(error) = open_main_workspace_window(cx, None) {
+            eprintln!(
+                "OxideTerm could not reopen a native GPUI window: {error:#}\n\
+                 Try updating GPU drivers, disabling incompatible graphics layers, \
+                 or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
             );
+        }
+    });
 
-            if let Err(err) = cx.open_window(platform::window_options(bounds), |window, cx| {
-                let workspace = cx.new(|cx| {
-                    WorkspaceApp::new(window, cx).unwrap_or_else(|err| {
-                        panic!(
-                            "failed to initialize OxideTerm workspace: {err:#}\n\
-                             OxideTerm native uses GPUI's GPU-backed renderer. \
-                             To retry with lightweight visual effects, launch with \
-                             OXIDETERM_RENDER_PROFILE=compatibility."
-                        )
-                    })
-                });
-                if let Some(launch) = ssh_launch.clone()
-                    && let Err(error) = workspace.update(cx, |workspace, cx| {
-                        workspace.open_temporary_ssh_launch(launch, window, cx)
-                    })
+    application.run(move |cx: &mut App| {
+        app_icon::install_runtime_app_icon();
+
+        let startup_settings = SettingsStore::load_default()
+            .map(|store| store.settings().clone())
+            .unwrap_or_default();
+        if let Err(error) =
+            bundled_fonts::load_terminal_font_open_critical(&startup_settings, &cx.text_system())
+        {
+            eprintln!(
+                "failed to load selected bundled terminal font; falling back to system fonts: {error}"
+            );
+        }
+        let cjk_fallback_text_system = cx.text_system().clone();
+        let foreground = cx.foreground_executor();
+        foreground
+            .spawn(async move {
+                // Mirrors Tauri's delayed CJK fallback warmup: keep window
+                // and terminal startup responsive, then register Maple
+                // Regular only.
+                Timer::after(Duration::from_millis(500)).await;
+                if let Err(error) =
+                    bundled_fonts::load_terminal_cjk_fallback_regular(&cjk_fallback_text_system)
                 {
-                    eprintln!("failed to open temporary SSH launch: {error}");
+                    eprintln!(
+                        "failed to load bundled CJK terminal fallback; falling back to system fonts: {error}"
+                    );
                 }
-                cx.new(|cx| Root::new(workspace, window, cx))
-            }) {
-                eprintln!(
-                    "OxideTerm could not open a native GPUI window: {err:#}\n\
-                     GPUI 0.2.2 does not expose a CPU renderer fallback. \
-                     Try updating GPU drivers, disabling incompatible graphics layers, \
-                     or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
-                );
-                cx.quit();
-            }
+                Timer::after(Duration::from_millis(5_000)).await;
+                if let Err(error) =
+                    bundled_fonts::load_terminal_cjk_secondary_faces(&cjk_fallback_text_system)
+                {
+                    eprintln!(
+                        "failed to load secondary bundled CJK terminal fonts; falling back to system fonts: {error}"
+                    );
+                }
+            })
+            .detach();
+        oxideterm_code_editor::init(cx);
+        cx.activate(true);
+        cx.on_action(quit);
+        cx.bind_keys(platform::app_key_bindings(&startup_settings));
+        cx.set_menus(platform::app_menus(&I18n::default()));
+
+        if let Err(err) = open_main_workspace_window(cx, ssh_launch) {
+            eprintln!(
+                "OxideTerm could not open a native GPUI window: {err:#}\n\
+                 GPUI 0.2.2 does not expose a CPU renderer fallback. \
+                 Try updating GPU drivers, disabling incompatible graphics layers, \
+                 or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
+            );
+            cx.quit();
+        }
+    });
+}
+
+fn default_window_bounds(cx: &mut App) -> Bounds<gpui::Pixels> {
+    Bounds::centered(
+        None,
+        size(
+            px(TAURI_DEFAULT_WINDOW_WIDTH),
+            px(TAURI_DEFAULT_WINDOW_HEIGHT),
+        ),
+        cx,
+    )
+}
+
+fn open_main_workspace_window(
+    cx: &mut App,
+    ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+) -> anyhow::Result<()> {
+    let bounds = default_window_bounds(cx);
+    cx.open_window(platform::window_options(bounds), |window, cx| {
+        let workspace = cx.new(|cx| {
+            WorkspaceApp::new(window, cx).unwrap_or_else(|err| {
+                panic!(
+                    "failed to initialize OxideTerm workspace: {err:#}\n\
+                     OxideTerm native uses GPUI's GPU-backed renderer. \
+                     To retry with lightweight visual effects, launch with \
+                     OXIDETERM_RENDER_PROFILE=compatibility."
+                )
+            })
         });
+        if let Some(launch) = ssh_launch
+            && let Err(error) = workspace.update(cx, |workspace, cx| {
+                workspace.open_temporary_ssh_launch(launch, window, cx)
+            })
+        {
+            eprintln!("failed to open temporary SSH launch: {error}");
+        }
+        cx.new(|cx| Root::new(workspace, window, cx))
+    })
+    .map(|_| ())
 }
 
 fn ssh_launch_path_arg() -> Result<Option<PathBuf>, String> {

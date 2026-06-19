@@ -92,8 +92,10 @@ impl WorkspaceApp {
             _ => return div().into_any_element(),
         };
         div()
-            .max_w(px(MONITOR_CONTENT_MAX_WIDTH))
-            .mx_auto()
+            // The legacy monitor tab should follow the runtime pages: page
+            // padding is local, while cards can use the full workspace width.
+            .w_full()
+            .min_w(px(0.0))
             .px(px(MONITOR_PAGE_PADDING))
             .pb(px(MONITOR_SECTION_GAP))
             .when(index == 0, |item| item.pt(px(MONITOR_PAGE_PADDING)))
@@ -386,7 +388,8 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| div().into_any_element()),
         };
         div()
-            .max_w(px(896.0))
+            .w_full()
+            .min_w(px(0.0))
             .px(px(CONNECTION_POOL_BODY_PADDING))
             .pb(px(CONNECTION_POOL_CARD_GAP))
             .when(index == 0, |item| item.pt(px(CONNECTION_POOL_BODY_PADDING)))

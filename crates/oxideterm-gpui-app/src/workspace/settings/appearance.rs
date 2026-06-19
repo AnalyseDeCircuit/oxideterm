@@ -415,8 +415,8 @@ impl WorkspaceApp {
             self.appearance_slider_control(
                 SettingsSlider::AppearanceBorderRadius,
                 SelectAnchorId::SettingsAppearanceBorderRadiusSlider,
-                0.0,
-                24.0,
+                APPEARANCE_BORDER_RADIUS_MIN,
+                APPEARANCE_BORDER_RADIUS_MAX,
                 settings.appearance.border_radius as f32,
                 cx,
             )

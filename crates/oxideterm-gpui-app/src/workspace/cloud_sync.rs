@@ -268,13 +268,7 @@ impl WorkspaceApp {
         };
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
-        let outer_max_width = self.cloud_sync_content_outer_max_width();
-        let mut content = div()
-            .w_full()
-            .min_w(px(0.0))
-            .max_w(px(outer_max_width))
-            .px(px(padding))
-            .pb(px(gap));
+        let mut content = div().w_full().min_w(px(0.0)).px(px(padding)).pb(px(gap));
         if index == 0 {
             content = content.pt(px(padding));
         }
@@ -285,16 +279,8 @@ impl WorkspaceApp {
             .w_full()
             .min_w(px(0.0))
             .flex()
-            .justify_center()
             .child(content.child(self.render_cloud_sync_section(section, cx)))
             .into_any_element()
-    }
-
-    fn cloud_sync_content_outer_max_width(&self) -> f32 {
-        // Match the plugin manager's centered `max-w-4xl mx-auto p-10` rhythm.
-        // Virtual-list rows need the width plus external padding explicitly.
-        self.tokens.metrics.settings_content_max_width
-            + self.tokens.metrics.settings_content_padding * 2.0
     }
 
     fn render_cloud_sync_section(

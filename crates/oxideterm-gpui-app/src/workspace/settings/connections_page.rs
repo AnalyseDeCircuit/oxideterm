@@ -1,3 +1,5 @@
+const CONNECTION_IMPORT_PANEL_MAX_WIDTH: f32 = 896.0; // Tauri ConnectionImportPanel max-w-4xl.
+
 impl WorkspaceApp {
     fn settings_connections_section(
         &self,
@@ -697,7 +699,7 @@ impl WorkspaceApp {
         let has_paths = !self.settings_connection_import_paths.is_empty();
         div()
             .w_full()
-            .max_w(px(896.0))
+            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
             .flex()
             .flex_row()
             .flex_wrap()
@@ -806,7 +808,7 @@ impl WorkspaceApp {
             self.settings_connection_import_paths.join(" · ")
         };
         div()
-            .max_w(px(896.0))
+            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
             .truncate()
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
@@ -831,7 +833,7 @@ impl WorkspaceApp {
                 });
         div()
             .w_full()
-            .max_w(px(896.0))
+            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
             .flex()
             .flex_row()
             .items_center()
@@ -959,7 +961,7 @@ impl WorkspaceApp {
         if preview.drafts.is_empty() {
             return div()
                 .w_full()
-                .max_w(px(896.0))
+                .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
                 .h(px(288.0))
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
@@ -977,7 +979,7 @@ impl WorkspaceApp {
         let mut list = div()
             .id("settings-connection-import-scroll")
             .w_full()
-            .max_w(px(896.0))
+            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
             .h(px(288.0))
             .selectable_overflow_y_scroll(
                 &self.selectable_text_scroll_handle("settings-connection-import-scroll"),

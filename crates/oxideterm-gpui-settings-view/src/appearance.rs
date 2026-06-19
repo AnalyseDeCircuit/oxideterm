@@ -650,14 +650,20 @@ pub fn settings_background_thumbnail_frame(
     let fallback_text_size = tokens.metrics.ui_text_xs;
     let fallback_text_color = tokens.ui.text_muted;
     let fallback_bg = tokens.ui.bg_sunken;
+    let thumbnail_radius = tokens.radii.md;
     let image = img(image_source)
         .w_full()
         .h_full()
         .object_fit(ObjectFit::Cover)
+        // Tauri uses `rounded-md overflow-hidden` on the thumbnail wrapper.
+        // GPUI does not clip image children through that wrapper reliably, so
+        // the image owns the same rounded mask as the frame.
+        .rounded(px(thumbnail_radius))
         .with_fallback(move || {
             div()
                 .w_full()
                 .h_full()
+                .rounded(px(thumbnail_radius))
                 .flex()
                 .flex_col()
                 .items_center()
@@ -680,7 +686,7 @@ pub fn settings_background_thumbnail_frame(
     let mut thumbnail = div()
         .relative()
         .w_full()
-        .rounded(px(tokens.radii.md))
+        .rounded(px(thumbnail_radius))
         .overflow_hidden()
         .border_2()
         .border_color(rgb(if active {

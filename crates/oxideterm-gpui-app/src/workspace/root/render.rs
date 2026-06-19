@@ -660,7 +660,7 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &GoToTab9, window, cx| {
                 this.go_to_tab(8, window, cx);
             }))
-            .when(titlebar_visible, |root| root.child(self.render_title_bar(cx)))
+            .when(titlebar_visible, |root| root.child(self.render_title_bar(window, cx)))
             .child(
                 div()
                     .flex_1()

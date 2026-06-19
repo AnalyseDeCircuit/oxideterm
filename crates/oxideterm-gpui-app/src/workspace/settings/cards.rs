@@ -842,8 +842,8 @@ impl WorkspaceApp {
                 let Some(value) = self.settings_slider_value_from_position(
                     SelectAnchorId::SettingsAppearanceBorderRadiusSlider,
                     x,
-                    0.0,
-                    24.0,
+                    APPEARANCE_BORDER_RADIUS_MIN,
+                    APPEARANCE_BORDER_RADIUS_MAX,
                 ) else {
                     return;
                 };

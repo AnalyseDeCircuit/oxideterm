@@ -133,6 +133,9 @@ pub(in crate::workspace) fn settings_store_modified_time(
         .ok()
 }
 
+const APPEARANCE_BORDER_RADIUS_MIN: f32 = 0.0; // Tauri AppearanceTab Slider min={0}.
+const APPEARANCE_BORDER_RADIUS_MAX: f32 = 16.0; // Tauri AppearanceTab Slider max={16} and settings normalization.
+
 include!("settings/surface.rs");
 include!("settings/cli_companion.rs");
 include!("settings/cards.rs");

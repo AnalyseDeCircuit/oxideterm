@@ -16,16 +16,17 @@ impl WorkspaceApp {
             // Drag-only chrome can be empty or text-only, so force a concrete
             // mouse hitbox for client-decoration hit testing on every platform.
             .occlude()
-            // Linux X11/Wayland do not consistently consume GPUI
-            // WindowControlArea hit tests, so also start moving from a normal
-            // client-side mouse event. Windows/macOS tolerate the duplicate path.
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _event, window, cx| {
-                    window.start_window_move();
-                    cx.stop_propagation();
-                }),
-            )
+            // Windows consumes this through non-client HTCAPTION handling. A
+            // handled GPUI mouse-down would suppress the native move operation.
+            .when(!cfg!(target_os = "windows"), |region| {
+                region.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|_this, _event, window, cx| {
+                        window.start_window_move();
+                        cx.stop_propagation();
+                    }),
+                )
+            })
             .into_any_element()
     }
 
@@ -47,18 +48,26 @@ impl WorkspaceApp {
             // wrap buttons, tabs, resize handles, terminal content, or inputs.
             .window_control_area(gpui::WindowControlArea::Drag)
             .occlude()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _event, window, cx| {
-                    window.start_window_move();
-                    cx.stop_propagation();
-                }),
-            )
+            // Windows titlebar movement is owned by HTCAPTION; keep the manual
+            // compositor move path for platforms where GPUI exposes it.
+            .when(!cfg!(target_os = "windows"), |region| {
+                region.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|_this, _event, window, cx| {
+                        window.start_window_move();
+                        cx.stop_propagation();
+                    }),
+                )
+            })
             .child(content)
             .into_any_element()
     }
 
-    pub(super) fn render_title_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_title_bar(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         // Tauri does not draw a separate accent-tinted top strip; its transparent
         // macOS chrome sits over the app root background. Native still needs this
@@ -68,6 +77,7 @@ impl WorkspaceApp {
         let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
 
         div()
+            .w_full()
             .h(px(self.tokens.metrics.titlebar_height))
             .flex()
             .flex_row()
@@ -80,7 +90,14 @@ impl WorkspaceApp {
             .child(self.render_window_drag_region("workspace-titlebar-drag-region", cx))
             .when(
                 cfg!(any(target_os = "windows", target_os = "linux")),
-                |bar| bar.child(self.render_client_titlebar_controls(titlebar_bg, text_color, cx)),
+                |bar| {
+                    bar.child(self.render_client_titlebar_controls(
+                        titlebar_bg,
+                        text_color,
+                        window.is_maximized(),
+                        cx,
+                    ))
+                },
             )
             .into_any_element()
     }
@@ -89,8 +106,10 @@ impl WorkspaceApp {
         &self,
         titlebar_bg: u32,
         text_color: u32,
+        is_maximized: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let maximize_glyph = if is_maximized { "❐" } else { "□" };
         div()
             .h_full()
             .flex()
@@ -103,7 +122,7 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.client_titlebar_button(
-                "□",
+                maximize_glyph,
                 gpui::WindowControlArea::Max,
                 titlebar_button_hover(titlebar_bg),
                 text_color,
@@ -127,13 +146,10 @@ impl WorkspaceApp {
         text_color: u32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let use_windows_native_caption_hit_test = cfg!(target_os = "windows")
-            && matches!(
-                control_area,
-                gpui::WindowControlArea::Min | gpui::WindowControlArea::Max
-            );
+        let use_native_caption_hit_test = cfg!(target_os = "windows");
 
         div()
+            .occlude()
             .w(px(46.0))
             .h_full()
             .flex()
@@ -142,33 +158,33 @@ impl WorkspaceApp {
             .text_size(px(13.0))
             .text_color(rgb(text_color))
             .hover(move |button| button.bg(rgb(hover_bg)))
-            // Windows keeps maximize/restore behavior in native non-client
-            // HTMAXBUTTON handling; gpui::Window::zoom_window only maximizes.
-            // Keep this limited to Min/Max so the Close button still follows
-            // the pure GPUI fallback path and drag regions stay isolated.
-            .when(use_windows_native_caption_hit_test, |button| {
+            // Windows owns caption buttons through non-client HT* hit testing;
+            // stopping the GPUI mouse event would prevent minimize/restore.
+            .when(use_native_caption_hit_test, |button| {
                 button.window_control_area(control_area)
             })
-            // Keep a GPUI fallback for Linux and for any platform path that does
-            // not consume the native caption hit test.
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |_this, _event, window, cx| {
-                    match control_area {
-                        gpui::WindowControlArea::Min => window.minimize_window(),
-                        gpui::WindowControlArea::Max => {
-                            if window.is_fullscreen() {
-                                window.toggle_fullscreen();
-                            } else {
-                                window.zoom_window();
+            // Keep a GPUI fallback for platforms where titlebar buttons are
+            // rendered client-side without native caption hit testing.
+            .when(!use_native_caption_hit_test, |button| {
+                button.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |_this, _event, window, cx| {
+                        match control_area {
+                            gpui::WindowControlArea::Min => window.minimize_window(),
+                            gpui::WindowControlArea::Max => {
+                                if window.is_fullscreen() {
+                                    window.toggle_fullscreen();
+                                } else {
+                                    window.zoom_window();
+                                }
                             }
+                            gpui::WindowControlArea::Close => window.remove_window(),
+                            gpui::WindowControlArea::Drag => {}
                         }
-                        gpui::WindowControlArea::Close => window.remove_window(),
-                        gpui::WindowControlArea::Drag => {}
-                    }
-                    cx.stop_propagation();
-                }),
-            )
+                        cx.stop_propagation();
+                    }),
+                )
+            })
             .child(glyph)
             .into_any_element()
     }
