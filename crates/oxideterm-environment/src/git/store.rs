@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::model::{GitProbeError, GitProbeKey, GitProbeOutcome, GitRepositorySnapshot};
+use super::model::{GitProbeError, GitProbeKey, GitProbeOutcome, GitRepositorySnapshot};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GitProbeState {
@@ -130,8 +130,8 @@ impl GitStatusStore {
 
 #[cfg(test)]
 mod tests {
+    use super::super::model::{GitBranchIdentity, GitProbeScope};
     use super::*;
-    use crate::model::{GitBranchIdentity, GitProbeScope};
 
     fn key() -> GitProbeKey {
         GitProbeKey::new(GitProbeScope::Local, "/repo").unwrap()

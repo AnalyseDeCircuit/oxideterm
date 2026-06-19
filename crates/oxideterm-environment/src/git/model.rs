@@ -82,15 +82,44 @@ impl GitBranchIdentity {
     }
 }
 
+/// Mutating Git operation currently waiting for user resolution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GitOperationKind {
+    Merge,
+    Rebase,
+    CherryPick,
+    Revert,
+}
+
+impl GitOperationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+            Self::CherryPick => "cherry_pick",
+            Self::Revert => "revert",
+        }
+    }
+}
+
 /// Snapshot of Git metadata that is safe to render in terminal chrome.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitRepositorySnapshot {
     pub repo_root: String,
     pub branch: GitBranchIdentity,
+    pub status: GitRepositoryStatus,
 }
 
 impl GitRepositorySnapshot {
     pub fn new(repo_root: impl Into<String>, branch: GitBranchIdentity) -> Option<Self> {
+        Self::with_status(repo_root, branch, GitRepositoryStatus::default())
+    }
+
+    pub fn with_status(
+        repo_root: impl Into<String>,
+        branch: GitBranchIdentity,
+        status: GitRepositoryStatus,
+    ) -> Option<Self> {
         let repo_root = repo_root.into();
         let repo_root = repo_root.trim();
         if repo_root.is_empty() || branch.display_text().trim().is_empty() {
@@ -99,7 +128,98 @@ impl GitRepositorySnapshot {
         Some(Self {
             repo_root: repo_root.to_string(),
             branch,
+            status,
         })
+    }
+}
+
+/// Parsed `git status --porcelain=v2 --branch` summary.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GitRepositoryStatus {
+    upstream: Option<String>,
+    ahead: u32,
+    behind: u32,
+    staged: u32,
+    modified: u32,
+    untracked: u32,
+    conflicts: u32,
+    operation: Option<GitOperationKind>,
+}
+
+impl GitRepositoryStatus {
+    pub fn new(
+        upstream: Option<String>,
+        ahead: u32,
+        behind: u32,
+        staged: u32,
+        modified: u32,
+        untracked: u32,
+        conflicts: u32,
+    ) -> Self {
+        Self {
+            upstream: upstream
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            ahead,
+            behind,
+            staged,
+            modified,
+            untracked,
+            conflicts,
+            operation: None,
+        }
+    }
+
+    pub fn with_operation(mut self, operation: Option<GitOperationKind>) -> Self {
+        self.operation = operation;
+        self
+    }
+
+    pub fn upstream(&self) -> Option<&str> {
+        self.upstream.as_deref()
+    }
+
+    pub fn ahead(&self) -> u32 {
+        self.ahead
+    }
+
+    pub fn behind(&self) -> u32 {
+        self.behind
+    }
+
+    pub fn staged(&self) -> u32 {
+        self.staged
+    }
+
+    pub fn modified(&self) -> u32 {
+        self.modified
+    }
+
+    pub fn untracked(&self) -> u32 {
+        self.untracked
+    }
+
+    pub fn conflicts(&self) -> u32 {
+        self.conflicts
+    }
+
+    pub fn operation(&self) -> Option<GitOperationKind> {
+        self.operation
+    }
+
+    pub fn dirty_count(&self) -> u32 {
+        self.staged
+            .saturating_add(self.modified)
+            .saturating_add(self.untracked)
+            .saturating_add(self.conflicts)
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty_count() > 0
+    }
+
+    pub fn has_conflicts(&self) -> bool {
+        self.conflicts > 0
     }
 }
 
@@ -150,6 +270,32 @@ impl GitBranchReference {
     }
 }
 
+/// Staged Git diff context that is safe to hand to higher-level consumers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitStagedDiffContext {
+    stat: String,
+    patch: String,
+}
+
+impl GitStagedDiffContext {
+    pub fn new(stat: impl Into<String>, patch: impl Into<String>) -> Option<Self> {
+        let stat = stat.into();
+        let patch = patch.into();
+        if stat.trim().is_empty() && patch.trim().is_empty() {
+            return None;
+        }
+        Some(Self { stat, patch })
+    }
+
+    pub fn stat(&self) -> &str {
+        &self.stat
+    }
+
+    pub fn patch(&self) -> &str {
+        &self.patch
+    }
+}
+
 /// Non-secret error surface for probe failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitProbeError {
@@ -194,10 +340,11 @@ pub enum GitBranchListOutcome {
     Error(GitProbeError),
 }
 
-/// Result of switching to an existing local branch.
+/// Result of reading staged diff content for AI-assisted commit messages.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitCheckoutOutcome {
-    Switched,
+pub enum GitStagedDiffOutcome {
+    Ready(GitStagedDiffContext),
+    Empty,
     NotRepository,
     GitUnavailable,
     CwdUnavailable,

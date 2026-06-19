@@ -867,7 +867,7 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn resolve_terminal_ai_inline_config(&self) -> Result<AiChatStreamConfig, String> {
+    pub(in crate::workspace) fn resolve_terminal_ai_inline_config(&self) -> Result<AiChatStreamConfig, String> {
         let settings = self.settings_store.settings();
         let providers = ai_provider_views(&settings.ai.providers);
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())

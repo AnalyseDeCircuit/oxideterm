@@ -3,11 +3,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{
-    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitCheckoutOutcome, GitProbeError,
-    GitProbeOutcome, GitRepositorySnapshot,
+use super::model::{
+    GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitOperationKind, GitProbeError,
+    GitProbeOutcome, GitRepositorySnapshot, GitRepositoryStatus, GitStagedDiffContext,
+    GitStagedDiffOutcome,
 };
-use crate::probe::{SHELL_BRANCH_LIST_SENTINEL, SHELL_CHECKOUT_SENTINEL, SHELL_PROBE_SENTINEL};
+use super::probe::{SHELL_BRANCH_LIST_SENTINEL, SHELL_PROBE_SENTINEL, SHELL_STAGED_DIFF_SENTINEL};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitCommandOutput {
@@ -36,6 +37,37 @@ pub fn interpret_git_command_outputs(
     branch: GitCommandOutput,
     head: GitCommandOutput,
 ) -> GitProbeOutcome {
+    interpret_git_command_outputs_with_status_and_operation(
+        root,
+        branch,
+        head,
+        GitCommandOutput::failure(""),
+        GitCommandOutput::failure(""),
+    )
+}
+
+pub fn interpret_git_command_outputs_with_status(
+    root: GitCommandOutput,
+    branch: GitCommandOutput,
+    head: GitCommandOutput,
+    status: GitCommandOutput,
+) -> GitProbeOutcome {
+    interpret_git_command_outputs_with_status_and_operation(
+        root,
+        branch,
+        head,
+        status,
+        GitCommandOutput::failure(""),
+    )
+}
+
+pub fn interpret_git_command_outputs_with_status_and_operation(
+    root: GitCommandOutput,
+    branch: GitCommandOutput,
+    head: GitCommandOutput,
+    status: GitCommandOutput,
+    operation: GitCommandOutput,
+) -> GitProbeOutcome {
     if !root.success {
         return GitProbeOutcome::NotRepository;
     }
@@ -47,13 +79,23 @@ pub fn interpret_git_command_outputs(
     if branch.success
         && let Some(branch_name) = non_empty_line(&branch.stdout)
     {
-        return ready(repo_root, GitBranchIdentity::Branch(branch_name));
+        return ready_with_status(
+            repo_root,
+            GitBranchIdentity::Branch(branch_name),
+            parse_successful_git_status(status)
+                .with_operation(parse_successful_git_operation(operation)),
+        );
     }
 
     if head.success
         && let Some(head_name) = non_empty_line(&head.stdout)
     {
-        return ready(repo_root, GitBranchIdentity::Detached(head_name));
+        return ready_with_status(
+            repo_root,
+            GitBranchIdentity::Detached(head_name),
+            parse_successful_git_status(status)
+                .with_operation(parse_successful_git_operation(operation)),
+        );
     }
 
     GitProbeOutcome::Error(GitProbeError::new("git branch output was empty"))
@@ -84,17 +126,29 @@ pub fn parse_shell_probe_output(output: &str) -> GitProbeOutcome {
             if let Some(branch) =
                 field_value(fields, "branch").filter(|value| !value.trim().is_empty())
             {
-                return ready(
+                return ready_with_status(
                     root.to_string(),
                     GitBranchIdentity::Branch(branch.to_string()),
+                    field_value(fields, "status")
+                        .map(parse_git_status_summary)
+                        .unwrap_or_default()
+                        .with_operation(
+                            field_value(fields, "operation").and_then(parse_git_operation_kind),
+                        ),
                 );
             }
             if let Some(head) =
                 field_value(fields, "detached").filter(|value| !value.trim().is_empty())
             {
-                return ready(
+                return ready_with_status(
                     root.to_string(),
                     GitBranchIdentity::Detached(head.to_string()),
+                    field_value(fields, "status")
+                        .map(parse_git_status_summary)
+                        .unwrap_or_default()
+                        .with_operation(
+                            field_value(fields, "operation").and_then(parse_git_operation_kind),
+                        ),
                 );
             }
             GitProbeOutcome::Error(GitProbeError::new("missing git branch"))
@@ -102,6 +156,59 @@ pub fn parse_shell_probe_output(output: &str) -> GitProbeOutcome {
         Some(_) => GitProbeOutcome::Error(GitProbeError::new("unknown git probe state")),
         None => GitProbeOutcome::Error(GitProbeError::new("missing git probe state")),
     }
+}
+
+pub fn parse_git_operation_kind(value: &str) -> Option<GitOperationKind> {
+    match value.trim() {
+        "merge" => Some(GitOperationKind::Merge),
+        "rebase" => Some(GitOperationKind::Rebase),
+        "cherry_pick" => Some(GitOperationKind::CherryPick),
+        "revert" => Some(GitOperationKind::Revert),
+        _ => None,
+    }
+}
+
+pub fn parse_git_status_summary(output: &str) -> GitRepositoryStatus {
+    let mut upstream = None;
+    let mut ahead = 0;
+    let mut behind = 0;
+    let mut staged = 0;
+    let mut modified = 0;
+    let mut untracked = 0;
+    let mut conflicts = 0;
+
+    for line in output.lines() {
+        if let Some(value) = line.strip_prefix("# branch.upstream ") {
+            upstream = Some(value.to_string());
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("# branch.ab ") {
+            let (parsed_ahead, parsed_behind) = parse_branch_ahead_behind(value);
+            ahead = parsed_ahead;
+            behind = parsed_behind;
+            continue;
+        }
+        if let Some(status) = porcelain_v2_xy(line, '1').or_else(|| porcelain_v2_xy(line, '2')) {
+            if status.0 != '.' {
+                staged += 1;
+            }
+            if status.1 != '.' {
+                modified += 1;
+            }
+            continue;
+        }
+        if line.starts_with("u ") {
+            conflicts += 1;
+            continue;
+        }
+        if line.starts_with("? ") {
+            untracked += 1;
+        }
+    }
+
+    GitRepositoryStatus::new(
+        upstream, ahead, behind, staged, modified, untracked, conflicts,
+    )
 }
 
 pub fn interpret_git_branch_list_output(branches: GitCommandOutput) -> GitBranchListOutcome {
@@ -138,34 +245,38 @@ pub fn parse_shell_branch_list_output(output: &str) -> GitBranchListOutcome {
     }
 }
 
-pub fn interpret_git_checkout_status(success: bool, stderr: impl AsRef<str>) -> GitCheckoutOutcome {
-    if success {
-        return GitCheckoutOutcome::Switched;
+pub fn interpret_git_staged_diff_outputs(
+    stat: GitCommandOutput,
+    patch: GitCommandOutput,
+) -> GitStagedDiffOutcome {
+    if !stat.success || !patch.success {
+        return GitStagedDiffOutcome::Error(GitProbeError::new("git staged diff failed"));
     }
-    GitCheckoutOutcome::Error(GitProbeError::new(first_non_empty_line(
-        stderr.as_ref(),
-        "git checkout failed",
-    )))
+    GitStagedDiffContext::new(stat.stdout, patch.stdout)
+        .map(GitStagedDiffOutcome::Ready)
+        .unwrap_or(GitStagedDiffOutcome::Empty)
 }
 
-pub fn parse_shell_checkout_output(output: &str) -> GitCheckoutOutcome {
-    let fields = match shell_fields_after_sentinel(output, SHELL_CHECKOUT_SENTINEL) {
+pub fn parse_shell_staged_diff_output(output: &str) -> GitStagedDiffOutcome {
+    let fields = match shell_fields_after_sentinel(output, SHELL_STAGED_DIFF_SENTINEL) {
         Ok(fields) => fields,
-        Err(error) => return GitCheckoutOutcome::Error(error),
+        Err(error) => return GitStagedDiffOutcome::Error(error),
     };
 
     match field_value(&fields, "state") {
-        Some("switched") => GitCheckoutOutcome::Switched,
-        Some("not_repo") => GitCheckoutOutcome::NotRepository,
-        Some("git_missing") => GitCheckoutOutcome::GitUnavailable,
-        Some("cwd_missing") => GitCheckoutOutcome::CwdUnavailable,
-        Some("failed") => GitCheckoutOutcome::Error(GitProbeError::new(
-            field_value(&fields, "message")
-                .map(|message| first_non_empty_line(message, "git checkout failed"))
-                .unwrap_or_else(|| "git checkout failed".to_string()),
-        )),
-        Some(_) => GitCheckoutOutcome::Error(GitProbeError::new("unknown git checkout state")),
-        None => GitCheckoutOutcome::Error(GitProbeError::new("missing git checkout state")),
+        Some("ok") => {
+            let stat = field_value(&fields, "stat").unwrap_or_default();
+            let patch = field_value(&fields, "patch").unwrap_or_default();
+            GitStagedDiffContext::new(stat.to_string(), patch.to_string())
+                .map(GitStagedDiffOutcome::Ready)
+                .unwrap_or(GitStagedDiffOutcome::Empty)
+        }
+        Some("empty") => GitStagedDiffOutcome::Empty,
+        Some("not_repo") => GitStagedDiffOutcome::NotRepository,
+        Some("git_missing") => GitStagedDiffOutcome::GitUnavailable,
+        Some("cwd_missing") => GitStagedDiffOutcome::CwdUnavailable,
+        Some(_) => GitStagedDiffOutcome::Error(GitProbeError::new("unknown git diff state")),
+        None => GitStagedDiffOutcome::Error(GitProbeError::new("missing git diff state")),
     }
 }
 
@@ -337,6 +448,43 @@ fn parse_worktree_branch_paths(output: &str) -> HashMap<String, String> {
     branch_paths
 }
 
+fn parse_successful_git_status(status: GitCommandOutput) -> GitRepositoryStatus {
+    status
+        .success
+        .then(|| parse_git_status_summary(&status.stdout))
+        .unwrap_or_default()
+}
+
+fn parse_successful_git_operation(operation: GitCommandOutput) -> Option<GitOperationKind> {
+    operation
+        .success
+        .then(|| parse_git_operation_kind(&operation.stdout))
+        .flatten()
+}
+
+fn parse_branch_ahead_behind(value: &str) -> (u32, u32) {
+    let mut ahead = 0;
+    let mut behind = 0;
+    for part in value.split_whitespace() {
+        if let Some(value) = part.strip_prefix('+') {
+            ahead = value.parse().unwrap_or(0);
+        } else if let Some(value) = part.strip_prefix('-') {
+            behind = value.parse().unwrap_or(0);
+        }
+    }
+    (ahead, behind)
+}
+
+fn porcelain_v2_xy(line: &str, record_kind: char) -> Option<(char, char)> {
+    let mut parts = line.split_whitespace();
+    (parts.next()?.chars().next()? == record_kind).then_some(())?;
+    let xy = parts.next()?;
+    let mut chars = xy.chars();
+    let x = chars.next()?;
+    let y = chars.next()?;
+    Some((x, y))
+}
+
 fn field_value<'a>(fields: &'a [&str], key: &str) -> Option<&'a str> {
     fields.chunks_exact(2).find_map(|chunk| {
         if chunk[0] == key {
@@ -355,12 +503,12 @@ fn non_empty_line(output: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn first_non_empty_line(output: &str, fallback: &str) -> String {
-    non_empty_line(output).unwrap_or_else(|| fallback.to_string())
-}
-
-fn ready(repo_root: String, branch: GitBranchIdentity) -> GitProbeOutcome {
-    GitRepositorySnapshot::new(repo_root, branch)
+fn ready_with_status(
+    repo_root: String,
+    branch: GitBranchIdentity,
+    status: GitRepositoryStatus,
+) -> GitProbeOutcome {
+    GitRepositorySnapshot::with_status(repo_root, branch, status)
         .map(GitProbeOutcome::Ready)
         .unwrap_or_else(|| GitProbeOutcome::Error(GitProbeError::new("invalid git snapshot")))
 }
@@ -407,21 +555,57 @@ mod tests {
     }
 
     #[test]
+    fn command_outputs_parse_porcelain_v2_status() {
+        let outcome = interpret_git_command_outputs_with_status_and_operation(
+            GitCommandOutput::success("/repo\n"),
+            GitCommandOutput::success("main\n"),
+            GitCommandOutput::success("abc123\n"),
+            GitCommandOutput::success(
+                "# branch.oid abc123\n\
+                 # branch.head main\n\
+                 # branch.upstream origin/main\n\
+                 # branch.ab +2 -1\n\
+                 1 M. N... 100644 100644 100644 a b file.rs\n\
+                 1 .M N... 100644 100644 100644 a b other.rs\n\
+                 2 R. N... 100644 100644 100644 a b R100 old\tnew\n\
+                 u UU N... 100644 100644 100644 100644 a b c d conflict.rs\n\
+                 ? notes.txt\n",
+            ),
+            GitCommandOutput::success("rebase\n"),
+        );
+
+        let GitProbeOutcome::Ready(snapshot) = outcome else {
+            panic!("expected ready git snapshot");
+        };
+        assert_eq!(snapshot.status.upstream(), Some("origin/main"));
+        assert_eq!(snapshot.status.ahead(), 2);
+        assert_eq!(snapshot.status.behind(), 1);
+        assert_eq!(snapshot.status.staged(), 2);
+        assert_eq!(snapshot.status.modified(), 1);
+        assert_eq!(snapshot.status.untracked(), 1);
+        assert_eq!(snapshot.status.conflicts(), 1);
+        assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Rebase));
+        assert!(snapshot.status.is_dirty());
+        assert!(snapshot.status.has_conflicts());
+    }
+
+    #[test]
     fn shell_probe_output_parses_nul_records() {
-        let output =
-            "noise\nOXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/tmp/Oxide Term\0branch\0feat/git\0";
+        let output = "noise\nOXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/tmp/Oxide Term\0branch\0feat/git\0status\0# branch.upstream origin/feat\n# branch.ab +1 -0\n? scratch.txt\n\0operation\0merge\0";
         let outcome = parse_shell_probe_output(output);
 
+        let GitProbeOutcome::Ready(snapshot) = outcome else {
+            panic!("expected ready shell git snapshot");
+        };
+        assert_eq!(snapshot.repo_root, "/tmp/Oxide Term");
         assert_eq!(
-            outcome,
-            GitProbeOutcome::Ready(
-                GitRepositorySnapshot::new(
-                    "/tmp/Oxide Term",
-                    GitBranchIdentity::Branch("feat/git".to_string()),
-                )
-                .unwrap()
-            )
+            snapshot.branch,
+            GitBranchIdentity::Branch("feat/git".to_string())
         );
+        assert_eq!(snapshot.status.upstream(), Some("origin/feat"));
+        assert_eq!(snapshot.status.ahead(), 1);
+        assert_eq!(snapshot.status.untracked(), 1);
+        assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Merge));
     }
 
     #[test]
@@ -518,22 +702,51 @@ mod tests {
     }
 
     #[test]
-    fn checkout_status_uses_first_error_line() {
+    fn staged_diff_outputs_empty_when_no_cached_changes() {
         assert_eq!(
-            interpret_git_checkout_status(false, "error: local changes would be overwritten\nmore"),
-            GitCheckoutOutcome::Error(GitProbeError::new(
-                "error: local changes would be overwritten"
-            ))
+            interpret_git_staged_diff_outputs(
+                GitCommandOutput::success(""),
+                GitCommandOutput::success(""),
+            ),
+            GitStagedDiffOutcome::Empty
         );
     }
 
     #[test]
-    fn shell_checkout_output_parses_failure_message() {
-        let output = "OXIDETERM_GIT_CHECKOUT_V1\0state\0failed\0message\0error: nope\nmore\0";
+    fn staged_diff_outputs_keep_stat_and_patch() {
+        let outcome = interpret_git_staged_diff_outputs(
+            GitCommandOutput::success(" src/lib.rs | 2 ++\n"),
+            GitCommandOutput::success("diff --git a/src/lib.rs b/src/lib.rs\n"),
+        );
 
         assert_eq!(
-            parse_shell_checkout_output(output),
-            GitCheckoutOutcome::Error(GitProbeError::new("error: nope"))
+            outcome,
+            GitStagedDiffOutcome::Ready(
+                GitStagedDiffContext::new(
+                    " src/lib.rs | 2 ++\n",
+                    "diff --git a/src/lib.rs b/src/lib.rs\n"
+                )
+                .unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn shell_staged_diff_output_parses_nul_records() {
+        let output = "noise\nOXIDETERM_GIT_STAGED_DIFF_V1\0state\0ok\0stat\0 src/lib.rs | 1 +\0patch\0diff --git a/src/lib.rs b/src/lib.rs\n+added\n\0";
+
+        let GitStagedDiffOutcome::Ready(context) = parse_shell_staged_diff_output(output) else {
+            panic!("expected staged diff context");
+        };
+        assert_eq!(context.stat(), " src/lib.rs | 1 +");
+        assert!(context.patch().contains("+added"));
+    }
+
+    #[test]
+    fn shell_staged_diff_output_handles_empty_state() {
+        assert_eq!(
+            parse_shell_staged_diff_output("OXIDETERM_GIT_STAGED_DIFF_V1\0state\0empty\0"),
+            GitStagedDiffOutcome::Empty
         );
     }
 }

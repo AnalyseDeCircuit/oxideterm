@@ -1,5 +1,6 @@
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
+use super::terminal_git::TerminalGitRepositoryAction;
 use super::*;
 use oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID;
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
@@ -312,6 +313,14 @@ impl WorkspaceApp {
         } else {
             snapshot.branch.display_text().to_string()
         };
+        let status = &snapshot.status;
+        let ahead = status.ahead();
+        let behind = status.behind();
+        let conflicts = status.conflicts();
+        let changed = status
+            .staged()
+            .saturating_add(status.modified())
+            .saturating_add(status.untracked());
         let workspace = cx.entity();
         let active = self.terminal_git_branch_picker.open;
 
@@ -319,7 +328,7 @@ impl WorkspaceApp {
             SelectAnchorId::TerminalGitBranchMenu,
             div()
                 .h(px(20.0))
-                .max_w(px(180.0))
+                .max_w(px(260.0))
                 .flex_none()
                 .px(px(6.0))
                 .flex()
@@ -366,7 +375,35 @@ impl WorkspaceApp {
                         rgba(0x86efacff)
                     },
                 ))
-                .child(div().min_w(px(0.0)).truncate().child(label)),
+                .child(div().min_w(px(0.0)).truncate().child(label))
+                .when(ahead > 0, |chip| {
+                    chip.child(self.render_terminal_git_status_badge(
+                        LucideIcon::ArrowUp,
+                        ahead,
+                        rgba(0x86efacff),
+                    ))
+                })
+                .when(behind > 0, |chip| {
+                    chip.child(self.render_terminal_git_status_badge(
+                        LucideIcon::ArrowDown,
+                        behind,
+                        rgba(0x67e8f9ff),
+                    ))
+                })
+                .when(changed > 0, |chip| {
+                    chip.child(self.render_terminal_git_status_badge(
+                        LucideIcon::Pencil,
+                        changed,
+                        rgba(0xfbbf24ff),
+                    ))
+                })
+                .when(conflicts > 0, |chip| {
+                    chip.child(self.render_terminal_git_status_badge(
+                        LucideIcon::AlertTriangle,
+                        conflicts,
+                        rgba(0xf87171ff),
+                    ))
+                }),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_select_anchor(anchor, cx);
@@ -374,6 +411,22 @@ impl WorkspaceApp {
             },
         )
         .into_any_element()
+    }
+
+    fn render_terminal_git_status_badge(
+        &self,
+        icon: LucideIcon,
+        count: u32,
+        color: Rgba,
+    ) -> gpui::Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .text_color(color)
+            .child(Self::render_lucide_icon(icon, 10.0, color))
+            .child(count.to_string())
     }
 
     fn render_terminal_git_branch_picker(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -384,7 +437,11 @@ impl WorkspaceApp {
         } else {
             64.0
         };
+        let snapshot = self.active_terminal_git_snapshot(cx);
+        let operation = snapshot.and_then(|snapshot| snapshot.status.operation());
         let visible_branches = self.visible_terminal_git_branches();
+        let query_checkout_candidate = self.terminal_git_query_checkout_candidate();
+        let query_rebase_candidate = self.terminal_git_query_rebase_candidate(cx);
         let loading = self.terminal_git_branch_picker.loading;
         let error = self.terminal_git_branch_picker.error.clone();
 
@@ -416,7 +473,17 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
         )
-        .child(self.render_terminal_git_branch_search(cx));
+        .child(self.render_terminal_git_branch_search(cx))
+        .child(self.render_terminal_git_action_groups(operation, cx));
+
+        if self.terminal_git_branch_picker.ai_commit_loading {
+            panel = panel.child(self.render_terminal_git_branch_message(
+                LucideIcon::LoaderCircle,
+                self.i18n.t("terminal.git.ai_commit_generating"),
+            ));
+        } else if let Some(error) = self.terminal_git_branch_picker.ai_commit_error.clone() {
+            panel = panel.child(self.render_terminal_git_branch_error(error));
+        }
 
         if loading {
             panel = panel.child(self.render_terminal_git_branch_message(
@@ -425,12 +492,20 @@ impl WorkspaceApp {
             ));
         } else if let Some(error) = error {
             panel = panel.child(self.render_terminal_git_branch_error(error));
-        } else if visible_branches.is_empty() {
-            panel = panel.child(self.render_terminal_git_branch_message(
-                LucideIcon::Search,
-                self.i18n.t("terminal.git.no_branches"),
-            ));
         } else {
+            let has_visible_branches = !visible_branches.is_empty();
+            if let Some(branch_name) = query_checkout_candidate.clone() {
+                panel = panel.child(self.render_terminal_git_query_checkout_row(branch_name, cx));
+            }
+            if let Some(branch_name) = query_rebase_candidate.clone() {
+                panel = panel.child(self.render_terminal_git_query_rebase_row(branch_name, cx));
+            }
+            if !has_visible_branches && query_checkout_candidate.is_none() {
+                panel = panel.child(self.render_terminal_git_branch_message(
+                    LucideIcon::Search,
+                    self.i18n.t("terminal.git.no_branches"),
+                ));
+            }
             let mut list = div()
                 .max_h(px(280.0))
                 .overflow_y_scrollbar()
@@ -440,10 +515,253 @@ impl WorkspaceApp {
             for branch in visible_branches {
                 list = list.child(self.render_terminal_git_branch_row(branch, cx));
             }
-            panel = panel.child(list);
+            if has_visible_branches {
+                panel = panel.child(list);
+            }
         }
 
         panel.into_any_element()
+    }
+
+    fn render_terminal_git_action_groups(
+        &self,
+        operation: Option<oxideterm_environment::GitOperationKind>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut groups = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(self.render_terminal_git_action_strip(
+                &[
+                    TerminalGitRepositoryAction::Fetch,
+                    TerminalGitRepositoryAction::Pull,
+                    TerminalGitRepositoryAction::Push,
+                    TerminalGitRepositoryAction::Status,
+                ],
+                cx,
+            ))
+            .child(self.render_terminal_git_action_strip(
+                &[
+                    TerminalGitRepositoryAction::Diff,
+                    TerminalGitRepositoryAction::Log,
+                    TerminalGitRepositoryAction::Stash,
+                    TerminalGitRepositoryAction::StashPop,
+                ],
+                cx,
+            ))
+            .child(self.render_terminal_git_write_action_strip(cx));
+
+        if let Some(operation) = operation {
+            let mut conflict_actions = vec![
+                TerminalGitRepositoryAction::Continue(operation),
+                TerminalGitRepositoryAction::Abort(operation),
+            ];
+            if operation != oxideterm_environment::GitOperationKind::Merge {
+                conflict_actions.push(TerminalGitRepositoryAction::Skip(operation));
+            }
+            groups = groups.child(self.render_terminal_git_action_strip(&conflict_actions, cx));
+        }
+
+        groups.into_any_element()
+    }
+
+    fn render_terminal_git_write_action_strip(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                self.render_terminal_git_action_button(TerminalGitRepositoryAction::StageAll, cx),
+            )
+            .child(self.render_terminal_git_ai_commit_action_button(cx))
+            .child(self.render_terminal_git_action_button(TerminalGitRepositoryAction::Commit, cx))
+            .child(
+                self.render_terminal_git_action_button(TerminalGitRepositoryAction::RebasePull, cx),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_git_action_strip(
+        &self,
+        actions: &[TerminalGitRepositoryAction],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut strip = div().flex().items_center().gap(px(6.0));
+        for action in actions {
+            strip = strip.child(self.render_terminal_git_action_button(*action, cx));
+        }
+        strip.into_any_element()
+    }
+
+    fn render_terminal_git_query_checkout_row(
+        &self,
+        branch_name: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_terminal_git_query_command_row(
+            branch_name,
+            "terminal.git.checkout_query",
+            LucideIcon::CornerDownLeft,
+            |this, cx| this.checkout_terminal_git_query(cx),
+            cx,
+        )
+    }
+
+    fn render_terminal_git_query_rebase_row(
+        &self,
+        branch_name: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_terminal_git_query_command_row(
+            branch_name,
+            "terminal.git.rebase_query",
+            LucideIcon::GitFork,
+            |this, cx| this.rebase_terminal_git_query(cx),
+            cx,
+        )
+    }
+
+    fn render_terminal_git_query_command_row(
+        &self,
+        branch_name: String,
+        label_key: &'static str,
+        icon: LucideIcon,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let label = self.i18n_replace(label_key, &[("branch", branch_name.clone())]);
+
+        div()
+            .h(px(30.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.accent << 8) | 0x66))
+            .bg(rgba((theme.accent << 8) | 0x14))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .text_color(rgb(theme.accent))
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgba((theme.accent << 8) | 0x24)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    action(this, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(Self::render_lucide_icon(icon, 13.0, rgb(theme.accent)))
+            .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
+            .into_any_element()
+    }
+
+    fn render_terminal_git_action_button(
+        &self,
+        action: TerminalGitRepositoryAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let label = self.i18n.t(action.label_key());
+        let icon = match action {
+            TerminalGitRepositoryAction::Fetch => LucideIcon::RefreshCw,
+            TerminalGitRepositoryAction::Pull => LucideIcon::Download,
+            TerminalGitRepositoryAction::Push => LucideIcon::Upload,
+            TerminalGitRepositoryAction::Status => LucideIcon::ListChecks,
+            TerminalGitRepositoryAction::Diff => LucideIcon::FileText,
+            TerminalGitRepositoryAction::Log => LucideIcon::History,
+            TerminalGitRepositoryAction::Stash => LucideIcon::Archive,
+            TerminalGitRepositoryAction::StashPop => LucideIcon::Inbox,
+            TerminalGitRepositoryAction::StageAll => LucideIcon::Plus,
+            TerminalGitRepositoryAction::Commit => LucideIcon::CheckCircle,
+            TerminalGitRepositoryAction::RebasePull => LucideIcon::GitFork,
+            TerminalGitRepositoryAction::Continue(_) => LucideIcon::Check,
+            TerminalGitRepositoryAction::Abort(_) => LucideIcon::X,
+            TerminalGitRepositoryAction::Skip(_) => LucideIcon::ArrowRight,
+        };
+
+        div()
+            .h(px(28.0))
+            .flex_1()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x99))
+            .bg(rgba((theme.bg_panel << 8) | 0x8c))
+            .px(px(7.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(5.0))
+            .text_color(rgb(theme.text))
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgb(theme.bg_hover)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.run_terminal_git_repository_action(action, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
+            .child(div().min_w(px(0.0)).truncate().child(label))
+            .into_any_element()
+    }
+
+    fn render_terminal_git_ai_commit_action_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let loading = self.terminal_git_branch_picker.ai_commit_loading;
+        let label = if loading {
+            self.i18n.t("terminal.git.ai_commit_generating")
+        } else {
+            self.i18n.t("terminal.git.action_ai_commit_message")
+        };
+        let text_color = if loading {
+            rgb(theme.text_muted)
+        } else {
+            rgb(theme.text)
+        };
+
+        div()
+            .h(px(28.0))
+            .flex_1()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x99))
+            .bg(rgba((theme.bg_panel << 8) | 0x8c))
+            .px(px(7.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(5.0))
+            .text_color(text_color)
+            .when(!loading, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(rgb(theme.bg_hover)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.generate_terminal_git_ai_commit_message(cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+            })
+            .when(loading, |button| button.cursor(CursorStyle::Arrow))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Sparkles,
+                12.0,
+                if loading {
+                    rgb(theme.text_muted)
+                } else {
+                    rgb(theme.accent)
+                },
+            ))
+            .child(div().min_w(px(0.0)).truncate().child(label))
+            .into_any_element()
     }
 
     fn render_terminal_git_branch_search(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -501,11 +819,6 @@ impl WorkspaceApp {
             .highlighted_branch
             .as_deref()
             .is_some_and(|name| name == branch.name());
-        let switching = self
-            .terminal_git_branch_picker
-            .switching_branch
-            .as_deref()
-            .is_some_and(|name| name == branch.name());
         let current = branch.current();
         let linked_worktree = branch.worktree_path().is_some() && !current;
         div()
@@ -553,9 +866,7 @@ impl WorkspaceApp {
                 }),
             )
             .child(Self::render_lucide_icon(
-                if switching {
-                    LucideIcon::LoaderCircle
-                } else if current {
+                if current {
                     LucideIcon::Check
                 } else if linked_worktree {
                     LucideIcon::FolderOpen
