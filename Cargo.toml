@@ -14,7 +14,6 @@ members = [
   "crates/oxideterm-plugin-registry",
   "crates/oxideterm-ai",
   "crates/oxideterm-acp-adapter",
-  "crates/oxideterm-code-editor",
   "crates/oxideterm-editor-core",
   "crates/oxideterm-editor-syntax",
   "crates/oxideterm-gpui-editor",

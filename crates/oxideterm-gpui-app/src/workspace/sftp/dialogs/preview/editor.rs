@@ -44,11 +44,15 @@ impl WorkspaceApp {
         let encoding = self.sftp_view.preview_editor_encoding.clone();
         let (line, column) = self
             .sftp_view
-            .preview_editor_input
+            .preview_editor
             .as_ref()
-            .map(|input| {
-                let pos = input.read(cx).cursor_position();
-                (pos.line + 1, pos.character + 1)
+            .and_then(|editor| {
+                let editor = editor.read(cx);
+                editor
+                    .buffer()
+                    .offset_to_line_col(editor.cursor().selection().head)
+                    .ok()
+                    .map(|pos| (pos.line + 1, pos.column + 1))
             })
             .unwrap_or((1, 1));
         let status = if self.sftp_view.preview_editor_saving {
@@ -77,20 +81,10 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h(px(0.0))
                     .overflow_hidden()
-                    .when_some(self.sftp_view.preview_editor_input.clone(), |body, input| {
-                        body.child(
-                            CodeEditorInput::new(&input)
-                                .appearance(false)
-                                .h_full()
-                                .font_family(settings_mono_font_family(
-                                    self.settings_store.settings(),
-                                ))
-                                .text_size(px(SFTP_TEXT_SM))
-                                .text_color(rgb(theme.text))
-                                .bg(rgb(theme.bg_sunken)),
-                        )
+                    .when_some(self.sftp_view.preview_editor.clone(), |body, editor| {
+                        body.child(editor)
                     })
-                    .when(self.sftp_view.preview_editor_input.is_none(), |body| {
+                    .when(self.sftp_view.preview_editor.is_none(), |body| {
                         body.child(self.render_sftp_preview_text(String::new()))
                     }),
             )

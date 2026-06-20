@@ -88,30 +88,54 @@ impl WorkspaceApp {
 
         self.stop_sftp_preview_media();
         let editor_language = sftp_editor_language(language.as_deref(), name);
-        let editor = cx.new(|cx| {
-            CodeEditorInputState::new(window, cx)
-                .code_editor(editor_language.clone())
-                .default_value(data.clone())
-        });
-        editor.update(cx, |state, cx| state.focus(window, cx));
-        let subscription = cx.subscribe(
-            &editor,
-            |this: &mut WorkspaceApp, input, event: &CodeEditorInputEvent, cx| {
-                if matches!(event, CodeEditorInputEvent::Change) {
-                    let value = input.read(cx).value().to_string();
-                    this.sftp_view.preview_editor_dirty =
-                        value != this.sftp_view.preview_editor_initial_content;
-                    this.sftp_view.preview_editor_save_error = None;
-                    this.sftp_view.preview_editor_network_error = false;
-                    this.sftp_view.preview_editor_last_atomic_write = None;
-                    cx.notify();
-                }
-            },
+        let syntax_language = sftp_editor_language_id(
+            language.as_deref(),
+            self.sftp_view.preview_path.as_deref(),
+            name,
+            &data,
         );
+        let tokens = self.tokens;
+        let runtime_settings = self.ide_runtime_settings();
+        let context_menu_labels = EditorContextMenuLabels {
+            copy: self.i18n.t("menu.copy"),
+            cut: self.i18n.t("fileManager.cut"),
+            paste: self.i18n.t("menu.paste"),
+            select_all: self.i18n.t("fileManager.selectAll"),
+        };
+        let workspace = cx.entity();
+        let editor_text = data.clone();
+        let editor = cx.new(|cx| {
+            let mut editor = TextEditorView::new(editor_text, &tokens, cx);
+            editor.set_context_menu_labels(context_menu_labels);
+            editor.apply_ide_runtime_settings(
+                &tokens,
+                runtime_settings.editor_font_size,
+                runtime_settings.editor_line_height,
+                runtime_settings.word_wrap,
+                runtime_settings.background_active,
+                cx,
+            );
+            editor.set_language(syntax_language, cx);
+            editor.set_on_save(Box::new(move |text, _window, cx| {
+                let text = text.to_string();
+                let _ = workspace.update(cx, |this, _cx| {
+                    this.save_sftp_preview_editor_content(text);
+                });
+                Ok(())
+            }));
+            editor
+        });
+        let observer = cx.observe(&editor, |this: &mut WorkspaceApp, editor, cx| {
+            this.sync_sftp_preview_editor_state(&editor, cx);
+            cx.notify();
+        });
+        let focus_handle = editor.read(cx).focus_handle(cx);
+        window.focus(&focus_handle);
 
-        self.sftp_view.preview_editor_input = Some(editor);
-        self.sftp_view.preview_editor_subscription = Some(subscription);
-        self.sftp_view.preview_editor_initial_content = data;
+        self.sftp_view.preview_editor = Some(editor);
+        self.sftp_view.preview_editor_observer = Some(observer);
+        self.sftp_view.preview_editor_initial_content = data.clone();
+        self.sftp_view.preview_editor_observed_content = data;
         self.sftp_view.preview_editor_language = Some(editor_language);
         self.sftp_view.preview_editor_encoding = encoding;
         self.sftp_view.preview_editor_dirty = false;
@@ -130,13 +154,25 @@ impl WorkspaceApp {
         if self.sftp_view.preview_editor_saving {
             return;
         }
+        let Some(editor) = self.sftp_view.preview_editor.clone() else {
+            return;
+        };
+        self.sync_sftp_preview_editor_state(&editor, cx);
+        let content = editor.read(cx).buffer().text();
+        self.save_sftp_preview_editor_content(content);
+    }
+
+    fn save_sftp_preview_editor_content(&mut self, content: String) {
+        if self.sftp_view.preview_editor_saving {
+            return;
+        }
+        self.sftp_view.preview_editor_dirty =
+            content != self.sftp_view.preview_editor_initial_content;
+        self.sftp_view.preview_editor_observed_content = content.clone();
         if !self.sftp_view.preview_editor_dirty {
             return;
         }
         let Some(path) = self.sftp_view.preview_path.clone() else {
-            return;
-        };
-        let Some(editor) = self.sftp_view.preview_editor_input.clone() else {
             return;
         };
         let can_spawn = self
@@ -148,7 +184,6 @@ impl WorkspaceApp {
                 Some(self.i18n.t("sftp.errors.connection_lost"));
             return;
         }
-        let content = editor.read(cx).value().to_string();
         let encoding = self.sftp_view.preview_editor_encoding.clone();
         self.sftp_view.preview_editor_saving = true;
         self.sftp_view.preview_editor_save_error = None;
@@ -156,6 +191,24 @@ impl WorkspaceApp {
         self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
         let generation = self.sftp_view.preview_generation;
         self.spawn_remote_sftp_preview_save(path, content, encoding, generation);
+    }
+
+    fn sync_sftp_preview_editor_state(
+        &mut self,
+        editor: &Entity<TextEditorView>,
+        cx: &mut Context<Self>,
+    ) {
+        let content = editor.read(cx).buffer().text();
+        let content_changed = content != self.sftp_view.preview_editor_observed_content;
+        self.sftp_view.preview_editor_dirty =
+            content != self.sftp_view.preview_editor_initial_content;
+        if content_changed {
+            // Editor notifications also cover cursor-only movement; only content edits should clear save errors.
+            self.sftp_view.preview_editor_observed_content = content;
+            self.sftp_view.preview_editor_save_error = None;
+            self.sftp_view.preview_editor_network_error = false;
+            self.sftp_view.preview_editor_last_atomic_write = None;
+        }
     }
 
     fn retry_sftp_preview_editor_save(&mut self, cx: &mut Context<Self>) {

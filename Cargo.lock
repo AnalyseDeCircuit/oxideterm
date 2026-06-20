@@ -4056,35 +4056,7 @@ dependencies = [
  "smol",
  "tracing",
  "tree-sitter",
- "tree-sitter-bash",
- "tree-sitter-c",
- "tree-sitter-c-sharp",
- "tree-sitter-cmake",
- "tree-sitter-cpp",
- "tree-sitter-css",
- "tree-sitter-diff",
- "tree-sitter-elixir",
- "tree-sitter-embedded-template",
- "tree-sitter-go",
- "tree-sitter-graphql",
- "tree-sitter-html",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-jsdoc",
  "tree-sitter-json",
- "tree-sitter-make",
- "tree-sitter-md",
- "tree-sitter-proto",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "tree-sitter-rust",
- "tree-sitter-scala",
- "tree-sitter-sequel",
- "tree-sitter-swift",
- "tree-sitter-toml-ng",
- "tree-sitter-typescript",
- "tree-sitter-yaml",
- "tree-sitter-zig",
  "unicode-segmentation",
  "uuid",
  "zed-sum-tree",
@@ -6867,15 +6839,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "oxideterm-code-editor"
-version = "2.0.0-gpui-preview.9"
-dependencies = [
- "gpui",
- "gpui-component",
- "oxideterm-theme",
-]
-
-[[package]]
 name = "oxideterm-connection-monitor"
 version = "2.0.0-gpui-preview.9"
 dependencies = [
@@ -7014,12 +6977,13 @@ dependencies = [
  "oxideterm-ai",
  "oxideterm-backend-classification",
  "oxideterm-cloud-sync",
- "oxideterm-code-editor",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
+ "oxideterm-editor-syntax",
  "oxideterm-environment",
  "oxideterm-forwarding",
  "oxideterm-gpui-cloud-sync",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-ide",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
@@ -11584,16 +11548,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-sitter-embedded-template"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "790063ef14e5b67556abc0b3be0ed863fb41d65ee791cf8c0b20eb42a1fa46af"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
 name = "tree-sitter-fish"
 version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11608,16 +11562,6 @@ name = "tree-sitter-go"
 version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b13d476345220dbe600147dd444165c5791bf85ef53e28acbedd46112ee18431"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-graphql"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efedc4cac157161cc23a0adc4553a2cedc908e1cd754b6cd033a919bb81ce5d6"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -11648,16 +11592,6 @@ name = "tree-sitter-javascript"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf40bf599e0416c16c125c3cec10ee5ddc7d1bb8b0c60fa5c4de249ad34dc1b1"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-jsdoc"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3862dfcb1038fc5e7812d7df14190afdeb7e1415288fd5f51f58395f8cb0faf"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -11734,16 +11668,6 @@ name = "tree-sitter-powershell"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3faf304d44b9ddd4a7d97804bb8de7daf564336dd5a526dc6de5b39238243022"
-dependencies = [
- "cc",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-proto"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e4360b434b5980fc397137ef29e1988619fef4159ac86fa7ac5777d459d3924"
 dependencies = [
  "cc",
  "tree-sitter-language",
