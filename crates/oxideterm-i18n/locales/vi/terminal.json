@@ -134,7 +134,9 @@
       "icon_server": "Server",
       "icon_folder": "Folder",
       "icon_docker": "Docker",
-      "icon_zap": "Custom"
+      "icon_zap": "Custom",
+      "pin": "Giữ mở",
+      "unpin": "Đóng sau khi chạy"
     },
     "cwd": {
       "search_directories": "Tìm thư mục...",

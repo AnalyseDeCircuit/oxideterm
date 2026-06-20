@@ -23,6 +23,7 @@ const MAX_NAME_LEN: usize = 160;
 const MAX_COMMAND_LEN: usize = 4096;
 const MAX_DESCRIPTION_LEN: usize = 1024;
 const MAX_HOST_PATTERN_LEN: usize = 256;
+const BUILTIN_CATEGORY_IDS: &[&str] = &["system", "network", "files", "docker", "custom"];
 static QUICK_COMMAND_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn quick_commands_path(settings_path: &Path) -> PathBuf {
@@ -169,6 +170,15 @@ fn merge_snapshot(
                 category_remap.insert(incoming_category.id.clone(), incoming_category.id.clone());
                 categories.push(incoming_category);
             }
+            (Some(conflict), QuickCommandImportStrategy::Rename)
+                if is_builtin_category_id(&incoming_category.id) =>
+            {
+                // Built-in category ids are stable containers, not importable user records.
+                // Reusing the local container prevents .oxide round-trips from creating
+                // duplicate System/Network/Files groups when the global strategy is Rename.
+                category_remap.insert(incoming_category.id, conflict.id);
+                skipped += 1;
+            }
             (Some(conflict), QuickCommandImportStrategy::Skip) => {
                 category_remap.insert(incoming_category.id, conflict.id);
                 skipped += 1;
@@ -231,6 +241,13 @@ fn merge_snapshot(
                 imported += 1;
             }
             (Some(_), QuickCommandImportStrategy::Skip) => skipped += 1,
+            (Some(conflict), QuickCommandImportStrategy::Rename)
+                if same_command_content(&conflict, &incoming_command) =>
+            {
+                // Rename preserves distinct user commands, but exact snapshot round-trips
+                // should not duplicate the same command under a reused built-in category.
+                skipped += 1;
+            }
             (Some(_), QuickCommandImportStrategy::Rename) => {
                 incoming_command.id = new_quick_command_id();
                 incoming_command.name = unique_command_name(
@@ -275,6 +292,19 @@ fn merge_snapshot(
         imported,
         skipped,
     }
+}
+
+fn is_builtin_category_id(id: &str) -> bool {
+    BUILTIN_CATEGORY_IDS.contains(&id)
+}
+
+fn same_command_content(a: &QuickCommand, b: &QuickCommand) -> bool {
+    a.id == b.id
+        && a.name.trim() == b.name.trim()
+        && a.command.trim() == b.command.trim()
+        && a.category == b.category
+        && a.description.as_deref().map(str::trim) == b.description.as_deref().map(str::trim)
+        && a.host_pattern.as_deref().map(str::trim) == b.host_pattern.as_deref().map(str::trim)
 }
 
 fn sanitize_snapshot(snapshot: QuickCommandsSnapshot) -> Result<QuickCommandsSnapshot, String> {
@@ -597,5 +627,39 @@ mod tests {
 
         assert!(result.imported > 0);
         assert!(exported.contains("Ops Uptime"));
+    }
+
+    #[test]
+    fn rename_import_does_not_duplicate_builtin_roundtrip_records() {
+        let source_settings_path = temp_settings_path("roundtrip-source");
+        let target_settings_path = temp_settings_path("roundtrip-target");
+        let json = export_snapshot_json(&source_settings_path).unwrap();
+
+        let result = apply_snapshot_json(
+            &target_settings_path,
+            &json,
+            QuickCommandImportStrategy::Rename,
+        );
+        let exported = export_snapshot_json(&target_settings_path).unwrap();
+        let snapshot = serde_json::from_str::<QuickCommandsSnapshot>(&exported).unwrap();
+
+        assert_eq!(result.errors, Vec::<String>::new());
+        assert_eq!(result.imported, 0);
+        assert_eq!(
+            snapshot.categories.len(),
+            default_quick_command_categories().len()
+        );
+        assert_eq!(snapshot.commands.len(), default_quick_commands().len());
+        assert_eq!(
+            snapshot
+                .categories
+                .iter()
+                .filter(|category| category.id == "system")
+                .count(),
+            1
+        );
+
+        let _ = fs::remove_dir_all(source_settings_path.parent().unwrap());
+        let _ = fs::remove_dir_all(target_settings_path.parent().unwrap());
     }
 }

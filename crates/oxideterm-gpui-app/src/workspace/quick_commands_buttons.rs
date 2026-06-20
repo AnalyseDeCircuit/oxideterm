@@ -43,6 +43,31 @@ impl WorkspaceApp {
         )
     }
 
+    fn quick_command_pin_button(
+        &self,
+        active: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let theme = self.tokens.ui;
+        self.workspace_icon_action_button(
+            LucideIcon::Pin,
+            14.0,
+            if active {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.text_muted)
+            },
+            IconButtonOptions {
+                background: active.then(|| rgba((theme.accent << 8) | 0x1a)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(22.0, ButtonRadius::Sm)
+            },
+            listener,
+            cx,
+        )
+    }
+
     fn quick_command_action_button(
         &self,
         icon: LucideIcon,

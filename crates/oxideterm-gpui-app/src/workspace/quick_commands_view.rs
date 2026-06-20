@@ -17,11 +17,13 @@ pub(super) fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
 
 fn close_terminal_quick_commands_popover_state(
     open: &mut bool,
+    pinned: &mut bool,
     pending_command: &mut Option<String>,
     focused_input: &mut Option<QuickCommandInput>,
     highlighted_command: &mut Option<String>,
 ) {
     *open = false;
+    *pinned = false;
     *pending_command = None;
     *focused_input = None;
     *highlighted_command = None;
@@ -30,20 +32,50 @@ fn close_terminal_quick_commands_popover_state(
 fn insert_quick_command_into_command_bar_state(
     draft: &mut String,
     command: &str,
+    keep_open: bool,
     command_bar_focused: &mut bool,
     open: &mut bool,
+    pinned: &mut bool,
     pending_command: &mut Option<String>,
     focused_input: &mut Option<QuickCommandInput>,
     highlighted_command: &mut Option<String>,
 ) {
     *draft = command.to_string();
     *command_bar_focused = true;
-    close_terminal_quick_commands_popover_state(
-        open,
-        pending_command,
-        focused_input,
-        highlighted_command,
-    );
+    if keep_open {
+        // Row click inserts into the command bar. In pin mode the palette is a
+        // repeatable picker, so keep it visible while moving keyboard ownership
+        // back to the command draft.
+        *open = true;
+        *pinned = true;
+        *pending_command = None;
+        *focused_input = None;
+        *highlighted_command = None;
+    } else {
+        close_terminal_quick_commands_popover_state(
+            open,
+            pinned,
+            pending_command,
+            focused_input,
+            highlighted_command,
+        );
+    }
+}
+
+fn finish_quick_command_execution_state(
+    open: &mut bool,
+    pinned: bool,
+    pending_command: &mut Option<String>,
+) {
+    // Pending confirmation state is scoped to the command that just ran.
+    *pending_command = None;
+    if pinned {
+        // Pin mode makes execution repeatable from the same palette. The
+        // palette itself stays after each command.
+        *open = true;
+    } else {
+        *open = false;
+    }
 }
 
 fn quick_command_draft_can_save(draft: &QuickCommandDraft) -> bool {
@@ -102,6 +134,10 @@ fn quick_command_editor_tab_target(
             .and_then(|previous| COMMAND_EDITOR_FIELDS.get(previous).copied())
             .or_else(|| COMMAND_EDITOR_FIELDS.last().copied())
     }
+}
+
+fn quick_command_space_inserts_literal(platform: bool, control: bool, alt: bool) -> bool {
+    !platform && !control && !alt
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -174,18 +210,29 @@ impl WorkspaceApp {
     pub(super) fn close_terminal_quick_commands_popover(&mut self) {
         close_terminal_quick_commands_popover_state(
             &mut self.terminal_quick_commands_open,
+            &mut self.terminal_quick_commands_pinned,
             &mut self.terminal_quick_command_pending,
             &mut self.quick_commands.focused_input,
             &mut self.quick_commands.highlighted_command,
         );
     }
 
-    fn insert_quick_command_into_command_bar(&mut self, command: &str) {
+    pub(super) fn finish_terminal_quick_command_execution(&mut self) {
+        finish_quick_command_execution_state(
+            &mut self.terminal_quick_commands_open,
+            self.terminal_quick_commands_pinned,
+            &mut self.terminal_quick_command_pending,
+        );
+    }
+
+    fn insert_quick_command_into_command_bar(&mut self, command: &str, keep_open: bool) {
         insert_quick_command_into_command_bar_state(
             &mut self.terminal_command_bar_draft,
             command,
+            keep_open,
             &mut self.terminal_command_bar_focused,
             &mut self.terminal_quick_commands_open,
+            &mut self.terminal_quick_commands_pinned,
             &mut self.terminal_quick_command_pending,
             &mut self.quick_commands.focused_input,
             &mut self.quick_commands.highlighted_command,
@@ -256,7 +303,10 @@ impl WorkspaceApp {
                     .unwrap_or(0);
                     if let Some(command) = visible_commands.get(selected_index) {
                         let command_text = command.command.clone();
-                        self.insert_quick_command_into_command_bar(&command_text);
+                        self.insert_quick_command_into_command_bar(
+                            &command_text,
+                            self.terminal_quick_commands_pinned,
+                        );
                         cx.notify();
                     }
                     return;
@@ -303,6 +353,27 @@ impl WorkspaceApp {
                         self.quick_commands.highlighted_command = None;
                     }
                     cx.notify();
+                }
+            }
+            "space" | " "
+                if quick_command_space_inserts_literal(
+                    modifiers.platform,
+                    modifiers.control,
+                    modifiers.alt,
+                ) =>
+            {
+                // Some GPUI platforms deliver Space without key_char, so the
+                // platform text owner never commits it. Route that fallback
+                // through the same IME replacement path as ordinary text.
+                let target = WorkspaceImeTarget::QuickCommand(input);
+                let replacement_range = self.ime_selection_range_for_target(target);
+                let caret = replacement_range
+                    .as_ref()
+                    .map(|range| range.start + " ".encode_utf16().count());
+                self.clear_ime_selection();
+                self.replace_ime_target_text(target, replacement_range, " ", cx);
+                if let Some(caret) = caret {
+                    self.set_ime_selection_from_anchor(target, caret, caret);
                 }
             }
             _ => {}
@@ -479,6 +550,16 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .gap(px(4.0))
+                            .child(self.quick_command_pin_button(
+                                self.terminal_quick_commands_pinned,
+                                |this, _event, _window, cx| {
+                                    this.terminal_quick_commands_pinned =
+                                        !this.terminal_quick_commands_pinned;
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                },
+                                cx,
+                            ))
                             .child(self.quick_command_icon_button(
                                 LucideIcon::Plus,
                                 |this, _event, _window, cx| {
@@ -831,6 +912,7 @@ impl WorkspaceApp {
         let command_for_edit = command.clone();
         let command_id = command.id.clone();
         let command_id_for_hover = command.id.clone();
+        let keep_open_for_insert = self.terminal_quick_commands_pinned;
         let highlighted =
             self.quick_commands.highlighted_command.as_deref() == Some(command.id.as_str());
         let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
@@ -879,7 +961,10 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
-                            this.insert_quick_command_into_command_bar(&command_for_insert);
+                            this.insert_quick_command_into_command_bar(
+                                &command_for_insert,
+                                keep_open_for_insert,
+                            );
                             window.focus(&this.focus_handle);
                             cx.stop_propagation();
                             cx.notify();
@@ -1424,6 +1509,7 @@ mod terminal_command_bar_quick_command_tests {
     #[test]
     fn quick_command_popover_outside_click_closes_without_blurring_command_bar() {
         let mut open = true;
+        let mut pinned = true;
         let mut pending_command = Some("rm -rf /tmp/example".to_string());
         let mut focused_input = Some(QuickCommandInput::Search);
         let mut highlighted_command = Some("qc-risky".to_string());
@@ -1431,12 +1517,14 @@ mod terminal_command_bar_quick_command_tests {
 
         close_terminal_quick_commands_popover_state(
             &mut open,
+            &mut pinned,
             &mut pending_command,
             &mut focused_input,
             &mut highlighted_command,
         );
 
         assert!(!open);
+        assert!(!pinned);
         assert_eq!(pending_command, None);
         assert_eq!(focused_input, None);
         assert_eq!(highlighted_command, None);
@@ -1444,10 +1532,11 @@ mod terminal_command_bar_quick_command_tests {
     }
 
     #[test]
-    fn quick_command_row_click_inserts_command_and_keeps_submit_closed() {
+    fn quick_command_unpinned_row_click_inserts_command_and_closes_popover() {
         let mut draft = String::new();
         let mut command_bar_focused = false;
         let mut open = true;
+        let mut pinned = false;
         let mut pending_command = Some("docker system prune".to_string());
         let mut focused_input = Some(QuickCommandInput::Search);
         let mut highlighted_command = Some("qc-docker".to_string());
@@ -1455,8 +1544,10 @@ mod terminal_command_bar_quick_command_tests {
         insert_quick_command_into_command_bar_state(
             &mut draft,
             "git status",
+            false,
             &mut command_bar_focused,
             &mut open,
+            &mut pinned,
             &mut pending_command,
             &mut focused_input,
             &mut highlighted_command,
@@ -1465,9 +1556,65 @@ mod terminal_command_bar_quick_command_tests {
         assert_eq!(draft, "git status");
         assert!(command_bar_focused);
         assert!(!open);
+        assert!(!pinned);
         assert_eq!(pending_command, None);
         assert_eq!(focused_input, None);
         assert_eq!(highlighted_command, None);
+    }
+
+    #[test]
+    fn quick_command_pinned_row_click_inserts_command_and_keeps_popover_open() {
+        let mut draft = String::new();
+        let mut command_bar_focused = false;
+        let mut open = true;
+        let mut pinned = false;
+        let mut pending_command = Some("docker system prune".to_string());
+        let mut focused_input = Some(QuickCommandInput::Search);
+        let mut highlighted_command = Some("qc-docker".to_string());
+
+        insert_quick_command_into_command_bar_state(
+            &mut draft,
+            "git status",
+            true,
+            &mut command_bar_focused,
+            &mut open,
+            &mut pinned,
+            &mut pending_command,
+            &mut focused_input,
+            &mut highlighted_command,
+        );
+
+        assert_eq!(draft, "git status");
+        assert!(command_bar_focused);
+        assert!(open);
+        assert!(pinned);
+        assert_eq!(pending_command, None);
+        assert_eq!(focused_input, None);
+        assert_eq!(highlighted_command, None);
+    }
+
+    #[test]
+    fn quick_command_pinned_execution_keeps_popover_open() {
+        let mut open = true;
+        let pinned = true;
+        let mut pending_command = Some("apt update".to_string());
+
+        finish_quick_command_execution_state(&mut open, pinned, &mut pending_command);
+
+        assert!(open);
+        assert_eq!(pending_command, None);
+    }
+
+    #[test]
+    fn quick_command_unpinned_execution_closes_popover() {
+        let mut open = true;
+        let pinned = false;
+        let mut pending_command = Some("apt update".to_string());
+
+        finish_quick_command_execution_state(&mut open, pinned, &mut pending_command);
+
+        assert!(!open);
+        assert_eq!(pending_command, None);
     }
 
     #[test]
@@ -1551,6 +1698,14 @@ mod terminal_command_bar_quick_command_tests {
             quick_command_editor_tab_target(QuickCommandInput::Search, true),
             None
         );
+    }
+
+    #[test]
+    fn quick_command_plain_space_is_literal_text() {
+        assert!(quick_command_space_inserts_literal(false, false, false));
+        assert!(!quick_command_space_inserts_literal(true, false, false));
+        assert!(!quick_command_space_inserts_literal(false, true, false));
+        assert!(!quick_command_space_inserts_literal(false, false, true));
     }
 
     #[test]

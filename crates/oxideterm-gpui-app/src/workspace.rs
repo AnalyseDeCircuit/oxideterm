@@ -593,6 +593,7 @@ pub(crate) struct WorkspaceApp {
     terminal_broadcast_targets: HashSet<PaneId>,
     terminal_broadcast_menu_open: bool,
     terminal_quick_commands_open: bool,
+    terminal_quick_commands_pinned: bool,
     terminal_quick_command_pending: Option<String>,
     terminal_cwd_tx: std::sync::mpsc::Sender<terminal_cwd::TerminalCwdDelivery>,
     terminal_cwd_rx: std::sync::mpsc::Receiver<terminal_cwd::TerminalCwdDelivery>,
