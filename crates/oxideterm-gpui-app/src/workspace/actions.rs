@@ -1494,7 +1494,7 @@ impl WorkspaceApp {
                 variant: TerminalNoticeVariant::Success,
             });
         }
-        self.close_terminal_quick_commands_popover();
+        self.finish_terminal_quick_command_execution();
         self.terminal_command_bar_draft.clear();
         self.ime_marked_text = None;
         cx.notify();

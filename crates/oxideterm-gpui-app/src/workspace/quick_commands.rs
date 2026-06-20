@@ -23,6 +23,7 @@ const MAX_NAME_LEN: usize = 160;
 const MAX_COMMAND_LEN: usize = 4096;
 const MAX_DESCRIPTION_LEN: usize = 1024;
 const MAX_HOST_PATTERN_LEN: usize = 256;
+const BUILTIN_CATEGORY_IDS: &[&str] = &["system", "network", "files", "docker", "custom"];
 static QUICK_COMMAND_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

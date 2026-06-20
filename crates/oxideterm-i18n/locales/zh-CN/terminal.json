@@ -144,7 +144,9 @@
       "icon_server": "服务器",
       "icon_folder": "文件夹",
       "icon_docker": "Docker",
-      "icon_zap": "自定义"
+      "icon_zap": "自定义",
+      "pin": "固定面板",
+      "unpin": "执行后关闭"
     },
     "cwd": {
       "search_directories": "搜索目录...",

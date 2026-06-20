@@ -290,6 +290,13 @@ fn merge_quick_commands_snapshot(
         };
 
         match strategy {
+            QuickCommandImportStrategy::Rename if is_builtin_category_id(&imported_category.id) => {
+                // Built-in category ids are stable containers, not importable user records.
+                // Reusing the local container prevents .oxide round-trips from creating
+                // duplicate System/Network/Files groups when the global strategy is Rename.
+                category_remap.insert(imported_category.id, conflict.id);
+                skipped += 1;
+            }
             QuickCommandImportStrategy::Skip => {
                 category_remap.insert(imported_category.id, conflict.id);
                 skipped += 1;
@@ -365,6 +372,13 @@ fn merge_quick_commands_snapshot(
 
         match strategy {
             QuickCommandImportStrategy::Skip => skipped += 1,
+            QuickCommandImportStrategy::Rename
+                if same_command_content(&conflict, &imported_command) =>
+            {
+                // Rename preserves distinct user commands, but exact snapshot round-trips
+                // should not duplicate the same command under a reused built-in category.
+                skipped += 1;
+            }
             QuickCommandImportStrategy::Rename => {
                 commands.push(QuickCommand {
                     id: new_quick_command_id(),
@@ -421,6 +435,19 @@ fn merge_quick_commands_snapshot(
         imported,
         skipped,
     }
+}
+
+fn is_builtin_category_id(id: &str) -> bool {
+    BUILTIN_CATEGORY_IDS.contains(&id)
+}
+
+fn same_command_content(a: &QuickCommand, b: &QuickCommand) -> bool {
+    a.id == b.id
+        && a.name.trim() == b.name.trim()
+        && a.command.trim() == b.command.trim()
+        && a.category == b.category
+        && a.description.as_deref().map(str::trim) == b.description.as_deref().map(str::trim)
+        && a.host_pattern.as_deref().map(str::trim) == b.host_pattern.as_deref().map(str::trim)
 }
 
 fn load_snapshot_from_path(path: &Path) -> Result<Option<QuickCommandsSnapshot>, String> {
@@ -883,6 +910,33 @@ mod quick_command_tests {
                 .iter()
                 .any(|command| command.command == "exa -la")
         );
+        let _ = fs::remove_dir_all(settings_path.parent().unwrap());
+    }
+
+    #[test]
+    fn import_snapshot_rename_does_not_duplicate_builtin_roundtrip_records() {
+        let settings_path = temp_settings_path("import-rename-roundtrip");
+        let mut state = QuickCommandsState::load(&settings_path);
+        let json = state.export_snapshot_json().unwrap();
+
+        let result = state.apply_snapshot_json(&json, QuickCommandImportStrategy::Rename);
+
+        assert_eq!(result.errors, Vec::<String>::new());
+        assert_eq!(result.imported, 0);
+        assert_eq!(
+            state.categories.len(),
+            default_quick_command_categories().len()
+        );
+        assert_eq!(state.commands.len(), default_quick_commands().len());
+        assert_eq!(
+            state
+                .categories
+                .iter()
+                .filter(|category| category.id == "system")
+                .count(),
+            1
+        );
+
         let _ = fs::remove_dir_all(settings_path.parent().unwrap());
     }
 }
