@@ -74,7 +74,7 @@ impl MarkdownBlockLayout {
         self.items.clone()
     }
 
-    /// Estimated GPUI sizes for `gpui_component::v_virtual_list`.
+    /// Estimated GPUI sizes used by windowed markdown rendering.
     pub fn item_sizes(&self) -> Rc<Vec<Size<Pixels>>> {
         self.item_sizes.clone()
     }

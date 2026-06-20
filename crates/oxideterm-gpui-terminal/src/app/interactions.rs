@@ -460,7 +460,13 @@ impl TerminalPane {
     }
 
     fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
-        terminal_scrollbar(&self.snapshot, &self.metrics).map(|scrollbar| {
+        terminal_scrollbar_for_viewport_display_offset(
+            &self.snapshot,
+            &self.metrics,
+            self.snapshot.rows,
+            self.smooth_scroll_display_offset(),
+        )
+        .map(|scrollbar| {
             let origin = self.content_origin();
             let viewport_width = self
                 .bounds

@@ -46,14 +46,15 @@ pub mod parser;
 pub mod render;
 pub mod style;
 
-pub use gpui_component::VirtualListScrollHandle as MarkdownVirtualListScrollHandle;
 pub use layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 pub use model::MarkdownDocument;
 pub use options::MarkdownOptions;
 pub use render::{MarkdownCodeBlockActions, MarkdownMermaidZoomHandler};
 
-use gpui::{AnyElement, ElementId, Entity, Render};
+use gpui::{AnyElement, ElementId, Entity, Render, ScrollHandle};
 use oxideterm_theme::ThemeTokens;
+
+pub type MarkdownVirtualListScrollHandle = ScrollHandle;
 
 /// Parse and render markdown source into a GPUI element tree.
 ///

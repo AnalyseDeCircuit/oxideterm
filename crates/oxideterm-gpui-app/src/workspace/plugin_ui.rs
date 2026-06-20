@@ -1,5 +1,5 @@
 use super::*;
-use gpui_component::scroll::ScrollableElement;
+use oxideterm_gpui_ui::scroll::ScrollableElement;
 
 const NATIVE_PLUGIN_UI_LIST_ROW_HEIGHT: f32 = 34.0;
 const NATIVE_PLUGIN_UI_LIST_OVERSCAN: usize = 8;

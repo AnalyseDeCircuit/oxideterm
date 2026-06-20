@@ -1,8 +1,8 @@
 use super::*;
-use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
+use oxideterm_gpui_ui::scroll::ScrollableElement;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_onboarding_modal(

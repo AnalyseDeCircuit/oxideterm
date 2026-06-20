@@ -7,6 +7,7 @@ use oxideterm_terminal_unicode::visual_line_for_row;
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalRect, TerminalScrollbar};
 
+#[cfg(test)]
 pub(crate) fn terminal_scrollbar(
     snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,
@@ -14,11 +15,26 @@ pub(crate) fn terminal_scrollbar(
     terminal_scrollbar_for_viewport(snapshot, metrics, snapshot.rows, snapshot.display_offset)
 }
 
+#[cfg(test)]
 pub(crate) fn terminal_scrollbar_for_viewport(
     snapshot: &TerminalSnapshot,
     metrics: &TerminalMetrics,
     viewport_rows: usize,
     display_offset: usize,
+) -> Option<TerminalScrollbar> {
+    terminal_scrollbar_for_viewport_display_offset(
+        snapshot,
+        metrics,
+        viewport_rows,
+        display_offset as f32,
+    )
+}
+
+pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
+    snapshot: &TerminalSnapshot,
+    metrics: &TerminalMetrics,
+    viewport_rows: usize,
+    display_offset_rows: f32,
 ) -> Option<TerminalScrollbar> {
     let history = snapshot.scrollback_lines;
     if history == 0 {
@@ -30,7 +46,8 @@ pub(crate) fn terminal_scrollbar_for_viewport(
     let thumb_height = (viewport_height * viewport_rows as f32 / total_lines as f32)
         .max(SCROLLBAR_MIN_THUMB)
         .min(viewport_height);
-    let scroll_fraction = (history.saturating_sub(display_offset)) as f32 / history as f32;
+    let display_offset = display_offset_rows.clamp(0.0, history as f32);
+    let scroll_fraction = (history as f32 - display_offset) / history as f32;
     let top = (viewport_height - thumb_height) * scroll_fraction;
 
     Some(TerminalScrollbar {

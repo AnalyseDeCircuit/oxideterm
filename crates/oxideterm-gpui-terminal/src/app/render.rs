@@ -61,6 +61,7 @@ impl Focusable for TerminalPane {
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
+        let scrollbar_display_offset = self.smooth_scroll_display_offset();
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
         snapshot.cursor_shape = self.preferences.cursor_shape;
@@ -119,7 +120,7 @@ impl Render for TerminalPane {
         .transparent_background(background.is_some())
         .ghost_text(self.terminal_ghost_text())
         .viewport_rows(viewport_rows)
-        .viewport_display_offset(self.snapshot.display_offset)
+        .scrollbar_display_offset(scrollbar_display_offset)
         .scroll_y_offset(smooth_scroll_y_offset)
         .layout_cache(self.layout_cache.clone());
 

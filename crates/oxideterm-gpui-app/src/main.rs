@@ -13,7 +13,6 @@ mod workspace;
 use std::{path::PathBuf, time::Duration};
 
 use gpui::{App, AppContext, Application, Bounds, Timer, actions, px, size};
-use gpui_component::Root;
 use oxideterm_i18n::I18n;
 use oxideterm_settings::SettingsStore;
 
@@ -170,10 +169,6 @@ fn main() {
         cx.on_action(quit);
         cx.bind_keys(platform::app_key_bindings(&startup_settings));
         cx.set_menus(platform::app_menus(&I18n::default()));
-        // OxideTerm still uses gpui-component for the window root, scrollbars,
-        // and markdown virtual lists even though the SFTP editor no longer uses
-        // its input backend. Initialize its globals before any Root renders.
-        gpui_component::init(cx);
 
         if let Err(err) = open_main_workspace_window(cx, ssh_launch) {
             eprintln!(
@@ -221,7 +216,7 @@ fn open_main_workspace_window(
         {
             eprintln!("failed to open temporary SSH launch: {error}");
         }
-        cx.new(|cx| Root::new(workspace, window, cx))
+        workspace
     })
     .map(|_| ())
 }

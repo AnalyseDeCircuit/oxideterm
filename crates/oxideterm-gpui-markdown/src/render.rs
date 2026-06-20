@@ -11,12 +11,13 @@ use std::{path::PathBuf, sync::Arc};
 use gpui::{
     AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, Image,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
-    StrikethroughStyle, Styled, StyledText, TextAlign, TextRun, UnderlineStyle, Window, div,
-    image_cache, img, prelude::FluentBuilder, px, relative, retain_all,
+    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextAlign, TextRun,
+    UnderlineStyle, Window, div, image_cache, img, prelude::FluentBuilder, px, relative,
+    retain_all,
 };
-use gpui_component::{VirtualListScrollHandle, v_virtual_list};
 use oxideterm_theme::ThemeTokens;
 
+use crate::MarkdownVirtualListScrollHandle;
 use crate::highlight;
 use crate::layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 use crate::math;
@@ -28,6 +29,7 @@ use crate::options::MarkdownOptions;
 use crate::style;
 
 const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
+const MARKDOWN_VIRTUAL_OVERDRAW_PX: f32 = 480.0;
 
 pub type MarkdownCodeRunHandler = Arc<dyn Fn(String, &mut Window, &mut App) + 'static>;
 pub type MarkdownMermaidZoomHandler =
@@ -45,13 +47,27 @@ pub fn render_document(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
+    render_document_with_code_actions(document, tokens, opts, None)
+}
+
+fn render_document_with_code_actions(
+    document: &MarkdownDocument,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
     let mut content = div()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
         .gap(px(opts.block_gap))
-        .child(render_blocks(&document.blocks, tokens, opts));
+        .child(render_blocks_with_code_actions(
+            &document.blocks,
+            tokens,
+            opts,
+            code_actions,
+        ));
 
     if opts.enable_footnotes && !document.footnotes.is_empty() {
         content = content.child(render_footnotes(&document.footnotes, tokens, opts));
@@ -77,15 +93,37 @@ pub fn render_document_windowed(
     viewport_height: f32,
     overdraw: f32,
 ) -> AnyElement {
+    render_document_windowed_with_code_actions(
+        document,
+        layout,
+        tokens,
+        opts,
+        viewport_top,
+        viewport_height,
+        overdraw,
+        None,
+    )
+}
+
+fn render_document_windowed_with_code_actions(
+    document: &MarkdownDocument,
+    layout: &MarkdownBlockLayout,
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    viewport_top: f32,
+    viewport_height: f32,
+    overdraw: f32,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
     let items = layout.items();
     if items.len() < WINDOWED_MARKDOWN_MIN_ITEMS || viewport_height <= 0.0 {
-        return render_document(document, tokens, opts);
+        return render_document_with_code_actions(document, tokens, opts, code_actions);
     }
 
     let item_sizes = layout.item_sizes();
     let total_height = estimated_markdown_height(&item_sizes, opts.block_gap);
     if total_height <= viewport_height + overdraw * 2.0 {
-        return render_document(document, tokens, opts);
+        return render_document_with_code_actions(document, tokens, opts, code_actions);
     }
 
     let window_top = (viewport_top - overdraw).max(0.0);
@@ -108,7 +146,12 @@ pub fn render_document_windowed(
             }
             match item {
                 MarkdownLayoutItem::Block(block) => {
-                    rendered.push(render_block(block, tokens, opts));
+                    rendered.push(render_block_with_code_actions(
+                        block,
+                        tokens,
+                        opts,
+                        code_actions,
+                    ));
                 }
                 MarkdownLayoutItem::Footnotes(footnotes) => {
                     rendered.push(render_footnotes(footnotes, tokens, opts));
@@ -342,68 +385,62 @@ pub fn render_document_windowed_selectable_with_code_actions(
 
 /// Render a complete markdown document through a block-level virtual list.
 pub fn render_document_virtual<V>(
-    view: Entity<V>,
+    _view: Entity<V>,
     id: impl Into<ElementId>,
     document: &MarkdownDocument,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
-    scroll_handle: &VirtualListScrollHandle,
+    scroll_handle: &MarkdownVirtualListScrollHandle,
 ) -> AnyElement
 where
     V: Render,
 {
-    render_document_virtual_with_code_actions(view, id, document, tokens, opts, scroll_handle, None)
+    render_document_virtual_with_code_actions(
+        _view,
+        id,
+        document,
+        tokens,
+        opts,
+        scroll_handle,
+        None,
+    )
 }
 
 pub fn render_document_virtual_with_code_actions<V>(
-    view: Entity<V>,
+    _view: Entity<V>,
     id: impl Into<ElementId>,
     document: &MarkdownDocument,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
-    scroll_handle: &VirtualListScrollHandle,
+    scroll_handle: &MarkdownVirtualListScrollHandle,
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement
 where
     V: Render,
 {
     let layout = MarkdownBlockLayout::from_document(document, opts);
-    let items = layout.items();
-    let item_sizes = layout.item_sizes();
-    let tokens = *tokens;
-    let opts = opts.clone();
-    let code_actions = code_actions.cloned();
-    let block_gap = opts.block_gap;
-    let enable_async_images = opts.enable_async_images;
-    let image_cache_id = opts.image_cache_id;
+    let viewport_top = f32::from(scroll_handle.offset().y);
+    let viewport_height = f32::from(scroll_handle.bounds().size.height);
+    let content = render_document_windowed_with_code_actions(
+        document,
+        &layout,
+        tokens,
+        opts,
+        viewport_top,
+        viewport_height,
+        MARKDOWN_VIRTUAL_OVERDRAW_PX,
+        code_actions,
+    );
 
-    let content = v_virtual_list(view, id, item_sizes, move |_this, range, _window, _cx| {
-        range
-            .filter_map(|index| match items.get(index) {
-                Some(MarkdownLayoutItem::Block(block)) => Some(render_block_with_code_actions(
-                    block,
-                    &tokens,
-                    &opts,
-                    code_actions.as_ref(),
-                )),
-                Some(MarkdownLayoutItem::Footnotes(footnotes)) => {
-                    Some(render_footnotes(footnotes, &tokens, &opts))
-                }
-                None => None,
-            })
-            .collect::<Vec<AnyElement>>()
-    })
-    .gap(px(block_gap))
-    .track_scroll(scroll_handle)
-    .into_any_element();
-
-    if enable_async_images {
-        image_cache(retain_all(image_cache_id))
-            .child(content)
-            .into_any_element()
-    } else {
-        content
-    }
+    // GPUI's built-in ScrollHandle keeps the same owner model without pulling
+    // in an external variable-height list for markdown previews.
+    div()
+        .id(id)
+        .size_full()
+        .overflow_y_scroll()
+        .track_scroll(scroll_handle)
+        .child(content)
+        .into_any_element()
 }
 
 fn estimated_markdown_height(item_sizes: &[gpui::Size<gpui::Pixels>], block_gap: f32) -> f32 {

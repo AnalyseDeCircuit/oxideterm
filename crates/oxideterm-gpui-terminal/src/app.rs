@@ -1019,6 +1019,24 @@ impl TerminalPane {
         true
     }
 
+    fn smooth_scroll_display_offset(&self) -> f32 {
+        if !self.settings.smooth_scroll {
+            return self.snapshot.display_offset as f32;
+        }
+
+        let line_height = self.metrics.line_height_f32();
+        if line_height <= f32::EPSILON {
+            return self.snapshot.display_offset as f32;
+        }
+
+        // The terminal state still scrolls in whole rows. The paint layer keeps
+        // the remaining wheel distance in pixels, so the scrollbar must use the
+        // same fractional row offset to move with smooth-scrolling content.
+        let display_offset =
+            self.snapshot.display_offset as f32 + f32::from(self.scroll_remainder_px) / line_height;
+        display_offset.clamp(0.0, self.snapshot.scrollback_lines as f32)
+    }
+
     fn next_drain_budget(&self) -> TerminalDrainBudget {
         let drain = self.preferences.render_policy.drain;
         if self.last_drain_budget_exhausted {

@@ -257,6 +257,56 @@ fn scrollbar_thumb_tracks_display_offset_direction() {
 }
 
 #[test]
+fn scrollbar_thumb_tracks_fractional_smooth_offset() {
+    let metrics = test_metrics();
+    let snapshot = test_snapshot(10, 90);
+    let current =
+        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 10.0).unwrap();
+    let halfway =
+        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 10.5).unwrap();
+    let next =
+        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 11.0).unwrap();
+
+    assert!(current.top > halfway.top);
+    assert!(halfway.top > next.top);
+}
+
+#[test]
+fn terminal_element_scrollbar_uses_fractional_display_offset() {
+    let metrics = test_metrics();
+    let mut snapshot = multirow_snapshot(&[
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    ]);
+    snapshot.display_offset = 11;
+    snapshot.scrollback_lines = 90;
+    snapshot.rows = 10;
+
+    let layout = TerminalElement::new(
+        snapshot.clone(),
+        None,
+        metrics.clone(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .viewport_rows(10)
+    .scrollbar_display_offset(10.5)
+    .layout_for_bounds(visible_layout_bounds(10));
+    let scrollbar = layout.scrollbar.unwrap();
+    let current =
+        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 10.0).unwrap();
+    let next =
+        terminal_scrollbar_for_viewport_display_offset(&snapshot, &metrics, 10, 11.0).unwrap();
+
+    assert!(current.top > scrollbar.top);
+    assert!(scrollbar.top > next.top);
+}
+
+#[test]
 fn scrollbar_is_hidden_without_scrollback() {
     assert!(terminal_scrollbar(&test_snapshot(0, 0), &test_metrics()).is_none());
 }

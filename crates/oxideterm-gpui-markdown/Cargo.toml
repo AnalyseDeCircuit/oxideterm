@@ -6,7 +6,6 @@ version.workspace = true
 
 [dependencies]
 gpui.workspace = true
-gpui-component.workspace = true
 oxideterm-theme = { path = "../oxideterm-theme" }
 pulldown-cmark = "0.12"
 ratex-layout = "0.1.8"
