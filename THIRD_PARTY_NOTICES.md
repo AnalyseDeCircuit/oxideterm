@@ -393,8 +393,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | gpu-alloc-ash | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gpu-alloc-types | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gpui | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui-component | 0.5.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui-component-macros | 0.5.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gpui-macros | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gpui_collections | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gpui_derive_refineable | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |

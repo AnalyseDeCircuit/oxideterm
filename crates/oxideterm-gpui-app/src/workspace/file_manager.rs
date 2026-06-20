@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{AnchoredPositionMode, Corner, UniformListScrollHandle, anchored, deferred, prelude::*};
-use gpui_component::scroll::ScrollableElement;
 use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
 };
@@ -14,6 +13,7 @@ use oxideterm_gpui_ui::{
         dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop,
         rounded_shell_child_radius,
     },
+    scroll::ScrollableElement,
     surface::{
         color_for_background, color_with_background_scaled_alpha, tauri_glass_surface_shadow,
     },

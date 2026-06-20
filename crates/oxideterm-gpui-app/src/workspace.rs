@@ -64,7 +64,6 @@ use gpui::{
     SharedString, Styled, StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle,
     Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
-use gpui_component::scroll::ScrollableElement;
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
     CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
@@ -137,6 +136,7 @@ use oxideterm_gpui_terminal::{
     TerminalUiPreferences, TerminalUiTheme, detect_custom_privilege_prompt,
     detect_privilege_prompt,
 };
+use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},

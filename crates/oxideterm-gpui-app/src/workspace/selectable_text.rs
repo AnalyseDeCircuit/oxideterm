@@ -9,8 +9,8 @@ use gpui::{
     StatefulInteractiveElement, Styled, StyledText, TextLayout, TextRun, Timer, Window, div, font,
     prelude::FluentBuilder, px, rgb,
 };
-use gpui_component::scroll::{Scrollbar, ScrollbarAxis};
 use oxideterm_gpui_ui::{
+    scroll::{ScrollableElement, vertical_scrollbar_layer},
     tauri_ui_font_family,
     text_input::{TextInputAnchor, text_input_anchor_probe},
 };
@@ -22,7 +22,7 @@ const SELECTABLE_TEXT_AUTOSCROLL_EDGE_PX: f32 = 48.0;
 const SELECTABLE_TEXT_AUTOSCROLL_MAX_STEP_PX: f32 = 26.0;
 
 pub(crate) trait SelectableTextScrollExt:
-    StatefulInteractiveElement + gpui_component::scroll::ScrollableElement + Sized
+    StatefulInteractiveElement + ScrollableElement + Sized
 {
     fn selectable_overflow_y_scroll(self, handle: &ScrollHandle) -> Self {
         self.overflow_y_scroll().track_scroll(handle)
@@ -35,10 +35,8 @@ pub(crate) trait SelectableTextScrollExt:
     }
 }
 
-impl<T> SelectableTextScrollExt for T where
-    T: StatefulInteractiveElement + gpui_component::scroll::ScrollableElement + Sized
-{
-}
+impl<T> SelectableTextScrollExt for T where T: StatefulInteractiveElement + ScrollableElement + Sized
+{}
 
 pub(crate) fn selectable_vertical_scrollbar_layer(
     id: impl Into<ElementId>,
@@ -46,14 +44,7 @@ pub(crate) fn selectable_vertical_scrollbar_layer(
 ) -> AnyElement {
     // Keep scrollbar chrome outside the scrolled content tree; otherwise the
     // thumb is translated with the page and disappears while dragging down.
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .bottom_0()
-        .child(Scrollbar::new(handle).id(id).axis(ScrollbarAxis::Vertical))
-        .into_any_element()
+    vertical_scrollbar_layer(id, handle)
 }
 
 #[derive(Clone)]

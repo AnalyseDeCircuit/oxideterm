@@ -55,7 +55,7 @@ pub(crate) struct TerminalElement {
     row_timestamps: Option<Arc<HashMap<i64, String>>>,
     layout_cache: Option<Arc<Mutex<TerminalLayoutCache>>>,
     viewport_rows: usize,
-    viewport_display_offset: usize,
+    scrollbar_display_offset: f32,
     scroll_y_offset: Pixels,
 }
 
@@ -344,7 +344,7 @@ impl TerminalElement {
         input: Option<TerminalElementInput>,
     ) -> Self {
         let viewport_rows = snapshot.rows;
-        let viewport_display_offset = snapshot.display_offset;
+        let scrollbar_display_offset = snapshot.display_offset as f32;
         Self {
             snapshot,
             rendered_images,
@@ -367,7 +367,7 @@ impl TerminalElement {
             ghost_text: None,
             layout_cache: None,
             viewport_rows,
-            viewport_display_offset,
+            scrollbar_display_offset,
             scroll_y_offset: px(0.0),
         }
     }
@@ -405,8 +405,8 @@ impl TerminalElement {
         self
     }
 
-    pub(crate) fn viewport_display_offset(mut self, display_offset: usize) -> Self {
-        self.viewport_display_offset = display_offset;
+    pub(crate) fn scrollbar_display_offset(mut self, display_offset_rows: f32) -> Self {
+        self.scrollbar_display_offset = display_offset_rows;
         self
     }
 
@@ -510,11 +510,11 @@ impl TerminalElement {
         let mut text_runs = Vec::new();
         let mut timestamp_runs = Vec::new();
         let mut cursor = None;
-        let scrollbar = terminal_scrollbar_for_viewport(
+        let scrollbar = terminal_scrollbar_for_viewport_display_offset(
             &self.snapshot,
             &self.metrics,
             self.viewport_rows,
-            self.viewport_display_offset,
+            self.scrollbar_display_offset,
         );
         let terminal_background = terminal_background(&self.theme);
         let cursor_row_visible = visible_rows.contains(&self.snapshot.cursor_row);

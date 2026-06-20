@@ -883,8 +883,8 @@ impl WorkspaceApp {
             loop {
                 Timer::after(Duration::from_millis(530)).await;
                 // Keep the workspace polling loop tied to the WorkspaceApp entity itself.
-                // The window root is gpui_component::Root<WorkspaceApp>, so downcasting a
-                // window handle to WorkspaceApp is not valid during startup.
+                // Startup may still be between window construction and active workspace
+                // restoration, so use the captured weak entity instead of the window root.
                 if cx
                     .update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {

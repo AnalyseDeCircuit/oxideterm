@@ -17,6 +17,7 @@ pub mod menu;
 pub mod modal;
 pub mod progress;
 pub mod radio_group;
+pub mod scroll;
 pub mod select;
 pub mod separator;
 pub mod slider;

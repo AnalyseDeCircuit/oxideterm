@@ -12,7 +12,6 @@ path = "src/main.rs"
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
-gpui-component.workspace = true
 gpui.workspace = true
 image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
