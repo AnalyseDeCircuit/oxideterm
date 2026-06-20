@@ -12,6 +12,7 @@ import {
   GitBranch,
   KeyRound,
   Pencil,
+  Pin,
   Radio,
   Search,
   Server,
@@ -60,6 +61,33 @@ import { detectPrivilegePrompt, findPrivilegeCredentialsForPrompt } from '@/lib/
 import type { SavedPrivilegeCredential } from '@/types';
 
 const LOCAL_SHELL_PRIVILEGE_CONNECTION_ID = 'local-shell:default';
+
+type QuickCommandRunCompletion = {
+  quickCommandsOpen: boolean;
+  shouldFocusInput: boolean;
+};
+
+export function resolveQuickCommandRunCompletion(
+  keepOpen: boolean,
+  didSubmit: boolean,
+  shouldHandOffFocus: boolean,
+): QuickCommandRunCompletion {
+  if (keepOpen) {
+    // Pin mode turns Quick Commands into a repeatable launcher. Keep the
+    // palette visible even if a confirmation modal or focus handoff ran first.
+    return { quickCommandsOpen: true, shouldFocusInput: false };
+  }
+  return {
+    quickCommandsOpen: false,
+    shouldFocusInput: !didSubmit || !shouldHandOffFocus,
+  };
+}
+
+export function resolveQuickCommandInsertCompletion(keepOpen: boolean): QuickCommandRunCompletion {
+  // Insert uses the command bar as the next keyboard owner. Pin only controls
+  // whether the palette remains visible after the row body is clicked.
+  return { quickCommandsOpen: keepOpen, shouldFocusInput: true };
+}
 
 type TerminalCommandBarProps = {
   paneId: string;
@@ -240,7 +268,7 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
     focusTerminal();
   }, [focusTerminal, openConnectionEditor, privilegeScopeId, t]);
 
-  const runCommand = useCallback(async (command: string) => {
+  const runCommand = useCallback(async (command: string, keepOpen = false) => {
     const risk = classifyCommandRisk(command);
     if (quickCommandSettings.quickCommandsConfirmBeforeRun || risk === 'high' || risk === 'medium') {
       const confirmed = await confirm({
@@ -261,8 +289,13 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
         variant: 'success',
       });
     }
-    setQuickCommandsOpen(false);
-    if (!didSubmit || !shouldHandOffFocusToTerminal(command, quickCommandSettings.focusHandoffCommands)) {
+    const completion = resolveQuickCommandRunCompletion(
+      keepOpen,
+      didSubmit,
+      shouldHandOffFocusToTerminal(command, quickCommandSettings.focusHandoffCommands),
+    );
+    setQuickCommandsOpen(completion.quickCommandsOpen);
+    if (completion.shouldFocusInput) {
       inputRef.current?.focus();
     }
   }, [confirm, quickCommandSettings.focusHandoffCommands, quickCommandSettings.quickCommandsConfirmBeforeRun, quickCommandSettings.quickCommandsShowToast, submitCommand, t]);
@@ -445,13 +478,16 @@ export const TerminalCommandBar: React.FC<TerminalCommandBarProps> = (props) => 
         <QuickCommandsPopover
           targetLabel={state.targetLabel}
           cwdHost={null}
-          onInsert={(command) => {
+          onInsert={(command, keepOpen) => {
             state.setValue(command);
             state.setCursorIndex(command.length);
-            setQuickCommandsOpen(false);
-            inputRef.current?.focus();
+            const completion = resolveQuickCommandInsertCompletion(keepOpen);
+            setQuickCommandsOpen(completion.quickCommandsOpen);
+            if (completion.shouldFocusInput) {
+              inputRef.current?.focus();
+            }
           }}
-          onRun={(command) => void runCommand(command)}
+          onRun={(command, keepOpen) => void runCommand(command, keepOpen)}
           onClose={() => {
             setQuickCommandsOpen(false);
             inputRef.current?.focus();
@@ -699,8 +735,8 @@ const TerminalCommandBarChips: React.FC<ChipsProps> = ({
 type QuickCommandsPopoverProps = {
   targetLabel: string;
   cwdHost?: string | null;
-  onInsert: (command: string) => void;
-  onRun: (command: string) => void;
+  onInsert: (command: string, keepOpen: boolean) => void;
+  onRun: (command: string, keepOpen: boolean) => void;
   onClose: () => void;
 };
 
@@ -718,6 +754,7 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
   const [editingCategory, setEditingCategory] = useState<QuickCommandCategory | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [keepOpen, setKeepOpen] = useState(false);
 
   const targetFields = useMemo(() => [targetLabel, cwdHost], [cwdHost, targetLabel]);
   const filteredCommands = useMemo(() => {
@@ -771,6 +808,24 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
             {t('terminal.quick_commands.title')}
           </span>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setKeepOpen((current) => !current);
+              }}
+              className={cn(
+                'rounded p-1 hover:bg-theme-bg-hover',
+                keepOpen
+                  ? 'bg-theme-accent/10 text-theme-accent hover:text-theme-accent'
+                  : 'text-theme-text-muted hover:text-theme-text',
+              )}
+              title={t(keepOpen ? 'terminal.quick_commands.unpin' : 'terminal.quick_commands.pin')}
+              aria-label={t(keepOpen ? 'terminal.quick_commands.unpin' : 'terminal.quick_commands.pin')}
+              aria-pressed={keepOpen}
+            >
+              <Pin className="h-3.5 w-3.5" />
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -889,8 +944,8 @@ const QuickCommandsPopover: React.FC<QuickCommandsPopoverProps> = ({ targetLabel
                 <QuickCommandRow
                   key={command.id}
                   command={command}
-                  onInsert={() => onInsert(command.command)}
-                  onRun={() => onRun(command.command)}
+                  onInsert={() => onInsert(command.command, keepOpen)}
+                  onRun={() => onRun(command.command, keepOpen)}
                   onEdit={() => startEdit(command)}
                   onDelete={() => deleteCommand(command.id)}
                 />

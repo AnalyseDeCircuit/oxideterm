@@ -152,4 +152,21 @@ describe('quickCommandsStore', () => {
       && command.command === 'ls -lah'
     ))).toBe(true);
   });
+
+  it('does not duplicate built-in groups when a default snapshot is imported with rename', () => {
+    const result = applyImportedQuickCommandsSnapshot(JSON.stringify({
+      version: 1,
+      categories: DEFAULT_QUICK_COMMAND_CATEGORIES,
+      commands: DEFAULT_QUICK_COMMANDS,
+      updatedAt: 1,
+    }), 'rename');
+    const state = useQuickCommandsStore.getState();
+
+    expect(result.errors).toEqual([]);
+    expect(result.imported).toBe(0);
+    expect(state.categories).toHaveLength(DEFAULT_QUICK_COMMAND_CATEGORIES.length);
+    expect(state.commands).toHaveLength(DEFAULT_QUICK_COMMANDS.length);
+    expect(state.categories.filter((category) => category.id === 'system')).toHaveLength(1);
+    expect(state.categories.some((category) => category.name.includes('(Imported)'))).toBe(false);
+  });
 });

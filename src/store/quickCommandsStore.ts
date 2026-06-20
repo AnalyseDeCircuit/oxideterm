@@ -13,6 +13,7 @@ const MAX_NAME_LEN = 160;
 const MAX_COMMAND_LEN = 4096;
 const MAX_DESCRIPTION_LEN = 1024;
 const MAX_HOST_PATTERN_LEN = 256;
+const BUILTIN_CATEGORY_IDS = new Set(['system', 'network', 'files', 'docker', 'custom']);
 
 export type QuickCommandIcon = 'terminal' | 'server' | 'folder' | 'docker' | 'zap';
 export type QuickCommandImportStrategy = 'rename' | 'skip' | 'replace' | 'merge';
@@ -421,6 +422,15 @@ function mergeQuickCommandsSnapshot(
       continue;
     }
 
+    if (strategy === 'rename' && BUILTIN_CATEGORY_IDS.has(importedCategory.id)) {
+      // Built-in category ids are stable containers, not importable user records.
+      // Reusing the local container prevents .oxide round-trips from creating
+      // duplicate System/Network/Files groups when the global strategy is Rename.
+      categoryRemap.set(importedCategory.id, conflict.id);
+      skipped += 1;
+      continue;
+    }
+
     if (strategy === 'rename') {
       const renamed = {
         ...importedCategory,
@@ -460,6 +470,13 @@ function mergeQuickCommandsSnapshot(
       continue;
     }
 
+    if (strategy === 'rename' && sameCommandContent(conflict, commandWithCategory)) {
+      // Rename preserves distinct user commands, but exact snapshot round-trips
+      // should not duplicate the same command under a reused built-in category.
+      skipped += 1;
+      continue;
+    }
+
     if (strategy === 'rename') {
       commands = [...commands, {
         ...commandWithCategory,
@@ -491,6 +508,15 @@ function mergeQuickCommandsSnapshot(
   }
 
   return { categories, commands, imported, skipped };
+}
+
+function sameCommandContent(a: QuickCommand, b: QuickCommand): boolean {
+  return a.id === b.id
+    && a.name.trim() === b.name.trim()
+    && a.command.trim() === b.command.trim()
+    && a.category === b.category
+    && (a.description?.trim() ?? undefined) === (b.description?.trim() ?? undefined)
+    && (a.hostPattern?.trim() ?? undefined) === (b.hostPattern?.trim() ?? undefined);
 }
 
 function findCategoryConflict(categories: QuickCommandCategory[], category: QuickCommandCategory): QuickCommandCategory | undefined {

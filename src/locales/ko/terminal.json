@@ -298,7 +298,9 @@
       "icon_server": "Server",
       "icon_folder": "Folder",
       "icon_docker": "Docker",
-      "icon_zap": "Custom"
+      "icon_zap": "Custom",
+      "pin": "계속 열어 두기",
+      "unpin": "실행 후 닫기"
     },
     "privilege_helper": {
       "fill": "비밀번호 입력",

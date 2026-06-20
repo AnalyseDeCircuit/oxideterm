@@ -298,7 +298,9 @@
       "icon_server": "Server",
       "icon_folder": "Folder",
       "icon_docker": "Docker",
-      "icon_zap": "Custom"
+      "icon_zap": "Custom",
+      "pin": "Offen halten",
+      "unpin": "Nach Ausführen schließen"
     },
     "privilege_helper": {
       "fill": "Passwort einfügen",

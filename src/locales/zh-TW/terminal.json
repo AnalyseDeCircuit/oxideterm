@@ -298,7 +298,9 @@
       "icon_server": "服务器",
       "icon_folder": "文件夹",
       "icon_docker": "Docker",
-      "icon_zap": "自定义"
+      "icon_zap": "自定义",
+      "pin": "固定面板",
+      "unpin": "執行後關閉"
     },
     "privilege_helper": {
       "fill": "填入密碼",
