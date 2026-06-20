@@ -298,6 +298,11 @@ impl WorkspaceApp {
             return true;
         }
 
+        if self.close_terminal_cwd_picker() {
+            cx.notify();
+            return true;
+        }
+
         if self.close_terminal_git_branch_picker() {
             cx.notify();
             return true;
@@ -351,6 +356,7 @@ impl WorkspaceApp {
         self.dismiss_terminal_broadcast_menu();
         if should_open {
             self.close_terminal_quick_commands_popover();
+            self.close_terminal_cwd_picker();
             self.close_terminal_git_branch_picker();
             self.terminal_command_suggestions_open = false;
             self.terminal_command_suggestion_highlighted = None;
@@ -493,6 +499,10 @@ impl WorkspaceApp {
 
         if self.terminal_quick_commands_open && self.quick_commands.focused_input.is_some() {
             self.handle_quick_commands_key(event, cx);
+            return;
+        }
+
+        if self.handle_terminal_cwd_picker_key(event, cx) {
             return;
         }
 

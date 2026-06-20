@@ -121,6 +121,7 @@ pub enum SelectAnchorId {
     IdeAgentStatus,
     TerminalBroadcastMenu,
     TerminalCommandBar,
+    TerminalCwdMenu,
     TerminalGitBranchMenu,
     TerminalCastSeekbar,
     SessionManagerViewMode,

@@ -53,6 +53,7 @@ impl WorkspaceApp {
         let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
         let (sftp_worker_tx, sftp_worker_rx) = std::sync::mpsc::channel();
         let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
+        let (terminal_cwd_tx, terminal_cwd_rx) = std::sync::mpsc::channel();
         let (terminal_git_tx, terminal_git_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = std::sync::mpsc::channel();
         let (native_plugin_confirm_tx, native_plugin_confirm_rx) = std::sync::mpsc::channel();
@@ -131,6 +132,9 @@ impl WorkspaceApp {
             terminal_broadcast_menu_open: false,
             terminal_quick_commands_open: false,
             terminal_quick_command_pending: None,
+            terminal_cwd_tx,
+            terminal_cwd_rx,
+            terminal_cwd_picker: terminal_cwd::TerminalCwdPickerState::default(),
             terminal_git_store: oxideterm_environment::GitStatusStore::default(),
             terminal_git_tx,
             terminal_git_rx,
@@ -901,6 +905,7 @@ impl WorkspaceApp {
                             workspace.poll_host_schedule_logs_results(cx);
                             workspace.poll_host_schedule_action_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
+                            workspace.poll_terminal_cwd_results(cx);
                             workspace.poll_terminal_git_results(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);

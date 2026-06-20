@@ -146,6 +146,17 @@
       "icon_docker": "Docker",
       "icon_zap": "自定义"
     },
+    "cwd": {
+      "search_directories": "搜索目录...",
+      "loading": "正在加载目录...",
+      "no_directories": "没有匹配的目录",
+      "unavailable": "当前工作目录不可用。",
+      "remote_list_failed": "无法加载远程目录。",
+      "parent_directory": "..（上级目录）",
+      "enter_directory": "进入目录",
+      "go_to_path": "跳转到路径",
+      "inferred": "推断"
+    },
     "git": {
       "search_branches": "搜索分支...",
       "loading_branches": "正在加载分支...",

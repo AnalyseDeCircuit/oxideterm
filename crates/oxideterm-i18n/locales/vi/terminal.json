@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "cwd": {
+      "search_directories": "Tìm thư mục...",
+      "loading": "Đang tải thư mục...",
+      "no_directories": "Không có thư mục phù hợp",
+      "unavailable": "Không có thư mục làm việc hiện tại.",
+      "remote_list_failed": "Không thể tải thư mục từ xa.",
+      "parent_directory": ".. (Thư mục cha)",
+      "enter_directory": "Vào thư mục",
+      "go_to_path": "Đi tới đường dẫn",
+      "inferred": "suy luận"
+    },
     "git": {
       "search_branches": "Tìm nhánh...",
       "loading_branches": "Đang tải nhánh...",

@@ -585,6 +585,8 @@ impl WorkspaceApp {
                 && self.terminal_broadcast_menu_open)
             || (anchor.id == SelectAnchorId::TerminalCommandBar
                 && self.terminal_quick_commands_open)
+            || (anchor.id == SelectAnchorId::TerminalCwdMenu
+                && self.terminal_cwd_picker.open)
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
                 && self.terminal_git_branch_picker.open)
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
@@ -1367,6 +1369,7 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             // width against the command bar. Keep the bar rect warm so the
             // first open and later resizes can compute the same adaptive width.
             | SelectAnchorId::TerminalCommandBar
+            | SelectAnchorId::TerminalCwdMenu
             | SelectAnchorId::TerminalGitBranchMenu
             | SelectAnchorId::TerminalCastSeekbar
             // Session Manager toolbar menus use window-anchored overlays, so

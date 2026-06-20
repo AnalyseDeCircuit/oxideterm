@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "cwd": {
+      "search_directories": "Verzeichnisse suchen...",
+      "loading": "Verzeichnisse werden geladen...",
+      "no_directories": "Keine passenden Verzeichnisse",
+      "unavailable": "Aktuelles Arbeitsverzeichnis ist nicht verfügbar.",
+      "remote_list_failed": "Entfernte Verzeichnisse konnten nicht geladen werden.",
+      "parent_directory": ".. (Übergeordnetes Verzeichnis)",
+      "enter_directory": "Verzeichnis öffnen",
+      "go_to_path": "Zu Pfad wechseln",
+      "inferred": "abgeleitet"
+    },
     "git": {
       "search_branches": "Branches suchen...",
       "loading_branches": "Branches werden geladen...",

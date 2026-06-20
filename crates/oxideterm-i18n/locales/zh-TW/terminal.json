@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "自定义"
     },
+    "cwd": {
+      "search_directories": "搜尋目錄...",
+      "loading": "正在載入目錄...",
+      "no_directories": "沒有符合的目錄",
+      "unavailable": "目前工作目錄不可用。",
+      "remote_list_failed": "無法載入遠端目錄。",
+      "parent_directory": "..（上層目錄）",
+      "enter_directory": "進入目錄",
+      "go_to_path": "前往路徑",
+      "inferred": "推斷"
+    },
     "git": {
       "search_branches": "搜尋分支...",
       "loading_branches": "正在載入分支...",

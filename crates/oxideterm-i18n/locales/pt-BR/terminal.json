@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "cwd": {
+      "search_directories": "Pesquisar diretórios...",
+      "loading": "Carregando diretórios...",
+      "no_directories": "Nenhum diretório correspondente",
+      "unavailable": "O diretório de trabalho atual não está disponível.",
+      "remote_list_failed": "Não foi possível carregar diretórios remotos.",
+      "parent_directory": ".. (Diretório pai)",
+      "enter_directory": "Entrar no diretório",
+      "go_to_path": "Ir para caminho",
+      "inferred": "inferido"
+    },
     "git": {
       "search_branches": "Buscar branches...",
       "loading_branches": "Carregando branches...",

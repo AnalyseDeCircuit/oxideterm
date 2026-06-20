@@ -7,9 +7,15 @@
 //! probing. It deliberately avoids GPUI, terminal panes, SSH handles, and
 //! process spawning so UI/backend owners can provide their own execution path.
 
+pub mod cwd;
 pub mod git;
 pub mod terminal_context;
 
+pub use cwd::{
+    CurrentDirectoryEntry, CurrentDirectoryKey, CurrentDirectoryScope, CurrentDirectorySnapshot,
+    CurrentDirectorySource, current_directory_cd_command, current_directory_parent,
+    current_directory_report_command,
+};
 pub use git::{
     GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath, GitCommandOutput,
     GitOperationKind, GitProbeCommandArgs, GitProbeEntry, GitProbeError, GitProbeKey,

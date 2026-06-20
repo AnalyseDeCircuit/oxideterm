@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "cwd": {
+      "search_directories": "ディレクトリを検索...",
+      "loading": "ディレクトリを読み込み中...",
+      "no_directories": "一致するディレクトリはありません",
+      "unavailable": "現在の作業ディレクトリを取得できません。",
+      "remote_list_failed": "リモートディレクトリを読み込めませんでした。",
+      "parent_directory": ".. (親ディレクトリ)",
+      "enter_directory": "ディレクトリに入る",
+      "go_to_path": "パスへ移動",
+      "inferred": "推定"
+    },
     "git": {
       "search_branches": "ブランチを検索...",
       "loading_branches": "ブランチを読み込み中...",

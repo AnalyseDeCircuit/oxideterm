@@ -146,6 +146,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "cwd": {
+      "search_directories": "Search directories...",
+      "loading": "Loading directories...",
+      "no_directories": "No matching directories",
+      "unavailable": "Current working directory is unavailable.",
+      "remote_list_failed": "Could not load remote directories.",
+      "parent_directory": ".. (Parent Directory)",
+      "enter_directory": "Enter directory",
+      "go_to_path": "Go to path",
+      "inferred": "inferred"
+    },
     "git": {
       "search_branches": "Search branches...",
       "loading_branches": "Loading branches...",

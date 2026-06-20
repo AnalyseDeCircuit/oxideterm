@@ -5,7 +5,7 @@ use super::terminal_git::{
 };
 use super::*;
 use oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID;
-use oxideterm_environment::{GitChangedPath, GitRepositoryStatus};
+use oxideterm_environment::{CurrentDirectorySnapshot, GitChangedPath, GitRepositoryStatus};
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuActionableStyle, context_menu_event_boundary, context_menu_pointer_event_boundary,
@@ -20,6 +20,9 @@ use oxideterm_terminal_recording::format_recording_elapsed;
 pub(in crate::workspace) mod completion;
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 260.0;
+const TERMINAL_CWD_MENU_WIDTH: f32 = 520.0;
+const TERMINAL_CWD_MENU_MAX_HEIGHT: f32 = 420.0;
+const TERMINAL_CWD_MENU_MARGIN: f32 = 12.0;
 const TERMINAL_GIT_BRANCH_MENU_WIDTH: f32 = 720.0;
 const TERMINAL_GIT_BRANCH_MENU_BODY_MAX_HEIGHT: f32 = 520.0;
 const TERMINAL_GIT_BRANCH_MENU_MARGIN: f32 = 12.0;
@@ -362,6 +365,434 @@ impl WorkspaceApp {
             listener,
             cx,
         )
+    }
+
+    fn render_terminal_target_indicator(
+        &self,
+        target_label: String,
+        is_local_terminal: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let tooltip_id = "terminal-command-target-indicator";
+        let icon = if is_local_terminal {
+            LucideIcon::Terminal
+        } else {
+            LucideIcon::Server
+        };
+
+        div()
+            .h(px(20.0))
+            .min_w(px(28.0))
+            .flex_none()
+            .px(px(6.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .bg(rgba((theme.bg_hover << 8) | 0x4d))
+            .text_color(rgb(theme.text_muted))
+            .id(tooltip_id)
+            .on_mouse_move({
+                let title = target_label.clone();
+                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id,
+                        title.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                })
+            })
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(tooltip_id, cx);
+                }
+            }))
+            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
+            .into_any_element()
+    }
+
+    fn render_terminal_cwd_chip(
+        &self,
+        snapshot: Option<CurrentDirectorySnapshot>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.terminal_cwd_picker.open;
+        let workspace = cx.entity();
+        let path = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.path().to_string())
+            .unwrap_or_else(|| "...".to_string());
+        select_anchor_probe(
+            SelectAnchorId::TerminalCwdMenu,
+            div()
+                .h(px(20.0))
+                .max_w(px(260.0))
+                .flex_none()
+                .px(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(if active {
+                    rgba((theme.accent << 8) | 0x99)
+                } else {
+                    rgba((theme.border << 8) | 0x80)
+                })
+                .bg(if active {
+                    rgba((theme.accent << 8) | 0x1f)
+                } else {
+                    rgba((theme.bg_hover << 8) | 0x66)
+                })
+                .text_size(px(11.0))
+                .font_family(settings_mono_font_family(self.settings_store.settings()))
+                .text_color(if active {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text)
+                })
+                .cursor_pointer()
+                .hover(move |style| style.bg(rgb(theme.bg_hover)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        if this.terminal_cwd_picker.open {
+                            this.close_terminal_cwd_picker();
+                        } else {
+                            this.open_terminal_cwd_picker(cx);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(Self::render_lucide_icon(
+                    LucideIcon::Folder,
+                    12.0,
+                    if active {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.text_muted)
+                    },
+                ))
+                .child(div().min_w(px(0.0)).truncate().child(path)),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_terminal_cwd_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let left = self.terminal_cwd_picker_left();
+        let bottom = if self.terminal_command_input_collapsed {
+            32.0
+        } else {
+            64.0
+        };
+        let mut panel = context_menu_pointer_event_boundary(
+            div()
+                .absolute()
+                .bottom(px(bottom))
+                .left(px(left))
+                .w(px(TERMINAL_CWD_MENU_WIDTH))
+                .max_w(relative(0.96))
+                .overflow_hidden()
+                .rounded(px(self.tokens.radii.lg))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgba((theme.bg_elevated << 8) | 0xf5))
+                .shadow_lg()
+                .occlude()
+                .p(px(8.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .text_size(px(12.0))
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                    cx.stop_propagation();
+                }),
+        )
+        .child(self.render_terminal_cwd_search(cx));
+
+        if let Some(path) = self.terminal_cwd_browse_path() {
+            panel = panel.child(self.render_terminal_cwd_context_row(path.to_string()));
+        }
+
+        let body = if self.terminal_cwd_picker.loading {
+            self.render_terminal_cwd_message(
+                LucideIcon::LoaderCircle,
+                self.i18n.t("terminal.cwd.loading"),
+            )
+        } else if let Some(error) = self.terminal_cwd_picker.error.clone() {
+            self.render_terminal_cwd_message(LucideIcon::AlertCircle, error)
+        } else {
+            let visible = self.visible_terminal_cwd_entries();
+            if visible.is_empty() {
+                self.render_terminal_cwd_message(
+                    LucideIcon::Search,
+                    self.i18n.t("terminal.cwd.no_directories"),
+                )
+            } else {
+                let mut list = div().flex().flex_col().gap(px(2.0));
+                for entry in visible {
+                    list = list.child(self.render_terminal_cwd_entry_row(entry, cx));
+                }
+                div()
+                    .min_h(px(0.0))
+                    .max_h(px(TERMINAL_CWD_MENU_MAX_HEIGHT))
+                    .overflow_y_scrollbar()
+                    .child(list)
+                    .into_any_element()
+            }
+        };
+
+        panel.child(body).into_any_element()
+    }
+
+    fn render_terminal_cwd_context_row(&self, path: String) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .bg(rgba((theme.bg_panel << 8) | 0x70))
+            .px(px(10.0))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(Self::render_lucide_icon(
+                LucideIcon::FolderOpen,
+                14.0,
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_color(rgb(theme.text))
+                    .child(path),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_cwd_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = WorkspaceImeTarget::TerminalCwdSearch;
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &self.terminal_cwd_picker.query,
+                    placeholder: self.i18n.t("terminal.cwd.search_directories"),
+                    focused: self.terminal_cwd_picker.open,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .h(px(32.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.ime_marked_text = None;
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            )),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_terminal_cwd_entry_row(
+        &self,
+        entry: terminal_cwd::TerminalCwdVisibleEntry,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.terminal_cwd_picker.highlighted_path.as_deref() == Some(&entry.path);
+        let (icon, label, accent) = match entry.kind {
+            terminal_cwd::TerminalCwdVisibleEntryKind::Parent => (
+                LucideIcon::ArrowUp,
+                self.i18n.t("terminal.cwd.parent_directory"),
+                rgb(theme.text_muted),
+            ),
+            terminal_cwd::TerminalCwdVisibleEntryKind::Directory => {
+                (LucideIcon::Folder, entry.name.clone(), rgb(theme.text))
+            }
+            terminal_cwd::TerminalCwdVisibleEntryKind::TypedPath => (
+                LucideIcon::CornerDownLeft,
+                self.i18n.t("terminal.cwd.go_to_path"),
+                rgb(theme.accent),
+            ),
+        };
+        let path = entry.path.clone();
+        let browse_path = path.clone();
+        let browse_tooltip_id = format!("terminal-cwd-enter-{browse_path}");
+        let browse_tooltip_label = self.i18n.t("terminal.cwd.enter_directory");
+        let can_browse = matches!(
+            entry.kind,
+            terminal_cwd::TerminalCwdVisibleEntryKind::Parent
+                | terminal_cwd::TerminalCwdVisibleEntryKind::Directory
+        );
+        div()
+            .min_h(px(34.0))
+            .rounded(px(self.tokens.radii.md))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .bg(if active {
+                rgba((theme.accent << 8) | 0x26)
+            } else {
+                rgba(0x00000000)
+            })
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgb(theme.bg_hover)))
+            .on_mouse_move(cx.listener({
+                let path = path.clone();
+                move |this, _event: &gpui::MouseMoveEvent, _window, cx| {
+                    if this.terminal_cwd_picker.highlighted_path.as_deref() != Some(&path) {
+                        this.terminal_cwd_picker.highlighted_path = Some(path.clone());
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                    this.terminal_cwd_picker.highlighted_path = Some(path.clone());
+                    if event.click_count >= 2 {
+                        this.select_terminal_cwd_path(path.clone(), cx);
+                    } else {
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .child(Self::render_lucide_icon(icon, 13.0, accent))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_color(if active { rgb(theme.accent) } else { accent })
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(10.0))
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_color(rgb(theme.text_muted))
+                            .child(entry.path),
+                    ),
+            )
+            .when(can_browse, |row| {
+                row.child(
+                    div()
+                        .size(px(24.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(self.tokens.radii.md))
+                        .text_color(rgb(theme.text_muted))
+                        .id(browse_tooltip_id.clone())
+                        .hover(move |style| style.bg(rgba((theme.bg_hover << 8) | 0xb3)))
+                        .on_mouse_move({
+                            let tooltip_id = browse_tooltip_id.clone();
+                            let tooltip_label = browse_tooltip_label.clone();
+                            cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                                this.queue_workspace_tooltip(
+                                    tooltip_id.clone(),
+                                    tooltip_label.clone(),
+                                    f32::from(event.position.x) + 12.0,
+                                    f32::from(event.position.y) + 16.0,
+                                    cx,
+                                );
+                            })
+                        })
+                        .on_hover(cx.listener({
+                            let tooltip_id = browse_tooltip_id.clone();
+                            move |this, hovered: &bool, _window, cx| {
+                                if !*hovered {
+                                    this.clear_workspace_tooltip(&tooltip_id, cx);
+                                }
+                            }
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.enter_terminal_cwd_directory(browse_path.clone(), cx);
+                                this.clear_workspace_tooltip(&browse_tooltip_id, cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::ChevronRight,
+                            13.0,
+                            rgb(theme.text_muted),
+                        )),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_terminal_cwd_message(&self, icon: LucideIcon, message: String) -> AnyElement {
+        div()
+            .min_h(px(72.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .bg(rgba((self.tokens.ui.bg_panel << 8) | 0x4d))
+            .p(px(10.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(Self::render_lucide_icon(
+                icon,
+                14.0,
+                rgb(self.tokens.ui.text_muted),
+            ))
+            .child(message)
+            .into_any_element()
     }
 
     fn render_terminal_git_chip(
@@ -1983,6 +2414,20 @@ impl WorkspaceApp {
         desired.clamp(TERMINAL_GIT_BRANCH_MENU_MARGIN, max_left)
     }
 
+    fn terminal_cwd_picker_left(&self) -> f32 {
+        let Some(chip) = self.select_anchors.get(&SelectAnchorId::TerminalCwdMenu) else {
+            return TERMINAL_CWD_MENU_MARGIN;
+        };
+        let Some(bar) = self.select_anchors.get(&SelectAnchorId::TerminalCommandBar) else {
+            return TERMINAL_CWD_MENU_MARGIN;
+        };
+        let bar_width = f32::from(bar.bounds.size.width);
+        let desired = f32::from(chip.bounds.left() - bar.bounds.left());
+        let max_left = (bar_width - TERMINAL_CWD_MENU_WIDTH - TERMINAL_CWD_MENU_MARGIN)
+            .max(TERMINAL_CWD_MENU_MARGIN);
+        desired.clamp(TERMINAL_CWD_MENU_MARGIN, max_left)
+    }
+
     fn active_privilege_scope_credentials(
         &self,
     ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
@@ -2404,11 +2849,15 @@ impl WorkspaceApp {
         // inference so local shells that are currently inside SSH show the
         // remote identity consistently in both places.
         let target_label = self.terminal_command_active_target_label(cx);
+        let cwd_snapshot = self.active_terminal_cwd_snapshot(cx);
+        let cwd_supported = self.active_terminal_cwd_scope_and_pane().is_some();
         let git_snapshot = self.active_terminal_git_snapshot(cx);
         let active_pane_id = self.active_pane_id();
         let is_local_terminal = self
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal);
+        let target_indicator_is_local =
+            is_local_terminal && target_label == self.i18n.t("terminal.command_bar.local_shell");
         let can_split = self.active_tab().is_some_and(|tab| {
             tab.kind == TabKind::LocalTerminal
                 && !self.active_tab_has_serial_terminal()
@@ -2474,6 +2923,9 @@ impl WorkspaceApp {
             .when(self.terminal_git_branch_picker.open, |bar| {
                 bar.child(self.render_terminal_git_branch_picker(cx))
             })
+            .when(self.terminal_cwd_picker.open, |bar| {
+                bar.child(self.render_terminal_cwd_picker(cx))
+            })
             .child(
                 div()
                     .min_h(px(24.0))
@@ -2513,6 +2965,7 @@ impl WorkspaceApp {
                                             this.terminal_command_suggestions_open = false;
                                             this.terminal_command_suggestion_highlighted = None;
                                             this.close_terminal_quick_commands_popover();
+                                            this.close_terminal_cwd_picker();
                                         }
                                         this.clear_workspace_tooltip(input_toggle_tooltip_id, cx);
                                         cx.stop_propagation();
@@ -2544,14 +2997,14 @@ impl WorkspaceApp {
                                     },
                                 )),
                             )
-                            .child(
-                                div()
-                                    .min_w(px(0.0))
-                                    .truncate()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(target_label),
-                            )
+                            .child(self.render_terminal_target_indicator(
+                                target_label,
+                                target_indicator_is_local,
+                                cx,
+                            ))
+                            .when(cwd_supported, |row| {
+                                row.child(self.render_terminal_cwd_chip(cwd_snapshot, cx))
+                            })
                             .when_some(git_snapshot, |row, snapshot| {
                                 row.child(self.render_terminal_git_chip(snapshot, cx))
                             }),
@@ -2948,6 +3401,7 @@ impl WorkspaceApp {
                                             this.terminal_quick_commands_open =
                                                 !this.terminal_quick_commands_open;
                                             this.dismiss_terminal_broadcast_menu();
+                                            this.close_terminal_cwd_picker();
                                             this.close_terminal_git_branch_picker();
                                             if !this.terminal_quick_commands_open {
                                                 this.close_terminal_quick_commands_popover();

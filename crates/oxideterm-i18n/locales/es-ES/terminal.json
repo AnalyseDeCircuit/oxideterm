@@ -136,6 +136,17 @@
       "icon_docker": "Docker",
       "icon_zap": "Custom"
     },
+    "cwd": {
+      "search_directories": "Buscar directorios...",
+      "loading": "Cargando directorios...",
+      "no_directories": "No hay directorios coincidentes",
+      "unavailable": "El directorio de trabajo actual no está disponible.",
+      "remote_list_failed": "No se pudieron cargar los directorios remotos.",
+      "parent_directory": ".. (Directorio superior)",
+      "enter_directory": "Entrar al directorio",
+      "go_to_path": "Ir a ruta",
+      "inferred": "inferido"
+    },
     "git": {
       "search_branches": "Buscar ramas...",
       "loading_branches": "Cargando ramas...",

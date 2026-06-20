@@ -34,6 +34,7 @@ pub(super) enum WorkspaceImeTarget {
     ShortcutsModalSearch,
     Search,
     TerminalCommandBar,
+    TerminalCwdSearch,
     TerminalGitBranchSearch,
     TerminalCastSearch,
     HostProcessSearch,
@@ -92,6 +93,7 @@ impl WorkspaceImeTarget {
             Self::ShortcutsModalSearch => 5,
             Self::Search => 1,
             Self::TerminalCommandBar => 2,
+            Self::TerminalCwdSearch => 18,
             Self::TerminalGitBranchSearch => 17,
             Self::TerminalCastSearch => 3,
             Self::HostProcessSearch => 6,
@@ -489,6 +491,10 @@ impl WorkspaceApp {
             && let Some(input) = self.quick_commands.focused_input
         {
             return Some(WorkspaceImeTarget::QuickCommand(input));
+        }
+
+        if self.terminal_cwd_picker.open {
+            return Some(WorkspaceImeTarget::TerminalCwdSearch);
         }
 
         if self.terminal_git_branch_picker.open {
@@ -1176,6 +1182,10 @@ impl WorkspaceApp {
             WorkspaceImeTarget::TerminalCommandBar => self
                 .terminal_command_bar_focused
                 .then(|| self.terminal_command_bar_draft.clone()),
+            WorkspaceImeTarget::TerminalCwdSearch => self
+                .terminal_cwd_picker
+                .open
+                .then(|| self.terminal_cwd_picker.query.clone()),
             WorkspaceImeTarget::TerminalGitBranchSearch => self
                 .terminal_git_branch_picker
                 .open
@@ -1879,6 +1889,14 @@ impl WorkspaceApp {
                     );
                     self.terminal_command_suggestions_open = false;
                     self.terminal_command_suggestion_highlighted = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TerminalCwdSearch => {
+                if self.terminal_cwd_picker.open {
+                    replace_utf16(&mut self.terminal_cwd_picker.query, replacement_range, text);
+                    self.terminal_cwd_picker.highlighted_path = None;
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

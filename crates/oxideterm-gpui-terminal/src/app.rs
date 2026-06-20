@@ -791,6 +791,29 @@ impl TerminalPane {
         self.send_text(&input, cx);
     }
 
+    pub fn send_internal_control_command_line(
+        &mut self,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if command.trim().is_empty() || !self.terminal_accepts_input() {
+            return false;
+        }
+
+        let mut input = command.replace("\r\n", "\r").replace('\n', "\r");
+        input.push('\r');
+        // Internal control commands are terminal-owned probes. They must not be
+        // learned as user history, autosuggest input, privilege commands, or AI
+        // context, even though the shell may still echo the bytes visibly.
+        if self.terminal.lock().write_text(&input).is_ok() {
+            self.last_terminal_input = Instant::now();
+            self.reset_cursor_blink();
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
     pub fn send_ai_input_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         if bytes.is_empty() || !self.terminal_accepts_input() {
             return;
