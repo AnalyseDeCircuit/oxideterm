@@ -147,6 +147,17 @@
       "go_to_path": "前往路徑",
       "inferred": "推斷"
     },
+    "project": {
+      "search_tasks": "搜尋專案任務...",
+      "no_project": "未偵測到專案。",
+      "no_tasks": "沒有符合的專案任務",
+      "group_develop": "開發",
+      "group_test": "測試",
+      "group_build": "建置",
+      "group_run": "執行",
+      "group_docker": "Docker",
+      "group_custom": "自訂"
+    },
     "git": {
       "search_branches": "搜尋分支...",
       "loading_branches": "正在載入分支...",

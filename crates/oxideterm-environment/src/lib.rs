@@ -9,6 +9,7 @@
 
 pub mod cwd;
 pub mod git;
+pub mod project;
 pub mod terminal_context;
 
 pub use cwd::{
@@ -29,5 +30,13 @@ pub use git::{
     parse_git_operation_kind, parse_git_status_summary, parse_shell_branch_list_output,
     parse_shell_probe_output, parse_shell_staged_diff_output, remote_shell_branch_list_command,
     remote_shell_probe_command, remote_shell_staged_diff_command, shell_quote,
+};
+pub use project::{
+    PROJECT_PROBE_MAX_ANCESTORS, PROJECT_PROBE_MAX_FILE_BYTES, PROJECT_SHELL_PROBE_SENTINEL,
+    ProjectFacet, ProjectFacetKind, ProjectManifestEntry, ProjectProbeEntry, ProjectProbeError,
+    ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectProbeState, ProjectSnapshot,
+    ProjectStatusStore, ProjectTask, ProjectTaskGroup, interpret_project_manifest_entries,
+    parse_remote_shell_project_probe_output, project_manifest_file_names,
+    remote_shell_project_probe_command,
 };
 pub use terminal_context::infer_terminal_cwd_from_text;

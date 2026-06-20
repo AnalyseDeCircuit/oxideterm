@@ -157,6 +157,17 @@
       "go_to_path": "跳转到路径",
       "inferred": "推断"
     },
+    "project": {
+      "search_tasks": "搜索项目任务...",
+      "no_project": "未检测到项目。",
+      "no_tasks": "没有匹配的项目任务",
+      "group_develop": "开发",
+      "group_test": "测试",
+      "group_build": "构建",
+      "group_run": "运行",
+      "group_docker": "Docker",
+      "group_custom": "自定义"
+    },
     "git": {
       "search_branches": "搜索分支...",
       "loading_branches": "正在加载分支...",

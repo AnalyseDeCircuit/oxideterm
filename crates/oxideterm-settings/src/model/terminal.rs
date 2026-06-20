@@ -40,8 +40,11 @@ impl Default for TerminalAutosuggestSettings {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCommandBarSettings {
     pub enabled: bool,
-    pub show_legacy_toolbar: bool,
     pub git_status: bool,
+    #[serde(default = "default_command_bar_project_tasks")]
+    pub project_tasks: bool,
+    #[serde(default)]
+    pub current_directory_awareness: bool,
     pub smart_completion: bool,
     pub quick_commands_enabled: bool,
     pub quick_commands_confirm_before_run: bool,
@@ -55,8 +58,9 @@ impl Default for TerminalCommandBarSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            show_legacy_toolbar: false,
             git_status: true,
+            project_tasks: true,
+            current_directory_awareness: false,
             smart_completion: true,
             quick_commands_enabled: true,
             quick_commands_confirm_before_run: false,
@@ -89,6 +93,10 @@ impl Default for TerminalCommandBarSettings {
             extra: ExtraFields::new(),
         }
     }
+}
+
+fn default_command_bar_project_tasks() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -288,5 +296,28 @@ mod tests {
         let settings: TerminalSettings = serde_json::from_value(value).unwrap();
 
         assert!(settings.smooth_scroll);
+    }
+
+    #[test]
+    fn command_bar_settings_default_current_directory_awareness_when_missing() {
+        let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("currentDirectoryAwareness");
+
+        let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
+
+        assert!(!settings.current_directory_awareness);
+    }
+
+    #[test]
+    fn command_bar_settings_default_project_tasks_when_missing() {
+        let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("projectTasks");
+
+        let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
+
+        assert!(settings.project_tasks);
     }
 }

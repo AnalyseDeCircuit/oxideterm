@@ -282,6 +282,9 @@ impl TerminalGitPathAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TerminalGitActionPlan {
     command: String,
+    // Worktree branch selections are visible `cd` commands. Preserve the
+    // resolved path so terminal chrome can follow without prompt parsing.
+    cwd_after_command: Option<String>,
 }
 
 impl TerminalGitActionPlan {
@@ -293,18 +296,25 @@ impl TerminalGitActionPlan {
             return None;
         }
 
-        let command = if let Some(worktree_path) = branch.worktree_path() {
-            terminal_git_cd_command(worktree_path)
+        let (command, cwd_after_command) = if let Some(worktree_path) = branch.worktree_path() {
+            (
+                terminal_git_cd_command(worktree_path),
+                Some(worktree_path.to_string()),
+            )
         } else {
-            terminal_git_checkout_command(branch_name)
+            (terminal_git_checkout_command(branch_name), None)
         };
-        Some(Self { command })
+        Some(Self {
+            command,
+            cwd_after_command,
+        })
     }
 
     fn checkout_name(branch_name: &str) -> Option<Self> {
         let branch_name = branch_name.trim();
         terminal_git_accepts_single_arg(branch_name).then(|| Self {
             command: terminal_git_checkout_command(branch_name),
+            cwd_after_command: None,
         })
     }
 
@@ -312,6 +322,7 @@ impl TerminalGitActionPlan {
         let branch_name = branch_name.trim();
         terminal_git_accepts_single_arg(branch_name).then(|| Self {
             command: terminal_git_rebase_command(branch_name),
+            cwd_after_command: None,
         })
     }
 
@@ -319,6 +330,7 @@ impl TerminalGitActionPlan {
         let branch_name = branch_name.trim();
         terminal_git_accepts_single_arg(branch_name).then(|| Self {
             command: terminal_git_create_branch_command(branch_name),
+            cwd_after_command: None,
         })
     }
 
@@ -326,6 +338,7 @@ impl TerminalGitActionPlan {
         let branch_name = branch_name.trim();
         terminal_git_accepts_single_arg(branch_name).then(|| Self {
             command: terminal_git_rename_branch_command(branch_name),
+            cwd_after_command: None,
         })
     }
 
@@ -333,18 +346,21 @@ impl TerminalGitActionPlan {
         let branch_name = branch_name.trim();
         terminal_git_accepts_single_arg(branch_name).then(|| Self {
             command: terminal_git_track_remote_command(branch_name),
+            cwd_after_command: None,
         })
     }
 
     fn repository_action(action: TerminalGitRepositoryAction) -> Self {
         Self {
             command: action.command_preview().to_string(),
+            cwd_after_command: None,
         }
     }
 
     fn path_action(action: TerminalGitPathAction, path: &str) -> Option<Self> {
         terminal_git_accepts_path_arg(path).then(|| Self {
             command: terminal_git_path_action_command(action, path),
+            cwd_after_command: None,
         })
     }
 }
@@ -437,6 +453,7 @@ impl WorkspaceApp {
         self.close_terminal_quick_commands_popover();
         self.dismiss_terminal_broadcast_menu();
         self.close_terminal_cwd_picker();
+        self.close_terminal_project_panel();
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
         self.terminal_command_bar_focused = false;
@@ -783,14 +800,24 @@ impl WorkspaceApp {
         failure_message: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane) = self.active_pane() else {
+        let Some(pane_id) = self.active_pane_id() else {
+            self.terminal_git_branch_picker.error = Some(failure_message);
+            cx.notify();
+            return;
+        };
+        let Some(pane) = self.panes.get(&pane_id).cloned() else {
             self.terminal_git_branch_picker.error = Some(failure_message);
             cx.notify();
             return;
         };
         // Git actions are sent through the active terminal so the user sees
         // Git's own output, conflict prompts, and any recovery instructions.
-        pane.update(cx, |pane, cx| pane.send_command_line(&plan.command, cx));
+        pane.update(cx, |pane, cx| {
+            pane.send_command_line(&plan.command, cx);
+            if let Some(cwd) = plan.cwd_after_command.clone() {
+                pane.set_current_working_directory_from_terminal_action(cwd, cx);
+            }
+        });
         self.close_terminal_git_branch_picker();
         cx.notify();
     }
@@ -1691,25 +1718,19 @@ mod tests {
     fn branch_action_plan_uses_worktree_cd_when_available() {
         let branch =
             GitBranchReference::with_worktree_path("main", false, Some("/tmp/Oxide Term")).unwrap();
+        let plan = TerminalGitActionPlan::select_branch(&branch).unwrap();
 
-        assert_eq!(
-            TerminalGitActionPlan::select_branch(&branch)
-                .unwrap()
-                .command,
-            "cd '/tmp/Oxide Term'"
-        );
+        assert_eq!(plan.command, "cd '/tmp/Oxide Term'");
+        assert_eq!(plan.cwd_after_command.as_deref(), Some("/tmp/Oxide Term"));
     }
 
     #[test]
     fn branch_action_plan_quotes_checkout_branch() {
         let branch = GitBranchReference::new("feature/it's-ok", false).unwrap();
+        let plan = TerminalGitActionPlan::select_branch(&branch).unwrap();
 
-        assert_eq!(
-            TerminalGitActionPlan::select_branch(&branch)
-                .unwrap()
-                .command,
-            "git checkout 'feature/it'\\''s-ok'"
-        );
+        assert_eq!(plan.command, "git checkout 'feature/it'\\''s-ok'");
+        assert!(plan.cwd_after_command.is_none());
     }
 
     #[test]

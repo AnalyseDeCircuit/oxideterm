@@ -55,6 +55,7 @@ impl WorkspaceApp {
         let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
         let (terminal_cwd_tx, terminal_cwd_rx) = std::sync::mpsc::channel();
         let (terminal_git_tx, terminal_git_rx) = std::sync::mpsc::channel();
+        let (terminal_project_tx, terminal_project_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = std::sync::mpsc::channel();
         let (native_plugin_confirm_tx, native_plugin_confirm_rx) = std::sync::mpsc::channel();
         let (native_plugin_terminal_tx, native_plugin_terminal_rx) = std::sync::mpsc::channel();
@@ -139,6 +140,10 @@ impl WorkspaceApp {
             terminal_git_tx,
             terminal_git_rx,
             terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState::default(),
+            terminal_project_store: oxideterm_environment::ProjectStatusStore::default(),
+            terminal_project_tx,
+            terminal_project_rx,
+            terminal_project_panel: terminal_project::TerminalProjectPanelState::default(),
             detached_local_terminals: HashMap::new(),
             serial_terminal_configs: HashMap::new(),
             detached_local_terminals_popover_open: false,
@@ -907,8 +912,10 @@ impl WorkspaceApp {
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.poll_terminal_cwd_results(cx);
                             workspace.poll_terminal_git_results(cx);
+                            workspace.poll_terminal_project_results(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
+                            workspace.maybe_refresh_active_terminal_project(cx);
                             workspace.maybe_start_sftp_remote_load(cx);
                             workspace.poll_forwarding_worker_results(cx);
                             workspace.poll_forwarding_events(cx);
@@ -1033,6 +1040,9 @@ impl WorkspaceApp {
             middle_click_paste: terminal.middle_click_paste,
             selection_requires_shift: terminal.selection_requires_shift,
             bidi_enabled: terminal.unicode.bidi_enabled,
+            current_directory_awareness_enabled: terminal
+                .command_bar
+                .current_directory_awareness,
             command_marks_enabled: terminal.command_marks.enabled,
             command_marks_user_input_observed: terminal.command_marks.user_input_observed,
             command_marks_heuristic_detection: terminal.command_marks.heuristic_detection,

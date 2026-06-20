@@ -75,6 +75,14 @@ impl TerminalCwdPickerState {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn terminal_current_directory_awareness_enabled(&self) -> bool {
+        self.settings_store
+            .settings()
+            .terminal
+            .command_bar
+            .current_directory_awareness
+    }
+
     pub(in crate::workspace) fn active_terminal_cwd_snapshot(
         &self,
         cx: &mut Context<Self>,
@@ -130,6 +138,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_terminal_cwd_picker(&mut self, cx: &mut Context<Self>) {
+        if !self.terminal_current_directory_awareness_enabled() {
+            return;
+        }
         self.prepare_terminal_cwd_picker(cx);
 
         if let Some(snapshot) = self.active_terminal_cwd_snapshot(cx) {
@@ -154,7 +165,7 @@ impl WorkspaceApp {
         self.terminal_cwd_picker.probe_scope = Some(scope);
         self.terminal_cwd_picker.probe_pane_id = Some(pane_id);
 
-        if self.request_active_terminal_cwd_report(pane_id, cx) {
+        if self.request_terminal_cwd_report(pane_id, cx) {
             self.spawn_terminal_cwd_report_poll(generation, cx);
         } else {
             self.terminal_cwd_picker.loading = false;
@@ -168,6 +179,7 @@ impl WorkspaceApp {
         self.dismiss_terminal_broadcast_menu();
         self.close_terminal_quick_commands_popover();
         self.close_terminal_git_branch_picker();
+        self.close_terminal_project_panel();
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
         self.terminal_command_bar_focused = false;
@@ -216,11 +228,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn request_active_terminal_cwd_report(
-        &mut self,
-        pane_id: PaneId,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    fn request_terminal_cwd_report(&mut self, pane_id: PaneId, cx: &mut Context<Self>) -> bool {
         let Some(pane) = self.panes.get(&pane_id) else {
             return false;
         };
@@ -370,12 +378,19 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn select_terminal_cwd_path(
         &mut self,
         path: String,
+        verified_directory: bool,
         cx: &mut Context<Self>,
     ) {
         let Some(command) = current_directory_cd_command(&path) else {
             return;
         };
-        let Some(pane) = self.active_pane() else {
+        let Some(pane_id) = self.active_pane_id() else {
+            self.terminal_cwd_picker.error =
+                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            cx.notify();
+            return;
+        };
+        let Some(pane) = self.panes.get(&pane_id).cloned() else {
             self.terminal_cwd_picker.error =
                 Some(self.i18n.t("terminal.cwd.unavailable").to_string());
             cx.notify();
@@ -384,7 +399,14 @@ impl WorkspaceApp {
 
         // Directory changes must be visible shell actions on the active pane;
         // background probes never mutate cwd on a reused SSH node.
-        pane.update(cx, |pane, cx| pane.send_command_line(&command, cx));
+        pane.update(cx, |pane, cx| {
+            pane.send_command_line(&command, cx);
+            if verified_directory {
+                // Listed directories were resolved in the active pane scope, so
+                // the chrome can follow the visible `cd` without prompt parsing.
+                pane.set_current_working_directory_from_terminal_action(path.clone(), cx);
+            }
+        });
         self.close_terminal_cwd_picker();
         cx.notify();
     }
@@ -437,9 +459,14 @@ impl WorkspaceApp {
                     .as_deref()
                     .and_then(|path| visible.iter().find(|entry| entry.path == path))
                     .or_else(|| visible.first())
-                    .map(|entry| entry.path.clone());
-                if let Some(path) = selected {
-                    self.select_terminal_cwd_path(path, cx);
+                    .map(|entry| {
+                        (
+                            entry.path.clone(),
+                            terminal_cwd_entry_confirms_directory(entry.kind),
+                        )
+                    });
+                if let Some((path, verified_directory)) = selected {
+                    self.select_terminal_cwd_path(path, verified_directory, cx);
                 }
                 true
             }
@@ -531,7 +558,7 @@ impl WorkspaceApp {
             current_directory_parent(key.path()).or_else(|| Some(key.path().to_string()));
         self.terminal_cwd_picker.error = None;
 
-        match key.scope() {
+        match key.scope().clone() {
             CurrentDirectoryScope::Local => {
                 self.terminal_cwd_picker.loading = false;
                 let outcome = terminal_cwd_local_directory_entries(key.path());
@@ -546,7 +573,7 @@ impl WorkspaceApp {
                 self.spawn_remote_terminal_cwd_directory_list(
                     key,
                     generation,
-                    NodeId::new(node_id.clone()),
+                    NodeId::new(node_id),
                 );
                 cx.notify();
             }
@@ -710,6 +737,15 @@ fn terminal_cwd_looks_path_like(value: &str) -> bool {
         || (value.len() > 2 && value.as_bytes().get(1) == Some(&b':'))
 }
 
+fn terminal_cwd_entry_confirms_directory(kind: TerminalCwdVisibleEntryKind) -> bool {
+    // Parent and directory rows come from a resolved listing. Typed rows are
+    // user input and may still fail when the shell executes `cd`.
+    matches!(
+        kind,
+        TerminalCwdVisibleEntryKind::Parent | TerminalCwdVisibleEntryKind::Directory
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,5 +776,18 @@ mod tests {
             ),
             "~/Documents/OxideTerm"
         );
+    }
+
+    #[test]
+    fn only_resolved_rows_update_cwd_optimistically() {
+        assert!(terminal_cwd_entry_confirms_directory(
+            TerminalCwdVisibleEntryKind::Parent
+        ));
+        assert!(terminal_cwd_entry_confirms_directory(
+            TerminalCwdVisibleEntryKind::Directory
+        ));
+        assert!(!terminal_cwd_entry_confirms_directory(
+            TerminalCwdVisibleEntryKind::TypedPath
+        ));
     }
 }

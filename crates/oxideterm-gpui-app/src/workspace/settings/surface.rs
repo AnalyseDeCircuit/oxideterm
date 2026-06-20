@@ -835,6 +835,10 @@ impl WorkspaceApp {
             .set_byte_limit(self.render_policy.image_cache_bytes);
         self.sftp_transfer_manager
             .apply_settings(sftp_runtime_settings_from_settings(&settings));
+        if !settings.terminal.command_bar.enabled || !settings.terminal.command_bar.project_tasks {
+            // Close stale project task UI when the owning awareness feature is disabled.
+            self.close_terminal_project_panel();
+        }
         self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
             settings.connection_pool.idle_timeout_secs as u64,
         )));

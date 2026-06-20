@@ -123,6 +123,7 @@ pub enum SelectAnchorId {
     TerminalCommandBar,
     TerminalCwdMenu,
     TerminalGitBranchMenu,
+    TerminalProjectMenu,
     TerminalCastSeekbar,
     SessionManagerViewMode,
     SessionManagerSort,

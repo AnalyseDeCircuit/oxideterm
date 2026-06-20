@@ -147,6 +147,17 @@
       "go_to_path": "경로로 이동",
       "inferred": "추론됨"
     },
+    "project": {
+      "search_tasks": "프로젝트 작업 검색...",
+      "no_project": "프로젝트를 감지하지 못했습니다.",
+      "no_tasks": "일치하는 프로젝트 작업이 없습니다",
+      "group_develop": "개발",
+      "group_test": "테스트",
+      "group_build": "빌드",
+      "group_run": "실행",
+      "group_docker": "Docker",
+      "group_custom": "사용자 지정"
+    },
     "git": {
       "search_branches": "브랜치 검색...",
       "loading_branches": "브랜치를 불러오는 중...",
