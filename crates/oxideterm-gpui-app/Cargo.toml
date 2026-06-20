@@ -21,15 +21,16 @@ oxideterm-acp-adapter = { path = "../oxideterm-acp-adapter" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
-oxideterm-code-editor = { path = "../oxideterm-code-editor", features = ["syntax"] }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-cloud-sync = { path = "../oxideterm-gpui-cloud-sync" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-environment = { path = "../oxideterm-environment" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }

@@ -1776,7 +1776,7 @@ Staleness means "the app cannot prove this state is current." It does not automa
 | Saved connections | `oxideterm-connections` |
 | Forwarding | `oxideterm-forwarding`, app forwarding surface |
 | Graphics and VNC sessions | `oxideterm-wsl-graphics`, app graphics/VNC surface |
-| IDE and editor | `oxideterm-gpui-ide`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-code-editor`, `oxideterm-editor-*` |
+| IDE and editor | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
 | Settings and privilege credentials | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, secret-aware app boundary |
 | AI, RAG, MCP, tool policy | `oxideterm-ai`, app AI sidebar |
 | Plugins | `oxideterm-plugin-*`, app plugin lifecycle |

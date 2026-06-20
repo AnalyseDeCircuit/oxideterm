@@ -1,14 +1,12 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, ObjectFit, PathPromptOptions, Pixels, Point,
+    AnchoredPositionMode, Corner, Entity, Focusable, ObjectFit, PathPromptOptions, Pixels, Point,
     SharedString, StyledText, Subscription, UniformListScrollHandle, anchored, deferred,
     prelude::*,
 };
-use oxideterm_code_editor::backend::input::{
-    Input as CodeEditorInput, InputEvent as CodeEditorInputEvent,
-    InputState as CodeEditorInputState,
-};
+use oxideterm_editor_syntax::LanguageId;
+use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
 use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
 };
@@ -37,7 +35,7 @@ use oxideterm_sftp::{
     TransferType as RemoteTransferType, encode_to_encoding, probe_tar_compression,
     probe_tar_support, tar_download_directory, tar_upload_directory,
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, path::Path};
 
 pub(super) mod native_video;
 
@@ -529,9 +527,10 @@ pub(super) struct SftpViewState {
     preview_font_family: Option<String>,
     preview_font_error: Option<String>,
     preview_font_size: f32,
-    preview_editor_input: Option<Entity<CodeEditorInputState>>,
-    preview_editor_subscription: Option<Subscription>,
+    preview_editor: Option<Entity<TextEditorView>>,
+    preview_editor_observer: Option<Subscription>,
     preview_editor_initial_content: String,
+    preview_editor_observed_content: String,
     preview_editor_language: Option<String>,
     preview_editor_encoding: String,
     preview_editor_dirty: bool,
@@ -615,9 +614,10 @@ impl Default for SftpViewState {
             preview_font_family: None,
             preview_font_error: None,
             preview_font_size: SFTP_PREVIEW_FONT_DEFAULT_SIZE,
-            preview_editor_input: None,
-            preview_editor_subscription: None,
+            preview_editor: None,
+            preview_editor_observer: None,
             preview_editor_initial_content: String::new(),
+            preview_editor_observed_content: String::new(),
             preview_editor_language: None,
             preview_editor_encoding: "UTF-8".to_string(),
             preview_editor_dirty: false,

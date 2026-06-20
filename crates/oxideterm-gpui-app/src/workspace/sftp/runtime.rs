@@ -558,8 +558,10 @@ impl WorkspaceApp {
                     self.sftp_view.preview_editor_saving = false;
                     match result {
                         Ok(saved) => {
+                            let saved_content = content.clone();
                             self.sftp_view.preview_editor_dirty = false;
-                            self.sftp_view.preview_editor_initial_content = content.clone();
+                            self.sftp_view.preview_editor_initial_content = saved_content.clone();
+                            self.sftp_view.preview_editor_observed_content = saved_content;
                             self.sftp_view.preview_editor_save_error = None;
                             self.sftp_view.preview_editor_network_error = false;
                             self.sftp_view.preview_editor_retry_count = 0;
@@ -568,6 +570,9 @@ impl WorkspaceApp {
                                 Some(saved.atomic_write);
                             self.sftp_view.preview_editor_encoding = saved.encoding_used.clone();
                             self.sftp_view.preview_path = Some(path.clone());
+                            if let Some(editor) = self.sftp_view.preview_editor.clone() {
+                                editor.update(cx, |editor, cx| editor.mark_saved_external(cx));
+                            }
                             if let Some(PreviewContent::Text {
                                 data,
                                 encoding: current_encoding,

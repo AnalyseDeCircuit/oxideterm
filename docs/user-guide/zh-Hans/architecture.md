@@ -1776,7 +1776,7 @@ flowchart LR
 | 保存连接 | `oxideterm-connections` |
 | 转发 | `oxideterm-forwarding`, 应用转发页面 |
 | 图形和 VNC 会话 | `oxideterm-wsl-graphics`, 应用图形/VNC 页面 |
-| IDE 和编辑器 | `oxideterm-gpui-ide`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-code-editor`, `oxideterm-editor-*` |
+| IDE 和编辑器 | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
 | 设置和提权凭据 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, 应用凭据感知边界 |
 | AI、RAG、MCP、工具策略 | `oxideterm-ai`, 应用 AI 侧边栏 |
 | 插件 | `oxideterm-plugin-*`, 应用插件生命周期 |

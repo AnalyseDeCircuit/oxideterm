@@ -70,9 +70,10 @@ impl WorkspaceApp {
     }
 
     fn reset_sftp_preview_editor(&mut self) {
-        self.sftp_view.preview_editor_input = None;
-        self.sftp_view.preview_editor_subscription = None;
+        self.sftp_view.preview_editor = None;
+        self.sftp_view.preview_editor_observer = None;
         self.sftp_view.preview_editor_initial_content.clear();
+        self.sftp_view.preview_editor_observed_content.clear();
         self.sftp_view.preview_editor_language = None;
         self.sftp_view.preview_editor_encoding = "UTF-8".to_string();
         self.sftp_view.preview_editor_dirty = false;

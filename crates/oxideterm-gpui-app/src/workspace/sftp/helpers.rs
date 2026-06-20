@@ -439,6 +439,60 @@ fn sftp_editor_language(language: Option<&str>, name: &str) -> String {
     .to_string()
 }
 
+fn sftp_editor_language_id(
+    language: Option<&str>,
+    path: Option<&str>,
+    name: &str,
+    source: &str,
+) -> Option<LanguageId> {
+    // Prefer the remote path because the dialog title can be shortened while the path keeps the real extension.
+    path.and_then(|path| LanguageId::detect(Some(Path::new(path)), source))
+        .or_else(|| LanguageId::detect(Some(Path::new(name)), source))
+        .or_else(|| language.and_then(sftp_editor_language_name_id))
+}
+
+fn sftp_editor_language_name_id(language: &str) -> Option<LanguageId> {
+    match language.trim().to_ascii_lowercase().as_str() {
+        "bash" | "sh" | "shell" => Some(LanguageId::Bash),
+        "c" => Some(LanguageId::C),
+        "cmake" => Some(LanguageId::CMake),
+        "csharp" | "c#" | "cs" => Some(LanguageId::CSharp),
+        "cpp" | "c++" | "cc" | "cxx" => Some(LanguageId::Cpp),
+        "css" => Some(LanguageId::Css),
+        "diff" | "patch" => Some(LanguageId::Diff),
+        "dockerfile" | "containerfile" => Some(LanguageId::Dockerfile),
+        "elixir" | "ex" | "exs" => Some(LanguageId::Elixir),
+        "fish" => Some(LanguageId::Fish),
+        "go" => Some(LanguageId::Go),
+        "html" => Some(LanguageId::Html),
+        "java" => Some(LanguageId::Java),
+        "javascript" | "js" | "jsx" => Some(LanguageId::Javascript),
+        "json" | "jsonc" => Some(LanguageId::Json),
+        "lisp" | "commonlisp" => Some(LanguageId::Lisp),
+        "lua" => Some(LanguageId::Lua),
+        "make" | "makefile" => Some(LanguageId::Make),
+        "markdown" | "md" | "mdx" => Some(LanguageId::Markdown),
+        "objective-c" | "objectivec" | "objc" => Some(LanguageId::ObjectiveC),
+        "perl" | "pl" => Some(LanguageId::Perl),
+        "php" => Some(LanguageId::Php),
+        "powershell" | "pwsh" | "ps1" => Some(LanguageId::Powershell),
+        "python" | "py" => Some(LanguageId::Python),
+        "r" => Some(LanguageId::R),
+        "ruby" | "rb" => Some(LanguageId::Ruby),
+        "rust" | "rs" => Some(LanguageId::Rust),
+        "scala" => Some(LanguageId::Scala),
+        "sql" => Some(LanguageId::Sql),
+        "swift" => Some(LanguageId::Swift),
+        "toml" => Some(LanguageId::Toml),
+        "tsx" => Some(LanguageId::Tsx),
+        "typescript" | "ts" => Some(LanguageId::TypeScript),
+        "yaml" | "yml" => Some(LanguageId::Yaml),
+        "zsh" => Some(LanguageId::Zsh),
+        "zig" => Some(LanguageId::Zig),
+        _ => None,
+    }
+}
+
 async fn load_remote_sftp_listing(
     router: NodeRouter,
     node_id: &NodeId,
