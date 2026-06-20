@@ -36,6 +36,7 @@ pub(super) enum WorkspaceImeTarget {
     TerminalCommandBar,
     TerminalCwdSearch,
     TerminalGitBranchSearch,
+    TerminalProjectSearch,
     TerminalCastSearch,
     HostProcessSearch,
     HostProcessRenice,
@@ -95,6 +96,7 @@ impl WorkspaceImeTarget {
             Self::TerminalCommandBar => 2,
             Self::TerminalCwdSearch => 18,
             Self::TerminalGitBranchSearch => 17,
+            Self::TerminalProjectSearch => 19,
             Self::TerminalCastSearch => 3,
             Self::HostProcessSearch => 6,
             Self::HostProcessRenice => 7,
@@ -499,6 +501,10 @@ impl WorkspaceApp {
 
         if self.terminal_git_branch_picker.open {
             return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
+        }
+
+        if self.terminal_project_panel.open {
+            return Some(WorkspaceImeTarget::TerminalProjectSearch);
         }
 
         if self.auto_route_modal.open
@@ -1190,6 +1196,10 @@ impl WorkspaceApp {
                 .terminal_git_branch_picker
                 .open
                 .then(|| self.terminal_git_branch_picker.query.clone()),
+            WorkspaceImeTarget::TerminalProjectSearch => self
+                .terminal_project_panel
+                .open
+                .then(|| self.terminal_project_panel.query.clone()),
             WorkspaceImeTarget::TerminalCastSearch => self
                 .terminal_cast_player
                 .as_ref()
@@ -1911,6 +1921,19 @@ impl WorkspaceApp {
                     // Filtering rebuilds the visible branch rows; drop the stale
                     // highlighted branch until keyboard navigation chooses one.
                     self.terminal_git_branch_picker.highlighted_branch = None;
+                    self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TerminalProjectSearch => {
+                if self.terminal_project_panel.open {
+                    replace_utf16(
+                        &mut self.terminal_project_panel.query,
+                        replacement_range,
+                        text,
+                    );
+                    self.terminal_project_panel.highlighted_task_id = None;
+                    self.ensure_terminal_project_task_highlight(cx);
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }
@@ -2863,14 +2886,14 @@ mod tests {
     use gpui::{Keystroke, Modifiers, px};
 
     use super::{
-        CopyShortcutOwner, NewConnectionField, PendingPlatformTextCommit, SettingsInput,
-        TextInputContentAlign, WorkspaceApp, WorkspaceImeTarget,
-        active_ime_should_defer_printable_key, collapsed_copy_shortcut_is_owned_by_target,
-        control_k_delete_end, copy_shortcut_owner_for_target, ime_target_accepts_newline,
-        ime_target_should_blink_caret, keystroke_commits_platform_text, line_end_for_utf16_offset,
-        line_range_for_utf16_offset, line_start_for_utf16_offset, next_utf16_boundary,
-        next_word_boundary, platform_text_commit_is_duplicate, previous_utf16_boundary,
-        previous_word_boundary, soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        CopyShortcutOwner, PendingPlatformTextCommit, SettingsInput, TextInputContentAlign,
+        WorkspaceApp, WorkspaceImeTarget, active_ime_should_defer_printable_key,
+        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
+        copy_shortcut_owner_for_target, ime_target_should_blink_caret,
+        keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
+        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
+        platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
+        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
         vertical_line_navigation_destination, word_range_for_utf16_offset,
     };
 

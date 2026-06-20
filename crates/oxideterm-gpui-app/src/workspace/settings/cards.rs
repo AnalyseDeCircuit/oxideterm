@@ -589,6 +589,8 @@ impl WorkspaceApp {
                 && self.terminal_cwd_picker.open)
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
                 && self.terminal_git_branch_picker.open)
+            || (anchor.id == SelectAnchorId::TerminalProjectMenu
+                && self.terminal_project_panel.open)
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
                 && self.session_manager.view_mode_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
@@ -1371,6 +1373,7 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::TerminalCommandBar
             | SelectAnchorId::TerminalCwdMenu
             | SelectAnchorId::TerminalGitBranchMenu
+            | SelectAnchorId::TerminalProjectMenu
             | SelectAnchorId::TerminalCastSeekbar
             // Session Manager toolbar menus use window-anchored overlays, so
             // their trigger bounds must be cached before pointer-down.

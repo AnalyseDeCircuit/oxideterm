@@ -1,4 +1,45 @@
 impl TerminalPane {
+    fn observe_terminal_cwd_action_from_completed_command(
+        &mut self,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let mode = self.terminal.lock().mode();
+        if mode.contains(TermMode::ALT_SCREEN) || mode.intersects(TermMode::MOUSE_MODE) {
+            return;
+        }
+        if !self.settings.current_directory_awareness_enabled {
+            return;
+        }
+        if self.shell_integration_status.detected {
+            return;
+        }
+        let Some(cwd) = cwd_after_simple_cd_command(command, self.cwd.as_deref()) else {
+            return;
+        };
+        self.set_current_working_directory_from_terminal_action(cwd, cx);
+    }
+
+    fn observe_terminal_cwd_action_from_closed_command_mark(
+        &mut self,
+        mark: &TerminalCommandMark,
+        cx: &mut Context<Self>,
+    ) {
+        if mark.exit_code != Some(0) {
+            return;
+        }
+        if !self.settings.current_directory_awareness_enabled {
+            return;
+        }
+        let Some(command) = mark.command.as_deref() else {
+            return;
+        };
+        let Some(cwd) = cwd_after_simple_cd_command(command, self.cwd.as_deref()) else {
+            return;
+        };
+        self.set_current_working_directory_from_terminal_action(cwd, cx);
+    }
+
     pub fn begin_command_mark(
         &mut self,
         command: &str,
@@ -631,9 +672,208 @@ fn is_printable_input(ch: char) -> bool {
     code >= 0x20 && code != 0x7f
 }
 
+fn cwd_after_simple_cd_command(command: &str, current_cwd: Option<&str>) -> Option<String> {
+    let words = split_simple_cd_words(command.trim())?;
+    let [program, args @ ..] = words.as_slice() else {
+        return None;
+    };
+    if program.value != "cd" || program.quoted {
+        return None;
+    }
+    let target = match args {
+        [] => SimpleCdWord::unquoted("~"),
+        [target] => target.clone(),
+        [flag, target] if flag.value == "--" && !flag.quoted => target.clone(),
+        _ => return None,
+    };
+    resolve_cd_target(current_cwd, &target.value, !target.quoted)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SimpleCdWord {
+    value: String,
+    quoted: bool,
+}
+
+impl SimpleCdWord {
+    fn unquoted(value: &str) -> Self {
+        Self {
+            value: value.to_string(),
+            quoted: false,
+        }
+    }
+}
+
+fn split_simple_cd_words(command: &str) -> Option<Vec<SimpleCdWord>> {
+    if command.is_empty() {
+        return None;
+    }
+
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut started = false;
+    let mut quoted_word = false;
+    for ch in command.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            started = true;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            started = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+                started = true;
+            } else if active_quote == '"' && matches!(ch, '$' | '`') {
+                return None;
+            } else {
+                current.push(ch);
+                started = true;
+            }
+            continue;
+        }
+        if matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+            started = true;
+            quoted_word = true;
+            continue;
+        }
+        if ch.is_whitespace() {
+            if started {
+                push_simple_cd_word(&mut words, &mut current, quoted_word)?;
+                started = false;
+                quoted_word = false;
+            }
+            continue;
+        }
+        if is_simple_cd_shell_meta(ch) || ch.is_control() {
+            return None;
+        }
+        current.push(ch);
+        started = true;
+    }
+    if escaped || quote.is_some() {
+        return None;
+    }
+    if started {
+        push_simple_cd_word(&mut words, &mut current, quoted_word)?;
+    }
+    Some(words)
+}
+
+fn push_simple_cd_word(
+    words: &mut Vec<SimpleCdWord>,
+    current: &mut String,
+    quoted: bool,
+) -> Option<()> {
+    if current.is_empty() {
+        return None;
+    }
+    words.push(SimpleCdWord {
+        value: std::mem::take(current),
+        quoted,
+    });
+    Some(())
+}
+
+fn is_simple_cd_shell_meta(ch: char) -> bool {
+    // Compound commands, redirections, expansions and globs depend on shell
+    // evaluation. Leave those to OSC7/shell integration instead of guessing.
+    matches!(
+        ch,
+        ';' | '|' | '&' | '<' | '>' | '`' | '$' | '(' | ')' | '{' | '}' | '*'
+            | '?' | '[' | ']' | '!' | '#'
+    )
+}
+
+fn resolve_cd_target(
+    current_cwd: Option<&str>,
+    target: &str,
+    tilde_expansion_allowed: bool,
+) -> Option<String> {
+    let target = target.trim();
+    if target.is_empty()
+        || target == "-"
+        || target == "--"
+        || target.chars().any(char::is_control)
+        || (target.starts_with('~')
+            && (!tilde_expansion_allowed
+                || (target != "~" && !target.starts_with("~/"))))
+    {
+        return None;
+    }
+
+    let raw = if matches!(target, "" | "~") {
+        "~".to_string()
+    } else if target.starts_with('/') || target.starts_with("~/") {
+        target.to_string()
+    } else {
+        join_posix_display_path(current_cwd?, target)?
+    };
+    normalize_posix_display_path(&raw)
+}
+
+fn join_posix_display_path(base: &str, relative: &str) -> Option<String> {
+    let base = base.trim_end_matches('/');
+    if base.is_empty() || (!base.starts_with('/') && base != "~" && !base.starts_with("~/")) {
+        return None;
+    }
+    let joined = if base == "/" {
+        format!("/{relative}")
+    } else if base == "~" {
+        format!("~/{relative}")
+    } else {
+        format!("{base}/{relative}")
+    };
+    Some(joined)
+}
+
+fn normalize_posix_display_path(path: &str) -> Option<String> {
+    let (prefix, body) = if path == "~" {
+        return Some("~".to_string());
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        ("~", rest)
+    } else if let Some(rest) = path.strip_prefix('/') {
+        ("/", rest)
+    } else {
+        return None;
+    };
+
+    let mut parts: Vec<&str> = Vec::new();
+    for part in body.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            parts.pop();
+        } else {
+            parts.push(part);
+        }
+    }
+
+    if prefix == "~" {
+        if parts.is_empty() {
+            Some("~".to_string())
+        } else {
+            Some(format!("~/{}", parts.join("/")))
+        }
+    } else if parts.is_empty() {
+        Some("/".to_string())
+    } else {
+        Some(format!("/{}", parts.join("/")))
+    }
+}
+
 #[cfg(test)]
 mod input_tracker_tests {
-    use super::TerminalInputTracker;
+    use super::{TerminalInputTracker, cwd_after_simple_cd_command};
 
     #[test]
     fn input_tracker_completes_plain_command_on_enter() {
@@ -679,5 +919,64 @@ mod input_tracker_tests {
         assert_eq!(tracker.apply_bytes(b"echo before"), None);
         assert_eq!(tracker.apply_bytes(b"\x1b[200~pasted\x1b[201~"), None);
         assert_eq!(tracker.apply_bytes(b"\r"), None);
+    }
+
+    #[test]
+    fn cd_cwd_action_resolves_plain_paths_without_prompt_inference() {
+        assert_eq!(
+            cwd_after_simple_cd_command("cd /var/log/../tmp", Some("/home/lipsc")).as_deref(),
+            Some("/var/tmp")
+        );
+        assert_eq!(
+            cwd_after_simple_cd_command("cd .oxideterm", Some("/home/lipsc")).as_deref(),
+            Some("/home/lipsc/.oxideterm")
+        );
+        assert_eq!(
+            cwd_after_simple_cd_command("cd ..", Some("~/Documents/OxideTerm")).as_deref(),
+            Some("~/Documents")
+        );
+    }
+
+    #[test]
+    fn cd_cwd_action_handles_home_and_quoted_paths() {
+        assert_eq!(
+            cwd_after_simple_cd_command("cd", Some("/home/lipsc")).as_deref(),
+            Some("~")
+        );
+        assert_eq!(
+            cwd_after_simple_cd_command("cd 'dir with spaces'", Some("/home/lipsc")).as_deref(),
+            Some("/home/lipsc/dir with spaces")
+        );
+        assert_eq!(
+            cwd_after_simple_cd_command("cd -- 'dir with spaces'", Some("/tmp")).as_deref(),
+            Some("/tmp/dir with spaces")
+        );
+        assert_eq!(
+            cwd_after_simple_cd_command("cd '~/literal space'", Some("/home/lipsc")),
+            None
+        );
+    }
+
+    #[test]
+    fn cd_cwd_action_rejects_shell_dependent_forms() {
+        assert_eq!(
+            cwd_after_simple_cd_command("cd $HOME/project", Some("/tmp")),
+            None
+        );
+        assert_eq!(
+            cwd_after_simple_cd_command("cd main && ls", Some("/tmp")),
+            None
+        );
+        assert_eq!(cwd_after_simple_cd_command("cd -", Some("/tmp")), None);
+        assert_eq!(cwd_after_simple_cd_command("cd ~root", Some("/tmp")), None);
+    }
+
+    #[test]
+    fn cd_cwd_action_requires_current_cwd_for_relative_paths() {
+        assert_eq!(cwd_after_simple_cd_command("cd src", None), None);
+        assert_eq!(
+            cwd_after_simple_cd_command("cd /tmp/src", None).as_deref(),
+            Some("/tmp/src")
+        );
     }
 }

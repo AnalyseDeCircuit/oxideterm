@@ -576,6 +576,21 @@ impl TerminalPane {
         self.cwd.clone()
     }
 
+    pub fn set_current_working_directory_from_terminal_action(
+        &mut self,
+        cwd: String,
+        cx: &mut Context<Self>,
+    ) {
+        let cwd = cwd.trim();
+        if cwd.is_empty() || cwd.chars().any(char::is_control) {
+            return;
+        }
+        // Workspace-owned directory actions only call this after selecting a
+        // path that was already resolved by the active pane's directory scope.
+        self.cwd = Some(cwd.to_string());
+        cx.notify();
+    }
+
     pub fn current_working_directory_host(&self) -> Option<String> {
         self.cwd_host.clone()
     }
@@ -787,7 +802,7 @@ impl TerminalPane {
         let mut input = command.replace("\r\n", "\r").replace('\n', "\r");
         input.push('\r');
         self.observe_privilege_input("command-line", input.as_bytes(), Instant::now(), cx);
-        self.observe_autosuggest_input_bytes(input.as_bytes());
+        self.observe_autosuggest_input_bytes(input.as_bytes(), cx);
         self.send_text(&input, cx);
     }
 
@@ -1154,6 +1169,9 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::CommandMark(event) => {
+                if let TerminalCommandMarkEvent::Closed(mark) = &event {
+                    self.observe_terminal_cwd_action_from_closed_command_mark(mark, cx);
+                }
                 if !self.settings.command_marks_enabled {
                     self.command_marks.clear();
                     self.selected_command_mark_id = None;
@@ -1316,7 +1334,7 @@ impl TerminalPane {
         {
             return;
         }
-        let Some(command) = self.observe_autosuggest_input_bytes(bytes) else {
+        let Some(command) = self.observe_autosuggest_input_bytes(bytes, cx) else {
             return;
         };
         // The autosuggest input tracker owns the current editable command line.
@@ -1361,10 +1379,15 @@ impl TerminalPane {
         observation
     }
 
-    fn observe_autosuggest_input_bytes(&mut self, bytes: &[u8]) -> Option<String> {
+    fn observe_autosuggest_input_bytes(
+        &mut self,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
         let command = self.input_tracker.apply_bytes(bytes)?;
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
+        self.observe_terminal_cwd_action_from_completed_command(&command, cx);
         Some(command)
     }
 

@@ -147,6 +147,17 @@
       "go_to_path": "Zu Pfad wechseln",
       "inferred": "abgeleitet"
     },
+    "project": {
+      "search_tasks": "Projektaufgaben suchen...",
+      "no_project": "Kein Projekt erkannt.",
+      "no_tasks": "Keine passenden Projektaufgaben",
+      "group_develop": "Entwicklung",
+      "group_test": "Test",
+      "group_build": "Build",
+      "group_run": "Ausführen",
+      "group_docker": "Docker",
+      "group_custom": "Benutzerdefiniert"
+    },
     "git": {
       "search_branches": "Branches suchen...",
       "loading_branches": "Branches werden geladen...",

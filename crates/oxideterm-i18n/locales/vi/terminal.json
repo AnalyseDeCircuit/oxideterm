@@ -147,6 +147,17 @@
       "go_to_path": "Đi tới đường dẫn",
       "inferred": "suy luận"
     },
+    "project": {
+      "search_tasks": "Tìm tác vụ dự án...",
+      "no_project": "Không phát hiện dự án.",
+      "no_tasks": "Không có tác vụ dự án phù hợp",
+      "group_develop": "Phát triển",
+      "group_test": "Kiểm thử",
+      "group_build": "Build",
+      "group_run": "Chạy",
+      "group_docker": "Docker",
+      "group_custom": "Tùy chỉnh"
+    },
     "git": {
       "search_branches": "Tìm nhánh...",
       "loading_branches": "Đang tải nhánh...",

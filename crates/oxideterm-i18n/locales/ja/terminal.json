@@ -147,6 +147,17 @@
       "go_to_path": "パスへ移動",
       "inferred": "推定"
     },
+    "project": {
+      "search_tasks": "プロジェクトタスクを検索...",
+      "no_project": "プロジェクトが検出されていません。",
+      "no_tasks": "一致するプロジェクトタスクはありません",
+      "group_develop": "開発",
+      "group_test": "テスト",
+      "group_build": "ビルド",
+      "group_run": "実行",
+      "group_docker": "Docker",
+      "group_custom": "カスタム"
+    },
     "git": {
       "search_branches": "ブランチを検索...",
       "loading_branches": "ブランチを読み込み中...",

@@ -1,3 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
 use super::terminal_git::{
@@ -5,7 +8,10 @@ use super::terminal_git::{
 };
 use super::*;
 use oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID;
-use oxideterm_environment::{CurrentDirectorySnapshot, GitChangedPath, GitRepositoryStatus};
+use oxideterm_environment::{
+    CurrentDirectorySnapshot, GitChangedPath, GitRepositoryStatus, ProjectSnapshot, ProjectTask,
+    ProjectTaskGroup,
+};
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuActionableStyle, context_menu_event_boundary, context_menu_pointer_event_boundary,
@@ -26,6 +32,9 @@ const TERMINAL_CWD_MENU_MARGIN: f32 = 12.0;
 const TERMINAL_GIT_BRANCH_MENU_WIDTH: f32 = 720.0;
 const TERMINAL_GIT_BRANCH_MENU_BODY_MAX_HEIGHT: f32 = 520.0;
 const TERMINAL_GIT_BRANCH_MENU_MARGIN: f32 = 12.0;
+const TERMINAL_PROJECT_MENU_WIDTH: f32 = 640.0;
+const TERMINAL_PROJECT_MENU_BODY_MAX_HEIGHT: f32 = 420.0;
+const TERMINAL_PROJECT_MENU_MARGIN: f32 = 12.0;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -107,6 +116,28 @@ fn terminal_git_action_icon(action: TerminalGitRepositoryAction) -> LucideIcon {
         TerminalGitRepositoryAction::Continue(_) => LucideIcon::Check,
         TerminalGitRepositoryAction::Abort(_) => LucideIcon::X,
         TerminalGitRepositoryAction::Skip(_) => LucideIcon::ArrowRight,
+    }
+}
+
+fn terminal_project_group_icon(group: ProjectTaskGroup) -> LucideIcon {
+    match group {
+        ProjectTaskGroup::Develop => LucideIcon::Rocket,
+        ProjectTaskGroup::Test => LucideIcon::CheckCircle,
+        ProjectTaskGroup::Build => LucideIcon::FileCode,
+        ProjectTaskGroup::Run => LucideIcon::Play,
+        ProjectTaskGroup::Docker => LucideIcon::HardDrive,
+        ProjectTaskGroup::Custom => LucideIcon::ListChecks,
+    }
+}
+
+fn terminal_project_group_label_key(group: ProjectTaskGroup) -> &'static str {
+    match group {
+        ProjectTaskGroup::Develop => "terminal.project.group_develop",
+        ProjectTaskGroup::Test => "terminal.project.group_test",
+        ProjectTaskGroup::Build => "terminal.project.group_build",
+        ProjectTaskGroup::Run => "terminal.project.group_run",
+        ProjectTaskGroup::Docker => "terminal.project.group_docker",
+        ProjectTaskGroup::Custom => "terminal.project.group_custom",
     }
 }
 
@@ -656,9 +687,15 @@ impl WorkspaceApp {
             ),
         };
         let path = entry.path.clone();
+        let verified_directory = matches!(
+            entry.kind,
+            terminal_cwd::TerminalCwdVisibleEntryKind::Parent
+                | terminal_cwd::TerminalCwdVisibleEntryKind::Directory
+        );
         let browse_path = path.clone();
         let browse_tooltip_id = format!("terminal-cwd-enter-{browse_path}");
         let browse_tooltip_label = self.i18n.t("terminal.cwd.enter_directory");
+        let browse_element_id = terminal_cwd_browse_element_id(&browse_path);
         let can_browse = matches!(
             entry.kind,
             terminal_cwd::TerminalCwdVisibleEntryKind::Parent
@@ -692,7 +729,7 @@ impl WorkspaceApp {
                 cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
                     this.terminal_cwd_picker.highlighted_path = Some(path.clone());
                     if event.click_count >= 2 {
-                        this.select_terminal_cwd_path(path.clone(), cx);
+                        this.select_terminal_cwd_path(path.clone(), verified_directory, cx);
                     } else {
                         cx.notify();
                     }
@@ -732,7 +769,7 @@ impl WorkspaceApp {
                         .justify_center()
                         .rounded(px(self.tokens.radii.md))
                         .text_color(rgb(theme.text_muted))
-                        .id(browse_tooltip_id.clone())
+                        .id(("terminal-cwd-browse-entry", browse_element_id))
                         .hover(move |style| style.bg(rgba((theme.bg_hover << 8) | 0xb3)))
                         .on_mouse_move({
                             let tooltip_id = browse_tooltip_id.clone();
@@ -919,6 +956,395 @@ impl WorkspaceApp {
             .text_color(color)
             .child(Self::render_lucide_icon(icon, 10.0, color))
             .child(count.to_string())
+    }
+
+    fn render_terminal_project_chip(
+        &self,
+        snapshot: ProjectSnapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.terminal_project_panel.open;
+        let workspace = cx.entity();
+        let label = snapshot.display_label();
+        let task_count = snapshot.tasks().len();
+
+        select_anchor_probe(
+            SelectAnchorId::TerminalProjectMenu,
+            div()
+                .h(px(20.0))
+                .max_w(px(240.0))
+                .flex_none()
+                .px(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(if active {
+                    rgba((theme.accent << 8) | 0x99)
+                } else {
+                    rgba(0x38bdf84d)
+                })
+                .bg(if active {
+                    rgba((theme.accent << 8) | 0x1f)
+                } else {
+                    rgba(0x38bdf81a)
+                })
+                .text_size(px(11.0))
+                .text_color(if active {
+                    rgb(theme.accent)
+                } else {
+                    rgba(0x7dd3fcff)
+                })
+                .cursor_pointer()
+                .hover(|style| style.bg(rgba(0x38bdf826)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        if this.terminal_project_panel.open {
+                            this.close_terminal_project_panel();
+                            cx.notify();
+                        } else {
+                            this.open_terminal_project_panel(cx);
+                        }
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(Self::render_lucide_icon(
+                    LucideIcon::ListChecks,
+                    12.0,
+                    if active {
+                        rgb(theme.accent)
+                    } else {
+                        rgba(0x7dd3fcff)
+                    },
+                ))
+                .child(div().min_w(px(0.0)).truncate().child(label))
+                .when(task_count > 0, |chip| {
+                    chip.child(
+                        div()
+                            .flex_none()
+                            .rounded(px(self.tokens.radii.sm))
+                            .bg(rgba(0x082f4933))
+                            .px(px(4.0))
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .child(task_count.to_string()),
+                    )
+                }),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_terminal_project_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let left = self.terminal_project_panel_left();
+        let bottom = if self.terminal_command_input_collapsed {
+            32.0
+        } else {
+            64.0
+        };
+
+        let mut panel = context_menu_pointer_event_boundary(
+            div()
+                .absolute()
+                .bottom(px(bottom))
+                .left(px(left))
+                .w(px(TERMINAL_PROJECT_MENU_WIDTH))
+                .max_w(relative(0.96))
+                .overflow_hidden()
+                .rounded(px(self.tokens.radii.lg))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgba((theme.bg_elevated << 8) | 0xf5))
+                .shadow_lg()
+                .occlude()
+                .p(px(8.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .text_size(px(12.0))
+                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                    cx.stop_propagation();
+                })
+                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                    cx.stop_propagation();
+                }),
+        )
+        .child(self.render_terminal_project_search(cx));
+
+        let body = if let Some(snapshot) = self.active_terminal_project_snapshot(cx) {
+            panel = panel.child(self.render_terminal_project_header(&snapshot));
+            let tasks = self.visible_terminal_project_tasks(cx);
+            if tasks.is_empty() {
+                self.render_terminal_project_message(
+                    LucideIcon::Search,
+                    self.i18n.t("terminal.project.no_tasks"),
+                )
+            } else {
+                self.render_terminal_project_task_list(tasks, cx)
+            }
+        } else {
+            self.render_terminal_project_message(
+                LucideIcon::AlertCircle,
+                self.i18n.t("terminal.project.no_project"),
+            )
+        };
+        panel = panel.child(body);
+        panel.into_any_element()
+    }
+
+    fn render_terminal_project_header(&self, snapshot: &ProjectSnapshot) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
+            .bg(rgba((theme.bg_hover << 8) | 0x4d))
+            .px(px(8.0))
+            .py(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Folder,
+                13.0,
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_size(px(11.0))
+                            .text_color(rgb(theme.text))
+                            .child(snapshot.root_path().to_string()),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(snapshot.display_label()),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_project_search(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = WorkspaceImeTarget::TerminalProjectSearch;
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &self.terminal_project_panel.query,
+                    placeholder: self.i18n.t("terminal.project.search_tasks"),
+                    focused: self.terminal_project_panel.open,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .h(px(32.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.ime_marked_text = None;
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            )),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_terminal_project_task_list(
+        &self,
+        tasks: Vec<ProjectTask>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut groups = Vec::<(ProjectTaskGroup, Vec<ProjectTask>)>::new();
+        for task in tasks {
+            if let Some((_, bucket)) = groups.iter_mut().find(|(group, _)| *group == task.group()) {
+                bucket.push(task);
+            } else {
+                groups.push((task.group(), vec![task]));
+            }
+        }
+
+        let mut list = div().flex().flex_col().gap(px(8.0));
+        for (group, tasks) in groups {
+            let mut section = div().flex().flex_col().gap(px(3.0)).child(
+                div()
+                    .px(px(4.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .text_size(px(10.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(Self::render_lucide_icon(
+                        terminal_project_group_icon(group),
+                        12.0,
+                        rgb(self.tokens.ui.text_muted),
+                    ))
+                    .child(self.i18n.t(terminal_project_group_label_key(group))),
+            );
+            for task in tasks {
+                section = section.child(self.render_terminal_project_task_row(task, cx));
+            }
+            list = list.child(section);
+        }
+
+        div()
+            .min_h(px(0.0))
+            .max_h(px(TERMINAL_PROJECT_MENU_BODY_MAX_HEIGHT))
+            .overflow_y_scrollbar()
+            .child(list)
+            .into_any_element()
+    }
+
+    fn render_terminal_project_task_row(
+        &self,
+        task: ProjectTask,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = self.terminal_project_panel.highlighted_task_id.as_deref() == Some(task.id());
+        let task_id = task.id().to_string();
+        let row_task = task.clone();
+        div()
+            .min_h(px(38.0))
+            .rounded(px(self.tokens.radii.md))
+            .px(px(8.0))
+            .py(px(5.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .bg(if active {
+                rgba((theme.accent << 8) | 0x26)
+            } else {
+                rgba(0x00000000)
+            })
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgb(theme.bg_hover)))
+            .on_mouse_move(cx.listener({
+                let task_id = task_id.clone();
+                move |this, _event: &MouseMoveEvent, _window, cx| {
+                    if this.terminal_project_panel.highlighted_task_id.as_deref()
+                        != Some(task_id.as_str())
+                    {
+                        this.terminal_project_panel.highlighted_task_id = Some(task_id.clone());
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    this.terminal_project_panel.highlighted_task_id =
+                        Some(row_task.id().to_string());
+                    if event.click_count >= 2 {
+                        this.run_terminal_project_task(row_task.clone(), cx);
+                    } else {
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .child(Self::render_lucide_icon(
+                LucideIcon::FilePlay,
+                13.0,
+                if active {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text_muted)
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_color(if active {
+                                rgb(theme.accent)
+                            } else {
+                                rgb(theme.text)
+                            })
+                            .child(task.label().to_string()),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(10.0))
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_color(rgb(theme.text_muted))
+                            .child(task.command().to_string()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(10.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .bg(rgba((theme.bg_hover << 8) | 0x80))
+                    .px(px(5.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(task.source().display_name()),
+            )
+            .into_any_element()
+    }
+
+    fn render_terminal_project_message(&self, icon: LucideIcon, message: String) -> AnyElement {
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .bg(rgba((self.tokens.ui.bg_panel << 8) | 0x4d))
+            .p(px(10.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(Self::render_lucide_icon(
+                icon,
+                14.0,
+                rgb(self.tokens.ui.text_muted),
+            ))
+            .child(message)
+            .into_any_element()
     }
 
     fn render_terminal_git_branch_picker(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -2428,6 +2854,23 @@ impl WorkspaceApp {
         desired.clamp(TERMINAL_CWD_MENU_MARGIN, max_left)
     }
 
+    fn terminal_project_panel_left(&self) -> f32 {
+        let Some(chip) = self
+            .select_anchors
+            .get(&SelectAnchorId::TerminalProjectMenu)
+        else {
+            return TERMINAL_PROJECT_MENU_MARGIN;
+        };
+        let Some(bar) = self.select_anchors.get(&SelectAnchorId::TerminalCommandBar) else {
+            return TERMINAL_PROJECT_MENU_MARGIN;
+        };
+        let bar_width = f32::from(bar.bounds.size.width);
+        let desired = f32::from(chip.bounds.left() - bar.bounds.left());
+        let max_left = (bar_width - TERMINAL_PROJECT_MENU_WIDTH - TERMINAL_PROJECT_MENU_MARGIN)
+            .max(TERMINAL_PROJECT_MENU_MARGIN);
+        desired.clamp(TERMINAL_PROJECT_MENU_MARGIN, max_left)
+    }
+
     fn active_privilege_scope_credentials(
         &self,
     ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
@@ -2849,9 +3292,17 @@ impl WorkspaceApp {
         // inference so local shells that are currently inside SSH show the
         // remote identity consistently in both places.
         let target_label = self.terminal_command_active_target_label(cx);
-        let cwd_snapshot = self.active_terminal_cwd_snapshot(cx);
-        let cwd_supported = self.active_terminal_cwd_scope_and_pane().is_some();
+        let cwd_awareness_enabled = self.terminal_current_directory_awareness_enabled();
+        let cwd_snapshot = cwd_awareness_enabled
+            .then(|| self.active_terminal_cwd_snapshot(cx))
+            .flatten();
+        let cwd_supported =
+            cwd_awareness_enabled && self.active_terminal_cwd_scope_and_pane().is_some();
         let git_snapshot = self.active_terminal_git_snapshot(cx);
+        let project_tasks_enabled = self.terminal_project_tasks_enabled();
+        let project_snapshot = project_tasks_enabled
+            .then(|| self.active_terminal_project_snapshot(cx))
+            .flatten();
         let active_pane_id = self.active_pane_id();
         let is_local_terminal = self
             .active_tab()
@@ -2923,9 +3374,14 @@ impl WorkspaceApp {
             .when(self.terminal_git_branch_picker.open, |bar| {
                 bar.child(self.render_terminal_git_branch_picker(cx))
             })
-            .when(self.terminal_cwd_picker.open, |bar| {
-                bar.child(self.render_terminal_cwd_picker(cx))
-            })
+            .when(
+                cwd_awareness_enabled && self.terminal_cwd_picker.open,
+                |bar| bar.child(self.render_terminal_cwd_picker(cx)),
+            )
+            .when(
+                project_tasks_enabled && self.terminal_project_panel.open,
+                |bar| bar.child(self.render_terminal_project_panel(cx)),
+            )
             .child(
                 div()
                     .min_h(px(24.0))
@@ -2966,6 +3422,7 @@ impl WorkspaceApp {
                                             this.terminal_command_suggestion_highlighted = None;
                                             this.close_terminal_quick_commands_popover();
                                             this.close_terminal_cwd_picker();
+                                            this.close_terminal_project_panel();
                                         }
                                         this.clear_workspace_tooltip(input_toggle_tooltip_id, cx);
                                         cx.stop_propagation();
@@ -3007,6 +3464,9 @@ impl WorkspaceApp {
                             })
                             .when_some(git_snapshot, |row, snapshot| {
                                 row.child(self.render_terminal_git_chip(snapshot, cx))
+                            })
+                            .when_some(project_snapshot, |row, snapshot| {
+                                row.child(self.render_terminal_project_chip(snapshot, cx))
                             }),
                     )
                     .child(
@@ -3677,6 +4137,14 @@ impl WorkspaceApp {
 
 fn terminal_broadcast_menu_left_for_trigger_right(trigger_right: f32) -> f32 {
     (trigger_right - TERMINAL_BROADCAST_MENU_WIDTH).max(12.0)
+}
+
+fn terminal_cwd_browse_element_id(path: &str) -> u64 {
+    // GPUI ElementId supports numeric tuple keys here; hashing keeps path-based
+    // row identity stable without forcing a String into the element id type.
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]

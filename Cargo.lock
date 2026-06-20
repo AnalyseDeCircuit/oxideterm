@@ -6967,6 +6967,9 @@ dependencies = [
 [[package]]
 name = "oxideterm-environment"
 version = "2.0.0-gpui-preview.9"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "oxideterm-forwarding"

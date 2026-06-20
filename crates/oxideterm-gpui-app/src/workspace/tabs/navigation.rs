@@ -877,10 +877,7 @@ impl WorkspaceApp {
         if measured_width > 1.0 {
             return measured_width;
         }
-        // Tauri places terminal-specific actions outside the scroll container,
-        // so reveal/clamp math must subtract that fixed right toolbar from the
-        // outer tab bar width before GPUI has measured the scroll viewport.
-        (self.tabbar_outer_width(window) - self.tabbar_legacy_actions_width()).max(0.0)
+        self.tabbar_outer_width(window)
     }
 
     fn tabbar_left_x(&self) -> f32 {
@@ -1038,51 +1035,6 @@ impl WorkspaceApp {
         (title_width + fixed_width).clamp(metrics.tab_min_width, metrics.tab_max_width)
     }
 
-    fn legacy_terminal_actions_tab(&self) -> Option<&Tab> {
-        let active_tab = self.active_tab()?;
-        if !matches!(active_tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
-            return None;
-        }
-        let command_bar = &self.settings_store.settings().terminal.command_bar;
-        if command_bar.enabled && !command_bar.show_legacy_toolbar {
-            return None;
-        }
-        Some(active_tab)
-    }
-
-    fn terminal_broadcast_toolbar_label(&self) -> Option<String> {
-        if !self.terminal_broadcast_enabled {
-            return None;
-        }
-        let active_pane_id = self.active_pane_id();
-        let broadcast_targets =
-            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)));
-        Some(if self.terminal_broadcast_targets.is_empty() {
-            self.i18n.t("terminal.command_bar.all_targets")
-        } else {
-            broadcast_targets.len().to_string()
-        })
-    }
-
-    fn tabbar_legacy_actions_width(&self) -> f32 {
-        let Some(active_tab) = self.legacy_terminal_actions_tab() else {
-            return 0.0;
-        };
-
-        let pane_count = active_tab
-            .root_pane
-            .as_ref()
-            .map(|root| root.pane_count())
-            .unwrap_or(1);
-
-        tabbar_legacy_actions_width_for_state(
-            active_tab.kind == TabKind::LocalTerminal,
-            pane_count,
-            self.terminal_broadcast_toolbar_label().as_deref(),
-            self.tokens.metrics.tab_title_width_ratio,
-        )
-    }
-
     fn tab_drop_target_index_for_x(
         &self,
         client_x: f32,
@@ -1214,55 +1166,6 @@ impl WorkspaceApp {
 
 }
 
-fn tabbar_legacy_actions_width_for_state(
-    is_local_terminal: bool,
-    pane_count: usize,
-    broadcast_label: Option<&str>,
-    ascii_width_ratio: f32,
-) -> f32 {
-    let mut children: usize = 3;
-    let mut width = TABBAR_LEGACY_ACTION_BUTTON_SIZE * 3.0;
-
-    if is_local_terminal {
-        children += 2;
-        width += TABBAR_LEGACY_ACTION_BUTTON_SIZE * 2.0;
-
-        if pane_count > 1 {
-            children += 2;
-            width += TABBAR_LEGACY_PANE_BADGE_MIN_WIDTH + TABBAR_LEGACY_ACTION_BUTTON_SIZE;
-        }
-    }
-
-    if let Some(label) = broadcast_label {
-        children += 1;
-        width += tabbar_broadcast_badge_width(label, ascii_width_ratio);
-    }
-
-    width
-        + TABBAR_LEGACY_ACTION_PADDING_X * 2.0
-        + TABBAR_LEGACY_ACTION_GAP * (children.saturating_sub(1) as f32)
-        + TABBAR_LEGACY_ACTION_BORDER_WIDTH
-}
-
-fn tabbar_broadcast_badge_width(label: &str, ascii_width_ratio: f32) -> f32 {
-    let text_width = label
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii() {
-                TABBAR_LEGACY_BROADCAST_FONT_SIZE * ascii_width_ratio
-            } else {
-                TABBAR_LEGACY_BROADCAST_FONT_SIZE
-            }
-        })
-        .sum::<f32>();
-
-    (TABBAR_LEGACY_BROADCAST_BADGE_PADDING_X * 2.0
-        + TABBAR_LEGACY_BROADCAST_ICON_SIZE
-        + TABBAR_LEGACY_BROADCAST_BADGE_GAP
-        + text_width)
-        .max(TABBAR_LEGACY_BROADCAST_BADGE_HEIGHT)
-}
-
 fn terminal_process_info_has_foreground_child_process(
     process: &oxideterm_terminal::TerminalProcessInfo,
 ) -> bool {
@@ -1302,23 +1205,6 @@ mod tests {
         assert!(terminal_process_info_has_foreground_child_process(
             &foreground_child
         ));
-    }
-
-    #[test]
-    fn tabbar_fixed_actions_width_is_reserved_outside_scroll_viewport() {
-        let ratio = 0.62;
-        let ssh_actions = tabbar_legacy_actions_width_for_state(false, 1, None, ratio);
-        assert_eq!(ssh_actions, 97.0);
-
-        let local_actions = tabbar_legacy_actions_width_for_state(true, 1, None, ratio);
-        assert_eq!(local_actions, 153.0);
-
-        let split_local_actions = tabbar_legacy_actions_width_for_state(true, 2, None, ratio);
-        assert_eq!(split_local_actions, 205.0);
-
-        let broadcast_actions =
-            tabbar_legacy_actions_width_for_state(false, 1, Some("All"), ratio);
-        assert!(broadcast_actions > ssh_actions);
     }
 
     #[test]

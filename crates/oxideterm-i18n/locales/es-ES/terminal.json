@@ -147,6 +147,17 @@
       "go_to_path": "Ir a ruta",
       "inferred": "inferido"
     },
+    "project": {
+      "search_tasks": "Buscar tareas del proyecto...",
+      "no_project": "No se detectó ningún proyecto.",
+      "no_tasks": "No hay tareas de proyecto coincidentes",
+      "group_develop": "Desarrollo",
+      "group_test": "Prueba",
+      "group_build": "Compilación",
+      "group_run": "Ejecutar",
+      "group_docker": "Docker",
+      "group_custom": "Personalizado"
+    },
     "git": {
       "search_branches": "Buscar ramas...",
       "loading_branches": "Cargando ramas...",

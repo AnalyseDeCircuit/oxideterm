@@ -453,6 +453,8 @@ mod tests {
                 "yazi"
             ]
         );
+        assert!(settings.terminal.command_bar.project_tasks);
+        assert!(!settings.terminal.command_bar.current_directory_awareness);
         assert_eq!(settings.terminal.theme, "default");
         assert_eq!(settings.terminal.font_family, FontFamily::Jetbrains);
         assert!(settings.terminal.cjk_font_family.is_empty());

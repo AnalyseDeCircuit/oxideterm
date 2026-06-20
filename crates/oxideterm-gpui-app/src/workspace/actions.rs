@@ -308,6 +308,11 @@ impl WorkspaceApp {
             return true;
         }
 
+        if self.close_terminal_project_panel() {
+            cx.notify();
+            return true;
+        }
+
         if self.terminal_command_suggestions_open {
             self.terminal_command_suggestions_open = false;
             self.terminal_command_suggestion_highlighted = None;
@@ -358,6 +363,7 @@ impl WorkspaceApp {
             self.close_terminal_quick_commands_popover();
             self.close_terminal_cwd_picker();
             self.close_terminal_git_branch_picker();
+            self.close_terminal_project_panel();
             self.terminal_command_suggestions_open = false;
             self.terminal_command_suggestion_highlighted = None;
             self.terminal_broadcast_menu_open = true;
@@ -507,6 +513,10 @@ impl WorkspaceApp {
         }
 
         if self.handle_terminal_git_branch_picker_key(event, cx) {
+            return;
+        }
+
+        if self.handle_terminal_project_panel_key(event, cx) {
             return;
         }
 
