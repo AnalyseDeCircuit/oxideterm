@@ -383,13 +383,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if active_ime_should_defer_printable_key(
+        if active_ime_should_defer_input_key(
             self.active_ime_target().is_some(),
+            self.ime_marked_text.is_some(),
             &event.keystroke,
         ) {
-            // The capture handler deliberately lets platform text input own
-            // printable characters; the bubble fallback must follow the same
-            // rule so inputs do not append once per key path.
+            // The capture handler deliberately lets platform text input own text
+            // and IME composition keys; the bubble fallback must follow the same
+            // rule so inputs do not append or activate once per key path.
             return;
         }
 

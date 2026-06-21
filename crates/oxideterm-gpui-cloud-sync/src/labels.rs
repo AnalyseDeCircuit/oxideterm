@@ -18,6 +18,9 @@ pub enum CloudSyncConfirm {
     ImportPreview,
     ClearSecret { key: String, label: String },
     RestoreBackup { id: String, created_at: String },
+    DeleteBackup { id: String, created_at: String },
+    ClearBackups,
+    ClearHistory,
     EnableSensitiveSync,
 }
 
@@ -386,6 +389,9 @@ pub enum CloudSyncConfirmDescription {
     None,
     ClearSecret { label: String },
     RestoreBackup { created_at: String },
+    DeleteBackup { created_at: String },
+    ClearBackups,
+    ClearHistory,
     EnableSensitiveSync,
 }
 
@@ -443,6 +449,26 @@ pub fn cloud_sync_confirm_copy_spec(confirm: &CloudSyncConfirm) -> CloudSyncConf
                 created_at: created_at.clone(),
             },
             confirm_label_key: "plugin.cloud_sync.actions.restore_backup",
+        },
+        CloudSyncConfirm::DeleteBackup { created_at, .. } => CloudSyncConfirmCopySpec {
+            variant: ConfirmDialogVariant::Danger,
+            title_key: "plugin.cloud_sync.confirm.delete_backup_title",
+            description: CloudSyncConfirmDescription::DeleteBackup {
+                created_at: created_at.clone(),
+            },
+            confirm_label_key: "plugin.cloud_sync.actions.delete_backup",
+        },
+        CloudSyncConfirm::ClearBackups => CloudSyncConfirmCopySpec {
+            variant: ConfirmDialogVariant::Danger,
+            title_key: "plugin.cloud_sync.confirm.clear_backups_title",
+            description: CloudSyncConfirmDescription::ClearBackups,
+            confirm_label_key: "plugin.cloud_sync.actions.clear_backups",
+        },
+        CloudSyncConfirm::ClearHistory => CloudSyncConfirmCopySpec {
+            variant: ConfirmDialogVariant::Danger,
+            title_key: "plugin.cloud_sync.confirm.clear_history_title",
+            description: CloudSyncConfirmDescription::ClearHistory,
+            confirm_label_key: "plugin.cloud_sync.actions.clear_history",
         },
         CloudSyncConfirm::EnableSensitiveSync => CloudSyncConfirmCopySpec {
             variant: ConfirmDialogVariant::Danger,

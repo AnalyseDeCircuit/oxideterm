@@ -65,6 +65,18 @@ impl WorkspaceApp {
                 "plugin.cloud_sync.confirm.restore_backup_description",
                 &[("createdAt", created_at)],
             )),
+            CloudSyncConfirmDescription::DeleteBackup { created_at } => Some(self.i18n_replace(
+                "plugin.cloud_sync.confirm.delete_backup_description",
+                &[("createdAt", created_at)],
+            )),
+            CloudSyncConfirmDescription::ClearBackups => Some(
+                self.i18n
+                    .t("plugin.cloud_sync.confirm.clear_backups_description"),
+            ),
+            CloudSyncConfirmDescription::ClearHistory => Some(
+                self.i18n
+                    .t("plugin.cloud_sync.confirm.clear_history_description"),
+            ),
             CloudSyncConfirmDescription::EnableSensitiveSync => Some(
                 self.i18n
                     .t("plugin.cloud_sync.confirm.enable_sensitive_sync_description"),

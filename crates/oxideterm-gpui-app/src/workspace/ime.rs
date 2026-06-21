@@ -216,14 +216,17 @@ fn keystroke_commits_platform_text(keystroke: &Keystroke) -> bool {
     keystroke_platform_text(keystroke).is_some()
 }
 
-pub(super) fn active_ime_should_defer_printable_key(
+pub(super) fn active_ime_should_defer_input_key(
     active_ime_target: bool,
+    ime_composing: bool,
     keystroke: &Keystroke,
 ) -> bool {
     // Browser-backed inputs receive printable text through the platform text
     // owner. Page-level key handlers must not append the same character first,
     // otherwise GPUI can commit the same key again through `InputHandler`.
-    active_ime_target && keystroke_platform_text(keystroke).is_some()
+    active_ime_target
+        && (keystroke_platform_text(keystroke).is_some()
+            || (ime_composing && ime_composition_control_key(keystroke)))
 }
 
 fn keystroke_platform_text(keystroke: &Keystroke) -> Option<&str> {
@@ -235,6 +238,13 @@ fn keystroke_platform_text(keystroke: &Keystroke) -> Option<&str> {
         .key_char
         .as_deref()
         .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
+}
+
+fn ime_composition_control_key(keystroke: &Keystroke) -> bool {
+    !keystroke.modifiers.platform
+        && !keystroke.modifiers.control
+        && !keystroke.modifiers.alt
+        && matches!(keystroke.key.as_str(), "enter" | "space" | " ")
 }
 
 impl InputHandler for WorkspaceInputHandler {
@@ -371,7 +381,7 @@ impl InputHandler for WorkspaceInputHandler {
 }
 
 impl WorkspaceApp {
-    pub(super) fn defer_active_ime_printable_key(
+    pub(super) fn defer_active_ime_key(
         &mut self,
         keystroke: &Keystroke,
         window: &Window,
@@ -380,6 +390,9 @@ impl WorkspaceApp {
         let Some(target) = self.active_ime_target() else {
             return false;
         };
+        if self.ime_marked_text.is_some() && ime_composition_control_key(keystroke) {
+            return true;
+        }
         let Some(text) = keystroke_platform_text(keystroke) else {
             return false;
         };
@@ -2887,7 +2900,7 @@ mod tests {
 
     use super::{
         CopyShortcutOwner, PendingPlatformTextCommit, SettingsInput, TextInputContentAlign,
-        WorkspaceApp, WorkspaceImeTarget, active_ime_should_defer_printable_key,
+        WorkspaceApp, WorkspaceImeTarget, active_ime_should_defer_input_key,
         collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
         copy_shortcut_owner_for_target, ime_target_should_blink_caret,
         keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
@@ -2964,9 +2977,32 @@ mod tests {
             },
         );
 
-        assert!(active_ime_should_defer_printable_key(true, &printable));
-        assert!(!active_ime_should_defer_printable_key(false, &printable));
-        assert!(!active_ime_should_defer_printable_key(true, &shortcut));
+        assert!(active_ime_should_defer_input_key(true, false, &printable));
+        assert!(!active_ime_should_defer_input_key(false, false, &printable));
+        assert!(!active_ime_should_defer_input_key(true, false, &shortcut));
+    }
+
+    #[test]
+    fn active_ime_defers_composition_control_keys_only_while_composing() {
+        let space = key("space", None, Modifiers::default());
+        let enter = key("enter", None, Modifiers::default());
+        let modified_space = key(
+            "space",
+            None,
+            Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        );
+
+        assert!(active_ime_should_defer_input_key(true, true, &space));
+        assert!(active_ime_should_defer_input_key(true, true, &enter));
+        assert!(!active_ime_should_defer_input_key(true, false, &enter));
+        assert!(!active_ime_should_defer_input_key(
+            true,
+            true,
+            &modified_space
+        ));
     }
 
     #[test]

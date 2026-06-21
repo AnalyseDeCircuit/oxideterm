@@ -209,7 +209,7 @@ use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
     WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
-    active_ime_should_defer_printable_key,
+    active_ime_should_defer_input_key,
 };
 use self::launcher::LauncherState;
 use self::new_connection::{

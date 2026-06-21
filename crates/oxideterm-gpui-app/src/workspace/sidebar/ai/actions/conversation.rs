@@ -429,6 +429,7 @@ impl WorkspaceApp {
         }
         self.ai_safety_menu_open = false;
         self.ai_safety_confirm_open = false;
+        self.restore_ai_chat_input_focus_after_safety_mode_change();
         cx.notify();
     }
 
@@ -439,7 +440,17 @@ impl WorkspaceApp {
         }
         self.ai_safety_menu_open = false;
         self.ai_safety_confirm_open = false;
+        self.restore_ai_chat_input_focus_after_safety_mode_change();
         cx.notify();
+    }
+
+    fn restore_ai_chat_input_focus_after_safety_mode_change(&mut self) {
+        // Closing the safety menu returns keyboard ownership to the composer so
+        // Enter/Space continue the conversation instead of falling through.
+        self.ai_chat_input_focused = true;
+        self.ai_chat_footer_focus = None;
+        self.ai_model_selector_search_focused = false;
+        self.ime_marked_text = None;
     }
 
     fn start_edit_ai_message(&mut self, message_id: String, content: String, cx: &mut Context<Self>) {
