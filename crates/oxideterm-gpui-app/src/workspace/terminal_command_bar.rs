@@ -22,8 +22,10 @@ use oxideterm_gpui_ui::text_input::{
     text_input_value_segments_with_color,
 };
 use oxideterm_gpui_ui::{
-    CommandPanelOptions, EntityListRowOptions, MonospaceDatumOptions, MonospaceDatumTone,
-    StatusPillOptions, StatusTone, command_panel, entity_list_row, monospace_datum, status_pill,
+    ActionChipOptions, ActionChipTextTone, CommandPanelOptions, ContextChipOptions,
+    EntityListRowOptions, MonospaceDatumOptions, MonospaceDatumTone, StatusPillOptions, StatusTone,
+    action_chip, action_chip_foreground, command_panel, context_chip, entity_list_row,
+    monospace_datum, status_pill,
 };
 use oxideterm_terminal_recording::format_recording_elapsed;
 
@@ -463,59 +465,59 @@ impl WorkspaceApp {
             .as_ref()
             .map(|snapshot| snapshot.path().to_string())
             .unwrap_or_else(|| "...".to_string());
+        let foreground = if active {
+            rgb(theme.accent)
+        } else {
+            rgb(theme.text)
+        };
+        let icon_color = if active {
+            rgb(theme.accent)
+        } else {
+            rgb(theme.text_muted)
+        };
         select_anchor_probe(
             SelectAnchorId::TerminalCwdMenu,
-            div()
-                .h(px(20.0))
-                .max_w(px(260.0))
-                .flex_none()
-                .px(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(if active {
-                    rgba((theme.accent << 8) | 0x99)
-                } else {
-                    rgba((theme.border << 8) | 0x80)
-                })
-                .bg(if active {
-                    rgba((theme.accent << 8) | 0x1f)
-                } else {
-                    rgba((theme.bg_hover << 8) | 0x66)
-                })
-                .text_size(px(11.0))
-                .font_family(settings_mono_font_family(self.settings_store.settings()))
-                .text_color(if active {
-                    rgb(theme.accent)
-                } else {
-                    rgb(theme.text)
-                })
-                .cursor_pointer()
-                .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        if this.terminal_cwd_picker.open {
-                            this.close_terminal_cwd_picker();
-                        } else {
-                            this.open_terminal_cwd_picker(cx);
-                        }
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .child(Self::render_lucide_icon(
+            context_chip(
+                &self.tokens,
+                ContextChipOptions::new()
+                    .max_width(260.0)
+                    .border_color(if active {
+                        rgba((theme.accent << 8) | 0x99)
+                    } else {
+                        rgba((theme.border << 8) | 0x80)
+                    })
+                    .background_color(if active {
+                        rgba((theme.accent << 8) | 0x1f)
+                    } else {
+                        rgba((theme.bg_hover << 8) | 0x66)
+                    })
+                    .text_color(foreground)
+                    .hover_background_color(rgb(theme.bg_hover)),
+                Some(Self::render_lucide_icon(
                     LucideIcon::Folder,
                     12.0,
-                    if active {
-                        rgb(theme.accent)
+                    icon_color,
+                )),
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .child(path)
+                    .into_any_element(),
+                Vec::new(),
+            )
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.terminal_cwd_picker.open {
+                        this.close_terminal_cwd_picker();
                     } else {
-                        rgb(theme.text_muted)
-                    },
-                ))
-                .child(div().min_w(px(0.0)).truncate().child(path)),
+                        this.open_terminal_cwd_picker(cx);
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_select_anchor(anchor, cx);
@@ -831,87 +833,91 @@ impl WorkspaceApp {
             .saturating_add(status.untracked());
         let workspace = cx.entity();
         let active = self.terminal_git_branch_picker.open;
+        let foreground = if active {
+            rgb(self.tokens.ui.accent)
+        } else {
+            rgba(0x86efacff)
+        };
+        let mut trailing: Vec<AnyElement> = Vec::new();
+        if ahead > 0 {
+            trailing.push(
+                self.render_terminal_git_status_badge(LucideIcon::ArrowUp, ahead, rgba(0x86efacff))
+                    .into_any_element(),
+            );
+        }
+        if behind > 0 {
+            trailing.push(
+                self.render_terminal_git_status_badge(
+                    LucideIcon::ArrowDown,
+                    behind,
+                    rgba(0x67e8f9ff),
+                )
+                .into_any_element(),
+            );
+        }
+        if changed > 0 {
+            trailing.push(
+                self.render_terminal_git_status_badge(
+                    LucideIcon::Pencil,
+                    changed,
+                    rgba(0xfbbf24ff),
+                )
+                .into_any_element(),
+            );
+        }
+        if conflicts > 0 {
+            trailing.push(
+                self.render_terminal_git_status_badge(
+                    LucideIcon::AlertTriangle,
+                    conflicts,
+                    rgba(0xf87171ff),
+                )
+                .into_any_element(),
+            );
+        }
 
         select_anchor_probe(
             SelectAnchorId::TerminalGitBranchMenu,
-            div()
-                .h(px(20.0))
-                .max_w(px(260.0))
-                .flex_none()
-                .px(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(if active {
-                    rgba((self.tokens.ui.accent << 8) | 0x99)
-                } else {
-                    rgba(0x22c55e4d)
-                })
-                .bg(if active {
-                    rgba((self.tokens.ui.accent << 8) | 0x1f)
-                } else {
-                    rgba(0x22c55e1a)
-                })
-                .text_size(px(11.0))
-                .text_color(if active {
-                    rgb(self.tokens.ui.accent)
-                } else {
-                    rgba(0x86efacff)
-                })
-                .cursor_pointer()
-                .hover(|style| style.bg(rgba(0x22c55e26)))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        if this.terminal_git_branch_picker.open {
-                            this.close_terminal_git_branch_picker();
-                            cx.notify();
-                        } else {
-                            this.open_terminal_git_branch_picker(cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(Self::render_lucide_icon(
+            context_chip(
+                &self.tokens,
+                ContextChipOptions::new()
+                    .max_width(260.0)
+                    .border_color(if active {
+                        rgba((self.tokens.ui.accent << 8) | 0x99)
+                    } else {
+                        rgba(0x22c55e4d)
+                    })
+                    .background_color(if active {
+                        rgba((self.tokens.ui.accent << 8) | 0x1f)
+                    } else {
+                        rgba(0x22c55e1a)
+                    })
+                    .text_color(foreground)
+                    .hover_background_color(rgba(0x22c55e26)),
+                Some(Self::render_lucide_icon(
                     LucideIcon::GitFork,
                     12.0,
-                    if active {
-                        rgb(self.tokens.ui.accent)
+                    foreground,
+                )),
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .child(label)
+                    .into_any_element(),
+                trailing,
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.terminal_git_branch_picker.open {
+                        this.close_terminal_git_branch_picker();
+                        cx.notify();
                     } else {
-                        rgba(0x86efacff)
-                    },
-                ))
-                .child(div().min_w(px(0.0)).truncate().child(label))
-                .when(ahead > 0, |chip| {
-                    chip.child(self.render_terminal_git_status_badge(
-                        LucideIcon::ArrowUp,
-                        ahead,
-                        rgba(0x86efacff),
-                    ))
-                })
-                .when(behind > 0, |chip| {
-                    chip.child(self.render_terminal_git_status_badge(
-                        LucideIcon::ArrowDown,
-                        behind,
-                        rgba(0x67e8f9ff),
-                    ))
-                })
-                .when(changed > 0, |chip| {
-                    chip.child(self.render_terminal_git_status_badge(
-                        LucideIcon::Pencil,
-                        changed,
-                        rgba(0xfbbf24ff),
-                    ))
-                })
-                .when(conflicts > 0, |chip| {
-                    chip.child(self.render_terminal_git_status_badge(
-                        LucideIcon::AlertTriangle,
-                        conflicts,
-                        rgba(0xf87171ff),
-                    ))
+                        this.open_terminal_git_branch_picker(cx);
+                    }
+                    cx.stop_propagation();
                 }),
+            ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_select_anchor(anchor, cx);
@@ -947,70 +953,67 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let label = snapshot.display_label();
         let task_count = snapshot.tasks().len();
+        let foreground = if active {
+            rgb(theme.accent)
+        } else {
+            rgba(0x7dd3fcff)
+        };
+        let mut trailing: Vec<AnyElement> = Vec::new();
+        if task_count > 0 {
+            trailing.push(
+                div()
+                    .flex_none()
+                    .rounded(px(self.tokens.radii.sm))
+                    .bg(rgba(0x082f4933))
+                    .px(px(4.0))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .child(task_count.to_string())
+                    .into_any_element(),
+            );
+        }
 
         select_anchor_probe(
             SelectAnchorId::TerminalProjectMenu,
-            div()
-                .h(px(20.0))
-                .max_w(px(240.0))
-                .flex_none()
-                .px(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(if active {
-                    rgba((theme.accent << 8) | 0x99)
-                } else {
-                    rgba(0x38bdf84d)
-                })
-                .bg(if active {
-                    rgba((theme.accent << 8) | 0x1f)
-                } else {
-                    rgba(0x38bdf81a)
-                })
-                .text_size(px(11.0))
-                .text_color(if active {
-                    rgb(theme.accent)
-                } else {
-                    rgba(0x7dd3fcff)
-                })
-                .cursor_pointer()
-                .hover(|style| style.bg(rgba(0x38bdf826)))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        if this.terminal_project_panel.open {
-                            this.close_terminal_project_panel();
-                            cx.notify();
-                        } else {
-                            this.open_terminal_project_panel(cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(Self::render_lucide_icon(
+            context_chip(
+                &self.tokens,
+                ContextChipOptions::new()
+                    .max_width(240.0)
+                    .border_color(if active {
+                        rgba((theme.accent << 8) | 0x99)
+                    } else {
+                        rgba(0x38bdf84d)
+                    })
+                    .background_color(if active {
+                        rgba((theme.accent << 8) | 0x1f)
+                    } else {
+                        rgba(0x38bdf81a)
+                    })
+                    .text_color(foreground)
+                    .hover_background_color(rgba(0x38bdf826)),
+                Some(Self::render_lucide_icon(
                     LucideIcon::ListChecks,
                     12.0,
-                    if active {
-                        rgb(theme.accent)
+                    foreground,
+                )),
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .child(label)
+                    .into_any_element(),
+                trailing,
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.terminal_project_panel.open {
+                        this.close_terminal_project_panel();
+                        cx.notify();
                     } else {
-                        rgba(0x7dd3fcff)
-                    },
-                ))
-                .child(div().min_w(px(0.0)).truncate().child(label))
-                .when(task_count > 0, |chip| {
-                    chip.child(
-                        div()
-                            .flex_none()
-                            .rounded(px(self.tokens.radii.sm))
-                            .bg(rgba(0x082f4933))
-                            .px(px(4.0))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .child(task_count.to_string()),
-                    )
+                        this.open_terminal_project_panel(cx);
+                    }
+                    cx.stop_propagation();
                 }),
+            ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_select_anchor(anchor, cx);
@@ -1492,56 +1495,28 @@ impl WorkspaceApp {
         active_section: TerminalGitPanelSection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let active = section == active_section;
         let label = self.i18n.t(section.label_key());
         let icon = terminal_git_section_icon(section);
-        div()
-            .flex_none()
-            .h(px(28.0))
-            .px(px(8.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(if active {
-                rgba((theme.accent << 8) | 0x88)
-            } else {
-                rgba((theme.border << 8) | 0x66)
-            })
-            .bg(if active {
-                rgba((theme.accent << 8) | 0x20)
-            } else {
-                rgba(0x00000000)
-            })
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .whitespace_nowrap()
-            .text_color(if active {
-                rgb(theme.accent)
-            } else {
-                rgb(theme.text_muted)
-            })
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(theme.bg_hover)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.terminal_git_branch_picker.active_section = section;
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(Self::render_lucide_icon(
-                icon,
-                12.0,
-                if active {
-                    rgb(theme.accent)
-                } else {
-                    rgb(theme.text_muted)
-                },
-            ))
-            .child(label)
-            .into_any_element()
+        let chip_options = ActionChipOptions::new()
+            .active(active)
+            .idle_text_tone(ActionChipTextTone::Muted);
+        let foreground = action_chip_foreground(&self.tokens, chip_options);
+        action_chip(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(icon, 12.0, foreground)),
+            chip_options,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.terminal_git_branch_picker.active_section = section;
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_git_branches_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1708,35 +1683,23 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let label = self.i18n.t(action.label_key());
         let icon = terminal_git_action_icon(action);
-        div()
-            .flex_none()
-            .h(px(28.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x66))
-            .px(px(8.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .whitespace_nowrap()
-            .text_size(px(11.0))
-            .text_color(rgb(theme.text))
-            .cursor_pointer()
-            .hover(move |style| {
-                style
-                    .bg(rgb(theme.bg_hover))
-                    .border_color(rgba((theme.accent << 8) | 0x66))
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.run_terminal_git_repository_action(action, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
-            .child(label)
-            .into_any_element()
+        let chip_options = ActionChipOptions::new()
+            .idle_text_tone(ActionChipTextTone::Primary)
+            .hover_border_accent(true);
+        action_chip(
+            &self.tokens,
+            label,
+            Some(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted))),
+            chip_options,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.run_terminal_git_repository_action(action, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_git_commit_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -2169,29 +2132,27 @@ impl WorkspaceApp {
         path: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let label = self.i18n.t(action.label_key());
-        div()
-            .h(px(24.0))
-            .rounded(px(self.tokens.radii.sm))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x66))
-            .px(px(6.0))
-            .flex()
-            .items_center()
-            .text_size(px(10.0))
-            .text_color(rgb(theme.text_muted))
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(theme.bg_hover)).text_color(rgb(theme.text)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.run_terminal_git_path_action(action, path.clone(), cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(label)
-            .into_any_element()
+        action_chip(
+            &self.tokens,
+            label,
+            None,
+            ActionChipOptions::new()
+                .height(24.0)
+                .padding_x(6.0)
+                .font_size(10.0)
+                .radius(ButtonRadius::Sm)
+                .idle_text_tone(ActionChipTextTone::Muted)
+                .hover_text_tone(ActionChipTextTone::Primary),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.run_terminal_git_path_action(action, path.clone(), cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_git_query_command_row(
