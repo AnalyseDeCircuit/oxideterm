@@ -58,6 +58,207 @@ pub enum ButtonRadius {
     Md,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionChipTextTone {
+    Primary,
+    Muted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ActionChipOptions {
+    pub active: bool,
+    pub disabled: bool,
+    pub height: f32,
+    pub min_width: Option<f32>,
+    pub padding_x: f32,
+    pub font_size: f32,
+    pub radius: ButtonRadius,
+    pub icon_gap: f32,
+    pub idle_text_tone: ActionChipTextTone,
+    pub hover_text_tone: Option<ActionChipTextTone>,
+    pub hover_border_accent: bool,
+}
+
+impl ActionChipOptions {
+    pub const fn new() -> Self {
+        Self {
+            active: false,
+            disabled: false,
+            height: 28.0,
+            min_width: None,
+            padding_x: 8.0,
+            font_size: 11.0,
+            radius: ButtonRadius::Md,
+            icon_gap: 6.0,
+            idle_text_tone: ActionChipTextTone::Muted,
+            hover_text_tone: None,
+            hover_border_accent: false,
+        }
+    }
+
+    pub const fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
+    }
+
+    pub const fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub const fn height(mut self, height: f32) -> Self {
+        self.height = height;
+        self
+    }
+
+    pub const fn min_width(mut self, min_width: f32) -> Self {
+        self.min_width = Some(min_width);
+        self
+    }
+
+    pub const fn padding_x(mut self, padding_x: f32) -> Self {
+        self.padding_x = padding_x;
+        self
+    }
+
+    pub const fn font_size(mut self, font_size: f32) -> Self {
+        self.font_size = font_size;
+        self
+    }
+
+    pub const fn radius(mut self, radius: ButtonRadius) -> Self {
+        self.radius = radius;
+        self
+    }
+
+    pub const fn icon_gap(mut self, icon_gap: f32) -> Self {
+        self.icon_gap = icon_gap;
+        self
+    }
+
+    pub const fn idle_text_tone(mut self, tone: ActionChipTextTone) -> Self {
+        self.idle_text_tone = tone;
+        self
+    }
+
+    pub const fn hover_text_tone(mut self, tone: ActionChipTextTone) -> Self {
+        self.hover_text_tone = Some(tone);
+        self
+    }
+
+    pub const fn hover_border_accent(mut self, enabled: bool) -> Self {
+        self.hover_border_accent = enabled;
+        self
+    }
+}
+
+impl Default for ActionChipOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContextChipOptions {
+    pub disabled: bool,
+    pub height: f32,
+    pub min_width: Option<f32>,
+    pub max_width: Option<f32>,
+    pub padding_x: f32,
+    pub font_size: f32,
+    pub radius: ButtonRadius,
+    pub gap: f32,
+    pub border_color: Option<Rgba>,
+    pub background_color: Option<Rgba>,
+    pub text_color: Option<Rgba>,
+    pub hover_background_color: Option<Rgba>,
+}
+
+impl ContextChipOptions {
+    pub const fn new() -> Self {
+        Self {
+            disabled: false,
+            height: 20.0,
+            min_width: None,
+            max_width: None,
+            padding_x: 6.0,
+            font_size: 11.0,
+            radius: ButtonRadius::Md,
+            gap: 4.0,
+            border_color: None,
+            background_color: None,
+            text_color: None,
+            hover_background_color: None,
+        }
+    }
+
+    pub const fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub const fn height(mut self, height: f32) -> Self {
+        self.height = height;
+        self
+    }
+
+    pub const fn min_width(mut self, min_width: f32) -> Self {
+        self.min_width = Some(min_width);
+        self
+    }
+
+    pub const fn max_width(mut self, max_width: f32) -> Self {
+        self.max_width = Some(max_width);
+        self
+    }
+
+    pub const fn padding_x(mut self, padding_x: f32) -> Self {
+        self.padding_x = padding_x;
+        self
+    }
+
+    pub const fn font_size(mut self, font_size: f32) -> Self {
+        self.font_size = font_size;
+        self
+    }
+
+    pub const fn radius(mut self, radius: ButtonRadius) -> Self {
+        self.radius = radius;
+        self
+    }
+
+    pub const fn gap(mut self, gap: f32) -> Self {
+        self.gap = gap;
+        self
+    }
+
+    pub fn border_color(mut self, color: Rgba) -> Self {
+        self.border_color = Some(color);
+        self
+    }
+
+    pub fn background_color(mut self, color: Rgba) -> Self {
+        self.background_color = Some(color);
+        self
+    }
+
+    pub fn text_color(mut self, color: Rgba) -> Self {
+        self.text_color = Some(color);
+        self
+    }
+
+    pub fn hover_background_color(mut self, color: Rgba) -> Self {
+        self.hover_background_color = Some(color);
+        self
+    }
+}
+
+impl Default for ContextChipOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn button(tokens: &ThemeTokens, label: String, tone: ButtonTone) -> Div {
     button_with(
         tokens,
@@ -264,6 +465,151 @@ impl IconButtonOptions {
 
 pub fn button_with(tokens: &ThemeTokens, label: String, options: ButtonOptions) -> Div {
     button_base(tokens, options, false).child(label)
+}
+
+pub fn action_chip(
+    tokens: &ThemeTokens,
+    label: String,
+    icon: Option<AnyElement>,
+    options: ActionChipOptions,
+) -> Div {
+    let foreground = action_chip_foreground(tokens, options);
+    let border = if options.active {
+        rgba((tokens.ui.accent << 8) | 0x88)
+    } else {
+        rgba((tokens.ui.border << 8) | 0x66)
+    };
+    let background = if options.active {
+        rgba((tokens.ui.accent << 8) | 0x20)
+    } else {
+        rgba(0x00000000)
+    };
+    let hover_background = rgb(tokens.ui.bg_hover);
+    let hover_border = rgba((tokens.ui.accent << 8) | 0x66);
+    let hover_text_color = options
+        .hover_text_tone
+        .map(|tone| action_chip_text_tone_color(tokens, tone));
+
+    // Action chips are compact command-popover controls. They centralize the
+    // pill shape without owning business actions or text measurement.
+    let chip = div()
+        .flex_none()
+        .h(px(options.height))
+        .when_some(options.min_width, |chip, min_width| {
+            chip.min_w(px(min_width))
+        })
+        .px(px(options.padding_x))
+        .rounded(px(button_radius_px(tokens, options.radius)))
+        .border_1()
+        .border_color(border)
+        .bg(background)
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(options.icon_gap))
+        .whitespace_nowrap()
+        .text_size(px(options.font_size))
+        .text_color(foreground)
+        .cursor(if options.disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        })
+        .hover(move |chip| {
+            if options.disabled {
+                chip
+            } else {
+                let chip = chip.bg(hover_background);
+                let chip = if options.hover_border_accent {
+                    chip.border_color(hover_border)
+                } else {
+                    chip
+                };
+                if let Some(color) = hover_text_color {
+                    chip.text_color(color)
+                } else {
+                    chip
+                }
+            }
+        });
+
+    match icon {
+        Some(icon) => chip.child(icon).child(label),
+        None => chip.child(label),
+    }
+}
+
+pub fn action_chip_foreground(tokens: &ThemeTokens, options: ActionChipOptions) -> Rgba {
+    if options.active {
+        rgb(tokens.ui.accent)
+    } else {
+        action_chip_text_tone_color(tokens, options.idle_text_tone)
+    }
+}
+
+fn action_chip_text_tone_color(tokens: &ThemeTokens, tone: ActionChipTextTone) -> Rgba {
+    match tone {
+        ActionChipTextTone::Primary => rgb(tokens.ui.text),
+        ActionChipTextTone::Muted => rgb(tokens.ui.text_muted),
+    }
+}
+
+pub fn context_chip(
+    tokens: &ThemeTokens,
+    options: ContextChipOptions,
+    leading: Option<AnyElement>,
+    body: AnyElement,
+    trailing: Vec<AnyElement>,
+) -> Div {
+    let border = options
+        .border_color
+        .unwrap_or_else(|| rgba((tokens.ui.border << 8) | 0x66));
+    let background = options.background_color.unwrap_or_else(|| rgba(0x00000000));
+    let foreground = options
+        .text_color
+        .unwrap_or_else(|| rgb(tokens.ui.text_muted));
+    let hover_background = options
+        .hover_background_color
+        .unwrap_or_else(|| rgb(tokens.ui.bg_hover));
+
+    // Context chips are command-bar state triggers. The shell owns chrome,
+    // while callers keep label measurement and domain badges explicit.
+    let mut chip = div()
+        .h(px(options.height))
+        .flex_none()
+        .when_some(options.min_width, |chip, width| chip.min_w(px(width)))
+        .when_some(options.max_width, |chip, width| chip.max_w(px(width)))
+        .px(px(options.padding_x))
+        .flex()
+        .items_center()
+        .gap(px(options.gap))
+        .rounded(px(button_radius_px(tokens, options.radius)))
+        .border_1()
+        .border_color(border)
+        .bg(background)
+        .text_size(px(options.font_size))
+        .text_color(foreground)
+        .cursor(if options.disabled {
+            CursorStyle::OperationNotAllowed
+        } else {
+            CursorStyle::PointingHand
+        })
+        .hover(move |chip| {
+            if options.disabled {
+                chip
+            } else {
+                chip.bg(hover_background)
+            }
+        });
+
+    if let Some(leading) = leading {
+        chip = chip.child(leading);
+    }
+    chip = chip.child(body);
+    for element in trailing {
+        chip = chip.child(element);
+    }
+    chip
 }
 
 pub fn toolbar_button(
@@ -581,6 +927,67 @@ mod tests {
         assert_eq!(options.font_size, None);
         assert!(options.show_label);
         assert!(!options.loading);
+    }
+
+    #[test]
+    fn action_chip_defaults_to_muted_compact_popover_shape() {
+        let options = ActionChipOptions::default();
+
+        assert!(!options.active);
+        assert!(!options.disabled);
+        assert_eq!(options.height, 28.0);
+        assert_eq!(options.padding_x, 8.0);
+        assert_eq!(options.font_size, 11.0);
+        assert_eq!(options.radius, ButtonRadius::Md);
+        assert_eq!(options.idle_text_tone, ActionChipTextTone::Muted);
+        assert_eq!(options.hover_text_tone, None);
+        assert!(!options.hover_border_accent);
+    }
+
+    #[test]
+    fn action_chip_foreground_uses_active_accent_or_idle_tone() {
+        let tokens = oxideterm_theme::default_tokens();
+
+        assert_eq!(
+            action_chip_foreground(
+                &tokens,
+                ActionChipOptions::new().idle_text_tone(ActionChipTextTone::Primary)
+            ),
+            rgb(tokens.ui.text)
+        );
+        assert_eq!(
+            action_chip_foreground(&tokens, ActionChipOptions::new().active(true)),
+            rgb(tokens.ui.accent)
+        );
+    }
+
+    #[test]
+    fn context_chip_defaults_to_command_bar_trigger_shape() {
+        let options = ContextChipOptions::default();
+
+        assert!(!options.disabled);
+        assert_eq!(options.height, 20.0);
+        assert_eq!(options.padding_x, 6.0);
+        assert_eq!(options.font_size, 11.0);
+        assert_eq!(options.radius, ButtonRadius::Md);
+        assert_eq!(options.gap, 4.0);
+        assert_eq!(options.min_width, None);
+        assert_eq!(options.max_width, None);
+    }
+
+    #[test]
+    fn context_chip_options_keep_label_measurement_out_of_primitive() {
+        let color = rgba(0x22c55e4d);
+        let options = ContextChipOptions::new()
+            .max_width(260.0)
+            .border_color(color)
+            .background_color(rgba(0x22c55e1a))
+            .hover_background_color(rgba(0x22c55e26));
+
+        assert_eq!(options.max_width, Some(260.0));
+        assert_eq!(options.border_color, Some(color));
+        assert_eq!(options.background_color, Some(rgba(0x22c55e1a)));
+        assert_eq!(options.hover_background_color, Some(rgba(0x22c55e26)));
     }
 
     #[test]

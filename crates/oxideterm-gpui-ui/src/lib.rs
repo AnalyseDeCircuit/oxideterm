@@ -40,9 +40,10 @@ pub use badge::{
     icon_badge_metrics_from_tokens, status_pill, status_pill_colors, status_pill_element,
 };
 pub use button::{
-    ButtonTone, IconButtonOptions, SplitFooterButtonOptions, ToolbarButtonIconPosition,
-    ToolbarButtonOptions, button, button_focus_visible, icon_button, split_footer_button,
-    tauri_focus_visible_ring, toolbar_button,
+    ActionChipOptions, ActionChipTextTone, ButtonTone, ContextChipOptions, IconButtonOptions,
+    SplitFooterButtonOptions, ToolbarButtonIconPosition, ToolbarButtonOptions, action_chip,
+    action_chip_foreground, button, button_focus_visible, context_chip, icon_button,
+    split_footer_button, tauri_focus_visible_ring, toolbar_button,
 };
 pub use checkbox::{CheckboxOptions, checkbox, checkbox_with};
 pub use command_panel::{CommandPanelOptions, command_panel, command_panel_body};
