@@ -1,3 +1,7 @@
+use oxideterm_gpui_ui::{
+    CommandPanelOptions, StatusPillOptions, StatusTone, SurfacePadding, command_panel, status_pill,
+};
+
 pub(super) fn quick_command_lucide_icon(icon: QuickCommandIcon) -> LucideIcon {
     match icon {
         QuickCommandIcon::Server => LucideIcon::Server,
@@ -138,6 +142,16 @@ fn quick_command_editor_tab_target(
 
 fn quick_command_space_inserts_literal(platform: bool, control: bool, alt: bool) -> bool {
     !platform && !control && !alt
+}
+
+fn quick_command_risk_tone(risk: &str) -> StatusTone {
+    // Quick command risk strings are owned by the classifier; the UI only maps
+    // those stable labels into shared visual tones.
+    if risk == "high" {
+        StatusTone::Error
+    } else {
+        StatusTone::Warning
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -461,14 +475,20 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_quick_commands_popover(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         let visible_commands = self.visible_quick_commands_for_active_terminal();
         let popover_width = self
             .select_anchors
             .get(&SelectAnchorId::TerminalCommandBar)
             .map(|anchor| quick_commands_popover_width_for_bar(f32::from(anchor.bounds.size.width)))
             .unwrap_or(QUICK_COMMANDS_POPOVER_MAX_WIDTH);
-        let mut popover = div()
+        let mut popover = command_panel(
+            &self.tokens,
+            CommandPanelOptions::new()
+                .width(popover_width)
+                .max_height(520.0)
+                .padding(SurfacePadding::None)
+                .terminal_owned(),
+        )
             .absolute()
             .bottom(px(56.0))
             .right(px(QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN))
@@ -480,16 +500,7 @@ impl WorkspaceApp {
             // TerminalCommandBar. Compute against the cached command-bar
             // bounds so AI sidebar and window-width changes shrink the panel
             // instead of clipping its left edge.
-            .w(px(popover_width))
             .max_w(px(QUICK_COMMANDS_POPOVER_MAX_WIDTH))
-            .max_h(px(520.0))
-            .overflow_hidden()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgba((theme.bg_elevated << 8) | 0xf2))
-            .shadow_lg()
-            .flex()
             .text_size(px(12.0))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
@@ -662,23 +673,11 @@ impl WorkspaceApp {
                                     cx,
                                 ),
                             ))
-                            .child(
-                                div()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .bg(rgb(theme.bg_panel))
-                                    .px(px(6.0))
-                                    .py(px(1.0))
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::NonSelectable,
-                                        "quick-command-category-count",
-                                        category.id.as_str(),
-                                        count.to_string(),
-                                        theme.text_muted,
-                                        cx,
-                                    )),
-                            ),
+                            .child(status_pill(
+                                &self.tokens,
+                                count.to_string(),
+                                StatusPillOptions::new(StatusTone::Neutral).compact(),
+                            )),
                     )
                     .child(self.quick_command_mini_button(
                         LucideIcon::Pencil,
@@ -993,52 +992,22 @@ impl WorkspaceApp {
                             )
                             .when_some(risk, |row, risk: &'static str| {
                                 row.child(
-                                    div()
-                                        .rounded(px(self.tokens.radii.md))
-                                        .px(px(6.0))
-                                        .py(px(1.0))
-                                        .text_size(px(10.0))
-                                        .text_color(if risk == "high" {
-                                            rgba(0xfca5a5ff)
-                                        } else {
-                                            rgba(0xfcd34dff)
-                                        })
-                                        .bg(if risk == "high" {
-                                            rgba(0xef444426)
-                                        } else {
-                                            rgba(0xf59e0b26)
-                                        })
-                                        .child(self.render_display_text_with_role(
-                                            SelectableTextRole::NonSelectable,
-                                            "quick-command-risk",
-                                            command.id.as_str(),
-                                            risk.to_uppercase(),
-                                            if risk == "high" {
-                                                0xfca5a5
-                                            } else {
-                                                0xfcd34d
-                                            },
-                                            cx,
-                                        )),
+                                    status_pill(
+                                        &self.tokens,
+                                        risk.to_uppercase(),
+                                        StatusPillOptions::new(quick_command_risk_tone(risk))
+                                            .compact()
+                                            .strong(),
+                                    ),
                                 )
                             })
                             .when_some(command.host_pattern.as_ref(), |row, pattern| {
                                 row.child(
-                                    div()
-                                        .rounded(px(self.tokens.radii.md))
-                                        .px(px(6.0))
-                                        .py(px(1.0))
-                                        .text_size(px(10.0))
-                                        .text_color(rgb(theme.text_muted))
-                                        .bg(rgb(theme.bg_panel))
-                                        .child(self.render_display_text_with_role(
-                                            SelectableTextRole::NonSelectable,
-                                            "quick-command-host-pattern",
-                                            command.id.as_str(),
-                                            pattern.clone(),
-                                            theme.text_muted,
-                                            cx,
-                                        )),
+                                    status_pill(
+                                        &self.tokens,
+                                        pattern.clone(),
+                                        StatusPillOptions::new(StatusTone::Neutral).compact(),
+                                    ),
                                 )
                             }),
                     )
@@ -1706,6 +1675,12 @@ mod terminal_command_bar_quick_command_tests {
         assert!(!quick_command_space_inserts_literal(true, false, false));
         assert!(!quick_command_space_inserts_literal(false, true, false));
         assert!(!quick_command_space_inserts_literal(false, false, true));
+    }
+
+    #[test]
+    fn quick_command_risk_tone_maps_classifier_labels_to_semantic_ui_tones() {
+        assert_eq!(quick_command_risk_tone("high"), StatusTone::Error);
+        assert_eq!(quick_command_risk_tone("medium"), StatusTone::Warning);
     }
 
     #[test]

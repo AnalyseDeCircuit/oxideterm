@@ -21,6 +21,10 @@ use oxideterm_gpui_ui::text_input::{
     TextInputView, text_caret, text_input, text_input_anchor_probe,
     text_input_value_segments_with_color,
 };
+use oxideterm_gpui_ui::{
+    CommandPanelOptions, EntityListRowOptions, MonospaceDatumOptions, MonospaceDatumTone,
+    StatusPillOptions, StatusTone, command_panel, entity_list_row, monospace_datum, status_pill,
+};
 use oxideterm_terminal_recording::format_recording_elapsed;
 
 pub(in crate::workspace) mod completion;
@@ -522,7 +526,6 @@ impl WorkspaceApp {
     }
 
     fn render_terminal_cwd_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         let left = self.terminal_cwd_picker_left();
         let bottom = if self.terminal_command_input_collapsed {
             32.0
@@ -530,30 +533,24 @@ impl WorkspaceApp {
             64.0
         };
         let mut panel = context_menu_pointer_event_boundary(
-            div()
-                .absolute()
-                .bottom(px(bottom))
-                .left(px(left))
-                .w(px(TERMINAL_CWD_MENU_WIDTH))
-                .max_w(relative(0.96))
-                .overflow_hidden()
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgba((theme.bg_elevated << 8) | 0xf5))
-                .shadow_lg()
-                .occlude()
-                .p(px(8.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .text_size(px(12.0))
-                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                    cx.stop_propagation();
-                }),
+            command_panel(
+                &self.tokens,
+                CommandPanelOptions::new()
+                    .width(TERMINAL_CWD_MENU_WIDTH)
+                    .max_width_ratio(0.96)
+                    .terminal_owned(),
+            )
+            .absolute()
+            .bottom(px(bottom))
+            .left(px(left))
+            .occlude()
+            .text_size(px(12.0))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            }),
         )
         .child(self.render_terminal_cwd_search(cx));
 
@@ -594,31 +591,25 @@ impl WorkspaceApp {
 
     fn render_terminal_cwd_context_row(&self, path: String) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x66))
-            .bg(rgba((theme.bg_panel << 8) | 0x70))
-            .px(px(10.0))
-            .py(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(Self::render_lucide_icon(
+        entity_list_row(
+            &self.tokens,
+            EntityListRowOptions::new().compact(),
+            Some(Self::render_lucide_icon(
                 LucideIcon::FolderOpen,
                 14.0,
                 rgb(theme.text_muted),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_color(rgb(theme.text))
-                    .child(path),
-            )
-            .into_any_element()
+            )),
+            div()
+                .truncate()
+                .font_family(settings_mono_font_family(self.settings_store.settings()))
+                .text_color(rgb(theme.text))
+                .child(path)
+                .into_any_element(),
+            None,
+            Vec::new(),
+            Vec::new(),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_cwd_search(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -701,113 +692,101 @@ impl WorkspaceApp {
             terminal_cwd::TerminalCwdVisibleEntryKind::Parent
                 | terminal_cwd::TerminalCwdVisibleEntryKind::Directory
         );
-        div()
-            .min_h(px(34.0))
-            .rounded(px(self.tokens.radii.md))
-            .px(px(8.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .bg(if active {
-                rgba((theme.accent << 8) | 0x26)
-            } else {
-                rgba(0x00000000)
-            })
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(theme.bg_hover)))
-            .on_mouse_move(cx.listener({
-                let path = path.clone();
-                move |this, _event: &gpui::MouseMoveEvent, _window, cx| {
-                    if this.terminal_cwd_picker.highlighted_path.as_deref() != Some(&path) {
-                        this.terminal_cwd_picker.highlighted_path = Some(path.clone());
-                        cx.notify();
-                    }
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
-                    this.terminal_cwd_picker.highlighted_path = Some(path.clone());
-                    if event.click_count >= 2 {
-                        this.select_terminal_cwd_path(path.clone(), verified_directory, cx);
-                    } else {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .child(Self::render_lucide_icon(icon, 13.0, accent))
-            .child(
+        let mut trailing = Vec::new();
+        if can_browse {
+            trailing.push(
                 div()
-                    .flex_1()
-                    .min_w(px(0.0))
+                    .size(px(24.0))
+                    .flex_none()
                     .flex()
-                    .flex_col()
-                    .gap(px(1.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .text_color(if active { rgb(theme.accent) } else { accent })
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(10.0))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_color(rgb(theme.text_muted))
-                            .child(entry.path),
-                    ),
-            )
-            .when(can_browse, |row| {
-                row.child(
-                    div()
-                        .size(px(24.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(self.tokens.radii.md))
-                        .text_color(rgb(theme.text_muted))
-                        .id(("terminal-cwd-browse-entry", browse_element_id))
-                        .hover(move |style| style.bg(rgba((theme.bg_hover << 8) | 0xb3)))
-                        .on_mouse_move({
-                            let tooltip_id = browse_tooltip_id.clone();
-                            let tooltip_label = browse_tooltip_label.clone();
-                            cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                                this.queue_workspace_tooltip(
-                                    tooltip_id.clone(),
-                                    tooltip_label.clone(),
-                                    f32::from(event.position.x) + 12.0,
-                                    f32::from(event.position.y) + 16.0,
-                                    cx,
-                                );
-                            })
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.md))
+                    .text_color(rgb(theme.text_muted))
+                    .id(("terminal-cwd-browse-entry", browse_element_id))
+                    .hover(move |style| style.bg(rgba((theme.bg_hover << 8) | 0xb3)))
+                    .on_mouse_move({
+                        let tooltip_id = browse_tooltip_id.clone();
+                        let tooltip_label = browse_tooltip_label.clone();
+                        cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                            this.queue_workspace_tooltip(
+                                tooltip_id.clone(),
+                                tooltip_label.clone(),
+                                f32::from(event.position.x) + 12.0,
+                                f32::from(event.position.y) + 16.0,
+                                cx,
+                            );
                         })
-                        .on_hover(cx.listener({
-                            let tooltip_id = browse_tooltip_id.clone();
-                            move |this, hovered: &bool, _window, cx| {
-                                if !*hovered {
-                                    this.clear_workspace_tooltip(&tooltip_id, cx);
-                                }
+                    })
+                    .on_hover(cx.listener({
+                        let tooltip_id = browse_tooltip_id.clone();
+                        move |this, hovered: &bool, _window, cx| {
+                            if !*hovered {
+                                this.clear_workspace_tooltip(&tooltip_id, cx);
                             }
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.enter_terminal_cwd_directory(browse_path.clone(), cx);
-                                this.clear_workspace_tooltip(&browse_tooltip_id, cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::ChevronRight,
-                            13.0,
-                            rgb(theme.text_muted),
-                        )),
-                )
-            })
-            .into_any_element()
+                        }
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.enter_terminal_cwd_directory(browse_path.clone(), cx);
+                            this.clear_workspace_tooltip(&browse_tooltip_id, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ChevronRight,
+                        13.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .into_any_element(),
+            );
+        }
+
+        entity_list_row(
+            &self.tokens,
+            EntityListRowOptions::new().active(active).compact(),
+            Some(Self::render_lucide_icon(icon, 13.0, accent)),
+            div()
+                .truncate()
+                .text_color(if active { rgb(theme.accent) } else { accent })
+                .child(label)
+                .into_any_element(),
+            Some(
+                div()
+                    .truncate()
+                    .text_size(px(10.0))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_color(rgb(theme.text_muted))
+                    .child(entry.path)
+                    .into_any_element(),
+            ),
+            Vec::new(),
+            trailing,
+        )
+        .cursor_pointer()
+        .on_mouse_move(cx.listener({
+            let path = path.clone();
+            move |this, _event: &gpui::MouseMoveEvent, _window, cx| {
+                if this.terminal_cwd_picker.highlighted_path.as_deref() != Some(&path) {
+                    this.terminal_cwd_picker.highlighted_path = Some(path.clone());
+                    cx.notify();
+                }
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                this.terminal_cwd_picker.highlighted_path = Some(path.clone());
+                if event.click_count >= 2 {
+                    this.select_terminal_cwd_path(path.clone(), verified_directory, cx);
+                } else {
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_cwd_message(&self, icon: LucideIcon, message: String) -> AnyElement {
@@ -1042,7 +1021,6 @@ impl WorkspaceApp {
     }
 
     fn render_terminal_project_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         let left = self.terminal_project_panel_left();
         let bottom = if self.terminal_command_input_collapsed {
             32.0
@@ -1051,30 +1029,24 @@ impl WorkspaceApp {
         };
 
         let mut panel = context_menu_pointer_event_boundary(
-            div()
-                .absolute()
-                .bottom(px(bottom))
-                .left(px(left))
-                .w(px(TERMINAL_PROJECT_MENU_WIDTH))
-                .max_w(relative(0.96))
-                .overflow_hidden()
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgba((theme.bg_elevated << 8) | 0xf5))
-                .shadow_lg()
-                .occlude()
-                .p(px(8.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .text_size(px(12.0))
-                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                    cx.stop_propagation();
-                }),
+            command_panel(
+                &self.tokens,
+                CommandPanelOptions::new()
+                    .width(TERMINAL_PROJECT_MENU_WIDTH)
+                    .max_width_ratio(0.96)
+                    .terminal_owned(),
+            )
+            .absolute()
+            .bottom(px(bottom))
+            .left(px(left))
+            .occlude()
+            .text_size(px(12.0))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            }),
         )
         .child(self.render_terminal_project_search(cx));
 
@@ -1101,45 +1073,33 @@ impl WorkspaceApp {
 
     fn render_terminal_project_header(&self, snapshot: &ProjectSnapshot) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x66))
-            .bg(rgba((theme.bg_hover << 8) | 0x4d))
-            .px(px(8.0))
-            .py(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(Self::render_lucide_icon(
+        entity_list_row(
+            &self.tokens,
+            EntityListRowOptions::new().compact(),
+            Some(Self::render_lucide_icon(
                 LucideIcon::Folder,
                 13.0,
                 rgb(theme.text_muted),
-            ))
-            .child(
+            )),
+            div()
+                .truncate()
+                .font_family(settings_mono_font_family(self.settings_store.settings()))
+                .text_size(px(11.0))
+                .text_color(rgb(theme.text))
+                .child(snapshot.root_path().to_string())
+                .into_any_element(),
+            Some(
                 div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_size(px(11.0))
-                            .text_color(rgb(theme.text))
-                            .child(snapshot.root_path().to_string()),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(10.0))
-                            .text_color(rgb(theme.text_muted))
-                            .child(snapshot.display_label()),
-                    ),
-            )
-            .into_any_element()
+                    .truncate()
+                    .text_size(px(10.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(snapshot.display_label())
+                    .into_any_element(),
+            ),
+            Vec::new(),
+            Vec::new(),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_project_search(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1238,47 +1198,14 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let active = self.terminal_project_panel.highlighted_task_id.as_deref() == Some(task.id());
         let task_id = task.id().to_string();
+        let task_label = task.label().to_string();
+        let task_command = task.command().to_string();
+        let task_source = task.source().display_name();
         let row_task = task.clone();
-        div()
-            .min_h(px(38.0))
-            .rounded(px(self.tokens.radii.md))
-            .px(px(8.0))
-            .py(px(5.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .bg(if active {
-                rgba((theme.accent << 8) | 0x26)
-            } else {
-                rgba(0x00000000)
-            })
-            .cursor_pointer()
-            .hover(move |style| style.bg(rgb(theme.bg_hover)))
-            .on_mouse_move(cx.listener({
-                let task_id = task_id.clone();
-                move |this, _event: &MouseMoveEvent, _window, cx| {
-                    if this.terminal_project_panel.highlighted_task_id.as_deref()
-                        != Some(task_id.as_str())
-                    {
-                        this.terminal_project_panel.highlighted_task_id = Some(task_id.clone());
-                        cx.notify();
-                    }
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.terminal_project_panel.highlighted_task_id =
-                        Some(row_task.id().to_string());
-                    if event.click_count >= 2 {
-                        this.run_terminal_project_task(row_task.clone(), cx);
-                    } else {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .child(Self::render_lucide_icon(
+        entity_list_row(
+            &self.tokens,
+            EntityListRowOptions::new().active(active).compact(),
+            Some(Self::render_lucide_icon(
                 LucideIcon::FilePlay,
                 13.0,
                 if active {
@@ -1286,44 +1213,60 @@ impl WorkspaceApp {
                 } else {
                     rgb(theme.text_muted)
                 },
-            ))
-            .child(
+            )),
+            div()
+                .truncate()
+                .text_color(if active {
+                    rgb(theme.accent)
+                } else {
+                    rgb(theme.text)
+                })
+                .child(task_label)
+                .into_any_element(),
+            Some(
                 div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .text_color(if active {
-                                rgb(theme.accent)
-                            } else {
-                                rgb(theme.text)
-                            })
-                            .child(task.label().to_string()),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(10.0))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_color(rgb(theme.text_muted))
-                            .child(task.command().to_string()),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_none()
+                    .truncate()
                     .text_size(px(10.0))
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgba((theme.bg_hover << 8) | 0x80))
-                    .px(px(5.0))
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_color(rgb(theme.text_muted))
-                    .child(task.source().display_name()),
-            )
-            .into_any_element()
+                    .child(task_command)
+                    .into_any_element(),
+            ),
+            vec![
+                status_pill(
+                    &self.tokens,
+                    task_source,
+                    StatusPillOptions::new(StatusTone::Neutral).compact(),
+                )
+                .into_any_element(),
+            ],
+            Vec::new(),
+        )
+        .cursor_pointer()
+        .on_mouse_move(cx.listener({
+            let task_id = task_id.clone();
+            move |this, _event: &MouseMoveEvent, _window, cx| {
+                if this.terminal_project_panel.highlighted_task_id.as_deref()
+                    != Some(task_id.as_str())
+                {
+                    this.terminal_project_panel.highlighted_task_id = Some(task_id.clone());
+                    cx.notify();
+                }
+            }
+        }))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                this.terminal_project_panel.highlighted_task_id = Some(row_task.id().to_string());
+                if event.click_count >= 2 {
+                    this.run_terminal_project_task(row_task.clone(), cx);
+                } else {
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_project_message(&self, icon: LucideIcon, message: String) -> AnyElement {
@@ -1348,7 +1291,6 @@ impl WorkspaceApp {
     }
 
     fn render_terminal_git_branch_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
         let left = self.terminal_git_branch_picker_left();
         let bottom = if self.terminal_command_input_collapsed {
             32.0
@@ -1365,30 +1307,24 @@ impl WorkspaceApp {
         };
 
         let mut panel = context_menu_pointer_event_boundary(
-            div()
-                .absolute()
-                .bottom(px(bottom))
-                .left(px(left))
-                .w(px(TERMINAL_GIT_BRANCH_MENU_WIDTH))
-                .max_w(relative(0.96))
-                .overflow_hidden()
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgba((theme.bg_elevated << 8) | 0xf5))
-                .shadow_lg()
-                .occlude()
-                .p(px(8.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .text_size(px(12.0))
-                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-                    cx.stop_propagation();
-                }),
+            command_panel(
+                &self.tokens,
+                CommandPanelOptions::new()
+                    .width(TERMINAL_GIT_BRANCH_MENU_WIDTH)
+                    .max_width_ratio(0.96)
+                    .terminal_owned(),
+            )
+            .absolute()
+            .bottom(px(bottom))
+            .left(px(left))
+            .occlude()
+            .text_size(px(12.0))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                cx.stop_propagation();
+            }),
         );
 
         if let Some(snapshot) = snapshot.clone() {
@@ -1465,74 +1401,60 @@ impl WorkspaceApp {
             metrics = metrics.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_staged",
                 status.staged(),
-                rgba(0x86efacff),
+                StatusTone::Success,
             ));
         }
         if status.modified() > 0 {
             metrics = metrics.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_modified",
                 status.modified(),
-                rgba(0xfbbf24ff),
+                StatusTone::Warning,
             ));
         }
         if status.untracked() > 0 {
             metrics = metrics.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_untracked",
                 status.untracked(),
-                rgba(0x67e8f9ff),
+                StatusTone::Info,
             ));
         }
         if status.conflicts() > 0 {
             metrics = metrics.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_conflict",
                 status.conflicts(),
-                rgba(0xf87171ff),
+                StatusTone::Error,
             ));
         }
 
-        div()
-            .min_h(px(42.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x66))
-            .bg(rgba((theme.bg_panel << 8) | 0x70))
-            .px(px(10.0))
-            .py(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(Self::render_lucide_icon(
+        entity_list_row(
+            &self.tokens,
+            EntityListRowOptions::new().compact(),
+            Some(Self::render_lucide_icon(
                 LucideIcon::FolderOpen,
                 14.0,
                 rgb(theme.text_muted),
-            ))
-            .child(
+            )),
+            div()
+                .truncate()
+                .text_size(px(12.0))
+                .font_family(self.terminal_git_mono_font())
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(theme.text))
+                .child(repo_root)
+                .into_any_element(),
+            Some(
                 div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(12.0))
-                            .font_family(self.terminal_git_mono_font())
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text))
-                            .child(repo_root),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(11.0))
-                            .font_family(self.terminal_git_mono_font())
-                            .text_color(rgb(theme.accent))
-                            .child(branch_label),
-                    ),
-            )
-            .child(metrics)
-            .into_any_element()
+                    .truncate()
+                    .text_size(px(11.0))
+                    .font_family(self.terminal_git_mono_font())
+                    .text_color(rgb(theme.accent))
+                    .child(branch_label)
+                    .into_any_element(),
+            ),
+            Vec::new(),
+            vec![metrics.into_any_element()],
+        )
+        .into_any_element()
     }
 
     fn render_terminal_git_section_tabs(
@@ -2132,22 +2054,19 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(2.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .font_family(self.terminal_git_mono_font())
-                            .text_color(rgb(theme.text))
-                            .child(path_label),
-                    )
+                    .child(monospace_datum(
+                        &self.tokens,
+                        path_label,
+                        Some(self.terminal_git_mono_font()),
+                        MonospaceDatumOptions::new(MonospaceDatumTone::Primary).strong(),
+                    ))
                     .when(path.original_path().is_some(), |meta| {
-                        meta.child(
-                            div()
-                                .truncate()
-                                .text_size(px(10.0))
-                                .font_family(self.terminal_git_mono_font())
-                                .text_color(rgb(theme.text_muted))
-                                .child(path.original_path().unwrap_or_default().to_string()),
-                        )
+                        meta.child(monospace_datum(
+                            &self.tokens,
+                            path.original_path().unwrap_or_default().to_string(),
+                            Some(self.terminal_git_mono_font()),
+                            MonospaceDatumOptions::new(MonospaceDatumTone::Muted).text_size(10.0),
+                        ))
                     }),
             )
             .child(self.render_terminal_git_path_badges(&path));
@@ -2207,42 +2126,41 @@ impl WorkspaceApp {
         if path.staged() {
             badges = badges.child(self.render_terminal_git_path_badge(
                 "terminal.git.path_state_staged",
-                rgba(0x86efacff),
+                StatusTone::Success,
             ));
         }
         if path.modified() {
             badges = badges.child(self.render_terminal_git_path_badge(
                 "terminal.git.path_state_modified",
-                rgba(0xfbbf24ff),
+                StatusTone::Warning,
             ));
         }
         if path.untracked() {
             badges = badges.child(self.render_terminal_git_path_badge(
                 "terminal.git.path_state_untracked",
-                rgba(0x67e8f9ff),
+                StatusTone::Info,
             ));
         }
         if path.conflict() {
             badges = badges.child(self.render_terminal_git_path_badge(
                 "terminal.git.path_state_conflict",
-                rgba(0xf87171ff),
+                StatusTone::Error,
             ));
         }
         badges.into_any_element()
     }
 
-    fn render_terminal_git_path_badge(&self, label_key: &'static str, color: Rgba) -> AnyElement {
-        div()
-            .h(px(18.0))
-            .rounded(px(self.tokens.radii.sm))
-            .px(px(5.0))
-            .flex()
-            .items_center()
-            .text_size(px(10.0))
-            .text_color(color)
-            .bg(rgba(0x00000026))
-            .child(self.i18n.t(label_key))
-            .into_any_element()
+    fn render_terminal_git_path_badge(
+        &self,
+        label_key: &'static str,
+        tone: StatusTone,
+    ) -> AnyElement {
+        status_pill(
+            &self.tokens,
+            self.i18n.t(label_key),
+            StatusPillOptions::new(tone).compact(),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_git_path_action_button(
@@ -2458,7 +2376,7 @@ impl WorkspaceApp {
             chips = chips.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_staged",
                 status.staged(),
-                rgba(0x86efacff),
+                StatusTone::Success,
             ));
         }
         if status.modified() > 0 {
@@ -2466,7 +2384,7 @@ impl WorkspaceApp {
             chips = chips.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_modified",
                 status.modified(),
-                rgba(0xfbbf24ff),
+                StatusTone::Warning,
             ));
         }
         if status.untracked() > 0 {
@@ -2474,7 +2392,7 @@ impl WorkspaceApp {
             chips = chips.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_untracked",
                 status.untracked(),
-                rgba(0x67e8f9ff),
+                StatusTone::Info,
             ));
         }
         if status.conflicts() > 0 {
@@ -2482,7 +2400,7 @@ impl WorkspaceApp {
             chips = chips.child(self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_conflict",
                 status.conflicts(),
-                rgba(0xf87171ff),
+                StatusTone::Error,
             ));
         }
         has_result.then(|| chips.into_any_element())
@@ -2496,7 +2414,7 @@ impl WorkspaceApp {
             self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_staged",
                 status.staged(),
-                rgba(0x86efacff),
+                StatusTone::Success,
             )
         })
     }
@@ -2509,7 +2427,7 @@ impl WorkspaceApp {
             self.render_terminal_git_label_count_chip(
                 "terminal.git.path_state_conflict",
                 status.conflicts(),
-                rgba(0xf87171ff),
+                StatusTone::Error,
             )
         })
     }
@@ -2519,15 +2437,14 @@ impl WorkspaceApp {
     }
 
     fn render_terminal_git_data_hint_with_width(&self, text: String, max_width: f32) -> AnyElement {
-        div()
-            .max_w(px(max_width))
-            .min_w(px(0.0))
-            .truncate()
-            .text_size(px(11.0))
-            .font_family(self.terminal_git_mono_font())
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(text)
-            .into_any_element()
+        monospace_datum(
+            &self.tokens,
+            text,
+            Some(self.terminal_git_mono_font()),
+            MonospaceDatumOptions::new(MonospaceDatumTone::Muted).text_size(11.0),
+        )
+        .max_w(px(max_width))
+        .into_any_element()
     }
 
     fn terminal_git_mono_font(&self) -> gpui::SharedString {
@@ -2538,21 +2455,14 @@ impl WorkspaceApp {
         &self,
         label_key: &'static str,
         count: u32,
-        color: Rgba,
+        tone: StatusTone,
     ) -> AnyElement {
-        div()
-            .h(px(18.0))
-            .rounded(px(self.tokens.radii.sm))
-            .px(px(5.0))
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .text_size(px(10.0))
-            .text_color(color)
-            .bg(rgba(0x00000026))
-            .child(self.i18n.t(label_key))
-            .child(count.to_string())
-            .into_any_element()
+        status_pill(
+            &self.tokens,
+            format!("{} {}", self.i18n.t(label_key), count),
+            StatusPillOptions::new(tone).compact(),
+        )
+        .into_any_element()
     }
 
     fn render_terminal_git_icon_count_chip(
@@ -2712,21 +2622,23 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(1.0))
-            .child(
-                div()
-                    .truncate()
-                    .font_family(self.terminal_git_mono_font())
-                    .child(branch_name.clone()),
-            );
+            .child(monospace_datum(
+                &self.tokens,
+                branch_name.clone(),
+                Some(self.terminal_git_mono_font()),
+                MonospaceDatumOptions::new(if current {
+                    MonospaceDatumTone::Accent
+                } else {
+                    MonospaceDatumTone::Primary
+                }),
+            ));
         if let Some(worktree_path) = worktree_path {
-            branch_identity = branch_identity.child(
-                div()
-                    .truncate()
-                    .text_size(px(10.0))
-                    .font_family(self.terminal_git_mono_font())
-                    .text_color(rgb(theme.text_muted))
-                    .child(worktree_path),
-            );
+            branch_identity = branch_identity.child(monospace_datum(
+                &self.tokens,
+                worktree_path,
+                Some(self.terminal_git_mono_font()),
+                MonospaceDatumOptions::new(MonospaceDatumTone::Muted).text_size(10.0),
+            ));
         }
 
         div()

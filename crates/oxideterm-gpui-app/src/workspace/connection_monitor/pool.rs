@@ -491,7 +491,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let state = connection_pool_state_view(&connection.state, &self.i18n, &self.tokens);
+        let state = connection_pool_state_view(&connection.state, &self.i18n);
         let is_idle = matches!(connection.state, ConnectionPoolEntryState::Idle);
         let is_active = matches!(connection.state, ConnectionPoolEntryState::Active);
         let global_never_timeout = idle_timeout_secs == 0;
@@ -505,16 +505,18 @@ impl WorkspaceApp {
         let connection_id = connection.id.clone();
         let next_keep_alive = !connection.keep_alive;
 
-        div()
+        oxideterm_gpui_ui::semantic_surface(
+            &self.tokens,
+            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::Inspector)
+                .padding(oxideterm_gpui_ui::SurfacePadding::None),
+        )
             .border_1()
             .border_color(if is_idle {
                 rgba((MONITOR_AMBER << 8) | CONNECTION_POOL_IDLE_BORDER_ALPHA_30)
             } else {
                 rgb(theme.border)
             })
-            .rounded(px(self.tokens.radii.lg))
             .p(px(CONNECTION_POOL_CARD_PADDING))
-            .bg(rgb(theme.bg_panel))
             .flex()
             .flex_col()
             .gap_3()
@@ -561,12 +563,14 @@ impl WorkspaceApp {
                                                 cx,
                                             )),
                                     )
-                                    .child(
-                                        div()
-                                            .text_size(px(12.0))
-                                            .text_color(rgb(state.color))
-                                            .child(state.label),
-                                    ),
+                                    .child(oxideterm_gpui_ui::status_pill(
+                                        &self.tokens,
+                                        state.label,
+                                        oxideterm_gpui_ui::StatusPillOptions::new(
+                                            connection_pool_state_tone(&connection.state),
+                                        )
+                                        .compact(),
+                                    )),
                             ),
                     )
                     .child(

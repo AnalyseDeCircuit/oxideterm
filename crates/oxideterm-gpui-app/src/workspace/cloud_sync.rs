@@ -81,6 +81,10 @@ pub(super) use oxideterm_gpui_cloud_sync::{
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
+use oxideterm_gpui_ui::{
+    StatusPillOptions, StatusTone, SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface,
+    status_pill, status_pill_element,
+};
 
 use super::quick_commands::QuickCommandImportStrategy;
 use super::*;
@@ -1095,21 +1099,17 @@ impl WorkspaceApp {
     }
 
     fn cloud_sync_plugin_card(&self, has_background: bool) -> Div {
-        let theme = self.tokens.ui;
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(cloud_sync_theme_border(theme.border, has_background))
-            .bg(cloud_sync_theme_card_bg(theme.bg_card, has_background))
-            // Mirrors the plugin manager card surface so Cloud Sync reads as
-            // a peer workspace tool instead of a legacy settings form.
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
+        semantic_surface(
+            &self.tokens,
+            SurfaceOptions::new(SurfaceKind::Inspector)
+                .padding(SurfacePadding::Spacious)
+                .has_background_image(has_background),
+        )
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(16.0))
     }
 
     fn render_cloud_sync_toolbar_button(
@@ -1177,20 +1177,12 @@ impl WorkspaceApp {
     }
 
     fn render_cloud_sync_status_chip(&self, label: String, tone: CloudSyncTone) -> AnyElement {
-        let color = tone.color(&self.tokens);
-        div()
-            .flex_shrink_0()
-            .rounded(px(999.0))
-            .border_1()
-            .border_color(cloud_sync_theme_alpha(color, CLOUD_SYNC_TW_ALPHA_40))
-            .bg(cloud_sync_theme_alpha(color, CLOUD_SYNC_TW_ALPHA_10))
-            .px(px(10.0))
-            .py(px(4.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(rgb(color))
-            .child(label)
-            .into_any_element()
+        status_pill(
+            &self.tokens,
+            label,
+            StatusPillOptions::new(cloud_sync_status_tone(tone)).strong(),
+        )
+        .into_any_element()
     }
 
     fn render_cloud_sync_progress(
@@ -2080,19 +2072,12 @@ impl WorkspaceApp {
     }
 
     fn render_cloud_sync_tone_chip(&self, tone: CloudSyncTone, label: AnyElement) -> AnyElement {
-        div()
-            .flex_shrink_0()
-            .rounded(px(999.0))
-            .border_1()
-            .border_color(rgba((tone.color(&self.tokens) << 8) | 0x73))
-            .bg(rgba((tone.color(&self.tokens) << 8) | 0x1A))
-            .px(px(8.0))
-            .py(px(2.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(rgb(tone.color(&self.tokens)))
-            .child(label)
-            .into_any_element()
+        status_pill_element(
+            &self.tokens,
+            label,
+            StatusPillOptions::new(cloud_sync_status_tone(tone)).compact(),
+        )
+        .into_any_element()
     }
 
     fn render_cloud_sync_apply_field_diff_card(
@@ -5625,7 +5610,6 @@ const CLOUD_SYNC_TW_ALPHA_10: u32 = 0x1a;
 const CLOUD_SYNC_TW_ALPHA_40: u32 = 0x66;
 const CLOUD_SYNC_TW_ALPHA_50: u32 = 0x80;
 const CLOUD_SYNC_BG_ACTIVE_THEME_ALPHA: u32 = 0x66;
-const CLOUD_SYNC_BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf;
 const CLOUD_SYNC_BG_ACTIVE_BORDER_HALF_ALPHA: u32 = 0x60;
 const CLOUD_SYNC_SECTION_DIFF_ITEM_MIN_WIDTH: f32 = 320.0;
 
@@ -5662,6 +5646,16 @@ impl CloudSyncTone {
             Self::Error => tokens.ui.error,
             Self::Muted => tokens.ui.text_muted,
         }
+    }
+}
+
+fn cloud_sync_status_tone(tone: CloudSyncTone) -> StatusTone {
+    match tone {
+        CloudSyncTone::Accent => StatusTone::Accent,
+        CloudSyncTone::Success => StatusTone::Success,
+        CloudSyncTone::Warning => StatusTone::Warning,
+        CloudSyncTone::Error => StatusTone::Error,
+        CloudSyncTone::Muted => StatusTone::Neutral,
     }
 }
 
@@ -5780,14 +5774,6 @@ fn cloud_sync_theme_card_bg(color: u32, has_background: bool) -> Rgba {
         color,
         has_background,
         CLOUD_SYNC_BG_ACTIVE_THEME_ALPHA,
-    )
-}
-
-fn cloud_sync_theme_border(color: u32, has_background: bool) -> Rgba {
-    oxideterm_gpui_ui::surface::color_for_background(
-        color,
-        has_background,
-        CLOUD_SYNC_BG_ACTIVE_BORDER_ALPHA,
     )
 }
 

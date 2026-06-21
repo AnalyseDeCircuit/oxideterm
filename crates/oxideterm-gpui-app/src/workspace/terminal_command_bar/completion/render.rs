@@ -1,3 +1,5 @@
+use oxideterm_gpui_ui::{StatusPillOptions, StatusTone, status_pill};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TerminalCommandSuggestionRowTextRole {
     Muted,
@@ -32,6 +34,16 @@ fn terminal_command_suggestion_row_ui_state(
     }
 }
 
+fn terminal_command_suggestion_risk_tone(risk: &str) -> StatusTone {
+    // Completion providers expose the same risk labels as quick commands; keep
+    // rendering semantic so the actual colors stay centralized.
+    if risk == "high" {
+        StatusTone::Error
+    } else {
+        StatusTone::Warning
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_terminal_command_suggestions(
         &self,
@@ -42,7 +54,6 @@ impl WorkspaceApp {
         const SUGGESTIONS_HEADER_BG_ALPHA: u32 = 0x99; // Tauri bg-theme-bg/60
         const SUGGESTIONS_BORDER_ALPHA: u32 = 0xff;
         const SUGGESTIONS_ROW_HOVER_ALPHA: u32 = 0x99; // Tauri hover:bg-theme-bg-hover/60
-        const SUGGESTIONS_SOURCE_BG_ALPHA: u32 = 0xff;
         let theme = self.tokens.ui;
         let highlighted = self.terminal_command_suggestion_highlighted;
         let mut menu = div()
@@ -146,34 +157,20 @@ impl WorkspaceApp {
                     })
                     .when_some(suggestion.risk, |row, risk| {
                         row.child(
-                            div()
-                                .rounded(px(self.tokens.radii.sm))
-                                .px(px(6.0))
-                                .py(px(2.0))
-                                .text_size(px(10.0))
-                                .text_color(if risk == "high" {
-                                    rgba(0xfca5a5ff)
-                                } else {
-                                    rgba(0xfcd34dff)
-                                })
-                                .bg(if risk == "high" {
-                                    rgba(0xef444426)
-                                } else {
-                                    rgba(0xf59e0b26)
-                                })
-                                .child(risk.to_uppercase()),
+                            status_pill(
+                                &self.tokens,
+                                risk.to_uppercase(),
+                                StatusPillOptions::new(terminal_command_suggestion_risk_tone(risk))
+                                    .compact()
+                                    .strong(),
+                            ),
                         )
                     })
-                    .child(
-                        div()
-                            .rounded(px(self.tokens.radii.sm))
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .text_size(px(10.0))
-                            .text_color(rgb(theme.text_muted))
-                            .bg(rgba((theme.bg_panel << 8) | SUGGESTIONS_SOURCE_BG_ALPHA))
-                            .child(self.i18n.t(suggestion.source_label_key)),
-                    ),
+                    .child(status_pill(
+                        &self.tokens,
+                        self.i18n.t(suggestion.source_label_key),
+                        StatusPillOptions::new(StatusTone::Neutral).compact(),
+                    )),
             );
         }
         menu.into_any_element()
@@ -203,6 +200,15 @@ mod tests {
                 text: TerminalCommandSuggestionRowTextRole::Muted,
                 background: TerminalCommandSuggestionRowBackgroundRole::Transparent,
             }
+        );
+    }
+
+    #[test]
+    fn suggestion_risk_tone_maps_classifier_labels_to_shared_status_tones() {
+        assert_eq!(terminal_command_suggestion_risk_tone("high"), StatusTone::Error);
+        assert_eq!(
+            terminal_command_suggestion_risk_tone("medium"),
+            StatusTone::Warning
         );
     }
 }

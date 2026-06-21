@@ -319,8 +319,13 @@ impl WorkspaceApp {
         } else {
             rgba((color << 8) | MONITOR_TINT_ALPHA)
         };
-        div()
-            .rounded(px(self.tokens.radii.lg))
+        oxideterm_gpui_ui::semantic_surface(
+            &self.tokens,
+            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
+                .padding(oxideterm_gpui_ui::SurfacePadding::None),
+        )
+            // Runtime stat cards use a value tint as their semantic signal, while
+            // the shared surface keeps radius and future border policy aligned.
             .bg(background)
             .p_3()
             .shadow_sm()

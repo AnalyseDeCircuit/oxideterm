@@ -1,6 +1,12 @@
 use super::*;
-use oxideterm_gpui_ui::text_input::{
-    TextInputContentAlign, TextInputView, text_input_anchor_probe, text_input_with_content_align,
+use gpui::Div;
+use oxideterm_gpui_ui::{
+    StatusPillOptions, StatusTone, SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface,
+    status_pill,
+    text_input::{
+        TextInputContentAlign, TextInputView, text_input_anchor_probe,
+        text_input_with_content_align,
+    },
 };
 use std::{process::Command, sync::mpsc};
 
@@ -26,7 +32,6 @@ const PLUGIN_MANAGER_TW_GREEN_400: u32 = 0x4ade80;
 const PLUGIN_MANAGER_TW_GREEN_500: u32 = 0x22c55e;
 const PLUGIN_MANAGER_TW_RED_400: u32 = 0xf87171;
 const PLUGIN_MANAGER_TW_RED_500: u32 = 0xef4444;
-const PLUGIN_MANAGER_TW_YELLOW_500: u32 = 0xeab308;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum NativePluginManagerOperationStatus {
@@ -180,6 +185,17 @@ impl WorkspaceApp {
         }
     }
 
+    fn native_plugin_card_surface(&self, has_background: bool) -> Div {
+        semantic_surface(
+            &self.tokens,
+            SurfaceOptions::new(SurfaceKind::Inspector)
+                .padding(SurfacePadding::Spacious)
+                .has_background_image(has_background),
+        )
+        .w_full()
+        .min_w(px(0.0))
+    }
+
     fn render_native_plugin_actions_card(
         &self,
         has_background: bool,
@@ -193,16 +209,7 @@ impl WorkspaceApp {
             .iter()
             .filter(|plugin| plugin.state == plugin_host::NativePluginState::Active)
             .count();
-        div()
-            .w_full()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(plugin_manager_theme_border(theme.border, has_background))
-            .bg(plugin_manager_theme_card_bg(theme.bg_card, has_background))
-            // Tauri PluginManagerView uses the same SettingsView action card:
-            // rounded-lg border bg-theme-bg-card p-5 with compact text buttons.
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
-            .p(px(self.tokens.metrics.settings_card_padding))
+        self.native_plugin_card_surface(has_background)
             .flex()
             .flex_col()
             .gap(px(16.0))
@@ -331,7 +338,9 @@ impl WorkspaceApp {
                 NativePluginManagerTab::Installed => {
                     self.render_native_plugin_installed_card(has_background, cx)
                 }
-                NativePluginManagerTab::Browse => self.render_native_plugin_browse_content(cx),
+                NativePluginManagerTab::Browse => {
+                    self.render_native_plugin_browse_content(has_background, cx)
+                }
             })
             .into_any_element()
     }
@@ -457,17 +466,8 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let plugin_rows = self.plugin_registry.plugins().to_vec();
         let diagnostics = self.plugin_registry.diagnostics().to_vec();
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(plugin_manager_theme_border(theme.border, has_background))
-            .bg(plugin_manager_theme_card_bg(theme.bg_card, has_background))
-            // PluginManagerView uses bg-theme-bg-card, which carries
-            // --theme-card-shadow in the Tauri theme.
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
-            .p(px(self.tokens.metrics.settings_card_padding))
+        let card = self
+            .native_plugin_card_surface(has_background)
             .flex()
             .flex_col()
             .gap(px(16.0))
@@ -538,13 +538,17 @@ impl WorkspaceApp {
         card.into_any_element()
     }
 
-    fn render_native_plugin_browse_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_native_plugin_browse_content(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .w_full()
             .flex()
             .flex_col()
             .gap(px(16.0))
-            .child(self.render_native_plugin_package_manager(cx))
+            .child(self.render_native_plugin_package_manager(has_background, cx))
             .child(self.render_native_plugin_url_disclaimer())
             .into_any_element()
     }
@@ -571,21 +575,17 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_native_plugin_package_manager(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_native_plugin_package_manager(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let busy = matches!(
             self.plugin_manager_operation_status,
             NativePluginManagerOperationStatus::Busy(_)
         );
-        div()
-            .w_full()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_card))
-            // Tauri Browse tab shows URL install as its own SettingsView card.
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
-            .p(px(self.tokens.metrics.settings_card_padding))
+        self.native_plugin_card_surface(has_background)
             .flex()
             .flex_col()
             .gap(px(14.0))
@@ -1425,7 +1425,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (state_label, state_color) = native_plugin_status_badge(&self.i18n, plugin, theme);
+        let (state_label, state_tone) = native_plugin_status_badge(&self.i18n, plugin);
         let error_message = native_plugin_visible_error(&self.i18n, plugin);
         let is_expanded = self
             .plugin_manager_expanded_plugin_ids
@@ -1535,21 +1535,11 @@ impl WorkspaceApp {
                                                 .text_color(rgb(theme.accent))
                                                 .child(format!("v{}", plugin.manifest.version)),
                                         )
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap(px(6.0))
-                                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .text_color(rgb(theme.text_muted))
-                                                .child(
-                                                    div()
-                                                        .size(px(8.0))
-                                                        .rounded_full()
-                                                        .bg(rgb(state_color)),
-                                                )
-                                                .child(state_label),
-                                        ),
+                                        .child(status_pill(
+                                            &self.tokens,
+                                            state_label,
+                                            StatusPillOptions::new(state_tone).compact(),
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -1985,29 +1975,28 @@ fn native_plugin_is_error_like(state: plugin_host::NativePluginState) -> bool {
 fn native_plugin_status_badge(
     i18n: &I18n,
     plugin: &plugin_host::NativePluginInfo,
-    theme: AppUiColors,
-) -> (String, u32) {
+) -> (String, StatusTone) {
     match plugin.state {
         plugin_host::NativePluginState::Active
         | plugin_host::NativePluginState::ReadyManifestOnly
         | plugin_host::NativePluginState::ReadyWasm
         | plugin_host::NativePluginState::ReadyProcess => {
-            (i18n.t("plugin.status.active"), PLUGIN_MANAGER_TW_GREEN_500)
+            (i18n.t("plugin.status.active"), StatusTone::Success)
         }
-        plugin_host::NativePluginState::Loading => (i18n.t("plugin.status.loading"), theme.warning),
+        plugin_host::NativePluginState::Loading => {
+            (i18n.t("plugin.status.loading"), StatusTone::Warning)
+        }
         plugin_host::NativePluginState::Error | plugin_host::NativePluginState::AutoDisabled => {
-            (i18n.t("plugin.status.error"), PLUGIN_MANAGER_TW_RED_400)
+            (i18n.t("plugin.status.error"), StatusTone::Error)
         }
-        plugin_host::NativePluginState::Disabled => (
-            i18n.t("plugin.status.disabled"),
-            PLUGIN_MANAGER_TW_YELLOW_500,
-        ),
-        plugin_host::NativePluginState::UnsupportedLegacyJs => (
-            i18n.t("plugin.status.inactive"),
-            PLUGIN_MANAGER_TW_YELLOW_500,
-        ),
+        plugin_host::NativePluginState::Disabled => {
+            (i18n.t("plugin.status.disabled"), StatusTone::Warning)
+        }
+        plugin_host::NativePluginState::UnsupportedLegacyJs => {
+            (i18n.t("plugin.status.inactive"), StatusTone::Warning)
+        }
         plugin_host::NativePluginState::Discovered => {
-            (i18n.t("plugin.status.inactive"), theme.text_muted)
+            (i18n.t("plugin.status.inactive"), StatusTone::Neutral)
         }
     }
 }

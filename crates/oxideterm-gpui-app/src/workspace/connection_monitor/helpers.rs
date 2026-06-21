@@ -98,43 +98,48 @@ fn topology_view_status_color(status: TopologyViewStatus) -> u32 {
 fn connection_pool_state_view(
     state: &ConnectionPoolEntryState,
     i18n: &I18n,
-    tokens: &ThemeTokens,
 ) -> ConnectionPoolStateView {
     match state {
         ConnectionPoolEntryState::Connecting => ConnectionPoolStateView {
             label: i18n.t("connections.state.connecting"),
-            color: CONNECTION_POOL_YELLOW_400,
         },
         ConnectionPoolEntryState::Active => ConnectionPoolStateView {
             label: i18n.t("connections.state.active"),
-            color: CONNECTION_POOL_GREEN_400,
         },
         ConnectionPoolEntryState::Idle => ConnectionPoolStateView {
             label: i18n.t("connections.state.idle"),
-            color: CONNECTION_POOL_AMBER_400,
         },
         ConnectionPoolEntryState::LinkDown => ConnectionPoolStateView {
             label: i18n.t("connections.monitor.link_down"),
-            color: tokens.ui.text_muted,
         },
         ConnectionPoolEntryState::Reconnecting => ConnectionPoolStateView {
             label: i18n.t("connections.monitor.reconnecting"),
-            color: tokens.ui.text_muted,
         },
         ConnectionPoolEntryState::Disconnecting => ConnectionPoolStateView {
             label: i18n.t("connections.state.disconnecting"),
-            color: CONNECTION_POOL_ORANGE_400,
         },
         ConnectionPoolEntryState::Disconnected => ConnectionPoolStateView {
             label: i18n.t("connections.state.disconnected"),
-            color: tokens.ui.text_muted,
         },
         ConnectionPoolEntryState::Error(error) => ConnectionPoolStateView {
             label: i18n
                 .t("connections.state.error")
                 .replace("{{error}}", error),
-            color: CONNECTION_POOL_RED_400,
         },
+    }
+}
+
+fn connection_pool_state_tone(state: &ConnectionPoolEntryState) -> oxideterm_gpui_ui::StatusTone {
+    match state {
+        ConnectionPoolEntryState::Active => oxideterm_gpui_ui::StatusTone::Success,
+        ConnectionPoolEntryState::Connecting | ConnectionPoolEntryState::Idle => {
+            oxideterm_gpui_ui::StatusTone::Warning
+        }
+        ConnectionPoolEntryState::Error(_) => oxideterm_gpui_ui::StatusTone::Error,
+        ConnectionPoolEntryState::LinkDown
+        | ConnectionPoolEntryState::Reconnecting
+        | ConnectionPoolEntryState::Disconnecting
+        | ConnectionPoolEntryState::Disconnected => oxideterm_gpui_ui::StatusTone::Neutral,
     }
 }
 

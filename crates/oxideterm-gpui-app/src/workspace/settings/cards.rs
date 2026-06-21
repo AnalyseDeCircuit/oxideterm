@@ -266,13 +266,18 @@ impl WorkspaceApp {
         }
     }
 
-    fn settings_card_surface(&self, card: Div, color: u32) -> Div {
-        oxideterm_gpui_ui::tauri_card_surface(
-            card,
-            color,
-            self.settings_background_active(),
-            Self::SETTINGS_BG_ACTIVE_SURFACE_ALPHA,
-        )
+    fn settings_card_surface(&self, card: Div, _color: u32) -> Div {
+        let chrome = oxideterm_gpui_ui::surface_chrome(
+            &self.tokens,
+            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::Inspector)
+                .padding(oxideterm_gpui_ui::SurfacePadding::None)
+                .has_background_image(self.settings_background_active()),
+        );
+        // Settings cards already own their inner padding and children, so only
+        // the shared chrome colors are applied here.
+        card.rounded(px(chrome.radius))
+            .border_color(chrome.border)
+            .bg(chrome.background)
     }
 
     fn text_badge(&self, label: String, color: u32) -> AnyElement {

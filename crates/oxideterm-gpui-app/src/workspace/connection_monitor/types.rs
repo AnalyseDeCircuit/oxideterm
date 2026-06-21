@@ -169,10 +169,7 @@ const CONNECTION_POOL_ICON_SIZE_LG: f32 = 20.0;
 const CONNECTION_POOL_ICON_SIZE_MD: f32 = 16.0;
 const CONNECTION_POOL_ICON_SIZE_SM: f32 = 12.0;
 const CONNECTION_POOL_GREEN_400: u32 = 0x4ade80;
-const CONNECTION_POOL_YELLOW_400: u32 = 0xfacc15;
 const CONNECTION_POOL_AMBER_400: u32 = 0xfbbf24;
-const CONNECTION_POOL_ORANGE_400: u32 = 0xfb923c;
-const CONNECTION_POOL_RED_400: u32 = 0xf87171;
 const CONNECTION_POOL_PANEL_ALPHA_30: u32 = 0x4d;
 const CONNECTION_POOL_EMPTY_ICON_ALPHA: u32 = 0x4d;
 const CONNECTION_POOL_EMPTY_HINT_OPACITY: f32 = 0.7;
@@ -241,7 +238,6 @@ struct TopologyNodeMenuState {
 
 struct ConnectionPoolStateView {
     label: String,
-    color: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
