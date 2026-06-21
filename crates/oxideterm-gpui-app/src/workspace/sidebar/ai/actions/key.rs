@@ -94,6 +94,16 @@ impl WorkspaceApp {
                     cx.notify();
                     true
                 }
+                "space" | " "
+                    if ai_text_input_space_inserts_literal(
+                        event.keystroke.modifiers.platform,
+                        event.keystroke.modifiers.control,
+                        event.keystroke.modifiers.alt,
+                    ) =>
+                {
+                    self.insert_ai_text_input_literal_space(WorkspaceImeTarget::AiMessageEdit, cx);
+                    true
+                }
                 _ => true,
             }
         } else if let Some(action) = self.ai_chat_footer_focus {
@@ -187,6 +197,16 @@ impl WorkspaceApp {
                     cx.notify();
                     true
                 }
+                "space" | " "
+                    if ai_text_input_space_inserts_literal(
+                        event.keystroke.modifiers.platform,
+                        event.keystroke.modifiers.control,
+                        event.keystroke.modifiers.alt,
+                    ) =>
+                {
+                    self.insert_ai_text_input_literal_space(WorkspaceImeTarget::AiChatInput, cx);
+                    true
+                }
                 _ => true,
             }
         } else {
@@ -244,5 +264,42 @@ impl WorkspaceApp {
         }
     }
 
+    fn insert_ai_text_input_literal_space(
+        &mut self,
+        target: WorkspaceImeTarget,
+        cx: &mut Context<Self>,
+    ) {
+        // Some GPUI platforms deliver Space without key_char, so write it
+        // through the IME owner just like a browser textarea would.
+        let replacement_range = self.ime_selection_range_for_target(target);
+        let caret = replacement_range
+            .as_ref()
+            .map(|range| range.start + " ".encode_utf16().count());
+        self.clear_ime_selection();
+        self.replace_ime_target_text(target, replacement_range, " ", cx);
+        if let Some(caret) = caret {
+            self.set_ime_selection_from_anchor(target, caret, caret);
+        }
+    }
+}
 
+fn ai_text_input_space_inserts_literal(platform: bool, control: bool, alt: bool) -> bool {
+    !platform && !control && !alt
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::ai_text_input_space_inserts_literal;
+
+    #[test]
+    fn ai_text_input_plain_space_inserts_literal() {
+        assert!(ai_text_input_space_inserts_literal(false, false, false));
+    }
+
+    #[test]
+    fn ai_text_input_modified_space_falls_through() {
+        assert!(!ai_text_input_space_inserts_literal(true, false, false));
+        assert!(!ai_text_input_space_inserts_literal(false, true, false));
+        assert!(!ai_text_input_space_inserts_literal(false, false, true));
+    }
 }

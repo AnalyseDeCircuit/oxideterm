@@ -2684,13 +2684,34 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let list_height =
             state.rollback_backups.len() as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT;
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(
-                self.render_cloud_sync_section_title(
-                    "plugin.cloud_sync.sections.rollback_backups",
+        let title =
+            self.render_cloud_sync_section_title("plugin.cloud_sync.sections.rollback_backups", cx);
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .child(title)
+            .when(!state.rollback_backups.is_empty(), |header| {
+                header.child(self.render_cloud_sync_inline_button(
+                    "plugin.cloud_sync.actions.clear_backups",
+                    cx.listener(
+                        move |this: &mut WorkspaceApp,
+                              _event,
+                              _window,
+                              cx: &mut Context<WorkspaceApp>| {
+                            if !busy {
+                                this.open_cloud_sync_clear_backups_confirm();
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ),
                     cx,
-                ),
-            )
+                ))
+            });
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+            .child(header)
             .child(
                 div()
                     .h(px(list_height))
@@ -2700,7 +2721,7 @@ impl WorkspaceApp {
                         spec,
                         move |index, _window, cx| {
                             workspace.update(cx, |this, cx| {
-                                this.render_cloud_sync_rollback_backup_item(index, busy, cx)
+                                this.render_cloud_sync_rollback_backup_item(index, busy, true, cx)
                             })
                         },
                     )),
@@ -2733,6 +2754,7 @@ impl WorkspaceApp {
         &self,
         index: usize,
         busy: bool,
+        show_management: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let state = self.cloud_sync_store.state().clone();
@@ -2764,6 +2786,55 @@ impl WorkspaceApp {
             ),
             CloudSyncRollbackBackupSummarySpec::SizeOnly(size) => size,
         };
+        let restore_id = id.clone();
+        let restore_created_at = created_at.clone();
+        let delete_id = id.clone();
+        let delete_created_at = created_at.clone();
+        let mut actions =
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(self.render_cloud_sync_inline_button(
+                    "plugin.cloud_sync.actions.restore_backup",
+                    cx.listener(
+                        move |this: &mut WorkspaceApp,
+                              _event,
+                              _window,
+                              cx: &mut Context<WorkspaceApp>| {
+                            if !busy {
+                                this.open_cloud_sync_restore_confirm(Some((
+                                    restore_id.clone(),
+                                    restore_created_at.clone(),
+                                )));
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ),
+                    cx,
+                ));
+        if show_management {
+            actions = actions.child(self.render_cloud_sync_inline_button(
+                "plugin.cloud_sync.actions.delete_backup",
+                cx.listener(
+                    move |this: &mut WorkspaceApp,
+                          _event,
+                          _window,
+                          cx: &mut Context<WorkspaceApp>| {
+                        if !busy {
+                            this.open_cloud_sync_delete_backup_confirm(
+                                delete_id.clone(),
+                                delete_created_at.clone(),
+                            );
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                    },
+                ),
+                cx,
+            ));
+        }
         cloud_sync_rollback_backup_row(
             &self.tokens,
             self.render_display_text_with_role(
@@ -2782,25 +2853,7 @@ impl WorkspaceApp {
                 self.tokens.ui.text_muted,
                 cx,
             ),
-            self.render_cloud_sync_inline_button(
-                "plugin.cloud_sync.actions.restore_backup",
-                cx.listener(
-                    move |this: &mut WorkspaceApp,
-                          _event,
-                          _window,
-                          cx: &mut Context<WorkspaceApp>| {
-                        if !busy {
-                            this.open_cloud_sync_restore_confirm(Some((
-                                id.clone(),
-                                created_at.clone(),
-                            )));
-                        }
-                        cx.stop_propagation();
-                        cx.notify();
-                    },
-                ),
-                cx,
-            ),
+            actions.into_any_element(),
         )
     }
 
@@ -2810,6 +2863,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let busy = self.cloud_sync_rx.is_some();
         let title = self.render_display_text_with_role(
             SelectableTextRole::PlainDocument,
             "cloud-sync-history",
@@ -2852,8 +2906,32 @@ impl WorkspaceApp {
                 ))
                 .into_any_element()
         };
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
             .child(title)
+            .when(!state.sync_history.is_empty(), |header| {
+                header.child(self.render_cloud_sync_inline_button(
+                    "plugin.cloud_sync.actions.clear_history",
+                    cx.listener(
+                        move |this: &mut WorkspaceApp,
+                              _event,
+                              _window,
+                              cx: &mut Context<WorkspaceApp>| {
+                            if !busy {
+                                this.open_cloud_sync_clear_history_confirm();
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        },
+                    ),
+                    cx,
+                ))
+            });
+        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
+            .child(header)
             .child(body)
             .into_any_element()
     }
@@ -2925,7 +3003,7 @@ impl WorkspaceApp {
                 cx,
             ));
         for index in 0..state.rollback_backups.len().min(3) {
-            card = card.child(self.render_cloud_sync_rollback_backup_item(index, busy, cx));
+            card = card.child(self.render_cloud_sync_rollback_backup_item(index, busy, false, cx));
         }
         card.into_any_element()
     }
@@ -4203,6 +4281,27 @@ impl WorkspaceApp {
         }
     }
 
+    fn open_cloud_sync_delete_backup_confirm(&mut self, id: String, created_at: String) {
+        self.cloud_sync_confirm = Some(CloudSyncConfirm::DeleteBackup { id, created_at });
+        self.cloud_sync_confirm_focused_action = None;
+    }
+
+    fn open_cloud_sync_clear_backups_confirm(&mut self) {
+        if self.cloud_sync_store.state().rollback_backups.is_empty() {
+            return;
+        }
+        self.cloud_sync_confirm = Some(CloudSyncConfirm::ClearBackups);
+        self.cloud_sync_confirm_focused_action = None;
+    }
+
+    fn open_cloud_sync_clear_history_confirm(&mut self) {
+        if self.cloud_sync_store.state().sync_history.is_empty() {
+            return;
+        }
+        self.cloud_sync_confirm = Some(CloudSyncConfirm::ClearHistory);
+        self.cloud_sync_confirm_focused_action = None;
+    }
+
     fn cancel_cloud_sync_confirm(&mut self) {
         self.cloud_sync_confirm = None;
         self.cloud_sync_confirm_focused_action = None;
@@ -4217,6 +4316,11 @@ impl WorkspaceApp {
             Some(CloudSyncConfirm::RestoreBackup { id, .. }) => {
                 self.start_cloud_sync_restore_backup(id, cx)
             }
+            Some(CloudSyncConfirm::DeleteBackup { id, .. }) => {
+                self.delete_cloud_sync_rollback_backup(&id, cx)
+            }
+            Some(CloudSyncConfirm::ClearBackups) => self.clear_cloud_sync_rollback_backups(cx),
+            Some(CloudSyncConfirm::ClearHistory) => self.clear_cloud_sync_history(cx),
             Some(CloudSyncConfirm::EnableSensitiveSync) => {
                 self.cloud_sync_store
                     .state_mut()
@@ -4225,6 +4329,83 @@ impl WorkspaceApp {
                 self.finish_cloud_sync_scope_edit(cx);
             }
             None => {}
+        }
+    }
+
+    fn delete_cloud_sync_rollback_backup(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        let removed = self.cloud_sync_store.state_mut().remove_rollback_backup(id);
+        if removed {
+            self.clear_cloud_sync_preview_for_deleted_backup(id);
+            self.save_cloud_sync_state();
+            self.push_cloud_sync_toast(
+                self.i18n
+                    .t("plugin.cloud_sync.toast.rollback_backup_deleted_title"),
+                None,
+                TerminalNoticeVariant::Success,
+            );
+        }
+        cx.notify();
+    }
+
+    fn clear_cloud_sync_rollback_backups(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        let removed = self.cloud_sync_store.state_mut().clear_rollback_backups();
+        if removed > 0 {
+            self.cloud_sync_pending_preview = self
+                .cloud_sync_pending_preview
+                .take()
+                .filter(|preview| !preview.is_backup());
+            self.cloud_sync_preview_selection = None;
+            self.save_cloud_sync_state();
+            self.push_cloud_sync_toast(
+                self.i18n
+                    .t("plugin.cloud_sync.toast.rollback_backups_cleared_title"),
+                None,
+                TerminalNoticeVariant::Success,
+            );
+        }
+        cx.notify();
+    }
+
+    fn clear_cloud_sync_history(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        let removed = self.cloud_sync_store.state_mut().clear_history();
+        if removed > 0 {
+            self.save_cloud_sync_state();
+            self.push_cloud_sync_toast(
+                self.i18n.t("plugin.cloud_sync.toast.history_cleared_title"),
+                None,
+                TerminalNoticeVariant::Success,
+            );
+        }
+        cx.notify();
+    }
+
+    fn clear_cloud_sync_preview_for_deleted_backup(&mut self, backup_id: &str) {
+        // A deleted backup cannot remain selected as the pending import preview.
+        let pending_matches_deleted_backup =
+            self.cloud_sync_pending_preview
+                .as_ref()
+                .is_some_and(|preview| match preview {
+                    CloudSyncPendingPreview::Legacy {
+                        source: CloudSyncPreviewSource::Backup { id, .. },
+                        ..
+                    } => id.as_str() == backup_id,
+                    _ => false,
+                });
+        if pending_matches_deleted_backup {
+            self.cloud_sync_pending_preview = None;
+            self.cloud_sync_preview_selection = None;
         }
     }
 

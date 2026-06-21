@@ -963,8 +963,20 @@ fn create_cloud_sync_rollback_backup(
     source_revision: Option<String>,
     sync_password: Option<&str>,
 ) -> anyhow::Result<Option<CloudSyncRollbackBackup>> {
+    let app_settings_json = oxideterm_settings::export_oxide_settings_snapshot_json(
+        settings_store.settings(),
+        None,
+        true,
+    )?;
+    let plugin_settings =
+        oxideterm_cloud_sync::plugin_settings::load_plugin_settings(settings_store.path())
+            .map_err(anyhow::Error::msg)?;
+    let saved_forwards = forwarding_registry.list_all_saved_forwards();
+    // Rollback coverage must include settings-only local state, not just connections.
     let has_local_data = !connection_store.connections().is_empty()
-        || !forwarding_registry.list_all_saved_forwards().is_empty();
+        || !saved_forwards.is_empty()
+        || !app_settings_json.trim().is_empty()
+        || !plugin_settings.is_empty();
     if !has_local_data {
         return Ok(None);
     }
@@ -980,16 +992,7 @@ fn create_cloud_sync_rollback_backup(
         .iter()
         .cloned()
         .collect::<std::collections::HashSet<_>>();
-    let app_settings_json = oxideterm_settings::export_oxide_settings_snapshot_json(
-        settings_store.settings(),
-        None,
-        true,
-    )?;
-    let plugin_settings =
-        oxideterm_cloud_sync::plugin_settings::load_plugin_settings(settings_store.path())
-            .map_err(anyhow::Error::msg)?;
-    let forwards = forwarding_registry
-        .list_all_saved_forwards()
+    let forwards = saved_forwards
         .into_iter()
         .filter_map(|forward| {
             let owner_id = forward.owner_connection_id?;

@@ -144,16 +144,14 @@ impl Render for WorkspaceApp {
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                let active_ime_commits_printable_key =
-                    this.defer_active_ime_printable_key(&event.keystroke, window, cx);
-                if active_ime_commits_printable_key {
+                let active_ime_should_receive_key =
+                    this.defer_active_ime_key(&event.keystroke, window, cx);
+                if active_ime_should_receive_key {
                     // Tauri DOM inputs let printable keydown bubble while the
                     // browser performs the actual text mutation through the
                     // input/composition pipeline. GPUI follows the same shape:
                     // if we stop propagation here, the platform input handler
-                    // may not receive the character and page-level fallbacks can
-                    // become a second writer. Record the owner for dedupe, then
-                    // leave the key unhandled so Window dispatches text once.
+                    // may not receive the character or IME candidate control.
                     return;
                 }
                 if this.keyboard_interactive_challenge.is_some() {

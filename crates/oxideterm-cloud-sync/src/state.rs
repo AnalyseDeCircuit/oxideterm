@@ -216,10 +216,31 @@ impl CloudSyncPersistedState {
         self.sync_history.truncate(MAX_SYNC_HISTORY);
     }
 
+    /// Clears locally retained sync history and returns the number of removed entries.
+    pub fn clear_history(&mut self) -> usize {
+        let removed = self.sync_history.len();
+        self.sync_history.clear();
+        removed
+    }
+
     pub fn append_rollback_backup(&mut self, backup: CloudSyncRollbackBackup) {
         self.rollback_backups.retain(|item| item.id != backup.id);
         self.rollback_backups.insert(0, backup);
         self.rollback_backups.truncate(crate::MAX_ROLLBACK_BACKUPS);
+    }
+
+    /// Removes one locally retained rollback backup by id.
+    pub fn remove_rollback_backup(&mut self, id: &str) -> bool {
+        let before = self.rollback_backups.len();
+        self.rollback_backups.retain(|backup| backup.id != id);
+        self.rollback_backups.len() != before
+    }
+
+    /// Clears all locally retained rollback backups and returns the removed count.
+    pub fn clear_rollback_backups(&mut self) -> usize {
+        let removed = self.rollback_backups.len();
+        self.rollback_backups.clear();
+        removed
     }
 }
 
@@ -333,6 +354,21 @@ mod tests {
     }
 
     #[test]
+    fn history_can_be_cleared_for_user_managed_lifecycle() {
+        let mut state = CloudSyncPersistedState::default();
+        state.append_history(CloudSyncHistoryEntry::new(
+            "upload",
+            CloudSyncHistorySummary::default(),
+            true,
+            None,
+            Some("rev-1".into()),
+        ));
+
+        assert_eq!(state.clear_history(), 1);
+        assert!(state.sync_history.is_empty());
+    }
+
+    #[test]
     fn persisted_state_accepts_structured_state_before_optional_sections() {
         let state: CloudSyncPersistedState = serde_json::from_value(serde_json::json!({
             "lastSyncedStructuredState": {
@@ -410,6 +446,33 @@ mod tests {
             state.rollback_backups[0].id,
             format!("backup-{}", crate::MAX_ROLLBACK_BACKUPS + 1)
         );
+    }
+
+    #[test]
+    fn rollback_backups_can_be_removed_for_user_managed_lifecycle() {
+        let mut state = CloudSyncPersistedState::default();
+        state.append_rollback_backup(CloudSyncRollbackBackup {
+            id: "backup-1".into(),
+            created_at: "2026-05-19T00:00:00Z".into(),
+            source_revision: None,
+            size_bytes: 0,
+            bytes_base64: String::new(),
+            metadata: None,
+        });
+        state.append_rollback_backup(CloudSyncRollbackBackup {
+            id: "backup-2".into(),
+            created_at: "2026-05-19T00:00:00Z".into(),
+            source_revision: None,
+            size_bytes: 0,
+            bytes_base64: String::new(),
+            metadata: None,
+        });
+
+        assert!(state.remove_rollback_backup("backup-1"));
+        assert!(!state.remove_rollback_backup("missing"));
+        assert_eq!(state.rollback_backups.len(), 1);
+        assert_eq!(state.clear_rollback_backups(), 1);
+        assert!(state.rollback_backups.is_empty());
     }
 
     #[test]
