@@ -116,7 +116,9 @@ impl WorkspaceApp {
                             .w_full()
                             .min_w_0()
                             .flex_none()
-                            .h(px(42.0))
+                            // The right sidebar header sits beside the main
+                            // tabbar, so keep both chrome rows exactly aligned.
+                            .h(px(self.tokens.metrics.tabbar_height))
                             .flex()
                             .flex_row()
                             .items_center()
