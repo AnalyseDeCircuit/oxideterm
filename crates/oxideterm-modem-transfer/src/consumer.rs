@@ -372,6 +372,31 @@ mod tests {
     }
 
     #[test]
+    fn xymodem_like_serial_noise_is_plain_output_without_negotiation() {
+        let mut consumer = ModemConsumer::new();
+        let bytes = [
+            b'e',
+            crate::xymodem::SOH,
+            1,
+            0xfe,
+            b'I',
+            b' ',
+            b'(',
+            b'3',
+            b'0',
+            b')',
+        ];
+        let events = consumer.process_server_output(&bytes);
+        assert_eq!(terminal_bytes(&events), bytes);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, ModemConsumerEvent::TransferStarted(_)))
+        );
+        assert!(consumer.active_transfer().is_none());
+    }
+
+    #[test]
     fn uppercase_c_in_plain_output_does_not_start_xymodem() {
         let mut consumer = ModemConsumer::new();
         let events = consumer.process_server_output(b"SECURITY.md\r\n");

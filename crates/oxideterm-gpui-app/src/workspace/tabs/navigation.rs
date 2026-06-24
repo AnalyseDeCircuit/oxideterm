@@ -217,6 +217,15 @@ impl WorkspaceApp {
 
     pub(super) fn focus_active_pane(&mut self, window: &mut Window, cx: &App) {
         self.clear_ai_sidebar_keyboard_focus();
+        if self.terminal_command_bar_focused {
+            // Focusing the pane must also release Workspace's synthetic command
+            // input owner; otherwise root key capture can keep swallowing Tab
+            // after the visual focus has returned to the terminal.
+            self.terminal_command_bar_focused = false;
+            self.terminal_command_suggestions_open = false;
+            self.terminal_command_suggestion_highlighted = None;
+            self.ime_marked_text = None;
+        }
         if let Some(pane) = self.active_pane() {
             pane.read(cx).focus(window);
         } else {

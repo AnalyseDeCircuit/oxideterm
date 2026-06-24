@@ -318,8 +318,9 @@ impl Render for WorkspaceApp {
                 } else if this.handle_privilege_prompt_helper_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.terminal_command_bar_focused {
-                    this.handle_terminal_command_bar_key(event, window, cx);
+                } else if this.terminal_command_bar_focused
+                    && this.handle_terminal_command_bar_key(event, window, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.dispatch_registered_keybinding(event, window, cx) {

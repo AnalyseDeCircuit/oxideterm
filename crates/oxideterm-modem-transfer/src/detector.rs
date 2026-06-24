@@ -1,7 +1,7 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::xymodem::{NAK, SOH, STX, WANT_CRC};
+use crate::xymodem::{NAK, WANT_CRC};
 use crate::zmodem::{ZBIN, ZBIN32, ZDLE, ZHEX, ZPAD};
 
 const DETECTOR_TAIL_BYTES: usize = 64;
@@ -79,25 +79,9 @@ fn find_zmodem_start(window: &[u8], current_start: usize) -> Option<DetectedMode
 }
 
 fn detect_xymodem_start(window: &[u8], current_start: usize) -> Option<DetectedModemStart> {
-    for index in 0..window.len().saturating_sub(2) {
-        let marker = window[index];
-        if !matches!(marker, SOH | STX) || index + 3 <= current_start {
-            continue;
-        }
-        let block_number = window[index + 1];
-        let block_complement = window[index + 2];
-        if block_number.wrapping_add(block_complement) == 0xff {
-            return Some(DetectedModemStart {
-                protocol: if block_number == 0 {
-                    DetectedModemProtocol::Ymodem
-                } else {
-                    DetectedModemProtocol::Xmodem
-                },
-                offset: index,
-            });
-        }
-    }
-
+    // X/YMODEM data blocks are too small to identify safely without a prior
+    // negotiation or explicit user action; serial boot noise can contain the
+    // same SOH/STX + complement shape by chance.
     [WANT_CRC, NAK].iter().find_map(|byte| {
         find_pattern_crossing_current_chunk(window, current_start, &[*byte]).map(|offset| {
             DetectedModemStart {
@@ -129,6 +113,7 @@ fn find_pattern_crossing_current_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xymodem::{SOH, STX};
 
     #[test]
     fn detects_zmodem_header_across_chunks() {
@@ -159,21 +144,16 @@ mod tests {
     }
 
     #[test]
-    fn detects_ymodem_block_zero() {
+    fn ignores_ymodem_data_block_without_negotiation() {
         let mut detector = ModemDetector::new();
-        assert_eq!(
-            detector.scan(&[SOH, 0, 0xff, b'f']),
-            vec![DetectedModemProtocol::Ymodem]
-        );
+        assert!(detector.scan(&[SOH, 0, 0xff, b'f']).is_empty());
     }
 
     #[test]
-    fn detects_xmodem_data_block() {
+    fn ignores_xmodem_data_block_without_negotiation() {
         let mut detector = ModemDetector::new();
-        assert_eq!(
-            detector.scan(&[SOH, 1, 0xfe, b'f']),
-            vec![DetectedModemProtocol::Xmodem]
-        );
+        assert!(detector.scan(&[SOH, 1, 0xfe, b'f']).is_empty());
+        assert!(detector.scan(&[STX, 1, 0xfe, b'f']).is_empty());
     }
 
     #[test]

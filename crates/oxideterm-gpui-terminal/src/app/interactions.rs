@@ -148,6 +148,13 @@ impl TerminalPane {
         false
     }
 
+    pub fn handle_unfocused_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        // Workspace can temporarily own focus while the terminal pane remains
+        // the visible active shell. Reuse the pane encoder so Tab, Backspace,
+        // and other protocol keys keep the same behavior as focused input.
+        self.handle_key(event, cx)
+    }
+
     pub(crate) fn handle_key_up(&mut self, event: &KeyUpEvent, cx: &mut Context<Self>) {
         let mode = self.terminal.lock().mode();
         if let Some(sequence) = oxideterm_key_escape_sequence(

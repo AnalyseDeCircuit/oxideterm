@@ -580,8 +580,9 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.terminal_command_bar_focused {
-            self.handle_terminal_command_bar_key(event, window, cx);
+        if self.terminal_command_bar_focused
+            && self.handle_terminal_command_bar_key(event, window, cx)
+        {
             return;
         }
 
@@ -621,6 +622,36 @@ impl WorkspaceApp {
             }
             return;
         }
+
+        if self.forward_unhandled_key_to_active_terminal(event, window, cx) {
+            return;
+        }
+    }
+
+    fn forward_unhandled_key_to_active_terminal(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let terminal_active = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        if !terminal_active {
+            return false;
+        }
+
+        let Some(pane) = self.active_pane() else {
+            return false;
+        };
+        let handled = pane.update(cx, |pane, cx| pane.handle_unfocused_key(event, cx));
+        if handled {
+            // The pane encoder wrote a terminal control sequence. Stop here so
+            // GPUI focus traversal or default widget handling cannot also run.
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+        handled
     }
 
     pub(super) fn standard_confirm_focus(&self) -> Option<ConfirmDialogAction> {
@@ -1242,23 +1273,24 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if modifiers.platform {
-            return;
+            return false;
         }
 
         match key {
             "escape" => {
                 if self.close_terminal_command_overlays(cx) {
-                    return;
+                    return true;
                 }
                 self.terminal_command_bar_focused = false;
                 self.close_terminal_quick_commands_popover();
                 self.ime_marked_text = None;
                 self.focus_active_pane(window, cx);
                 cx.notify();
+                true
             }
             "tab" => {
                 if self.terminal_command_suggestions_open {
@@ -1266,8 +1298,10 @@ impl WorkspaceApp {
                     let index = self.terminal_command_suggestion_highlighted.unwrap_or(0);
                     if let Some(suggestion) = suggestions.get(index) {
                         self.accept_terminal_command_suggestion(suggestion, cx);
+                        return true;
                     }
                 }
+                false
             }
             "right" => {
                 let suggestions = self.terminal_command_bar_visible_suggestions(cx);
@@ -1275,7 +1309,9 @@ impl WorkspaceApp {
                     self.terminal_command_inline_suggestion_for_accept(&suggestions)
                 {
                     self.accept_terminal_command_suggestion(&suggestion, cx);
+                    return true;
                 }
+                false
             }
             "down" => {
                 let mut suggestions = self.terminal_command_bar_suggestions(false, cx);
@@ -1292,7 +1328,9 @@ impl WorkspaceApp {
                             TerminalCommandSuggestionDirection::Down,
                         );
                     cx.notify();
+                    return true;
                 }
+                false
             }
             "up" => {
                 let mut suggestions = self.terminal_command_bar_suggestions(false, cx);
@@ -1309,7 +1347,9 @@ impl WorkspaceApp {
                             TerminalCommandSuggestionDirection::Up,
                         );
                     cx.notify();
+                    return true;
                 }
+                false
             }
             "enter" if modifiers.shift || modifiers.alt => {
                 self.terminal_command_bar_draft.push('\n');
@@ -1317,6 +1357,7 @@ impl WorkspaceApp {
                 self.terminal_command_suggestion_highlighted = None;
                 self.ime_marked_text = None;
                 cx.notify();
+                true
             }
             "enter" => {
                 let suggestions = self.terminal_command_bar_visible_suggestions(cx);
@@ -1328,7 +1369,7 @@ impl WorkspaceApp {
                     TerminalCommandEnterAction::AcceptSuggestion(index) => {
                         if let Some(suggestion) = suggestions.get(index) {
                             self.accept_terminal_command_suggestion(suggestion, cx);
-                            return;
+                            return true;
                         }
                     }
                     TerminalCommandEnterAction::SubmitSuggestion(index) => {
@@ -1341,9 +1382,15 @@ impl WorkspaceApp {
                         self.terminal_command_suggestion_highlighted = None;
                     }
                 }
+                if self.terminal_command_bar_draft.trim().is_empty() {
+                    // A stale command-bar focus flag must not swallow Enter
+                    // when there is no command to submit.
+                    return false;
+                }
                 self.terminal_command_suggestions_open = false;
                 self.terminal_command_suggestion_highlighted = None;
-                self.submit_terminal_command_bar(window, cx)
+                self.submit_terminal_command_bar(window, cx);
+                true
             }
             "space" | " "
                 if terminal_command_bar_space_inserts_literal(
@@ -1366,6 +1413,7 @@ impl WorkspaceApp {
                 if let Some(caret) = caret {
                     self.set_ime_selection_from_anchor(target, caret, caret);
                 }
+                true
             }
             "backspace" => {
                 let changed = self.terminal_command_bar_draft.pop().is_some()
@@ -1381,8 +1429,9 @@ impl WorkspaceApp {
                     // leaves the command bar visually unchanged.
                     cx.notify();
                 }
+                changed
             }
-            _ => {}
+            _ => false,
         }
     }
 

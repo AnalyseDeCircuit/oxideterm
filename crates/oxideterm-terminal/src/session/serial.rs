@@ -152,7 +152,7 @@ pub struct SerialSession {
     lifecycle: TerminalLifecycle,
     command_tx: crossbeam_channel::Sender<SerialCommand>,
     worker_handle: Option<std::thread::JoinHandle<()>>,
-    _port_reservation: SerialPortReservation,
+    port_reservation: Option<SerialPortReservation>,
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
@@ -168,6 +168,7 @@ pub struct SerialSession {
     encoding_detector: EncodingMismatchDetector,
     modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
+    serial_console_ingress: SerialConsoleIngress,
 }
 
 #[derive(Debug)]
@@ -193,6 +194,63 @@ impl Drop for SerialPortReservation {
     fn drop(&mut self) {
         if let Ok(mut owners) = serial_port_owners().lock() {
             owners.remove(&self.normalized_port_path);
+        }
+    }
+}
+
+const ESC_BYTE: u8 = 0x1b;
+const SERIAL_STRING_CONTROL_MARKER: &[u8] = b"?";
+
+#[derive(Debug, Default)]
+struct SerialConsoleIngress {
+    pending_escape: bool,
+}
+
+impl SerialConsoleIngress {
+    fn filter(&mut self, bytes: &[u8]) -> Vec<u8> {
+        if bytes.is_empty() {
+            return Vec::new();
+        }
+
+        let mut filtered = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        if self.pending_escape {
+            self.pending_escape = false;
+            append_serial_escape_pair(&mut filtered, bytes[0]);
+            index = 1;
+        }
+
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if byte != ESC_BYTE {
+                filtered.push(byte);
+                index += 1;
+                continue;
+            }
+
+            let Some(next) = bytes.get(index + 1).copied() else {
+                // Serial reads can split an escape sequence across chunks.
+                self.pending_escape = true;
+                break;
+            };
+            append_serial_escape_pair(&mut filtered, next);
+            index += 2;
+        }
+
+        filtered
+    }
+}
+
+fn append_serial_escape_pair(output: &mut Vec<u8>, next: u8) {
+    match next {
+        // Raw serial boot noise can contain unterminated terminal string controls.
+        // Passing them to the VTE parser can hide every later printable byte.
+        b']' | b'P' | b'_' | b'^' | b'X' => {
+            output.extend_from_slice(SERIAL_STRING_CONTROL_MARKER)
+        }
+        _ => {
+            output.push(ESC_BYTE);
+            output.push(next);
         }
     }
 }
@@ -234,6 +292,11 @@ impl SerialSession {
             run_serial_worker(worker_config, command_rx, worker_tx);
         });
 
+        let mut serial_graphics_options = graphics_options;
+        // A serial console is a raw byte stream; image protocols are opt-in
+        // terminal features and should not parse arbitrary device boot noise.
+        serial_graphics_options.enabled = false;
+
         Ok(Self {
             config,
             term,
@@ -245,9 +308,9 @@ impl SerialSession {
             lifecycle: TerminalLifecycle::Running,
             command_tx,
             worker_handle: Some(worker_handle),
-            _port_reservation: port_reservation,
+            port_reservation: Some(port_reservation),
             title: None,
-            graphics_ingress: GraphicsIngress::new(graphics_options),
+            graphics_ingress: GraphicsIngress::new(serial_graphics_options),
             graphics: TerminalGraphicsState::default(),
             graphics_alt_screen_active: false,
             output_queue: VecDeque::new(),
@@ -261,11 +324,18 @@ impl SerialSession {
             encoding_detector: EncodingMismatchDetector::new(encoding),
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
+            serial_console_ingress: SerialConsoleIngress::default(),
         })
     }
 
     fn title_text(&self) -> String {
         self.config.title_text()
+    }
+
+    fn release_port_reservation(&mut self) {
+        // Dropping the reservation removes the in-process owner entry while
+        // the worker thread owns the OS-level serial handle lifecycle.
+        self.port_reservation.take();
     }
 
     fn drain_worker_events_with_budget(
@@ -315,6 +385,7 @@ impl SerialSession {
                 }
                 Ok(SerialWorkerEvent::Failed(error)) => {
                     self.lifecycle = TerminalLifecycle::Exited(None);
+                    self.release_port_reservation();
                     self.feed_utf8_terminal_output(
                         format!("\r\nSerial session failed: {}\r\n", error.message).as_bytes(),
                     );
@@ -324,6 +395,7 @@ impl SerialSession {
                     break;
                 }
                 Ok(SerialWorkerEvent::Closed) => {
+                    self.release_port_reservation();
                     if self.lifecycle.is_running() {
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
@@ -334,6 +406,7 @@ impl SerialSession {
                 }
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    self.release_port_reservation();
                     if self.lifecycle.is_running() {
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
@@ -356,7 +429,12 @@ impl SerialSession {
     }
 
     fn feed_plain_transport_output(&mut self, bytes: &[u8]) {
-        for kind in self.magic_scan.scan(bytes) {
+        let terminal_bytes = self.serial_console_ingress.filter(bytes);
+        if terminal_bytes.is_empty() {
+            return;
+        }
+
+        for kind in self.magic_scan.scan(&terminal_bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
         let mut term = self.term.lock();
@@ -369,7 +447,7 @@ impl SerialSession {
         let cursor = Cell::new(graphics_cursor_from_term(&term, size));
         let mut protocol_responses = Vec::new();
         self.graphics_ingress.advance_ordered(
-            bytes,
+            &terminal_bytes,
             |segment| match segment {
                 TerminalGraphicsSegment::Terminal(terminal_bytes) => {
                     if let Some(hint) = self.encoding_detector.observe(&terminal_bytes) {
@@ -776,6 +854,7 @@ impl TerminalSessionBackend for SerialSession {
         if matches!(self.lifecycle, TerminalLifecycle::Closed) {
             return;
         }
+        self.release_port_reservation();
         let _ = self.command_tx.try_send(SerialCommand::Close);
         if let Some(handle) = self.worker_handle.take() {
             let _ = handle.join();
@@ -964,12 +1043,24 @@ fn normalize_serial_port_path(port_path: &str) -> String {
     let trimmed = port_path.trim();
     #[cfg(target_os = "windows")]
     {
-        trimmed.to_ascii_uppercase()
+        normalize_windows_serial_port_path(trimmed)
     }
     #[cfg(not(target_os = "windows"))]
     {
         trimmed.to_string()
     }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn normalize_windows_serial_port_path(port_path: &str) -> String {
+    let uppercase = port_path.trim().to_ascii_uppercase();
+    // Windows accepts both COM10 and the Win32 device namespace form; use one
+    // owner key so existence checks and duplicate reservations agree.
+    uppercase
+        .strip_prefix("\\\\.\\")
+        .or_else(|| uppercase.strip_prefix("\\\\?\\"))
+        .unwrap_or(&uppercase)
+        .to_string()
 }
 
 fn map_serial_data_bits(data_bits: u8) -> Result<serialport::DataBits, SerialError> {
@@ -1122,6 +1213,54 @@ mod serial_tests {
         }
     }
 
+    fn test_serial_session() -> SerialSession {
+        let resize = TerminalResize::new(80, 24, 0, 0);
+        let size = TerminalSize {
+            cols: resize.cols,
+            rows: resize.rows,
+            cell_width: resize.cell_width,
+            cell_height: resize.cell_height,
+        };
+        let (event_tx, event_rx) = unbounded();
+        let (_worker_tx, worker_rx) = unbounded();
+        let (command_tx, _command_rx) = crossbeam_channel::unbounded();
+        let listener = LocalEventListener { tx: event_tx };
+        let mut term_config = Config::default();
+        term_config.scrolling_history = 100;
+
+        SerialSession {
+            config: valid_config(),
+            term: Arc::new(FairMutex::new(Term::new(term_config, &size, listener))),
+            parser: Processor::new(),
+            event_rx,
+            worker_rx,
+            pending_events: Vec::new(),
+            resize,
+            lifecycle: TerminalLifecycle::Running,
+            command_tx,
+            worker_handle: None,
+            port_reservation: Some(SerialPortReservation {
+                normalized_port_path: "test-serial-session".to_string(),
+            }),
+            title: None,
+            graphics_ingress: GraphicsIngress::new(GraphicsOptions::default()),
+            graphics: TerminalGraphicsState::default(),
+            graphics_alt_screen_active: false,
+            output_queue: VecDeque::new(),
+            output_queue_bytes: 0,
+            magic_scan: MagicScanWindow::default(),
+            encoding: TerminalEncoding::Utf8,
+            output_decoder: TerminalOutputDecoder::new(TerminalEncoding::Utf8),
+            output_processor: None,
+            output_events_enabled: false,
+            input_encoder: TerminalInputEncoder::new(TerminalEncoding::Utf8),
+            encoding_detector: EncodingMismatchDetector::new(TerminalEncoding::Utf8),
+            modem_consumer: ModemConsumer::new(),
+            shell_integration: TerminalShellIntegration::default(),
+            serial_console_ingress: SerialConsoleIngress::default(),
+        }
+    }
+
     #[test]
     fn serial_config_validation_rejects_invalid_parameters() {
         let mut config = valid_config();
@@ -1148,6 +1287,38 @@ mod serial_tests {
 
         assert_eq!(error.code, SerialErrorCode::PortBusy);
         drop(first);
+    }
+
+    #[test]
+    fn failed_worker_releases_port_reservation() {
+        let port_path = "/tmp/oxideterm-test-serial-failed-worker";
+        let reservation = reserve_serial_port(port_path).unwrap();
+        let normalized_port_path = reservation.normalized_port_path.clone();
+        let mut session = test_serial_session();
+        session.port_reservation = Some(reservation);
+
+        let error = SerialError::new(
+            SerialErrorCode::PortBusy,
+            "fake serial busy",
+            Some(port_path.to_string()),
+            true,
+        );
+        let (worker_tx, worker_rx) = unbounded();
+        session.worker_rx = worker_rx;
+        worker_tx.send(SerialWorkerEvent::Failed(error)).unwrap();
+        session.read_pending();
+
+        let second = reserve_serial_port(port_path).unwrap();
+        assert_eq!(second.normalized_port_path, normalized_port_path);
+    }
+
+    #[test]
+    fn windows_serial_normalization_collapses_device_namespace() {
+        assert_eq!(normalize_windows_serial_port_path("COM10"), "COM10");
+        assert_eq!(normalize_windows_serial_port_path("com10"), "COM10");
+        assert_eq!(normalize_windows_serial_port_path("\\\\.\\COM10"), "COM10");
+        assert_eq!(normalize_windows_serial_port_path("\\\\?\\com10"), "COM10");
+        assert_eq!(normalize_windows_serial_port_path(" COM3 "), "COM3");
     }
 
     #[test]
@@ -1206,6 +1377,30 @@ mod serial_tests {
             SerialWorkerEvent::Closed
         ));
         assert!(worker_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn serial_boot_text_survives_unfinished_osc_noise() {
+        let mut session = test_serial_session();
+
+        session.feed_transport_output(b"\x1b]boot-noise-without-terminator");
+        session.feed_transport_output(b"I (30) boot: ESP-IDF v3.0.7 2nd stage bootloader\r\n");
+
+        assert!(
+            session
+                .buffer_text()
+                .contains("I (30) boot: ESP-IDF v3.0.7")
+        );
+    }
+
+    #[test]
+    fn serial_preserves_split_csi_sequences() {
+        let mut session = test_serial_session();
+
+        session.feed_transport_output(b"\x1b");
+        session.feed_transport_output(b"[31mred\x1b[0m\r\n");
+
+        assert!(session.buffer_text().contains("red"));
     }
 
     #[test]
