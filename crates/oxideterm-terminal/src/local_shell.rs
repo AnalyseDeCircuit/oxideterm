@@ -139,6 +139,15 @@ pub fn shell_args_for_profile(shell: &ShellInfo, load_profile: bool) -> Vec<Stri
                 vec!["--no-config".to_string()]
             }
         }
+        "nu" | "nu.exe" => {
+            // Nushell loads its config by default; only pass a flag when the
+            // user explicitly disables shell profile loading.
+            if load_profile {
+                Vec::new()
+            } else {
+                vec!["--no-config-file".to_string()]
+            }
+        }
         "sh" | "dash" => {
             if load_profile {
                 vec!["--login".to_string()]
@@ -166,6 +175,7 @@ pub fn shell_args_for_profile(shell: &ShellInfo, load_profile: bool) -> Vec<Stri
 fn default_args_for_shell(shell_id: &str) -> Vec<String> {
     match shell_id {
         "zsh" | "bash" | "git-bash" | "fish" | "sh" | "dash" => vec!["--login".to_string()],
+        "nu" | "nu.exe" => Vec::new(),
         "pwsh" | "powershell" => vec![
             "-NoLogo".to_string(),
             "-NoExit".to_string(),
@@ -195,7 +205,7 @@ fn scan_unix_shells() -> Vec<ShellInfo> {
         }
     }
 
-    const COMMON_SHELLS: &[&str] = &["zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh"];
+    const COMMON_SHELLS: &[&str] = &["zsh", "bash", "fish", "nu", "sh", "dash", "ksh", "tcsh"];
     for shell_name in COMMON_SHELLS {
         if let Some(path) = command_path(shell_name)
             && !shells.iter().any(|shell| shell.path == path)
@@ -233,6 +243,7 @@ fn shell_info_from_path(path: &Path) -> Option<ShellInfo> {
         "zsh" => "Zsh",
         "bash" => "Bash",
         "fish" => "Fish",
+        "nu" => "Nushell",
         "sh" => "Bourne Shell",
         "dash" => "Dash",
         "ksh" => "Korn Shell",
@@ -296,6 +307,22 @@ fn scan_windows_shells() -> Vec<ShellInfo> {
             ShellInfo::new("pwsh", "PowerShell Core", path)
                 .with_args(default_args_for_shell("pwsh")),
         );
+    }
+
+    for path in [
+        PathBuf::from(&program_files).join(r"nu\bin\nu.exe"),
+        PathBuf::from(&program_files_x86).join(r"nu\bin\nu.exe"),
+    ] {
+        if path.exists() {
+            shells.push(ShellInfo::new("nu", "Nushell", path));
+            break;
+        }
+    }
+
+    if !shells.iter().any(|shell| shell.id == "nu")
+        && let Some(path) = windows_command_path("nu.exe")
+    {
+        shells.push(ShellInfo::new("nu", "Nushell", path));
     }
 
     for path in [
@@ -411,5 +438,43 @@ fn capitalize_first(value: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nushell_profile_args_follow_config_toggle() {
+        let shell = ShellInfo::new("nu", "Nushell", "nu");
+
+        assert!(shell_args_for_profile(&shell, true).is_empty());
+        assert_eq!(
+            shell_args_for_profile(&shell, false),
+            vec!["--no-config-file".to_string()]
+        );
+    }
+
+    #[test]
+    fn nushell_windows_executable_keeps_same_profile_behavior() {
+        let shell = ShellInfo::new("nu.exe", "Nushell", "nu.exe");
+
+        assert!(shell_args_for_profile(&shell, true).is_empty());
+        assert_eq!(
+            shell_args_for_profile(&shell, false),
+            vec!["--no-config-file".to_string()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_shell_info_recognizes_nushell() {
+        let shell = shell_info_from_path(Path::new("/opt/homebrew/bin/nu"))
+            .expect("nu should be treated as a known shell");
+
+        assert_eq!(shell.id, "nu");
+        assert_eq!(shell.label, "Nushell");
+        assert!(shell.args.is_empty());
     }
 }
