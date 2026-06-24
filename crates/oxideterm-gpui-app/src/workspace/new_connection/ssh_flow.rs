@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     result::Result as StdResult,
@@ -33,7 +34,7 @@ use super::{
     },
 };
 use crate::workspace::{
-    NativeProxyConnectRun, WorkspaceApp,
+    NativeProxyConnectRun, WorkspaceApp, WorkspaceSshNode,
     session_manager::{
         duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
         save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
@@ -76,6 +77,27 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
 #[derive(Clone)]
 pub(in crate::workspace) struct NativeSshPromptHandler {
     tx: mpsc::Sender<SshConnectionWorkerResult>,
+}
+
+fn sync_saved_connection_node_title_for_nodes(
+    ssh_nodes: &mut HashMap<NodeId, WorkspaceSshNode>,
+    saved_connection_id: &str,
+    title: &str,
+) -> bool {
+    let mut changed = false;
+    for node in ssh_nodes.values_mut() {
+        if node.saved_connection_id.as_deref() != Some(saved_connection_id) {
+            continue;
+        }
+        if node.title == title {
+            continue;
+        }
+        // Only mirror saved display metadata. The live runtime config keeps
+        // describing the already-created SSH node until the user reconnects.
+        node.title = title.to_string();
+        changed = true;
+    }
+    changed
 }
 
 impl NativeSshPromptHandler {
@@ -1033,6 +1055,17 @@ impl WorkspaceApp {
         }
     }
 
+    fn sync_saved_connection_node_title(&mut self, saved_connection_id: &str) -> bool {
+        let Some(title) = self
+            .connection_store
+            .get(saved_connection_id)
+            .map(|connection| connection.name.clone())
+        else {
+            return false;
+        };
+        sync_saved_connection_node_title_for_nodes(&mut self.ssh_nodes, saved_connection_id, &title)
+    }
+
     fn save_editing_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.editing_saved_connection_id.clone() else {
             return;
@@ -1044,7 +1077,11 @@ impl WorkspaceApp {
         let existing_auth = existing_connection
             .as_ref()
             .map(|connection| connection.auth.clone());
-        match save_request_from_form_with_existing_auth(form, Some(id), existing_auth.as_ref()) {
+        match save_request_from_form_with_existing_auth(
+            form,
+            Some(id.clone()),
+            existing_auth.as_ref(),
+        ) {
             Ok(mut request) => {
                 if form.proxy_hops.is_empty()
                     && let Some(connection) = existing_connection.as_ref()
@@ -1053,6 +1090,7 @@ impl WorkspaceApp {
                 }
                 match self.connection_store.upsert(request) {
                     Ok(_) => {
+                        self.sync_saved_connection_node_title(&id);
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
                         self.duplicating_saved_connection_id = None;
@@ -2607,6 +2645,50 @@ mod runtime_save_tests {
         );
         assert_eq!(form.upstream_proxy_username, "proxy-user");
         assert_eq!(form.upstream_proxy_password, "proxy-secret");
+    }
+
+    #[test]
+    fn saved_connection_title_sync_updates_only_matching_nodes() {
+        let mut nodes = HashMap::from([
+            (
+                NodeId::new("node-home"),
+                WorkspaceSshNode {
+                    saved_connection_id: Some("home".to_string()),
+                    config: SshConfig {
+                        host: "100.118.61.75".to_string(),
+                        ..SshConfig::default()
+                    },
+                    title: "Old Home".to_string(),
+                    terminal_ids: Vec::new(),
+                    readiness: NodeReadiness::Ready,
+                },
+            ),
+            (
+                NodeId::new("node-prod"),
+                WorkspaceSshNode {
+                    saved_connection_id: Some("prod".to_string()),
+                    config: SshConfig {
+                        host: "prod.example.com".to_string(),
+                        ..SshConfig::default()
+                    },
+                    title: "Production".to_string(),
+                    terminal_ids: Vec::new(),
+                    readiness: NodeReadiness::Ready,
+                },
+            ),
+        ]);
+
+        assert!(sync_saved_connection_node_title_for_nodes(
+            &mut nodes,
+            "home",
+            "Renamed Home"
+        ));
+
+        let home = nodes.get(&NodeId::new("node-home")).unwrap();
+        let prod = nodes.get(&NodeId::new("node-prod")).unwrap();
+        assert_eq!(home.title, "Renamed Home");
+        assert_eq!(home.config.host, "100.118.61.75");
+        assert_eq!(prod.title, "Production");
     }
 }
 
