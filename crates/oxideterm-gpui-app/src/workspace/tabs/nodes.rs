@@ -1187,13 +1187,13 @@ impl WorkspaceApp {
                     Some(old)
                 });
             if let Some(replaced_pane_id) = replaced {
-                if let Some(pane) = self.panes.remove(&replaced_pane_id) {
+                if let Some(pane) = self.remove_terminal_pane(&replaced_pane_id) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
                 self.unregister_ssh_terminal_session(old_session_id);
                 remounted += 1;
             } else {
-                if let Some(pane) = self.panes.remove(&new_pane_id) {
+                if let Some(pane) = self.remove_terminal_pane(&new_pane_id) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
                 self.unregister_ssh_terminal_session(new_session_id);

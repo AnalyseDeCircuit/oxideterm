@@ -13,8 +13,8 @@ use std::{
 use anyhow::Result;
 use chrono::Timelike;
 use gpui::{
-    Bounds, ClipboardItem, Context, FocusHandle, PathPromptOptions, Pixels, Point, SharedString,
-    Subscription, Timer, Window, px,
+    Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, PathPromptOptions, Pixels, Point,
+    SharedString, Subscription, Timer, Window, px,
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
@@ -65,6 +65,11 @@ pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalPaneEvent {
+    Exited { exit_code: Option<i32> },
+}
 
 fn log_privilege_prompt_terminal_pane(args: std::fmt::Arguments<'_>) {
     if env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
@@ -1125,11 +1130,15 @@ impl TerminalPane {
             TerminalEvent::ChildExited(code) => {
                 self.notify_trzsz_connection_lost_if_active();
                 self.notify_modem_connection_lost_if_active();
+                let should_emit_exit = !self.terminal_exited;
                 self.terminal_exited = true;
                 self.title = match code {
                     Some(code) => format!("Process exited ({code})").into(),
                     None => "Process exited".into(),
                 };
+                if should_emit_exit {
+                    cx.emit(TerminalPaneEvent::Exited { exit_code: code });
+                }
                 TerminalEventEffect::notify()
             }
             TerminalEvent::MagicDetected(kind) => {
@@ -1564,6 +1573,8 @@ impl TerminalPane {
         })
     }
 }
+
+impl EventEmitter<TerminalPaneEvent> for TerminalPane {}
 
 pub fn paste_needs_confirmation(text: &str) -> bool {
     const PASTE_LINE_THRESHOLD: usize = 1;

@@ -9,7 +9,7 @@ mod trzsz_worker;
 
 pub use app::{
     SharedTerminalSession, TerminalContextAction, TerminalCursorAnchor, TerminalInputInterceptor,
-    TerminalInputInterceptorResult, TerminalPane, TerminalSearchStatus,
+    TerminalInputInterceptorResult, TerminalPane, TerminalPaneEvent, TerminalSearchStatus,
 };
 pub use background_cache::BackgroundImageRenderCache;
 pub use command_facts::{

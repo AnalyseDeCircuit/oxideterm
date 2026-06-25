@@ -1545,7 +1545,7 @@ impl WorkspaceApp {
             )
             .expect("failed to initialize terminal pane")
         });
-        self.panes.insert(pane_id, pane.clone());
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,

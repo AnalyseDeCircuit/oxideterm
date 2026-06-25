@@ -772,7 +772,7 @@ impl WorkspaceApp {
             self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids {
-            if let Some(pane) = self.panes.remove(&pane_id) {
+            if let Some(pane) = self.remove_terminal_pane(&pane_id) {
                 let _ = pane.update(cx, |pane, _cx| pane.shutdown());
             }
         }

@@ -10,6 +10,83 @@ pub(super) struct SplitDrag {
 }
 
 impl WorkspaceApp {
+    pub(super) fn register_terminal_pane(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        pane: gpui::Entity<TerminalPane>,
+        cx: &mut Context<Self>,
+    ) {
+        let subscription = cx.subscribe(
+            &pane,
+            move |this, _pane, event: &TerminalPaneEvent, cx| match event {
+                TerminalPaneEvent::Exited { .. } => {
+                    this.queue_auto_close_terminal_session(session_id, cx);
+                }
+            },
+        );
+        self.terminal_pane_subscriptions
+            .insert(pane_id, subscription);
+        self.panes.insert(pane_id, pane);
+    }
+
+    pub(super) fn remove_terminal_pane(
+        &mut self,
+        pane_id: &PaneId,
+    ) -> Option<gpui::Entity<TerminalPane>> {
+        self.terminal_pane_subscriptions.remove(pane_id);
+        self.panes.remove(pane_id)
+    }
+
+    pub(super) fn queue_auto_close_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut Context<Self>,
+    ) {
+        // Serial sessions report port failures through the same terminal event;
+        // keep those panes visible so users can inspect the error text.
+        if self.serial_terminal_configs.contains_key(&session_id) {
+            return;
+        }
+        if self.pending_auto_close_terminal_sessions.insert(session_id) {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn schedule_pending_auto_close_terminal_sessions(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pending_auto_close_terminal_sessions.is_empty()
+            || self.auto_close_terminal_sessions_scheduled
+        {
+            return;
+        }
+        self.auto_close_terminal_sessions_scheduled = true;
+        let workspace = cx.entity();
+        window.on_next_frame(move |window, cx| {
+            let _ = workspace.update(cx, |this, cx| {
+                this.auto_close_terminal_sessions_scheduled = false;
+                this.drain_pending_auto_close_terminal_sessions(window, cx);
+            });
+        });
+    }
+
+    fn drain_pending_auto_close_terminal_sessions(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session_ids: Vec<_> = self.pending_auto_close_terminal_sessions.drain().collect();
+        for session_id in session_ids {
+            if self.serial_terminal_configs.contains_key(&session_id) {
+                continue;
+            }
+            self.close_terminal_session(session_id, window, cx);
+        }
+    }
+
     pub(super) fn active_tab_has_serial_terminal(&self) -> bool {
         let Some(tab) = self.active_tab() else {
             return false;
@@ -74,7 +151,7 @@ impl WorkspaceApp {
             root_pane.split_active(active_pane_id, group_id, direction, pane_id, session_id)
         }) {
             tab.active_pane_id = Some(pane_id);
-            self.panes.insert(pane_id, pane.clone());
+            self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
             self.needs_active_pane_focus = true;
             pane.read(cx).focus(window);
             cx.notify();
@@ -107,7 +184,7 @@ impl WorkspaceApp {
             self.unregister_ssh_terminal_session(session_id);
         }
 
-        if let Some(pane) = self.panes.remove(&active_pane_id) {
+        if let Some(pane) = self.remove_terminal_pane(&active_pane_id) {
             let _ = pane.update(cx, |pane, _cx| pane.shutdown());
         }
 
@@ -163,7 +240,7 @@ impl WorkspaceApp {
             .into_iter()
             .filter(|pane_id| *pane_id != active_pane_id)
         {
-            if let Some(pane) = self.panes.remove(&pane_id) {
+            if let Some(pane) = self.remove_terminal_pane(&pane_id) {
                 let _ = pane.update(cx, |pane, _cx| pane.shutdown());
             }
         }

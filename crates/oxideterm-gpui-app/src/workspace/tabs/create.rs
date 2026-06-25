@@ -33,7 +33,7 @@ impl WorkspaceApp {
             .expect("failed to initialize terminal pane")
         });
 
-        self.panes.insert(pane_id, pane.clone());
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,
@@ -76,7 +76,7 @@ impl WorkspaceApp {
 
         // Telnet is a local transport in the plugin API: it owns no SSH node,
         // but it still participates in the normal tab/pane/session registry.
-        self.panes.insert(pane_id, pane.clone());
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,
@@ -114,7 +114,7 @@ impl WorkspaceApp {
 
         // Serial mirrors Tauri local-terminal transport semantics: it is not
         // an SSH node and must not expose SFTP, forwarding, or ProxyJump.
-        self.panes.insert(pane_id, pane.clone());
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
         self.serial_terminal_configs.insert(session_id, config);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
@@ -559,7 +559,7 @@ impl WorkspaceApp {
                 .expect("failed to initialize ssh terminal pane")
         });
 
-        self.panes.insert(pane_id, pane.clone());
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,
@@ -762,7 +762,7 @@ impl WorkspaceApp {
             TerminalPane::from_shared_session(shared_session, preferences, window, cx)
                 .expect("failed to remount ssh terminal pane")
         });
-        self.panes.insert(pane_id, pane);
+        self.register_terminal_pane(pane_id, session_id, pane, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.persist_session_tree_snapshot();
         Ok((pane_id, session_id))

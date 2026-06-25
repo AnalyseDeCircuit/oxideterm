@@ -131,9 +131,9 @@ use oxideterm_gpui_terminal::{
     TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalContextAction,
     TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
     TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice,
-    TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPasteLabels,
-    TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus, TerminalTrzszLabels,
-    TerminalUiPreferences, TerminalUiTheme, detect_custom_privilege_prompt,
+    TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPaneEvent,
+    TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
+    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme, detect_custom_privilege_prompt,
     detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
@@ -578,6 +578,9 @@ pub(crate) struct WorkspaceApp {
     tab_close_confirm: Option<TabCloseConfirm>,
     node_disconnect_confirm: Option<NodeDisconnectConfirm>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
+    terminal_pane_subscriptions: HashMap<PaneId, Subscription>,
+    pending_auto_close_terminal_sessions: HashSet<TerminalSessionId>,
+    auto_close_terminal_sessions_scheduled: bool,
     tab_scroll_handle: ScrollHandle,
     host_tools_tab_scroll_handle: ScrollHandle,
     next_tab_id: u64,

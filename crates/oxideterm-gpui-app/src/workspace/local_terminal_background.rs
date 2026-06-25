@@ -104,7 +104,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.panes.remove(&active_pane_id);
+        self.remove_terminal_pane(&active_pane_id);
 
         let tab = &mut self.tabs[active_index];
         let Some(root_pane) = tab.root_pane.as_mut() else {
@@ -134,7 +134,7 @@ impl WorkspaceApp {
             root_pane.collect_pane_ids(&mut pane_ids);
         }
         for pane_id in pane_ids {
-            self.panes.remove(&pane_id);
+            self.remove_terminal_pane(&pane_id);
         }
         self.active_tab_id = if self.tabs.is_empty() {
             None
@@ -172,7 +172,7 @@ impl WorkspaceApp {
                 .expect("failed to resume detached local terminal pane")
         });
 
-        self.panes.insert(pane_id, pane.clone());
+        self.register_terminal_pane(pane_id, detached.session_id, pane.clone(), cx);
         self.refresh_native_plugin_terminal_hooks(cx);
         self.tabs.push(Tab {
             id: tab_id,
