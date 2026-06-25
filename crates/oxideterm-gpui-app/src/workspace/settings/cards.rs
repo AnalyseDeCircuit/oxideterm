@@ -924,6 +924,25 @@ impl WorkspaceApp {
         self.settings_input_draft.clear();
     }
 
+    pub(in crate::workspace) fn apply_focused_cloud_sync_input_draft(&mut self) -> bool {
+        let Some(input) = self.focused_settings_input else {
+            return false;
+        };
+        if !apply_cloud_sync_form_input_draft(
+            &mut self.cloud_sync_form,
+            input,
+            &self.settings_input_draft,
+        ) {
+            return false;
+        }
+        // Cloud Sync configuration commits can be triggered by tab/action
+        // changes, so release the manually owned input after its latest draft
+        // has been copied into the form.
+        self.focused_settings_input = None;
+        self.clear_settings_input_draft(input);
+        true
+    }
+
     pub(in crate::workspace) fn current_settings_input_value(&self, input: SettingsInput) -> String {
         let settings = self.settings_store.settings();
         if let Some(value) = persisted_settings_input_value(settings, input) {

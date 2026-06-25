@@ -631,6 +631,14 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
+                    if this.cloud_sync_active_tab == CloudSyncTab::Configure
+                        && tab != CloudSyncTab::Configure
+                        && !this.persist_cloud_sync_configuration(false, cx)
+                    {
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
                     this.cloud_sync_active_tab = tab;
                     this.clear_cloud_sync_select_focus();
                     cx.stop_propagation();
@@ -4133,17 +4141,22 @@ impl WorkspaceApp {
     }
 
     fn save_cloud_sync_configuration(&mut self, cx: &mut Context<Self>) {
+        self.persist_cloud_sync_configuration(true, cx);
+    }
+
+    fn persist_cloud_sync_configuration(
+        &mut self,
+        show_success_toast: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.apply_focused_cloud_sync_input_draft();
         self.invalidate_cloud_sync_snapshot_caches();
         let (settings, interval) = cloud_sync_settings_from_form(&self.cloud_sync_form);
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync_store.state().secret_hints.clone(),
         );
         let secret_result = store_cloud_sync_touched_secrets(&self.cloud_sync_form, &mut provider);
-        self.cloud_sync_store.state_mut().settings = settings;
-        self.cloud_sync_store.state_mut().secret_hints = provider.hints().clone();
-        normalize_cloud_sync_interval_draft(&mut self.cloud_sync_form, interval);
-        reset_cloud_sync_secret_drafts(&mut self.cloud_sync_form);
-        if let Err(error) = secret_result.and_then(|_| self.cloud_sync_store.save()) {
+        if let Err(error) = secret_result {
             self.cloud_sync_store.state_mut().last_error = Some(error.to_string());
             self.push_cloud_sync_toast(
                 self.i18n
@@ -4151,16 +4164,34 @@ impl WorkspaceApp {
                 Some(error.to_string()),
                 TerminalNoticeVariant::Error,
             );
-        } else {
-            self.cloud_sync_store.state_mut().last_error = None;
+            return false;
+        }
+        self.cloud_sync_store.state_mut().settings = settings;
+        self.cloud_sync_store.state_mut().secret_hints = provider.hints().clone();
+        if let Err(error) = self.cloud_sync_store.save() {
+            self.cloud_sync_store.state_mut().last_error = Some(error.to_string());
             self.push_cloud_sync_toast(
-                self.i18n.t("plugin.cloud_sync.toast.settings_saved_title"),
-                None,
-                TerminalNoticeVariant::Success,
+                self.i18n
+                    .t("plugin.cloud_sync.toast.settings_saved_failed_title"),
+                Some(error.to_string()),
+                TerminalNoticeVariant::Error,
             );
+            return false;
+        } else {
+            normalize_cloud_sync_interval_draft(&mut self.cloud_sync_form, interval);
+            reset_cloud_sync_secret_drafts(&mut self.cloud_sync_form);
+            self.cloud_sync_store.state_mut().last_error = None;
+            if show_success_toast {
+                self.push_cloud_sync_toast(
+                    self.i18n.t("plugin.cloud_sync.toast.settings_saved_title"),
+                    None,
+                    TerminalNoticeVariant::Success,
+                );
+            }
             self.reschedule_cloud_sync_auto_upload(cx);
             self.queue_cloud_sync_dirty_refresh(cx);
         }
+        true
     }
 
     fn clear_cloud_sync_secret(&mut self, secret_key: &str) {
@@ -4499,6 +4530,13 @@ impl WorkspaceApp {
     }
 
     fn start_cloud_sync_check(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        if !self.persist_cloud_sync_configuration(false, cx) {
+            return;
+        }
         self.start_cloud_sync_check_with_options(false, cx);
     }
 
@@ -4726,6 +4764,9 @@ impl WorkspaceApp {
             self.mark_cloud_sync_operation_in_progress();
             return;
         }
+        if !self.persist_cloud_sync_configuration(false, cx) {
+            return;
+        }
         if matches!(
             self.cloud_sync_store.state().settings.backend_type,
             BackendType::GithubGist
@@ -4807,6 +4848,9 @@ impl WorkspaceApp {
             self.mark_cloud_sync_operation_in_progress();
             return;
         }
+        if !self.persist_cloud_sync_configuration(false, cx) {
+            return;
+        }
         self.cloud_sync_store.state_mut().status = CloudSyncStatus::Checking;
         self.cloud_sync_store.state_mut().last_error = None;
         self.cloud_sync_upload_preview = None;
@@ -4841,6 +4885,9 @@ impl WorkspaceApp {
     fn start_cloud_sync_restore_backup(&mut self, backup_id: String, cx: &mut Context<Self>) {
         if self.cloud_sync_rx.is_some() {
             self.mark_cloud_sync_operation_in_progress();
+            return;
+        }
+        if !self.persist_cloud_sync_configuration(false, cx) {
             return;
         }
         let Some(backup) = self
