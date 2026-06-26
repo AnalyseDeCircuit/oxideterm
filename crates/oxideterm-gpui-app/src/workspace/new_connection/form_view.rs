@@ -20,7 +20,10 @@ use super::{
 use crate::assets::LucideIcon;
 use crate::workspace::SelectableTextScrollExt;
 use crate::workspace::WorkspaceApp;
-use crate::workspace::{browser_behavior, ime::WorkspaceImeTarget};
+use crate::workspace::{
+    browser_behavior,
+    ime::{WorkspaceImeTarget, keystroke_uses_text_edit_modifier},
+};
 use gpui::Div;
 use oxideterm_connections::SavedUpstreamProxyProtocol;
 use oxideterm_gpui_ui::{
@@ -150,7 +153,7 @@ impl WorkspaceApp {
                 | NewConnectionField::UpstreamProxyUsername
         );
 
-        if modifiers.platform {
+        if keystroke_uses_text_edit_modifier(&event.keystroke) {
             match key {
                 "a" => {
                     select_current_connection_field(form);

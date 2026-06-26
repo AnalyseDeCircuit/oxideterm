@@ -247,6 +247,17 @@ fn ime_composition_control_key(keystroke: &Keystroke) -> bool {
         && matches!(keystroke.key.as_str(), "enter" | "space" | " ")
 }
 
+pub(super) fn keystroke_uses_text_edit_modifier(keystroke: &Keystroke) -> bool {
+    if cfg!(target_os = "macos") {
+        // On macOS, Ctrl+letter is a distinct text-editing chord and must not
+        // be treated as Command+letter.
+        keystroke.modifiers.platform
+    } else {
+        // Windows and Linux users expect Ctrl+A/C/X/V for ordinary text fields.
+        keystroke.modifiers.platform || keystroke.modifiers.control
+    }
+}
+
 impl InputHandler for WorkspaceInputHandler {
     fn selected_text_range(
         &mut self,
@@ -1400,7 +1411,7 @@ impl WorkspaceApp {
         keystroke: &Keystroke,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !keystroke.modifiers.platform {
+        if !keystroke_uses_text_edit_modifier(keystroke) {
             return false;
         }
         match keystroke.key.as_str() {
@@ -2904,11 +2915,12 @@ mod tests {
         WorkspaceApp, WorkspaceImeTarget, active_ime_should_defer_input_key,
         collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
         copy_shortcut_owner_for_target, ime_target_should_blink_caret,
-        keystroke_commits_platform_text, line_end_for_utf16_offset, line_range_for_utf16_offset,
-        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
-        platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
-        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
-        vertical_line_navigation_destination, word_range_for_utf16_offset,
+        keystroke_commits_platform_text, keystroke_uses_text_edit_modifier,
+        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
+        next_utf16_boundary, next_word_boundary, platform_text_commit_is_duplicate,
+        previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
+        transpose_text_at_utf16_offset, vertical_line_navigation_destination,
+        word_range_for_utf16_offset,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -2964,6 +2976,33 @@ mod tests {
                 ..Modifiers::default()
             }
         )));
+    }
+
+    #[test]
+    fn platform_edit_shortcut_uses_expected_modifier_for_target_os() {
+        let platform_v = key(
+            "v",
+            None,
+            Modifiers {
+                platform: true,
+                ..Modifiers::default()
+            },
+        );
+        let control_v = key(
+            "v",
+            None,
+            Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        );
+
+        assert!(keystroke_uses_text_edit_modifier(&platform_v));
+        if cfg!(target_os = "macos") {
+            assert!(!keystroke_uses_text_edit_modifier(&control_v));
+        } else {
+            assert!(keystroke_uses_text_edit_modifier(&control_v));
+        }
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 use crate::workspace::WorkspaceApp;
-use crate::workspace::ime::WorkspaceImeTarget;
+use crate::workspace::ime::{WorkspaceImeTarget, keystroke_uses_text_edit_modifier};
 use oxideterm_gpui_ui::{
     TextInputView,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
@@ -132,7 +132,7 @@ impl WorkspaceApp {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
-        if modifiers.platform {
+        if keystroke_uses_text_edit_modifier(&event.keystroke) {
             if key == "v" {
                 self.paste_into_keyboard_interactive_field(cx);
             }
