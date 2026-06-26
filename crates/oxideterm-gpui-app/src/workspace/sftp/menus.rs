@@ -61,21 +61,42 @@ impl WorkspaceApp {
                 if menu.pane != SftpPane::Remote || file.file_type == SftpFileType::Directory {
                     menu_el
                 } else {
-                    menu_el.child(self.render_sftp_context_menu_guarded_item(
-                        LucideIcon::Eye,
-                        self.i18n.t("sftp.context.preview"),
-                        false,
-                        false,
-                        pane_loading,
-                        has_background,
-                        {
-                            let file = file.clone();
-                            move |this, _event, _window, _cx| {
-                                this.open_or_preview_sftp_file(menu.pane, &file);
-                            }
-                        },
-                        cx,
-                    ))
+                    let can_extract = selected_count == 1
+                        && sftp_extract_archive_kind(&file.name).is_some();
+                    menu_el
+                        .child(self.render_sftp_context_menu_guarded_item(
+                            LucideIcon::Eye,
+                            self.i18n.t("sftp.context.preview"),
+                            false,
+                            false,
+                            pane_loading,
+                            has_background,
+                            {
+                                let file = file.clone();
+                                move |this, _event, _window, _cx| {
+                                    this.open_or_preview_sftp_file(menu.pane, &file);
+                                }
+                            },
+                            cx,
+                        ))
+                        .when(can_extract, |menu_el| {
+                            menu_el.child(self.render_sftp_context_menu_guarded_item(
+                                LucideIcon::FolderArchive,
+                                self.i18n.t("sftp.context.extract"),
+                                false,
+                                false,
+                                pane_loading,
+                                has_background,
+                                {
+                                    let file = file.clone();
+                                    move |this, _event, _window, cx| {
+                                        this.extract_remote_sftp_archive(file.clone());
+                                        cx.notify();
+                                    }
+                                },
+                                cx,
+                            ))
+                        })
                 }
             })
             .when(menu.file.is_some() && selected_count == 1, |menu_el| {
