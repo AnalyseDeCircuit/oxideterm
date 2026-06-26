@@ -368,8 +368,16 @@ jobs:
               `OxideTerm_${version}_windows_arm64-setup.exe`,
             );
             await addAsset(
+              ['windows-aarch64-portable'],
+              `OxideTerm_${version}_windows_arm64_portable.zip`,
+            );
+            await addAsset(
               ['windows-x86_64', 'x86_64-pc-windows-msvc'],
               `OxideTerm_${version}_windows_x64-setup.exe`,
+            );
+            await addAsset(
+              ['windows-x86_64-portable'],
+              `OxideTerm_${version}_windows_x64_portable.zip`,
             );
 
             if (Object.keys(platforms).length === 0) {
@@ -572,7 +580,9 @@ jobs:
               `OxideTerm_${version}_linux_x64.deb`,
               `OxideTerm_${version}_linux_x64_portable.tar.gz`,
               `OxideTerm_${version}_windows_arm64-setup.exe`,
+              `OxideTerm_${version}_windows_arm64_portable.zip`,
               `OxideTerm_${version}_windows_x64-setup.exe`,
+              `OxideTerm_${version}_windows_x64_portable.zip`,
             ];
 
             const missing = expected.filter((name) => !names.has(name));

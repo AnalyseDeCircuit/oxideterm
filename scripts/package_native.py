@@ -29,6 +29,7 @@ CLI_BIN = "oxideterm"
 AGENT_RESOURCE_DIR = "agents"
 AGENT_BINARY_PREFIX = "oxideterm-agent-"
 ENCODED_AGENT_SUFFIX = ".b64"
+PORTABLE_MARKER_FILENAME = "portable"
 
 
 @dataclass(frozen=True)
@@ -388,6 +389,7 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
     copy_runtime_resources(package_root / "resources", target)
     for name in ("LICENSE", "NOTICE", "README.md"):
         shutil.copy2(ROOT_DIR / name, package_root / name)
+    (package_root / PORTABLE_MARKER_FILENAME).touch()
 
     # Portable artifacts are produced with stdlib archive writers so Windows runners
     # do not depend on a Unix shell, tar, cp, or symlink behavior.
@@ -742,8 +744,9 @@ def main() -> None:
     app_binary = build_app(target, target_was_explicit)
     if "windows" in target:
         create_windows_installer(app_binary, target, version, label, identity)
-    else:
-        create_portable_package(app_binary, target, version, label)
+    # Every target should publish a self-contained portable artifact; Windows
+    # additionally ships an NSIS installer for users who prefer installation.
+    create_portable_package(app_binary, target, version, label)
     if "apple-darwin" in target:
         create_macos_app(app_binary, target, version, label, identity)
     if "linux" in target:
