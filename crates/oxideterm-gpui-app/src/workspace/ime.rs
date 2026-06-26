@@ -1026,6 +1026,7 @@ impl WorkspaceApp {
             WorkspaceImeTarget::TerminalCommandBar
             | WorkspaceImeTarget::AiChatInput
             | WorkspaceImeTarget::AiMessageEdit
+            | WorkspaceImeTarget::Sftp(_)
             | WorkspaceImeTarget::ReadOnlyText(_) => {
                 // These targets report an anchor around the painted text itself.
                 // Applying the shared form-control padding again makes hit testing

@@ -14,23 +14,6 @@ impl WorkspaceApp {
             }
             return false;
         }
-        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
-            match key {
-                "a" => {
-                    self.select_all_sftp_files(self.sftp_view.active_pane);
-                    self.sftp_view.dismiss_context_menu();
-                    cx.notify();
-                    return true;
-                }
-                "l" => {
-                    self.start_sftp_path_edit(self.sftp_view.active_pane);
-                    self.sftp_view.dismiss_context_menu();
-                    cx.notify();
-                    return true;
-                }
-                _ => return false,
-            }
-        }
         if key == "escape" && self.dismiss_workspace_context_menus() {
             cx.notify();
             return true;
@@ -75,6 +58,11 @@ impl WorkspaceApp {
             return false;
         }
         if let Some(input) = self.sftp_view.focused_input {
+            // Focused inline inputs must keep browser-style editing shortcuts;
+            // pane-level shortcuts are only considered after text input declines them.
+            if self.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
+                return true;
+            }
             match key {
                 "tab" if !event.keystroke.modifiers.platform && !event.keystroke.modifiers.control => {
                     self.handle_sftp_input_tab(input);
@@ -110,14 +98,33 @@ impl WorkspaceApp {
                     cx.notify();
                     return true;
                 }
-                "backspace" => {
-                    if self.sftp_input_value_mut(input).pop().is_some() {
-                        // Empty Backspace keeps the SFTP input unchanged.
-                        cx.notify();
-                    }
+                _ => {}
+            }
+            if self.handle_active_text_input_navigation(&event.keystroke, cx) {
+                return true;
+            }
+            if self.handle_active_text_input_delete_selection(&event.keystroke, cx) {
+                return true;
+            }
+            if self.handle_active_text_input_transpose(&event.keystroke, cx) {
+                return true;
+            }
+        }
+        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
+            match key {
+                "a" => {
+                    self.select_all_sftp_files(self.sftp_view.active_pane);
+                    self.sftp_view.dismiss_context_menu();
+                    cx.notify();
                     return true;
                 }
-                _ => {}
+                "l" => {
+                    self.start_sftp_path_edit(self.sftp_view.active_pane);
+                    self.sftp_view.dismiss_context_menu();
+                    cx.notify();
+                    return true;
+                }
+                _ => return false,
             }
         }
         match key {

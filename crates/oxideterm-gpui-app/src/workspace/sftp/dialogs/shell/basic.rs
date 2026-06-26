@@ -166,6 +166,7 @@ impl WorkspaceApp {
                     .items_center()
                     .child(self.render_sftp_inline_text(
                         SftpInput::DialogValue,
+                        None,
                         &self.sftp_view.dialog_value,
                         placeholder_key,
                         focused,

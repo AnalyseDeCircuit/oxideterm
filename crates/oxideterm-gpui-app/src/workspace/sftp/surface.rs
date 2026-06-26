@@ -367,6 +367,7 @@ impl WorkspaceApp {
             .when(editing, |bar| {
                 bar.child(self.render_sftp_inline_text(
                     input,
+                    Some(pane),
                     value,
                     "sftp.file_list.path_placeholder",
                     focused,
@@ -734,6 +735,7 @@ impl WorkspaceApp {
             ))
             .child(self.render_sftp_inline_text(
                 input,
+                Some(pane),
                 filter,
                 "sftp.file_list.filter_placeholder",
                 focused,
@@ -781,18 +783,34 @@ impl WorkspaceApp {
     fn render_sftp_inline_text(
         &self,
         input: SftpInput,
+        pane: Option<SftpPane>,
         value: &str,
         placeholder_key: &'static str,
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let text = if value.is_empty() {
+        let target = WorkspaceImeTarget::Sftp(input);
+        let marked = self.marked_text_for_target(target).unwrap_or_default();
+        let display = if value.is_empty() && marked.is_empty() {
             self.i18n.t(placeholder_key)
+        } else if value.is_empty() {
+            String::new()
         } else {
             value.to_string()
         };
-        let target = WorkspaceImeTarget::Sftp(input);
+        let visually_empty = value.is_empty() && marked.is_empty();
+        let input_range = if focused && !value.is_empty() && marked.is_empty() {
+            self.ime_selected_range_for_target(target)
+        } else {
+            None
+        }
+        .map(|range| text_input_visual_range(value, false, range));
+        let selection_range = input_range.clone().filter(|range| range.start < range.end);
+        let caret_offset = input_range
+            .as_ref()
+            .filter(|range| range.start == range.end)
+            .map(|range| range.start);
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
@@ -803,22 +821,50 @@ impl WorkspaceApp {
                 .flex()
                 .items_center()
                 .overflow_hidden()
+                .cursor(CursorStyle::IBeam)
                 .text_size(px(SFTP_TEXT_XS))
-                .text_color(if value.is_empty() {
+                .text_color(if visually_empty {
                     rgb(theme.text_muted)
                 } else {
                     rgb(theme.text)
                 })
-                .when(focused && value.is_empty(), |input| {
+                .when(focused && visually_empty, |input| {
                     input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
                 })
-                .child(div().truncate().child(text))
-                .when_some(self.marked_text_for_target(target), |input, marked| {
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .child(text_input_value_segments(
+                            &self.tokens,
+                            &display,
+                            visually_empty,
+                            selection_range,
+                            caret_offset,
+                            self.new_connection_caret_visible,
+                        )),
+                )
+                .when(!marked.is_empty(), |input| {
                     input.child(div().underline().child(marked.to_string()))
                 })
-                .when(focused && !value.is_empty(), |input| {
-                    input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                }),
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        window.focus(&this.focus_handle);
+                        if let Some(pane) = pane {
+                            this.sftp_view.active_pane = pane;
+                        }
+                        this.sftp_view.focused_input = Some(input);
+                        this.ime_marked_text = None;
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(cx.listener(
+                    |this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    },
+                )),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, _cx| {
                     this.text_input_anchors.insert(anchor.id, anchor);

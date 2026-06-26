@@ -20,7 +20,9 @@ use oxideterm_gpui_ui::{
     surface::{
         color_for_background, color_with_background_scaled_alpha, tauri_glass_surface_shadow,
     },
-    text_input::{text_caret, text_input_anchor_probe},
+    text_input::{
+        text_caret, text_input_anchor_probe, text_input_value_segments, text_input_visual_range,
+    },
 };
 use oxideterm_preview::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PreviewAssetOwner, PreviewSession,
