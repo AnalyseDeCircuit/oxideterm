@@ -11,18 +11,18 @@ If you just want the most stable daily-use OxideTerm release, do not download th
 - Built from the same product direction as OxideTerm: local-first remote server work over SSH, with terminal, SFTP, port forwarding, connection management, file workflows, and OxideSens AI context.
 - Intended for users who are comfortable testing early builds and filing detailed issues.
 
-## GPUI Preview 9 Highlights
+## GPUI Preview 10 Highlights
 
-This preview focuses on terminal polish, host tooling, settings coverage, and native workflow breadth.
+This preview focuses on closing GPUI preview regressions, improving Windows usability, and tightening native workflow parity.
 
-- Host Tools gained broader monitoring surfaces for processes, Docker, services, tmux, packages, logs, ports, filesystems, scheduled tasks, and runtime health.
-- VNC graphics support is now available in the native app for remote visual workflows.
-- Terminal privilege credentials now have native settings management and local/SSH sudo helper improvements.
-- Terminal context actions, command-bar behavior, smooth scrolling, IME handling, and selection/menu interactions were refined.
-- Native terminal graphics handling was tightened so yazi image previews do not leave stale image blocks after exiting alternate-screen apps.
-- X/Y/ZMODEM transfer support was added to native terminal sessions, with more conservative protocol detection.
-- Background image settings and runtime surfaces now apply more consistently across terminal-adjacent tabs.
-- SFTP transfer scheduling, directory loading, and remote session behavior were improved.
+- Windows terminal input handling was refined so ordinary Tab/Shift+Tab reaches the active terminal instead of being swallowed by focus traversal, while command-bar and quick-command UI keeps its own key handling.
+- Windows text editing shortcuts and GPUI text-selection affordances were tightened across settings, quick-command, and path-oriented surfaces.
+- Windows releases now include portable archives in addition to installers, so Portable Runtime users can start from a self-contained package.
+- SFTP gained archive extraction from the context menu, improved path text selection, and remote workflow fixes.
+- Local terminal lifecycle handling was improved so exited panes can close cleanly without leaving stale local PTY state behind.
+- Cloud sync configuration is now persisted before sync actions, reducing surprises when upload/check/pull is triggered immediately after edits.
+- Local terminal setup gained Nushell support alongside the existing shell detection paths.
+- GPUI shared UI primitives and command-bar focus handling were refined to reduce visual regressions while keeping terminal-first input behavior.
 
 ## What To Test
 
