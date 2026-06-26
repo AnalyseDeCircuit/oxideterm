@@ -332,6 +332,9 @@ impl Render for WorkspaceApp {
                 {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.forward_terminal_tab_from_capture(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::SessionManager)
