@@ -45,6 +45,26 @@ enum TerminalCommandSuggestionDirection {
     Down,
 }
 
+fn terminal_tab_capture_keystroke(keystroke: &gpui::Keystroke) -> bool {
+    let modifiers = keystroke.modifiers;
+    // Plain Tab and Shift+Tab are terminal protocol keys, but some platforms
+    // also treat them as focus traversal keys. Capture only that collision;
+    // Ctrl+Tab and other chords stay owned by the normal keybinding registry.
+    keystroke.key.as_str() == "tab" && !modifiers.platform && !modifiers.control && !modifiers.alt
+}
+
+fn terminal_tab_capture_blocked_by_workspace_ui(
+    active_ime_target: bool,
+    quick_commands_open: bool,
+    command_suggestions_open: bool,
+) -> bool {
+    // Text inputs, command palettes, terminal command popovers, and quick
+    // commands own Tab semantics while they are active. The terminal fallback is
+    // only for the platform focus-traversal path that would otherwise swallow a
+    // real terminal Tab.
+    active_ime_target || quick_commands_open || command_suggestions_open
+}
+
 impl WorkspaceApp {
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = true;
@@ -626,6 +646,27 @@ impl WorkspaceApp {
         if self.forward_unhandled_key_to_active_terminal(event, window, cx) {
             return;
         }
+    }
+
+    pub(super) fn forward_terminal_tab_from_capture(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !terminal_tab_capture_keystroke(&event.keystroke) {
+            return false;
+        }
+
+        if terminal_tab_capture_blocked_by_workspace_ui(
+            self.active_ime_target().is_some(),
+            self.terminal_quick_commands_open,
+            self.terminal_command_suggestions_open,
+        ) {
+            return false;
+        }
+
+        self.forward_unhandled_key_to_active_terminal(event, window, cx)
     }
 
     fn forward_unhandled_key_to_active_terminal(
@@ -2209,6 +2250,14 @@ fn is_shell_assignment_name(name: &str) -> bool {
 mod terminal_command_bar_behavior_tests {
     use super::*;
 
+    fn tab_keystroke_with(modifiers: gpui::Modifiers) -> gpui::Keystroke {
+        gpui::Keystroke {
+            key: "tab".to_string(),
+            modifiers,
+            ..Default::default()
+        }
+    }
+
     fn suggestion(executable: bool) -> TerminalCommandSuggestion {
         TerminalCommandSuggestion {
             kind: TerminalCommandSuggestionKind::History,
@@ -2223,6 +2272,47 @@ mod terminal_command_bar_behavior_tests {
             risk: None,
             inline_safe: true,
         }
+    }
+
+    #[test]
+    fn terminal_tab_capture_matches_terminal_tab_chords_only() {
+        assert!(terminal_tab_capture_keystroke(&tab_keystroke_with(
+            gpui::Modifiers::default()
+        )));
+        assert!(terminal_tab_capture_keystroke(&tab_keystroke_with(
+            gpui::Modifiers {
+                shift: true,
+                ..Default::default()
+            }
+        )));
+        assert!(!terminal_tab_capture_keystroke(&tab_keystroke_with(
+            gpui::Modifiers {
+                control: true,
+                ..Default::default()
+            }
+        )));
+        assert!(!terminal_tab_capture_keystroke(&tab_keystroke_with(
+            gpui::Modifiers {
+                platform: true,
+                ..Default::default()
+            }
+        )));
+    }
+
+    #[test]
+    fn terminal_tab_capture_defers_to_workspace_text_ui() {
+        assert!(!terminal_tab_capture_blocked_by_workspace_ui(
+            false, false, false
+        ));
+        assert!(terminal_tab_capture_blocked_by_workspace_ui(
+            true, false, false
+        ));
+        assert!(terminal_tab_capture_blocked_by_workspace_ui(
+            false, true, false
+        ));
+        assert!(terminal_tab_capture_blocked_by_workspace_ui(
+            false, false, true
+        ));
     }
 
     #[test]
