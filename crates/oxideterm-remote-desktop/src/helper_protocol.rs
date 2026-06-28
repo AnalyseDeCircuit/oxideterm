@@ -6,8 +6,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopProtocol, RemoteDesktopSecret,
-    RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopFrameUpdate, RemoteDesktopProtocol,
+    RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -171,6 +171,9 @@ pub enum RemoteDesktopHelperEvent {
     Frame {
         frame: RemoteDesktopFrame,
     },
+    FrameUpdate {
+        update: RemoteDesktopFrameUpdate,
+    },
     Cursor {
         x: u32,
         y: u32,
@@ -208,6 +211,14 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("size", &frame.size)
                 .field("format", &frame.format)
                 .field("bytes", &format_args!("<{} bytes>", frame.bytes.len()))
+                .finish(),
+            Self::FrameUpdate { update } => formatter
+                .debug_struct("FrameUpdate")
+                .field("size", &update.size)
+                .field("rect", &update.rect)
+                .field("format", &update.format)
+                .field("compression", &update.compression)
+                .field("bytes", &format_args!("<{} bytes>", update.bytes.len()))
                 .finish(),
             Self::Cursor {
                 x,

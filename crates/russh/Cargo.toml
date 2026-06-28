@@ -168,7 +168,7 @@ features = ["alloc"]
 version = "0.10"
 
 [dependencies.curve25519-dalek]
-version = "=5.0.0-rc.0"
+version = "=5.0.0-rc.1"
 
 [dependencies.data-encoding]
 version = "2.3"
@@ -187,10 +187,10 @@ optional = true
 version = "0.11.0-rc.5"
 
 [dependencies.ecdsa]
-version = "=0.17.0-rc.18"
+version = "=0.17.0-rc.22"
 
 [dependencies.ed25519-dalek]
-version = "=3.0.0-rc.0"
+version = "=3.0.0-rc.1"
 features = [
     "alloc",
     "rand_core",
@@ -198,7 +198,7 @@ features = [
 ]
 
 [dependencies.elliptic-curve]
-version = "=0.14.0-rc.33"
+version = "0.14"
 features = ["ecdh"]
 
 [dependencies.enum_dispatch]
@@ -256,15 +256,15 @@ version = "0.4.6"
 package = "num-bigint"
 
 [dependencies.p256]
-version = "=0.14.0-rc.10"
+version = "=0.14.0-rc.14"
 features = ["ecdh"]
 
 [dependencies.p384]
-version = "=0.14.0-rc.10"
+version = "=0.14.0-rc.14"
 features = ["ecdh"]
 
 [dependencies.p521]
-version = "=0.14.0-rc.10"
+version = "=0.14.0-rc.14"
 features = ["ecdh"]
 
 [dependencies.pbkdf2]

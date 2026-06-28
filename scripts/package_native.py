@@ -32,6 +32,11 @@ AGENT_BINARY_PREFIX = "oxideterm-agent-"
 ENCODED_AGENT_SUFFIX = ".b64"
 HELPER_RESOURCE_DIR = "helpers"
 PORTABLE_MARKER_FILENAME = "portable"
+LEGACY_RDP_HELPER_FEATURE = "legacy-freerdp"
+LEGACY_RDP_LINUX_TARGETS = {
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+}
 
 
 @dataclass(frozen=True)
@@ -260,6 +265,9 @@ def build_cli(target: str, target_was_explicit: bool) -> Path:
 
 def build_helper(package: str, target: str, target_was_explicit: bool) -> Path:
     args = ["cargo", "build", "-p", package, "--release"]
+    features = helper_features(package, target)
+    if features:
+        args.extend(["--features", ",".join(features)])
     if target_was_explicit:
         args.extend(["--target", target])
     run(args)
@@ -275,6 +283,18 @@ def build_helper(package: str, target: str, target_was_explicit: bool) -> Path:
     make_executable(dest)
     print(f"Remote desktop helper artifact written to {dest}")
     return dest
+
+
+def helper_features(package: str, target: str) -> list[str]:
+    if package != "oxideterm-rdp-helper":
+        return []
+    if os.environ.get("OXIDETERM_DISABLE_LEGACY_RDP") == "1":
+        return []
+    if target in LEGACY_RDP_LINUX_TARGETS:
+        # The FreeRDP Rust binding targets the FreeRDP 2 ABI, which is
+        # available on our Linux packaging runners through freerdp2-dev.
+        return [LEGACY_RDP_HELPER_FEATURE]
+    return []
 
 
 def build_remote_desktop_helpers(target: str, target_was_explicit: bool) -> None:
@@ -596,6 +616,18 @@ def linux_deb_arch(target: str) -> str:
     return mapping[target]
 
 
+def linux_deb_dependencies(target: str) -> str:
+    dependencies = ["libc6 (>= 2.31)", "libgcc-s1"]
+    if helper_features("oxideterm-rdp-helper", target):
+        if target == "aarch64-unknown-linux-gnu":
+            dependencies.extend(
+                ["libfreerdp2-2t64", "libfreerdp-client2-2t64", "libwinpr2-2t64"]
+            )
+        else:
+            dependencies.extend(["libfreerdp2-2", "libfreerdp-client2-2", "libwinpr2-2"])
+    return ", ".join(dependencies)
+
+
 def linux_deb_version(version: str) -> str:
     # Debian treats '-' as the Debian revision separator. Preview semver tags
     # use '-' inside the upstream version, so store them as '~' for valid
@@ -742,7 +774,7 @@ Section: utils
 Priority: optional
 Architecture: {linux_deb_arch(target)}
 Maintainer: AnalyseDeCircuit <noreply@oxideterm.app>
-Depends: libc6 (>= 2.31), libgcc-s1
+Depends: {linux_deb_dependencies(target)}
 Description: OxideTerm native SSH workspace
  Local-first SSH workspace with terminal, SFTP, port forwarding, and AI context.
 """

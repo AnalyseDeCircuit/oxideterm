@@ -68,6 +68,16 @@ impl RemoteDesktopViewState {
                 self.message = None;
                 self.pending_resize = None;
             }
+            RemoteDesktopHelperEvent::FrameUpdate { update } => {
+                if let Some(frame) = self.frame.as_mut()
+                    && frame.apply_update(&update)
+                {
+                    self.status = RemoteDesktopSessionStatus::Connected;
+                    self.size = Some(update.size);
+                    self.message = None;
+                    self.pending_resize = None;
+                }
+            }
             RemoteDesktopHelperEvent::ConnectionFailure { message } => {
                 self.status = RemoteDesktopSessionStatus::Failed;
                 self.message = Some(message);
@@ -114,7 +124,9 @@ impl RemoteDesktopViewState {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_remote_desktop::{RemoteDesktopFrame, RemoteDesktopFrameFormat};
+    use oxideterm_remote_desktop::{
+        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopRect,
+    };
 
     use super::*;
 
@@ -155,6 +167,33 @@ mod tests {
 
         assert!(state.snapshot().has_frame);
         assert!(state.frame().unwrap().is_complete());
+    }
+
+    #[test]
+    fn frame_update_patches_existing_frame() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let size = RemoteDesktopSize {
+            width: 2,
+            height: 1,
+        };
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 1, 1, 1, 2, 2, 2, 2],
+            ),
+        });
+
+        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(1, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![9, 9, 9, 9],
+            ),
+        });
+
+        assert_eq!(state.frame().unwrap().bytes, vec![1, 1, 1, 1, 9, 9, 9, 9]);
     }
 
     #[test]

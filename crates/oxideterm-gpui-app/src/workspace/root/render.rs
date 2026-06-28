@@ -331,6 +331,9 @@ impl Render for WorkspaceApp {
                 } else if this.dispatch_registered_keybinding(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.forward_remote_desktop_key_from_capture(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if !this.registered_keybinding_matches(event)
                     && this.dispatch_runtime_plugin_keybinding(event, cx)
                 {
@@ -409,6 +412,11 @@ impl Render for WorkspaceApp {
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 this.handle_workspace_key(event, window, cx);
+            }))
+            .on_key_up(cx.listener(|this, event: &KeyUpEvent, _window, cx| {
+                if this.forward_remote_desktop_key_up(event) {
+                    cx.stop_propagation();
+                }
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, window, cx);

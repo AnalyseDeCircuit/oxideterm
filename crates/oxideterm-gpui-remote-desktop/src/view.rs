@@ -8,51 +8,56 @@ use gpui::{
     Styled, Window, canvas, div, fill, prelude::*, px, rgb, rgba, size,
 };
 use image::{Frame as ImageFrame, RgbaImage};
-use oxideterm_gpui_ui::{
-    SurfaceKind, SurfaceOptions, SurfacePadding, empty_state, error_state, semantic_surface,
-};
+use oxideterm_gpui_ui::{empty_state, error_state};
 use oxideterm_remote_desktop::{
     RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopProtocol, RemoteDesktopSessionStatus,
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::RemoteDesktopViewState;
+use crate::{RemoteDesktopViewState, SharedRemoteDesktopGeometry};
 
 const VIEW_PADDING: f32 = 14.0;
 const FRAME_BORDER_ALPHA: u32 = 0x80;
 const FRAME_BG_ALPHA: u32 = 0x66;
 
 pub fn remote_desktop_surface(tokens: &ThemeTokens, state: &RemoteDesktopViewState) -> AnyElement {
+    remote_desktop_surface_with_geometry(tokens, state, None)
+}
+
+pub fn remote_desktop_surface_with_geometry(
+    tokens: &ThemeTokens,
+    state: &RemoteDesktopViewState,
+    geometry: Option<SharedRemoteDesktopGeometry>,
+) -> AnyElement {
     let snapshot = state.snapshot();
-    semantic_surface(
-        tokens,
-        SurfaceOptions::new(SurfaceKind::Panel).padding(SurfacePadding::Normal),
-    )
-    .size_full()
-    .min_w(px(0.0))
-    .min_h(px(0.0))
-    .flex()
-    .flex_col()
-    .gap(px(tokens.spacing.three))
-    .child(header(
-        tokens,
-        &snapshot.title,
-        snapshot.protocol,
-        snapshot.status,
-        snapshot.read_only,
-        snapshot.pending_resize.is_some(),
-    ))
-    .child(div().min_h(px(0.0)).flex_1().child(match snapshot.status {
-        RemoteDesktopSessionStatus::Failed => error_body(tokens, snapshot.message),
-        RemoteDesktopSessionStatus::Idle
-        | RemoteDesktopSessionStatus::Connecting
-        | RemoteDesktopSessionStatus::Reconnecting
-        | RemoteDesktopSessionStatus::Disconnected => {
-            placeholder_body(tokens, snapshot.status, snapshot.message)
-        }
-        RemoteDesktopSessionStatus::Connected => frame_body(tokens, state),
-    }))
-    .into_any_element()
+    div()
+        .size_full()
+        .min_w(px(0.0))
+        .min_h(px(0.0))
+        .p(px(VIEW_PADDING))
+        .bg(rgb(tokens.ui.bg_panel))
+        .flex()
+        .flex_col()
+        .gap(px(tokens.spacing.three))
+        .child(header(
+            tokens,
+            &snapshot.title,
+            snapshot.protocol,
+            snapshot.status,
+            snapshot.read_only,
+            snapshot.pending_resize.is_some(),
+        ))
+        .child(div().min_h(px(0.0)).flex_1().child(match snapshot.status {
+            RemoteDesktopSessionStatus::Failed => error_body(tokens, snapshot.message),
+            RemoteDesktopSessionStatus::Idle
+            | RemoteDesktopSessionStatus::Connecting
+            | RemoteDesktopSessionStatus::Reconnecting
+            | RemoteDesktopSessionStatus::Disconnected => {
+                placeholder_body(tokens, snapshot.status, snapshot.message)
+            }
+            RemoteDesktopSessionStatus::Connected => frame_body(tokens, state, geometry),
+        }))
+        .into_any_element()
 }
 
 fn header(
@@ -153,9 +158,16 @@ fn aux_badge(tokens: &ThemeTokens, label: &'static str) -> Div {
         .child(label)
 }
 
-fn frame_body(tokens: &ThemeTokens, state: &RemoteDesktopViewState) -> AnyElement {
+fn frame_body(
+    tokens: &ThemeTokens,
+    state: &RemoteDesktopViewState,
+    geometry: Option<SharedRemoteDesktopGeometry>,
+) -> AnyElement {
     if let Some(frame) = state.frame() {
         let Some(image) = render_image_for_frame(frame) else {
+            if let Some(geometry) = geometry {
+                geometry.clear();
+            }
             return corrupted_frame_body(tokens, frame).into_any_element();
         };
         let frame_size = frame.size;
@@ -164,7 +176,6 @@ fn frame_body(tokens: &ThemeTokens, state: &RemoteDesktopViewState) -> AnyElemen
             .size_full()
             .min_w(px(0.0))
             .min_h(px(0.0))
-            .rounded(px(tokens.radii.md))
             .border_1()
             .border_color(rgba((tokens.ui.border << 8) | FRAME_BORDER_ALPHA))
             .bg(rgba((tokens.ui.bg_sunken << 8) | FRAME_BG_ALPHA))
@@ -173,10 +184,14 @@ fn frame_body(tokens: &ThemeTokens, state: &RemoteDesktopViewState) -> AnyElemen
                 image,
                 frame_size.width,
                 frame_size.height,
+                geometry,
             ))
             .into_any_element();
     }
 
+    if let Some(geometry) = geometry {
+        geometry.clear();
+    }
     empty_state(
         tokens,
         "RD",
@@ -197,7 +212,6 @@ fn corrupted_frame_body(tokens: &ThemeTokens, frame: &RemoteDesktopFrame) -> Div
         .size_full()
         .min_w(px(0.0))
         .min_h(px(0.0))
-        .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgba((tokens.ui.error << 8) | FRAME_BORDER_ALPHA))
         .bg(rgba((tokens.ui.bg_sunken << 8) | FRAME_BG_ALPHA))
@@ -231,13 +245,25 @@ fn remote_desktop_frame_canvas(
     image: Arc<RenderImage>,
     width: u32,
     height: u32,
+    geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> impl IntoElement {
     canvas(
         move |bounds, _window: &mut Window, _cx| {
-            ObjectFit::Contain.get_bounds(
+            let image_bounds = ObjectFit::Contain.get_bounds(
                 bounds,
                 size(DevicePixels(width as i32), DevicePixels(height as i32)),
-            )
+            );
+            if let Some(geometry) = geometry.as_ref() {
+                geometry.update(
+                    Some(image_bounds),
+                    Some(oxideterm_remote_desktop::RemoteDesktopSize { width, height }),
+                    Some(oxideterm_remote_desktop::RemoteDesktopSize::clamped(
+                        f32::from(bounds.size.width).round() as u32,
+                        f32::from(bounds.size.height).round() as u32,
+                    )),
+                );
+            }
+            image_bounds
         },
         move |bounds, image_bounds, window: &mut Window, _cx| {
             window.paint_quad(fill(bounds, rgb(0x000000)));
@@ -253,11 +279,21 @@ fn render_image_for_frame(frame: &RemoteDesktopFrame) -> Option<Arc<RenderImage>
     }
 
     let mut bytes = frame.bytes.clone();
-    if frame.format == RemoteDesktopFrameFormat::Bgra8 {
-        // GPUI's image path expects RGBA. Keep the protocol boundary format
-        // explicit so future helpers can choose the cheapest transport format.
-        for pixel in bytes.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
+    match frame.format {
+        RemoteDesktopFrameFormat::Rgba8 => {
+            // GPUI's RenderImage cache expects BGRA bytes, while the helper
+            // protocol keeps RGBA explicit for engines that already produce it.
+            for pixel in bytes.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        RemoteDesktopFrameFormat::Bgra8 => {
+            // FreeRDP and VNC-style desktop buffers often use the fourth byte
+            // as unused padding rather than alpha. Remote desktop framebuffers
+            // are opaque, so make that explicit before uploading to GPUI.
+            for pixel in bytes.chunks_exact_mut(4) {
+                pixel[3] = 0xff;
+            }
         }
     }
 
@@ -292,4 +328,43 @@ fn error_body(tokens: &ThemeTokens, message: Option<String>) -> AnyElement {
         None,
     )
     .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use oxideterm_remote_desktop::{RemoteDesktopFrame, RemoteDesktopSize};
+
+    use super::*;
+
+    #[test]
+    fn bgra_frame_padding_is_rendered_as_opaque_alpha() {
+        let frame = RemoteDesktopFrame::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            RemoteDesktopFrameFormat::Bgra8,
+            vec![0x10, 0x20, 0x30, 0x00],
+        );
+
+        let image = render_image_for_frame(&frame).expect("complete BGRA frame should render");
+
+        assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0xff].as_slice()));
+    }
+
+    #[test]
+    fn rgba_frame_is_uploaded_in_gpui_bgra_order() {
+        let frame = RemoteDesktopFrame::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![0x30, 0x20, 0x10, 0xff],
+        );
+
+        let image = render_image_for_frame(&frame).expect("complete RGBA frame should render");
+
+        assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0xff].as_slice()));
+    }
 }

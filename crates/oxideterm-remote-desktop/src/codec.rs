@@ -1,9 +1,17 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 
-use crate::{RemoteDesktopHelperEvent, RemoteDesktopHelperRequest};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    RemoteDesktopFrame, RemoteDesktopFrameCompression, RemoteDesktopFrameFormat,
+    RemoteDesktopFrameUpdate, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
+    RemoteDesktopRect, RemoteDesktopSize,
+};
+
+const MAX_BINARY_FRAME_PAYLOAD_LEN: usize = 256 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteDesktopJsonLineError {
@@ -13,6 +21,32 @@ pub enum RemoteDesktopJsonLineError {
     ReadFailed(#[from] std::io::Error),
     #[error("remote desktop helper JSON failed: {0}")]
     JsonFailed(#[from] serde_json::Error),
+    #[error("remote desktop helper binary payload is too large: {0} bytes")]
+    BinaryPayloadTooLarge(usize),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum RemoteDesktopBinaryEventHeader {
+    FrameBinary {
+        size: RemoteDesktopSize,
+        format: RemoteDesktopFrameFormat,
+        #[serde(default)]
+        compression: RemoteDesktopFrameCompression,
+        payload_len: usize,
+    },
+    FrameUpdateBinary {
+        size: RemoteDesktopSize,
+        rect: RemoteDesktopRect,
+        format: RemoteDesktopFrameFormat,
+        #[serde(default)]
+        compression: RemoteDesktopFrameCompression,
+        payload_len: usize,
+    },
 }
 
 pub fn encode_request_line(
@@ -56,13 +90,44 @@ pub fn write_event_line(
     writer: &mut impl Write,
     event: &RemoteDesktopHelperEvent,
 ) -> Result<(), RemoteDesktopJsonLineError> {
-    write_line(writer, event)
+    match event {
+        RemoteDesktopHelperEvent::Frame { frame } => write_binary_event(
+            writer,
+            RemoteDesktopBinaryEventHeader::FrameBinary {
+                size: frame.size,
+                format: frame.format,
+                compression: RemoteDesktopFrameCompression::None,
+                payload_len: frame.bytes.len(),
+            },
+            &frame.bytes,
+        ),
+        RemoteDesktopHelperEvent::FrameUpdate { update } => write_binary_event(
+            writer,
+            RemoteDesktopBinaryEventHeader::FrameUpdateBinary {
+                size: update.size,
+                rect: update.rect,
+                format: update.format,
+                compression: update.compression,
+                payload_len: update.bytes.len(),
+            },
+            &update.bytes,
+        ),
+        _ => write_line(writer, event),
+    }
 }
 
 pub fn read_event_line(
     reader: &mut impl BufRead,
 ) -> Result<Option<RemoteDesktopHelperEvent>, RemoteDesktopJsonLineError> {
-    read_line(reader)
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(None);
+    }
+    let trimmed = trim_json_line(&line)?;
+    if let Ok(header) = serde_json::from_str::<RemoteDesktopBinaryEventHeader>(trimmed) {
+        return read_binary_event(reader, header).map(Some);
+    }
+    decode_line(trimmed).map(Some)
 }
 
 fn encode_line<T: serde::Serialize>(value: &T) -> Result<String, RemoteDesktopJsonLineError> {
@@ -74,10 +139,7 @@ fn encode_line<T: serde::Serialize>(value: &T) -> Result<String, RemoteDesktopJs
 fn decode_line<T: serde::de::DeserializeOwned>(
     line: &str,
 ) -> Result<T, RemoteDesktopJsonLineError> {
-    let trimmed = line.trim_end_matches(['\r', '\n']);
-    if trimmed.trim().is_empty() {
-        return Err(RemoteDesktopJsonLineError::EmptyLine);
-    }
+    let trimmed = trim_json_line(line)?;
     Ok(serde_json::from_str(trimmed)?)
 }
 
@@ -100,11 +162,69 @@ fn read_line<T: serde::de::DeserializeOwned>(
     decode_line(&line).map(Some)
 }
 
+fn trim_json_line(line: &str) -> Result<&str, RemoteDesktopJsonLineError> {
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    if trimmed.trim().is_empty() {
+        return Err(RemoteDesktopJsonLineError::EmptyLine);
+    }
+    Ok(trimmed)
+}
+
+fn write_binary_event(
+    writer: &mut impl Write,
+    header: RemoteDesktopBinaryEventHeader,
+    payload: &[u8],
+) -> Result<(), RemoteDesktopJsonLineError> {
+    writer.write_all(encode_line(&header)?.as_bytes())?;
+    writer.write_all(payload)?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn read_binary_event(
+    reader: &mut impl Read,
+    header: RemoteDesktopBinaryEventHeader,
+) -> Result<RemoteDesktopHelperEvent, RemoteDesktopJsonLineError> {
+    let payload_len = match &header {
+        RemoteDesktopBinaryEventHeader::FrameBinary { payload_len, .. }
+        | RemoteDesktopBinaryEventHeader::FrameUpdateBinary { payload_len, .. } => *payload_len,
+    };
+    if payload_len > MAX_BINARY_FRAME_PAYLOAD_LEN {
+        return Err(RemoteDesktopJsonLineError::BinaryPayloadTooLarge(
+            payload_len,
+        ));
+    }
+    let mut payload = vec![0; payload_len];
+    reader.read_exact(&mut payload)?;
+    Ok(match header {
+        RemoteDesktopBinaryEventHeader::FrameBinary {
+            size,
+            format,
+            compression: RemoteDesktopFrameCompression::None,
+            ..
+        } => RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(size, format, payload),
+        },
+        RemoteDesktopBinaryEventHeader::FrameUpdateBinary {
+            size,
+            rect,
+            format,
+            compression: RemoteDesktopFrameCompression::None,
+            ..
+        } => RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(size, rect, format, payload),
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
 
-    use crate::{RemoteDesktopProtocol, RemoteDesktopSessionStatus, RemoteDesktopSize};
+    use crate::{
+        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
+        RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionStatus, RemoteDesktopSize,
+    };
 
     use super::*;
 
@@ -136,6 +256,58 @@ mod tests {
         let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
 
         assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn frame_event_uses_json_header_with_raw_payload() {
+        let event = RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                RemoteDesktopSize {
+                    width: 1,
+                    height: 1,
+                },
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 2, 3, 4],
+            ),
+        };
+        let mut bytes = Vec::new();
+
+        write_event_line(&mut bytes, &event).unwrap();
+
+        let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
+        let header = std::str::from_utf8(&bytes[..header_end]).unwrap();
+        assert!(header.contains("\"type\":\"frameBinary\""));
+        assert!(header.contains("\"payloadLen\":4"));
+        assert_eq!(&bytes[(header_end + 1)..], &[1, 2, 3, 4]);
+
+        let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
+        assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn binary_frame_can_be_followed_by_json_event_without_delimiter() {
+        let frame = RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                RemoteDesktopSize {
+                    width: 4,
+                    height: 4,
+                },
+                RemoteDesktopRect::new(1, 1, 1, 1),
+                RemoteDesktopFrameFormat::Bgra8,
+                vec![9, 8, 7, 6],
+            ),
+        };
+        let status = RemoteDesktopHelperEvent::Status {
+            status: RemoteDesktopSessionStatus::Connected,
+            message: None,
+        };
+        let mut bytes = Vec::new();
+        write_event_line(&mut bytes, &frame).unwrap();
+        write_event_line(&mut bytes, &status).unwrap();
+        let mut reader = Cursor::new(bytes);
+
+        assert_eq!(read_event_line(&mut reader).unwrap(), Some(frame));
+        assert_eq!(read_event_line(&mut reader).unwrap(), Some(status));
     }
 
     #[test]

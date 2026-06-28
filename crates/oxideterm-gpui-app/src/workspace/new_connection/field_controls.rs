@@ -972,6 +972,7 @@ impl WorkspaceApp {
     }
 
     fn render_transport_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
         let active_transport = self
             .new_connection_form
             .as_ref()
@@ -982,28 +983,83 @@ impl WorkspaceApp {
                 NewConnectionTransport::Ssh,
                 self.i18n.t("modals.new_connection.transport_ssh"),
                 NewConnectionField::Name,
+                LucideIcon::Server,
             ),
             (
                 NewConnectionTransport::Telnet,
                 self.i18n.t("modals.new_connection.transport_telnet"),
                 NewConnectionField::Host,
+                LucideIcon::Network,
             ),
             (
                 NewConnectionTransport::Serial,
                 self.i18n.t("modals.new_connection.transport_serial"),
                 NewConnectionField::SerialPortPath,
+                LucideIcon::Radio,
+            ),
+            (
+                NewConnectionTransport::Rdp,
+                self.i18n.t("modals.new_connection.transport_rdp"),
+                NewConnectionField::Host,
+                LucideIcon::Monitor,
+            ),
+            (
+                NewConnectionTransport::Vnc,
+                self.i18n.t("modals.new_connection.transport_vnc"),
+                NewConnectionField::Host,
+                LucideIcon::Monitor,
             ),
         ];
-        let mut row = segmented_tabs(&self.tokens);
-        for (transport, label, focus_field) in choices {
-            row = row.child(
-                segmented_tab(&self.tokens, label, active_transport == transport).on_mouse_down(
+        let mut sidebar = div()
+            .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .border_r_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .pr(px(self.tokens.spacing.three));
+
+        for (transport, label, focus_field, icon) in choices {
+            let active = active_transport == transport;
+            let row_text = if active {
+                theme.accent
+            } else {
+                theme.text_muted
+            };
+            let row = div()
+                .w_full()
+                .min_h(px(36.0))
+                .flex()
+                .items_center()
+                .gap(px(self.tokens.spacing.two))
+                .px(px(self.tokens.spacing.two))
+                .py(px(6.0))
+                .border_l_2()
+                .border_color(if active {
+                    rgba((theme.accent << 8) | 0xff)
+                } else {
+                    rgba((theme.border << 8) | 0x00)
+                })
+                .cursor_pointer()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(row_text))
+                .when(active, |row| row.bg(rgba((theme.accent << 8) | 0x16)))
+                .when(!active, |row| row.hover(|row| row.bg(rgb(theme.bg_hover))))
+                .child(Self::render_lucide_icon(icon, 14.0, rgb(row_text)))
+                .child(div().min_w(px(0.0)).truncate().child(label))
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         let mut should_refresh_ports = false;
                         if let Some(form) = this.new_connection_form.as_mut() {
                             let previous_transport = form.transport;
                             apply_transport_default_port(form, previous_transport, transport);
+                            apply_transport_default_username(
+                                form,
+                                previous_transport,
+                                transport,
+                            );
                             form.transport = transport;
                             form.focused_field = focus_field;
                             form.field_focused = false;
@@ -1019,10 +1075,95 @@ impl WorkspaceApp {
                         }
                         cx.notify();
                     }),
-                ),
-            );
+                );
+            sidebar = sidebar.child(row);
         }
-        row.into_any_element()
+        sidebar.into_any_element()
+    }
+
+    fn render_remote_desktop_form_branch(
+        &self,
+        protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return div().into_any_element();
+        };
+        let port_placeholder = match protocol {
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => RDP_DEFAULT_PORT_TEXT,
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => VNC_DEFAULT_PORT_TEXT,
+        };
+        let port_invalid = !form.port.trim().is_empty()
+            && !form.port.trim().parse::<u16>().is_ok_and(|port| port > 0);
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(self.render_connection_field(
+                self.i18n.t("ssh.form.name"),
+                &form.name,
+                self.i18n.t("ssh.form.name_placeholder"),
+                NewConnectionField::Name,
+                false,
+                cx,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(self.tokens.metrics.form_host_port_gap))
+                    .child(div().flex_1().child(self.render_connection_field(
+                        self.i18n.t("ssh.form.host"),
+                        &form.host,
+                        self.i18n.t("ssh.form.host_placeholder"),
+                        NewConnectionField::Host,
+                        false,
+                        cx,
+                    )))
+                    .child(
+                        div()
+                            .w(px(self.tokens.metrics.form_port_width))
+                            .child(self.render_connection_field(
+                                self.i18n.t("ssh.form.port"),
+                                &form.port,
+                                port_placeholder.to_string(),
+                                NewConnectionField::Port,
+                                false,
+                                cx,
+                            )),
+                    ),
+            )
+            .when(port_invalid, |section| {
+                section.child(self.render_connection_hint_with_color(
+                    self.i18n.t("modals.new_connection.remote_desktop_invalid_port"),
+                    self.tokens.ui.error,
+                ))
+            })
+            .when(
+                protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
+                |section| {
+                    section
+                        .child(self.render_connection_field(
+                            self.i18n.t("modals.new_connection.remote_desktop_username"),
+                            &form.username,
+                            "Administrator".to_string(),
+                            NewConnectionField::Username,
+                            false,
+                            cx,
+                        ))
+                        .child(self.render_connection_field(
+                            self.i18n.t("ssh.form.password"),
+                            &form.password,
+                            self.i18n
+                                .t("modals.new_connection.remote_desktop_password_placeholder"),
+                            NewConnectionField::Password,
+                            true,
+                            cx,
+                        ))
+                },
+            )
+            .into_any_element()
     }
 
     fn render_telnet_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {

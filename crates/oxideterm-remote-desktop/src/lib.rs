@@ -25,8 +25,9 @@ pub use helper_protocol::{
 };
 pub use model::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopFrame,
-    RemoteDesktopFrameFormat, RemoteDesktopProtocol, RemoteDesktopSessionId,
-    RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
+    RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionId, RemoteDesktopSessionStatus,
+    RemoteDesktopSize,
 };
 pub use provider::{
     RemoteDesktopProviderCapabilities, RemoteDesktopProviderEntry, RemoteDesktopProviderError,

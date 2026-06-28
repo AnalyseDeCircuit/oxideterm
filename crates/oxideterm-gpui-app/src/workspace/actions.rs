@@ -122,12 +122,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn copy(&mut self, cx: &mut Context<Self>) {
+        if self.copy_remote_desktop(cx) {
+            return;
+        }
         if let Some(pane) = self.active_pane() {
             let _ = pane.update(cx, |pane, cx| pane.copy_to_clipboard(cx));
         }
     }
 
     pub(super) fn paste(&mut self, cx: &mut Context<Self>) {
+        if self.paste_remote_desktop(cx) {
+            return;
+        }
         if let Some(pane) = self.active_pane() {
             let _ = pane.update(cx, |pane, cx| pane.paste_from_clipboard(cx));
         }

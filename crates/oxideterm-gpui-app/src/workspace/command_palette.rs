@@ -486,7 +486,7 @@ impl WorkspaceApp {
                 self.open_remote_desktop_preview_tab(protocol, window, cx);
             }
             PaletteAction::OpenRemoteDesktopConnection(profile) => {
-                self.open_remote_desktop_connection_tab(profile, window, cx);
+                self.open_remote_desktop_connection_tab(profile, None, window, cx);
             }
             PaletteAction::Sidebar(section) => self.set_sidebar_section(section, cx),
             PaletteAction::OpenSavedConnections => self.open_session_manager_tab(window, cx),
