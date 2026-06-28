@@ -47,6 +47,7 @@ pub(crate) struct TerminalElement {
     selected_search_match: Option<usize>,
     command_marks: Vec<TerminalCommandMark>,
     selected_command_mark_id: Option<String>,
+    hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
     hovered_link: Option<TerminalLinkRange>,
     bidi_enabled: bool,
@@ -57,6 +58,7 @@ pub(crate) struct TerminalElement {
     viewport_rows: usize,
     scrollbar_display_offset: f32,
     scroll_y_offset: Pixels,
+    command_mark_gutter_width: f32,
 }
 
 #[derive(Clone)]
@@ -114,6 +116,10 @@ pub(crate) struct TerminalCommandMarkOverlay {
     pub(crate) has_top: bool,
     pub(crate) has_bottom: bool,
     pub(crate) stale: bool,
+    pub(crate) selected: bool,
+    pub(crate) hovered: bool,
+    pub(crate) running: bool,
+    pub(crate) exit_code: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -358,6 +364,7 @@ impl TerminalElement {
             selected_search_match,
             command_marks: Vec::new(),
             selected_command_mark_id: None,
+            hovered_command_mark_id: None,
             highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
             hovered_link,
             bidi_enabled,
@@ -369,6 +376,7 @@ impl TerminalElement {
             viewport_rows,
             scrollbar_display_offset,
             scroll_y_offset: px(0.0),
+            command_mark_gutter_width: 0.0,
         }
     }
 
@@ -384,9 +392,11 @@ impl TerminalElement {
         mut self,
         marks: Vec<TerminalCommandMark>,
         selected_command_mark_id: Option<String>,
+        hovered_command_mark_id: Option<String>,
     ) -> Self {
         self.command_marks = marks;
         self.selected_command_mark_id = selected_command_mark_id;
+        self.hovered_command_mark_id = hovered_command_mark_id;
         self
     }
 
@@ -412,6 +422,11 @@ impl TerminalElement {
 
     pub(crate) fn scroll_y_offset(mut self, scroll_y_offset: Pixels) -> Self {
         self.scroll_y_offset = scroll_y_offset;
+        self
+    }
+
+    pub(crate) fn command_mark_gutter_width(mut self, width: f32) -> Self {
+        self.command_mark_gutter_width = width.max(0.0);
         self
     }
 
@@ -493,6 +508,7 @@ impl TerminalElement {
             &self.snapshot,
             &self.command_marks,
             self.selected_command_mark_id.as_deref(),
+            self.hovered_command_mark_id.as_deref(),
         );
         let mut selections = Vec::new();
         let mut images = self
@@ -1203,40 +1219,45 @@ fn command_mark_overlays_for_rows(
     snapshot: &TerminalSnapshot,
     marks: &[TerminalCommandMark],
     selected_command_mark_id: Option<&str>,
+    hovered_command_mark_id: Option<&str>,
 ) -> Vec<TerminalCommandMarkOverlay> {
-    let Some(selected_id) = selected_command_mark_id else {
-        return Vec::new();
-    };
-    let Some(mark) = marks.iter().find(|mark| mark.command_id == selected_id) else {
-        return Vec::new();
-    };
-    let start_line = mark.start_line;
-    let end_line = mark.end_line.unwrap_or_else(|| {
-        snapshot_prompt_block_start_line(snapshot, snapshot_absolute_cursor_line(snapshot))
-            .saturating_sub(1)
-            .max(mark.start_line)
-    });
-    if end_line < start_line {
-        return Vec::new();
-    }
-
     let viewport_start = snapshot
         .scrollback_lines
         .saturating_sub(snapshot.display_offset);
     let viewport_end = viewport_start.saturating_add(snapshot.rows.saturating_sub(1));
-    if end_line < viewport_start || start_line > viewport_end {
-        return Vec::new();
+    let mut overlays = Vec::new();
+
+    for mark in marks {
+        let start_line = mark.start_line;
+        let end_line = mark.end_line.unwrap_or_else(|| {
+            snapshot_prompt_block_start_line(snapshot, snapshot_absolute_cursor_line(snapshot))
+                .saturating_sub(1)
+                .max(mark.start_line)
+        });
+        if end_line < start_line || end_line < viewport_start || start_line > viewport_end {
+            continue;
+        }
+
+        let selected = selected_command_mark_id == Some(mark.command_id.as_str());
+        let hovered = !selected && hovered_command_mark_id == Some(mark.command_id.as_str());
+        let visible_start_line = start_line.max(viewport_start);
+        let visible_end_line = end_line.min(viewport_end);
+        overlays.push(TerminalCommandMarkOverlay {
+            start_row: visible_start_line.saturating_sub(viewport_start),
+            end_row: visible_end_line.saturating_sub(viewport_start),
+            has_top: start_line >= viewport_start,
+            has_bottom: end_line <= viewport_end,
+            stale: mark.stale,
+            selected,
+            hovered,
+            running: !mark.is_closed,
+            exit_code: mark.exit_code,
+        });
     }
 
-    let visible_start_line = start_line.max(viewport_start);
-    let visible_end_line = end_line.min(viewport_end);
-    vec![TerminalCommandMarkOverlay {
-        start_row: visible_start_line.saturating_sub(viewport_start),
-        end_row: visible_end_line.saturating_sub(viewport_start),
-        has_top: start_line >= viewport_start,
-        has_bottom: end_line <= viewport_end,
-        stale: mark.stale,
-    }]
+    // Passive command edges should stay behind hover/selection fills when ranges overlap.
+    overlays.sort_by_key(|overlay| (overlay.selected, overlay.hovered));
+    overlays
 }
 
 fn snapshot_absolute_cursor_line(snapshot: &TerminalSnapshot) -> usize {
@@ -1529,9 +1550,10 @@ impl Element for TerminalElement {
         let timestamp_origin = viewport_timestamp_origin + point(px(0.0), self.scroll_y_offset);
         // The timestamp gutter and the terminal grid use separate origins so
         // timestamps remain a paint-only overlay and never affect text runs.
-        let viewport_origin =
-            viewport_timestamp_origin + point(px(timestamp_gutter_width), px(0.0));
-        let origin = timestamp_origin + point(px(timestamp_gutter_width), px(0.0));
+        let grid_gutter_width = timestamp_gutter_width + self.command_mark_gutter_width;
+        let viewport_origin = viewport_timestamp_origin + point(px(grid_gutter_width), px(0.0));
+        let origin = timestamp_origin + point(px(grid_gutter_width), px(0.0));
+        let grid_viewport_width = px((f32::from(bounds.size.width) - grid_gutter_width).max(0.0));
         let viewport_mask_bounds = Bounds::new(
             viewport_timestamp_origin,
             size(
@@ -1587,6 +1609,7 @@ impl Element for TerminalElement {
                         origin,
                         self.snapshot.cols,
                         &self.metrics,
+                        self.command_mark_gutter_width,
                         window,
                     );
                 }
@@ -1655,7 +1678,7 @@ impl Element for TerminalElement {
             paint_scrollbar(
                 scrollbar,
                 viewport_origin,
-                bounds.size.width,
+                grid_viewport_width,
                 self.viewport_rows,
                 &self.metrics,
                 window,

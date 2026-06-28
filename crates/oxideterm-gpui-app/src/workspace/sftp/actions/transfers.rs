@@ -38,7 +38,7 @@ impl WorkspaceApp {
     }
 
     fn resume_sftp_incomplete_transfer(&mut self, transfer_id: String) {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -179,6 +179,7 @@ impl WorkspaceApp {
         self.sftp_view.next_transfer_id += 1;
 
         if self
+            .main_window_tabs
             .active_tab_id
             .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
             == Some(&node_id)

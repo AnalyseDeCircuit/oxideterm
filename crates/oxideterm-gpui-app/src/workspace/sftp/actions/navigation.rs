@@ -386,6 +386,7 @@ impl WorkspaceApp {
         let next = match (pane, target) {
             (SftpPane::Local, "~") => home_path(),
             (SftpPane::Remote, "~") => self
+                .main_window_tabs
                 .active_tab_id
                 .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
                 .and_then(|node_id| self.sftp_remote_home_by_node.get(node_id))

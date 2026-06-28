@@ -550,7 +550,7 @@ impl WorkspaceApp {
             terminal_cast_seekbar_dragging: self.terminal_cast_seek_dragging,
             text_selection_dragging: self.ime_drag_selection.is_some(),
             sftp_file_dragging: self.sftp_view.has_drag_capture(),
-            tab_dragging: self.tab_drag.is_some(),
+            tab_dragging: self.main_window_tabs.drag.is_some(),
         })
     }
 }

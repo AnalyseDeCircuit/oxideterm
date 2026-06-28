@@ -387,9 +387,21 @@ impl TerminalPane {
                     .take(remove_count)
                     .any(|mark| &mark.command_id == selected)
             });
+        let removed_hovered = self
+            .hovered_command_mark_id
+            .as_ref()
+            .is_some_and(|hovered| {
+                self.command_marks
+                    .iter()
+                    .take(remove_count)
+                    .any(|mark| &mark.command_id == hovered)
+            });
         self.command_marks.drain(..remove_count);
         if removed_selected {
             self.selected_command_mark_id = None;
+        }
+        if removed_hovered {
+            self.hovered_command_mark_id = None;
         }
     }
 

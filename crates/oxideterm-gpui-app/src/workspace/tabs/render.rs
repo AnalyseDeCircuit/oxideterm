@@ -30,19 +30,25 @@ impl WorkspaceApp {
             .items_center()
             .pl(px(self.tokens.metrics.tabbar_leading_offset))
             .overflow_hidden()
-            .track_scroll(&self.tab_scroll_handle)
+            .track_scroll(&self.main_window_tabs.scroll_handle)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
 
         for (tab_index, tab) in self.tabs.iter().enumerate() {
             let tab_id = tab.id;
-            let active = Some(tab_id) == self.active_tab_id;
-            let drag_state = self.tab_drag.as_ref();
+            if self.detached_tabs.contains(&tab_id) {
+                continue;
+            }
+            let active = Some(tab_id) == self.main_window_tabs.active_tab_id;
+            let drag_state = self.main_window_tabs.drag.as_ref();
             let drag_active = drag_state.is_some_and(|drag| drag.active);
             let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
             let show_drop_indicator = drag_state.is_some_and(|drag| {
-                drag.active && drag.drop_target_index == tab_index && drag.from_index != tab_index
+                drag.active
+                    && drag.mode == TabDragMode::Reorder
+                    && drag.drop_target_index == tab_index
+                    && drag.from_index != tab_index
             });
             let tab_width = self.tab_visual_width(tab);
             let reconnect_node_id = self.reconnect_node_id_for_tab(tab);
@@ -116,6 +122,13 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                             this.start_tab_drag_candidate(tab_id, tab_index, event, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                            this.open_tab_context_menu(tab_id, event, cx);
                             cx.stop_propagation();
                         }),
                     )
@@ -235,7 +248,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_tab_close_confirm_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(confirm) = self.tab_close_confirm.as_ref() else {
+        let Some(confirm) = self.main_window_tabs.close_confirm.as_ref() else {
             return div().into_any_element();
         };
         let (title_key, description) = match confirm {

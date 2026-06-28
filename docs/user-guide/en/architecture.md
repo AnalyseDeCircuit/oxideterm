@@ -742,17 +742,25 @@ Use auto-start only for forwards that should start whenever the owning connectio
 
 Graphics sessions are visual runtime surfaces. They are separate from terminal buffers even when a terminal or command launches the remote visual program.
 
+The detailed RDP/VNC/X11 ownership boundary is tracked in [Remote Desktop Boundary](../../design/remote-desktop-boundary.md). Native currently treats visual remoting as three related but separate paths:
+
+- **WSL Graphics**: `oxideterm-wsl-graphics` owns WSL distro probing, VNC server startup, desktop/app child processes, and cleanup.
+- **Remote Desktop**: future RDP/VNC connection types should use a protocol-neutral remote desktop domain and out-of-process helpers.
+- **SSH X11 forwarding**: `oxideterm-x11-forwarding` owns DISPLAY, xauth, fake-cookie, setup rewrite, and SSH X11 channel bridge semantics; it is not a full desktop viewer.
+
 ### Responsibilities
 
 - Track graphics sessions separately from terminal tabs.
 - Start or reconnect the backing graphics session through the graphics runtime.
-- Connect the GPUI VNC viewer to the local forwarded VNC endpoint.
+- Connect the GPUI viewer to the backing framebuffer source.
 - Route keyboard, pointer, and scroll input to the viewer worker.
 - Keep rendered frames as viewer state, not terminal output or scrollback.
 
 ### Ownership Rule
 
 The graphics runtime owns the server/session process lifecycle. The GPUI viewer owns the client connection, current framebuffer, pointer geometry, and input dispatch. Closing the viewer should stop or detach the graphics session according to the chosen action, but it should not rewrite saved SSH connection profiles.
+
+For future RDP/VNC sessions, the app should own helper lifecycle at the tab/session level while `oxideterm-connections` owns saved profile metadata and secret references. RDP/VNC protocol code should live in helper binaries or protocol-specific crates, not in `oxideterm-gpui-app`.
 
 ---
 

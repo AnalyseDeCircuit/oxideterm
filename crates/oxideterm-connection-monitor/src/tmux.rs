@@ -100,40 +100,41 @@ pub struct TmuxCaptureCommand {
 const TMUX_UNAVAILABLE_MARKER: &str = "__OXIDE_TMUX_UNAVAILABLE__";
 const TMUX_ERROR_MARKER: &str = "__OXIDE_TMUX_ERROR__";
 const TMUX_CAPABILITY_MARKER: &str = "__OXIDE_TMUX_CAPABILITY__";
-const TMUX_FIELD_SEPARATOR: char = '\u{1f}';
+const TMUX_FIELD_SEPARATOR: &str = "\t|\t";
+const TMUX_LEGACY_FIELD_SEPARATOR: &str = "\u{1f}";
 
 const TMUX_SESSION_FORMAT: &str = concat!(
-    "SESSION\u{1f}",
-    "#{session_id}\u{1f}",
-    "#{session_name}\u{1f}",
-    "#{session_windows}\u{1f}",
-    "#{session_attached}\u{1f}",
-    "#{session_created}\u{1f}",
+    "SESSION\t|\t",
+    "#{session_id}\t|\t",
+    "#{session_name}\t|\t",
+    "#{session_windows}\t|\t",
+    "#{session_attached}\t|\t",
+    "#{session_created}\t|\t",
     "#{session_activity}"
 );
 
 const TMUX_WINDOW_FORMAT: &str = concat!(
-    "WINDOW\u{1f}",
-    "#{session_id}\u{1f}",
-    "#{window_id}\u{1f}",
-    "#{window_index}\u{1f}",
-    "#{window_name}\u{1f}",
-    "#{window_active}\u{1f}",
-    "#{window_panes}\u{1f}",
-    "#{window_layout}\u{1f}",
+    "WINDOW\t|\t",
+    "#{session_id}\t|\t",
+    "#{window_id}\t|\t",
+    "#{window_index}\t|\t",
+    "#{window_name}\t|\t",
+    "#{window_active}\t|\t",
+    "#{window_panes}\t|\t",
+    "#{window_layout}\t|\t",
     "#{window_activity}"
 );
 
 const TMUX_PANE_FORMAT: &str = concat!(
-    "PANE\u{1f}",
-    "#{session_id}\u{1f}",
-    "#{window_id}\u{1f}",
-    "#{pane_id}\u{1f}",
-    "#{pane_index}\u{1f}",
-    "#{pane_current_command}\u{1f}",
-    "#{pane_current_path}\u{1f}",
-    "#{pane_active}\u{1f}",
-    "#{pane_pid}\u{1f}",
+    "PANE\t|\t",
+    "#{session_id}\t|\t",
+    "#{window_id}\t|\t",
+    "#{pane_id}\t|\t",
+    "#{pane_index}\t|\t",
+    "#{pane_current_command}\t|\t",
+    "#{pane_current_path}\t|\t",
+    "#{pane_active}\t|\t",
+    "#{pane_pid}\t|\t",
     "#{pane_width}x#{pane_height}"
 );
 
@@ -291,12 +292,13 @@ pub fn parse_tmux_snapshot(output: &str) -> ResourceTmuxSnapshot {
     let mut platform = "unknown".to_string();
     let mut version = String::new();
 
-    for line in section
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        if line == TMUX_UNAVAILABLE_MARKER {
+    for raw_line in section.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.trim().is_empty() {
+            continue;
+        }
+        let marker_line = line.trim();
+        if marker_line == TMUX_UNAVAILABLE_MARKER {
             return ResourceTmuxSnapshot {
                 status: ResourceTmuxStatus::Unavailable,
                 sessions: Vec::new(),
@@ -304,7 +306,7 @@ pub fn parse_tmux_snapshot(output: &str) -> ResourceTmuxSnapshot {
                 panes: Vec::new(),
             };
         }
-        if let Some(message) = line.strip_prefix(TMUX_ERROR_MARKER) {
+        if let Some(message) = marker_line.strip_prefix(TMUX_ERROR_MARKER) {
             return ResourceTmuxSnapshot {
                 status: ResourceTmuxStatus::Error {
                     message: clean_marker_message(message, "tmux command failed."),
@@ -315,7 +317,7 @@ pub fn parse_tmux_snapshot(output: &str) -> ResourceTmuxSnapshot {
             };
         }
         if let Some((next_capability, next_platform, next_version)) =
-            parse_tmux_capability_line(line)
+            parse_tmux_capability_line(marker_line)
         {
             capability = next_capability;
             platform = next_platform;
@@ -506,9 +508,7 @@ fn parse_tmux_capability_line(line: &str) -> Option<(TmuxCommandCapability, Stri
 }
 
 fn parse_tmux_session_line(line: &str) -> Option<ResourceTmuxSession> {
-    let payload = line
-        .strip_prefix("SESSION")?
-        .strip_prefix(TMUX_FIELD_SEPARATOR)?;
+    let payload = strip_tmux_row_prefix(line, "SESSION")?;
     let parts = split_tmux_fields(payload, 6)?;
     if parts.len() != 6 {
         return None;
@@ -524,9 +524,7 @@ fn parse_tmux_session_line(line: &str) -> Option<ResourceTmuxSession> {
 }
 
 fn parse_tmux_window_line(line: &str) -> Option<ResourceTmuxWindow> {
-    let payload = line
-        .strip_prefix("WINDOW")?
-        .strip_prefix(TMUX_FIELD_SEPARATOR)?;
+    let payload = strip_tmux_row_prefix(line, "WINDOW")?;
     let parts = split_tmux_fields(payload, 8)?;
     if parts.len() != 8 {
         return None;
@@ -544,9 +542,7 @@ fn parse_tmux_window_line(line: &str) -> Option<ResourceTmuxWindow> {
 }
 
 fn parse_tmux_pane_line(line: &str) -> Option<ResourceTmuxPane> {
-    let payload = line
-        .strip_prefix("PANE")?
-        .strip_prefix(TMUX_FIELD_SEPARATOR)?;
+    let payload = strip_tmux_row_prefix(line, "PANE")?;
     let parts = split_tmux_fields(payload, 9)?;
     if parts.len() != 9 {
         return None;
@@ -603,10 +599,22 @@ fn tmux_session_matches_query(
             })
 }
 
+fn strip_tmux_row_prefix<'a>(line: &'a str, kind: &str) -> Option<&'a str> {
+    let payload = line.strip_prefix(kind)?;
+    payload
+        .strip_prefix(TMUX_FIELD_SEPARATOR)
+        .or_else(|| payload.strip_prefix(TMUX_LEGACY_FIELD_SEPARATOR))
+}
+
 fn split_tmux_fields(payload: &str, expected: usize) -> Option<Vec<&str>> {
-    // tmux fields are separated by ASCII Unit Separator so names and commands do not fight tabs.
-    let parts = payload.split(TMUX_FIELD_SEPARATOR).collect::<Vec<_>>();
-    (parts.len() == expected).then_some(parts)
+    // Keep the current printable separator compatible with older snapshots
+    // that used ASCII Unit Separator.
+    [TMUX_FIELD_SEPARATOR, TMUX_LEGACY_FIELD_SEPARATOR]
+        .into_iter()
+        .find_map(|separator| {
+            let parts = payload.split(separator).collect::<Vec<_>>();
+            (parts.len() == expected).then_some(parts)
+        })
 }
 
 fn validated_tmux_target(value: &str, label: &str) -> Result<String, String> {
@@ -699,8 +707,25 @@ mod tests {
     use super::*;
 
     fn tmux_row(kind: &str, fields: &[&str]) -> String {
-        let separator = TMUX_FIELD_SEPARATOR.to_string();
-        format!("{kind}{separator}{}", fields.join(&separator))
+        format!(
+            "{kind}{TMUX_FIELD_SEPARATOR}{}",
+            fields.join(TMUX_FIELD_SEPARATOR)
+        )
+    }
+
+    fn legacy_tmux_row(kind: &str, fields: &[&str]) -> String {
+        format!(
+            "{kind}{TMUX_LEGACY_FIELD_SEPARATOR}{}",
+            fields.join(TMUX_LEGACY_FIELD_SEPARATOR)
+        )
+    }
+
+    #[test]
+    fn unix_tmux_snapshot_command_uses_printable_separator() {
+        let command = build_unix_tmux_snapshot_command();
+
+        assert!(command.contains("SESSION\t|\t#{session_id}"));
+        assert!(!command.contains(TMUX_LEGACY_FIELD_SEPARATOR));
     }
 
     #[test]
@@ -770,6 +795,26 @@ mod tests {
         assert_eq!(snapshot.windows[0].name, "editor");
         assert_eq!(snapshot.panes[0].command, "nvim");
         assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn parses_legacy_unit_separator_tmux_rows() {
+        let output = format!(
+            "===TMUX===\n__OXIDE_TMUX_CAPABILITY__\tfull\ttmux_cli\ttmux 3.4\n{}\n===TMUX_END===\n",
+            legacy_tmux_row(
+                "SESSION",
+                &["$1", "legacy", "1", "0", "1713990000", "1713990300",]
+            )
+        );
+
+        let snapshot = parse_tmux_snapshot(&output);
+
+        assert!(matches!(
+            snapshot.status,
+            ResourceTmuxStatus::Available { .. }
+        ));
+        assert_eq!(snapshot.sessions.len(), 1);
+        assert_eq!(snapshot.sessions[0].name, "legacy");
     }
 
     #[test]

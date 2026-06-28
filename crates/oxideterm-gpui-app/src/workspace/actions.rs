@@ -886,7 +886,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.tab_close_confirm.is_none() {
+        if self.main_window_tabs.close_confirm.is_none() {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {

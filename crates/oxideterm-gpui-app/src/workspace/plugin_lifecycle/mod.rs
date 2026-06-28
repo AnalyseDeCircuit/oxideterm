@@ -759,7 +759,9 @@ impl WorkspaceApp {
     pub(super) fn native_plugin_layout_snapshot(&self) -> Value {
         native_plugin_layout_snapshot(
             self.sidebar_collapsed,
-            self.active_tab_id.map(|tab_id| tab_id.0.to_string()),
+            self.main_window_tabs
+                .active_tab_id
+                .map(|tab_id| tab_id.0.to_string()),
             self.tabs.len(),
         )
     }

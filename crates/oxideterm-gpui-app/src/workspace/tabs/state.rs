@@ -18,8 +18,22 @@ impl WorkspaceApp {
     }
 
     pub(super) fn active_tab_index(&self) -> Option<usize> {
-        let active = self.active_tab_id?;
+        let active = self.main_window_tabs.active_tab_id?;
         self.tabs.iter().position(|tab| tab.id == active)
+    }
+
+    pub(super) fn tab_index_by_id(&self, tab_id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == tab_id)
+    }
+
+    pub(super) fn tab_by_id(&self, tab_id: TabId) -> Option<&Tab> {
+        self.tab_index_by_id(tab_id)
+            .and_then(|index| self.tabs.get(index))
+    }
+
+    pub(super) fn tab_mut_by_id(&mut self, tab_id: TabId) -> Option<&mut Tab> {
+        let index = self.tab_index_by_id(tab_id)?;
+        self.tabs.get_mut(index)
     }
 
     pub(super) fn active_tab(&self) -> Option<&Tab> {

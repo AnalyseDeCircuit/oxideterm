@@ -31,7 +31,7 @@ impl WorkspaceApp {
             tab_id
         };
 
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
         self.activate_sftp_view_for_node(&node_id);
@@ -90,7 +90,7 @@ impl WorkspaceApp {
         if self.sftp_view.remote_load_inflight || !self.sftp_view.remote_load_pending {
             return;
         }
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         if self
@@ -157,7 +157,7 @@ impl WorkspaceApp {
                     path,
                     result,
                 } => {
-                    if Some(tab_id) == self.active_tab_id {
+                    if Some(tab_id) == self.main_window_tabs.active_tab_id {
                         self.sftp_view.remote_load_inflight = false;
                         self.sftp_view.remote_loading = false;
                         match result {
@@ -282,6 +282,7 @@ impl WorkspaceApp {
                         self.update_sftp_transfer_batch_toast(batch_id, state);
                     }
                     let active_sftp_node = self
+                        .main_window_tabs
                         .active_tab_id
                         .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
                         .cloned();
@@ -299,6 +300,7 @@ impl WorkspaceApp {
                         self.sftp_view.local_files = files;
                     }
                     if let Some(node_id) = self
+                        .main_window_tabs
                         .active_tab_id
                         .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
                         .cloned()
@@ -374,6 +376,7 @@ impl WorkspaceApp {
                 }
                 SftpWorkerResult::IncompleteTransfersLoaded { node_id, result } => {
                     if self
+                        .main_window_tabs
                         .active_tab_id
                         .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
                         != Some(&node_id)
@@ -403,6 +406,7 @@ impl WorkspaceApp {
                 }
                 SftpWorkerResult::BackgroundTransfersLoaded { node_id, result } => {
                     if self
+                        .main_window_tabs
                         .active_tab_id
                         .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
                         != Some(&node_id)
@@ -629,7 +633,7 @@ impl WorkspaceApp {
                 .timer(std::time::Duration::from_secs(delay_secs))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.active_tab_id == Some(tab_id)
+                if this.main_window_tabs.active_tab_id == Some(tab_id)
                     && this
                         .sftp_tab_nodes
                         .get(&tab_id)
@@ -653,6 +657,7 @@ impl WorkspaceApp {
         cwd: Option<String>,
     ) {
         if self
+            .main_window_tabs
             .active_tab_id
             .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
             != Some(node_id)

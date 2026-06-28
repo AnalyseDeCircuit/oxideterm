@@ -4,6 +4,7 @@ mod browser_behavior;
 mod cloud_sync;
 mod command_palette;
 mod connection_monitor;
+mod detached_tab_window;
 mod file_manager;
 mod forwards;
 mod graphics;
@@ -57,12 +58,12 @@ use self::{
 };
 use anyhow::Result;
 use gpui::{
-    AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, CursorStyle,
-    FocusHandle, Focusable, Image, IntoElement, KeyDownEvent, ListAlignment, ListState,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
+    AnchoredPositionMode, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context,
+    Corner, CursorStyle, FocusHandle, Focusable, Image, IntoElement, KeyDownEvent, ListAlignment,
+    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
     PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent,
     SharedString, Styled, StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle,
-    Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
+    WeakEntity, Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
@@ -520,6 +521,13 @@ enum AiModelSelectorScope {
     TerminalInline,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum TabDragMode {
+    Pending,
+    Reorder,
+    Detach,
+}
+
 #[derive(Clone, Debug)]
 struct TabDragState {
     tab_id: TabId,
@@ -530,7 +538,15 @@ struct TabDragState {
     current_y: f32,
     tab_widths: Vec<f32>,
     active: bool,
+    mode: TabDragMode,
     drop_target_index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TabContextMenu {
+    tab_id: TabId,
+    x: f32,
+    y: f32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -539,6 +555,44 @@ enum TabCloseConfirm {
     LocalChildProcess { tab_id: TabId },
     LocalChildProcessBatch { tab_ids: Vec<TabId> },
     Other { tab_ids: Vec<TabId> },
+}
+
+struct WorkspaceWindowTabState {
+    active_tab_id: Option<TabId>,
+    navigation_history: Vec<TabId>,
+    navigation_index: Option<usize>,
+    navigation_replaying: bool,
+    navigation_observed_tab: Option<TabId>,
+    drag: Option<TabDragState>,
+    context_menu: Option<TabContextMenu>,
+    close_confirm: Option<TabCloseConfirm>,
+    scroll_handle: ScrollHandle,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DetachedTabReturnDrag {
+    tab_id: TabId,
+    start_screen_x: f32,
+    start_screen_y: f32,
+    current_screen_x: f32,
+    current_screen_y: f32,
+    active: bool,
+}
+
+impl WorkspaceWindowTabState {
+    fn new() -> Self {
+        Self {
+            active_tab_id: None,
+            navigation_history: Vec::new(),
+            navigation_index: None,
+            navigation_replaying: false,
+            navigation_observed_tab: None,
+            drag: None,
+            context_menu: None,
+            close_confirm: None,
+            scroll_handle: ScrollHandle::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -569,19 +623,15 @@ pub(super) struct SelectableTextFragmentState {
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     tabs: Vec<Tab>,
-    active_tab_id: Option<TabId>,
-    tab_navigation_history: Vec<TabId>,
-    tab_navigation_index: Option<usize>,
-    tab_navigation_replaying: bool,
-    tab_navigation_observed_tab: Option<TabId>,
-    tab_drag: Option<TabDragState>,
-    tab_close_confirm: Option<TabCloseConfirm>,
+    main_window_tabs: WorkspaceWindowTabState,
+    detached_tabs: HashSet<TabId>,
+    detached_tab_return_drag: Option<DetachedTabReturnDrag>,
+    main_window_tabbar_drop_bounds: Option<Bounds<Pixels>>,
     node_disconnect_confirm: Option<NodeDisconnectConfirm>,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
     terminal_pane_subscriptions: HashMap<PaneId, Subscription>,
     pending_auto_close_terminal_sessions: HashSet<TerminalSessionId>,
     auto_close_terminal_sessions_scheduled: bool,
-    tab_scroll_handle: ScrollHandle,
     host_tools_tab_scroll_handle: ScrollHandle,
     next_tab_id: u64,
     next_pane_id: u64,

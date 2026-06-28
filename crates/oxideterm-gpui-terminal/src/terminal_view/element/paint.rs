@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, SharedString, Window, fill,
-    point, px, rgb, rgba, size,
+    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, Rgba, SharedString, Window,
+    fill, point, px, rgb, rgba, size,
 };
 use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
 use unicode_width::UnicodeWidthChar;
@@ -84,6 +84,7 @@ pub(crate) fn paint_command_mark_overlay(
     origin: gpui::Point<Pixels>,
     cols: usize,
     metrics: &TerminalMetrics,
+    command_mark_gutter_width: f32,
     window: &mut Window,
 ) {
     let x = 0.0;
@@ -91,36 +92,30 @@ pub(crate) fn paint_command_mark_overlay(
     let width = cols as f32 * metrics.cell_width_f32();
     let height =
         (overlay.end_row.saturating_sub(overlay.start_row) + 1) as f32 * metrics.line_height_f32();
-    let accent = if overlay.stale {
-        rgba(0x94a3b8b8)
-    } else {
-        rgba(0x12cfd0ff)
-    };
-    let fill_color = if overlay.stale {
-        rgba(0x94a3b80a)
-    } else {
-        rgba(0x12cfd009)
-    };
+    let accent = command_mark_accent(overlay);
     let bounds = Bounds::new(origin + point(px(x), px(y)), size(px(width), px(height)));
-    window.paint_quad(fill(bounds, fill_color));
-    window.paint_quad(fill(
-        Bounds::new(origin + point(px(x), px(y)), size(px(1.0), px(height))),
-        accent,
-    ));
+
+    if let Some(fill_color) = command_mark_fill(overlay) {
+        window.paint_quad(fill(bounds, fill_color));
+    }
+
+    let edge_width = if overlay.selected { 3.0 } else { 2.0 };
+    let edge_x = command_mark_edge_x(command_mark_gutter_width, edge_width);
     window.paint_quad(fill(
         Bounds::new(
-            origin + point(px((width - 1.0).max(0.0)), px(y)),
-            size(px(1.0), px(height)),
+            origin + point(px(edge_x), px(y)),
+            size(px(edge_width), px(height)),
         ),
         accent,
     ));
-    if overlay.has_top {
+
+    if overlay.selected && overlay.has_top {
         window.paint_quad(fill(
             Bounds::new(origin + point(px(x), px(y)), size(px(width), px(1.0))),
             accent,
         ));
     }
-    if overlay.has_bottom {
+    if overlay.selected && overlay.has_bottom {
         window.paint_quad(fill(
             Bounds::new(
                 origin + point(px(x), px((y + height - 1.0).max(y))),
@@ -129,6 +124,56 @@ pub(crate) fn paint_command_mark_overlay(
             accent,
         ));
     }
+}
+
+fn command_mark_edge_x(gutter_width: f32, edge_width: f32) -> f32 {
+    if gutter_width <= edge_width {
+        return 0.0;
+    }
+    -gutter_width + (gutter_width - edge_width) / 2.0
+}
+
+fn command_mark_accent(overlay: &TerminalCommandMarkOverlay) -> Rgba {
+    if overlay.stale {
+        return rgba(0x94a3b8a8);
+    }
+    if overlay.running {
+        return rgba(0x38bdf8d8);
+    }
+    match overlay.exit_code {
+        Some(0) => rgba(0x22c55ed8),
+        Some(_) => rgba(0xef4444e0),
+        None => rgba(0xf59e0bd8),
+    }
+}
+
+fn command_mark_fill(overlay: &TerminalCommandMarkOverlay) -> Option<Rgba> {
+    if overlay.selected {
+        return Some(if overlay.stale {
+            rgba(0x94a3b812)
+        } else if overlay.running {
+            rgba(0x38bdf814)
+        } else {
+            match overlay.exit_code {
+                Some(0) => rgba(0x22c55e10),
+                Some(_) => rgba(0xef444414),
+                None => rgba(0xf59e0b12),
+            }
+        });
+    }
+
+    overlay.hovered.then(|| {
+        if overlay.stale {
+            rgba(0x94a3b80a)
+        } else {
+            match overlay.exit_code {
+                Some(0) => rgba(0x22c55e08),
+                Some(_) => rgba(0xef44440a),
+                _ if overlay.running => rgba(0x38bdf80a),
+                None => rgba(0xf59e0b08),
+            }
+        }
+    })
 }
 
 pub(crate) fn paint_terminal_image(

@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct SplitDrag {
+    tab_id: Option<TabId>,
     group_id: PaneId,
     handle_index: usize,
     direction: SplitDirection,
@@ -255,6 +256,7 @@ impl WorkspaceApp {
 
     pub(super) fn start_split_drag(
         &mut self,
+        tab_id: Option<TabId>,
         group_id: PaneId,
         handle_index: usize,
         direction: SplitDirection,
@@ -263,6 +265,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.split_drag = Some(SplitDrag {
+            tab_id,
             group_id,
             handle_index,
             direction,
@@ -297,12 +300,20 @@ impl WorkspaceApp {
             }
         };
         let next_sizes = adjusted_split_sizes(&drag.start_sizes, drag.handle_index, delta_fraction);
-        if let Some(tab) = self.active_tab_mut()
-            && tab
-                .root_pane
-                .as_mut()
-                .is_some_and(|root_pane| root_pane.update_group_sizes(drag.group_id, &next_sizes))
-        {
+        let updated = if let Some(tab_id) = drag.tab_id {
+            self.tab_mut_by_id(tab_id).is_some_and(|tab| {
+                tab.root_pane.as_mut().is_some_and(|root_pane| {
+                    root_pane.update_group_sizes(drag.group_id, &next_sizes)
+                })
+            })
+        } else {
+            self.active_tab_mut().is_some_and(|tab| {
+                tab.root_pane.as_mut().is_some_and(|root_pane| {
+                    root_pane.update_group_sizes(drag.group_id, &next_sizes)
+                })
+            })
+        };
+        if updated {
             cx.notify();
         }
     }
@@ -314,10 +325,22 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_pane_tree(&self, node: &PaneNode, cx: &mut Context<Self>) -> AnyElement {
+        self.render_pane_tree_for_tab(self.main_window_tabs.active_tab_id, node, cx)
+    }
+
+    pub(super) fn render_pane_tree_for_tab(
+        &self,
+        tab_id: Option<TabId>,
+        node: &PaneNode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let active_pane_id = tab_id
+            .and_then(|tab_id| self.tab_by_id(tab_id))
+            .and_then(|tab| tab.active_pane_id);
         match node {
             PaneNode::Leaf { pane_id, .. } => {
                 let theme = self.tokens.ui;
-                let active = Some(*pane_id) == self.active_pane_id();
+                let active = Some(*pane_id) == active_pane_id;
                 let Some(pane) = self.panes.get(pane_id).cloned() else {
                     return div().size_full().into_any_element();
                 };
@@ -338,12 +361,21 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener({
                             let pane_id = *pane_id;
+                            let tab_id = tab_id;
                             move |this, _event, window, cx| {
-                                if let Some(tab) = this.active_tab_mut() {
+                                if let Some(tab_id) = tab_id
+                                    && let Some(tab) = this.tab_mut_by_id(tab_id)
+                                {
+                                    tab.active_pane_id = Some(pane_id);
+                                    if !this.detached_tabs.contains(&tab_id) {
+                                        this.main_window_tabs.active_tab_id = Some(tab_id);
+                                    }
+                                } else if let Some(tab) = this.active_tab_mut() {
                                     tab.active_pane_id = Some(pane_id);
                                 }
-                                this.needs_active_pane_focus = true;
-                                this.focus_active_pane(window, cx);
+                                if let Some(pane) = this.panes.get(&pane_id).cloned() {
+                                    pane.read(cx).focus(window);
+                                }
                                 cx.notify();
                             }
                         }),
@@ -396,7 +428,7 @@ impl WorkspaceApp {
                                     .left_0()
                                     .right_0()
                                     .bottom_0()
-                                    .child(self.render_pane_tree(child, cx)),
+                                    .child(self.render_pane_tree_for_tab(tab_id, child, cx)),
                             ),
                     );
                     if index + 1 < children.len() {
@@ -410,6 +442,7 @@ impl WorkspaceApp {
                                 MouseButton::Left,
                                 cx.listener(move |this, event, _window, cx| {
                                     this.start_split_drag(
+                                        tab_id,
                                         group_id,
                                         index,
                                         direction,

@@ -124,7 +124,7 @@ impl WorkspaceApp {
             });
             tab_id
         };
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);

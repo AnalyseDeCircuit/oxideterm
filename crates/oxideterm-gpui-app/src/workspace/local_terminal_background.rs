@@ -126,7 +126,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let old_active_tab_id = self.active_tab_id;
+        let old_active_tab_id = self.main_window_tabs.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
         let tab = self.tabs.remove(index);
         let mut pane_ids = Vec::new();
@@ -136,7 +136,7 @@ impl WorkspaceApp {
         for pane_id in pane_ids {
             self.remove_terminal_pane(&pane_id);
         }
-        self.active_tab_id = if self.tabs.is_empty() {
+        self.main_window_tabs.active_tab_id = if self.tabs.is_empty() {
             None
         } else if !removed_was_active
             && old_active_tab_id.is_some_and(|tab_id| self.tabs.iter().any(|tab| tab.id == tab_id))
@@ -182,7 +182,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, detached.session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         if self.detached_local_terminals.is_empty() {

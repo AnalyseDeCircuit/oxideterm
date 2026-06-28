@@ -7,7 +7,7 @@ use oxideterm_ssh::{NodeId, PhaseResult, ReconnectIdeSnapshot};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use std::time::SystemTime;
 
-use super::WorkspaceApp;
+use super::{TabId, WorkspaceApp};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum IdeReconnectRestoreStatus {
@@ -66,7 +66,7 @@ impl WorkspaceApp {
             tab_id
         };
 
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
         self.expanded_ssh_nodes.insert(node_id.clone());
@@ -194,7 +194,7 @@ impl WorkspaceApp {
             tab_id
         };
 
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(target_node_id.clone());
         self.expanded_ssh_nodes.insert(target_node_id);
@@ -252,9 +252,13 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_ide_surface(&self, _cx: &mut Context<Self>) -> AnyElement {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return div().into_any_element();
         };
+        self.render_ide_surface_for_tab(tab_id)
+    }
+
+    pub(super) fn render_ide_surface_for_tab(&self, tab_id: TabId) -> AnyElement {
         self.ide_tab_surfaces
             .get(&tab_id)
             .cloned()
@@ -305,7 +309,7 @@ impl WorkspaceApp {
     }
 
     fn active_ide_surface(&self) -> Option<gpui::Entity<IdeSurface>> {
-        let tab_id = self.active_tab_id?;
+        let tab_id = self.main_window_tabs.active_tab_id?;
         let tab = self.tabs.iter().find(|tab| tab.id == tab_id)?;
         (tab.kind == TabKind::Ide)
             .then(|| self.ide_tab_surfaces.get(&tab_id).cloned())

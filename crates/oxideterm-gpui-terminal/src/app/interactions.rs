@@ -838,11 +838,25 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
-        let hovered_link = (!self.selecting && self.scrollbar_drag.is_none())
+        let mode = self.terminal.lock().mode();
+        let can_hover_terminal_content = !self.selecting
+            && self.scrollbar_drag.is_none()
+            && !mouse_mode(mode, event.modifiers.shift);
+        let hovered_link = can_hover_terminal_content
             .then(|| self.link_at_position(event.position))
             .flatten();
-        if hovered_link != self.hovered_link {
+        let hovered_command_mark_id = (can_hover_terminal_content
+            && self.settings.command_marks_enabled)
+            .then(|| {
+                let absolute_line = self.absolute_line_for_position(event.position);
+                self.command_mark_id_at_absolute_line(absolute_line)
+            })
+            .flatten();
+        let hover_changed = hovered_link != self.hovered_link
+            || hovered_command_mark_id != self.hovered_command_mark_id;
+        if hover_changed {
             self.hovered_link = hovered_link;
+            self.hovered_command_mark_id = hovered_command_mark_id;
             cx.notify();
         }
 
@@ -853,7 +867,6 @@ impl TerminalPane {
             return;
         }
 
-        let mode = self.terminal.lock().mode();
         if mouse_mode(mode, event.modifiers.shift) {
             let point = self.terminal_point_for_position(event.position);
             if self.last_mouse_report_point == Some(point) {

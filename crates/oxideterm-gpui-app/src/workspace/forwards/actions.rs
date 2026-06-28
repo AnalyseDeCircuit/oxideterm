@@ -112,7 +112,7 @@ impl WorkspaceApp {
         self.forwarding_view
             .new_ports
             .retain(|detected| detected.port != port);
-        if let Some(tab_id) = self.active_tab_id
+        if let Some(tab_id) = self.main_window_tabs.active_tab_id
             && let Some(node_id) = self.forward_tab_nodes.get(&tab_id)
         {
             let connection_id = self.forwarding_connection_id_for_node(node_id);
@@ -311,7 +311,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn maybe_refresh_forwards_stats(&mut self, cx: &mut Context<Self>) {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         if self
@@ -458,7 +458,7 @@ impl WorkspaceApp {
                     result,
                 } => {
                     self.remember_forwarding_binding(binding);
-                    if Some(tab_id) == self.active_tab_id {
+                    if Some(tab_id) == self.main_window_tabs.active_tab_id {
                         self.forwarding_view.pending = false;
                         match result {
                             Ok(()) => {
@@ -614,7 +614,7 @@ impl WorkspaceApp {
     }
 
     fn active_forwards_tab_matches_session(&self, session_id: &str) -> bool {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return false;
         };
         let Some(node_id) = self.forward_tab_nodes.get(&tab_id) else {
@@ -624,7 +624,7 @@ impl WorkspaceApp {
     }
 
     fn active_forwards_tab_matches_node(&self, node_id: &NodeId) -> bool {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return false;
         };
         self.forward_tab_nodes

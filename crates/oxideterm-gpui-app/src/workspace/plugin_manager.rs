@@ -1,8 +1,8 @@
 use super::*;
 use gpui::Div;
 use oxideterm_gpui_ui::{
-    StatusPillOptions, StatusTone, SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface,
-    status_pill,
+    ActionSlotRowOptions, StatusPillOptions, StatusTone, SurfaceKind, SurfaceOptions,
+    SurfacePadding, action_slot_row, semantic_surface, status_pill,
     text_input::{
         TextInputContentAlign, TextInputView, text_input_anchor_probe,
         text_input_with_content_align,
@@ -90,7 +90,7 @@ impl WorkspaceApp {
             });
             tab_id
         };
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle);
@@ -686,13 +686,11 @@ impl WorkspaceApp {
                             .border_color(rgb(theme.warning))
                             .bg(rgb(theme.bg_card))
                             .p(px(10.0))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(10.0))
-                            .child(
+                            .child(action_slot_row(
+                                &self.tokens,
+                                ActionSlotRowOptions::new().gap(10.0).trailing_gap(8.0),
+                                None,
                                 div()
-                                    .min_w(px(0.0))
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .line_height(px(18.0))
                                     .text_color(rgb(theme.warning))
@@ -700,14 +698,10 @@ impl WorkspaceApp {
                                         self.i18n
                                             .t("plugin.url_conflict_desc")
                                             .replace("{{pluginId}}", &pending.plugin_id),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex_shrink_0()
-                                    .flex()
-                                    .gap(px(8.0))
-                                    .child(self.render_native_plugin_manager_text_button(
+                                    )
+                                    .into_any_element(),
+                                vec![
+                                    self.render_native_plugin_manager_text_button(
                                         self.i18n.t("common.actions.cancel"),
                                         false,
                                         cx.listener(|this, _event, _window, cx| {
@@ -716,8 +710,8 @@ impl WorkspaceApp {
                                                 NativePluginManagerOperationStatus::Idle;
                                             cx.notify();
                                         }),
-                                    ))
-                                    .child(self.render_native_plugin_manager_text_button(
+                                    ),
+                                    self.render_native_plugin_manager_text_button(
                                         self.i18n.t("plugin.url_conflict_confirm"),
                                         busy,
                                         cx.listener(move |this, _event, _window, cx| {
@@ -728,8 +722,9 @@ impl WorkspaceApp {
                                                 cx,
                                             );
                                         }),
-                                    )),
-                            ),
+                                    ),
+                                ],
+                            )),
                     )
                 },
             )
@@ -1074,13 +1069,11 @@ impl WorkspaceApp {
             .border_color(rgb(theme.border))
             .bg(rgb(theme.bg_card))
             .p(px(10.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(10.0))
-            .child(
+            .child(action_slot_row(
+                &self.tokens,
+                ActionSlotRowOptions::new().gap(10.0),
+                None,
                 div()
-                    .min_w(px(0.0))
                     .flex()
                     .flex_col()
                     .gap(px(3.0))
@@ -1108,20 +1101,21 @@ impl WorkspaceApp {
                                 .text_color(rgb(theme.text_muted))
                                 .child(capabilities),
                         )
+                    })
+                    .into_any_element(),
+                vec![self.render_native_plugin_manager_button(
+                    LucideIcon::Download,
+                    self.i18n.t("plugin.update"),
+                    busy,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.start_native_plugin_package_install(
+                            download_url.clone(),
+                            checksum.clone(),
+                            false,
+                            cx,
+                        );
                     }),
-            )
-            .child(self.render_native_plugin_manager_button(
-                LucideIcon::Download,
-                self.i18n.t("plugin.update"),
-                busy,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.start_native_plugin_package_install(
-                        download_url.clone(),
-                        checksum.clone(),
-                        false,
-                        cx,
-                    );
-                }),
+                )],
             ))
             .into_any_element()
     }
@@ -1386,17 +1380,15 @@ impl WorkspaceApp {
             .border_color(rgb(theme.error))
             .bg(rgb(theme.bg_panel))
             .p(px(14.0))
-            .flex()
-            .items_start()
-            .gap(px(10.0))
-            .child(Self::render_lucide_icon(
-                LucideIcon::AlertTriangle,
-                16.0,
-                rgb(theme.error),
-            ))
-            .child(
+            .child(action_slot_row(
+                &self.tokens,
+                ActionSlotRowOptions::new().align_start().gap(10.0),
+                Some(Self::render_lucide_icon(
+                    LucideIcon::AlertTriangle,
+                    16.0,
+                    rgb(theme.error),
+                )),
                 div()
-                    .min_w(px(0.0))
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
@@ -1413,8 +1405,10 @@ impl WorkspaceApp {
                             .line_height(px(18.0))
                             .text_color(rgb(theme.error))
                             .child(diagnostic.message.clone()),
-                    ),
-            )
+                    )
+                    .into_any_element(),
+                Vec::new(),
+            ))
             .into_any_element()
     }
 

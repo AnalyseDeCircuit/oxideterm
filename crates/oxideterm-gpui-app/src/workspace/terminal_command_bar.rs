@@ -3125,6 +3125,23 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(in crate::workspace) fn render_detached_terminal_surface(
+        &self,
+        tab_id: TabId,
+        root_pane: &PaneNode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Detached windows share terminal pane entities with the workspace, but
+        // the command bar still uses the main active-tab pipeline. Keep the
+        // first detachable surface pane-only so commands cannot target the
+        // wrong tab while the UI ownership model is being made window-aware.
+        div()
+            .size_full()
+            .relative()
+            .child(self.render_pane_tree_for_tab(Some(tab_id), root_pane, cx))
+            .into_any_element()
+    }
+
     fn render_terminal_command_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         const COMMAND_BAR_BG_ALPHA: u32 = 0xf2; // Tauri bg-theme-bg/95
         const COMMAND_BAR_BORDER_ALPHA: u32 = 0xb3; // Tauri border-theme-border/70

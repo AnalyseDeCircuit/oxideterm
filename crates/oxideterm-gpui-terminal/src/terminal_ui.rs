@@ -20,6 +20,8 @@ pub const TERMINAL_FONT: &str = oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY
 pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
 pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
+// Paint command-block edges in a narrow gutter so column-zero text remains untouched.
+pub(crate) const TERMINAL_COMMAND_MARK_GUTTER_WIDTH: f32 = 4.0;
 pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
 pub(crate) const OXIDETERM_TERMINAL_FOREGROUND: u32 = 0xe6e8eb;
 pub(crate) const SCROLLBAR_WIDTH: f32 = 10.0;

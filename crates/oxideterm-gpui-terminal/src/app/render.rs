@@ -114,6 +114,7 @@ impl Render for TerminalPane {
                 Vec::new()
             },
             self.selected_command_mark_id.clone(),
+            self.hovered_command_mark_id.clone(),
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
         .row_timestamps(row_timestamps)
@@ -122,6 +123,7 @@ impl Render for TerminalPane {
         .viewport_rows(viewport_rows)
         .scrollbar_display_offset(scrollbar_display_offset)
         .scroll_y_offset(smooth_scroll_y_offset)
+        .command_mark_gutter_width(self.command_mark_gutter_width())
         .layout_cache(self.layout_cache.clone());
 
         div()

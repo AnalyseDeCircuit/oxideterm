@@ -32,7 +32,7 @@ impl WorkspaceApp {
             });
             tab_id
         };
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         if self.sidebar_collapsed {
@@ -85,6 +85,11 @@ impl WorkspaceApp {
             return true;
         }
         if let Some(input) = self.file_manager.focused_input {
+            // Inline inputs share the workspace IME/text-editing model so
+            // selection, caret movement, and platform shortcuts stay browser-like.
+            if self.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
+                return true;
+            }
             match key {
                 "tab"
                     if !event.keystroke.modifiers.platform
@@ -115,14 +120,16 @@ impl WorkspaceApp {
                     cx.notify();
                     return true;
                 }
-                "backspace" => {
-                    if self.file_manager_input_value_mut(input).pop().is_some() {
-                        // Empty Backspace keeps the input and file list unchanged.
-                        cx.notify();
-                    }
-                    return true;
-                }
                 _ => {}
+            }
+            if self.handle_active_text_input_navigation(&event.keystroke, cx) {
+                return true;
+            }
+            if self.handle_active_text_input_delete_selection(&event.keystroke, cx) {
+                return true;
+            }
+            if self.handle_active_text_input_transpose(&event.keystroke, cx) {
+                return true;
             }
         }
         if self.handle_file_manager_dialog_footer_key(event, cx) {
@@ -1555,7 +1562,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);

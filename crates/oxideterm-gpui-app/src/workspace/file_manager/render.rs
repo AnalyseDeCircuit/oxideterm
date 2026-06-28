@@ -758,39 +758,46 @@ impl WorkspaceApp {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let text = if value.is_empty() {
-            self.i18n.t("fileManager.pathPlaceholder")
-        } else {
-            value.to_string()
-        };
         let target = WorkspaceImeTarget::FileManager(input);
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .h_full()
-                .flex()
-                .items_center()
-                .overflow_hidden()
-                .text_size(px(FILE_MANAGER_TEXT_XS))
-                .text_color(if value.is_empty() {
-                    rgb(theme.text_muted)
-                } else {
-                    rgb(theme.text)
-                })
-                .when(focused && value.is_empty(), |input| {
-                    input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                })
-                .child(div().truncate().child(text))
-                .when_some(self.marked_text_for_target(target), |input, marked| {
-                    input.child(div().underline().child(marked.to_string()))
-                })
-                .when(focused && !value.is_empty(), |input| {
-                    input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder: self.i18n.t("fileManager.pathPlaceholder"),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .px(px(0.0))
+            .border_0()
+            .bg(rgba(0x00000000))
+            .text_size(px(FILE_MANAGER_TEXT_XS))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle);
+                    this.file_manager.focused_input = Some(input);
+                    this.dismiss_file_manager_context_menu();
+                    this.ime_marked_text = None;
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
                 }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            )),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_text_input_anchor(anchor, cx);

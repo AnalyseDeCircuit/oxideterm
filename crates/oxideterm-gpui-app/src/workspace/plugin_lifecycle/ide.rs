@@ -15,6 +15,7 @@ pub(super) fn native_plugin_ide_workspace_snapshot(
     cx: &mut Context<WorkspaceApp>,
 ) -> Option<IdePluginSnapshot> {
     let active_surface = workspace
+        .main_window_tabs
         .active_tab_id
         .and_then(|tab_id| workspace.ide_tab_surfaces.get(&tab_id))
         .and_then(|surface| surface.read(cx).plugin_snapshot());

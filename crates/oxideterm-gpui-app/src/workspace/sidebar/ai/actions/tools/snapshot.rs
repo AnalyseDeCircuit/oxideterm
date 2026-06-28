@@ -182,7 +182,7 @@ impl WorkspaceApp {
                 } else {
                     tab.title.clone()
                 },
-                state: if Some(tab.id) == self.active_tab_id {
+                state: if Some(tab.id) == self.main_window_tabs.active_tab_id {
                     "connected"
                 } else {
                     "available"
@@ -463,6 +463,7 @@ impl WorkspaceApp {
 
         let settings = self.settings_store.settings();
         let active_tab_ref = self
+            .main_window_tabs
             .active_tab_id
             .and_then(|active_tab_id| self.tabs.iter().find(|tab| tab.id == active_tab_id));
         let active_node_id = self
@@ -486,7 +487,7 @@ impl WorkspaceApp {
                     .and_then(|node| node.terminal_ids.first().copied())
                     .map(|session_id| session_id.0.to_string())
             });
-        let active_tab = self.active_tab_id.and_then(|active_tab_id| {
+        let active_tab = self.main_window_tabs.active_tab_id.and_then(|active_tab_id| {
             self.tabs
                 .iter()
                 .find(|tab| tab.id == active_tab_id)
@@ -568,7 +569,7 @@ impl WorkspaceApp {
             "runtimeEpoch": self.ai_runtime_epoch,
             "tabs": {
                 "open": self.tabs.len(),
-                "activeTabId": self.active_tab_id.map(|id| id.0.to_string()),
+                "activeTabId": self.main_window_tabs.active_tab_id.map(|id| id.0.to_string()),
             },
             "terminalRegistry": { "entries": self.panes.len() },
             "localTerminals": {
@@ -593,7 +594,7 @@ impl WorkspaceApp {
             active_tab,
             active_node,
             active_session_id,
-            active_tab_id: self.active_tab_id.map(|tab_id| tab_id.0.to_string()),
+            active_tab_id: self.main_window_tabs.active_tab_id.map(|tab_id| tab_id.0.to_string()),
             active_node_id,
             memory: ai_memory_settings_json(settings.ai.memory.enabled, &settings.ai.memory.content),
             health_state,
@@ -1701,7 +1702,7 @@ impl WorkspaceApp {
                 .with_target(requested_target.clone()));
         }
 
-        let active_tab_id = self.active_tab_id.map(|tab_id| tab_id.0.to_string());
+        let active_tab_id = self.main_window_tabs.active_tab_id.map(|tab_id| tab_id.0.to_string());
         let refreshed = self.ai_orchestrator_snapshot(cx);
         refreshed
             .targets
@@ -1746,7 +1747,7 @@ impl WorkspaceApp {
         match surface {
             "local_terminal" | "terminal" => match self.create_local_terminal_tab(window, cx) {
                 Ok(()) => {
-                    let active_tab_id = self.active_tab_id.map(|tab_id| tab_id.0.to_string());
+                    let active_tab_id = self.main_window_tabs.active_tab_id.map(|tab_id| tab_id.0.to_string());
                     let refreshed = self.ai_orchestrator_snapshot(cx);
                     let target = refreshed
                         .targets
@@ -1960,7 +1961,7 @@ impl WorkspaceApp {
         // AI terminal tools must act on the same pane the user can see. The
         // model may target a non-active session from context, so make that tab
         // and pane visible before writing input or reading command output.
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         if let Some(tab) = self.tabs.get_mut(tab_index) {
             tab.active_pane_id = Some(pane_id);
         }

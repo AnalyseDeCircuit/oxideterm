@@ -58,7 +58,7 @@ impl WorkspaceApp {
             tab_id
         };
 
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
         // Tauri opens the forwarding surface against the selected node but
@@ -70,13 +70,22 @@ impl WorkspaceApp {
 
     pub(super) fn render_forwards_surface(
         &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+            return self.render_empty_workspace(cx);
+        };
+        self.render_forwards_surface_for_tab(tab_id, window, cx)
+    }
+
+    pub(super) fn render_forwards_surface_for_tab(
+        &mut self,
+        tab_id: TabId,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(tab_id) = self.active_tab_id else {
-            return self.render_empty_workspace(cx);
-        };
         let Some(node_id) = self.forward_tab_nodes.get(&tab_id).cloned() else {
             return self.render_empty_workspace(cx);
         };

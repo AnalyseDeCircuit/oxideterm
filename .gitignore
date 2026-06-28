@@ -39,3 +39,5 @@ tasks/*
 docs/native-mosh-spike-boundary.md
 docs/design/upstream-proxy-support.md
 docs/design/acp-client-support.md
+docs/design/remote-desktop-boundary.md
+docs/design/remote-desktop-boundary.zh-Hans.md

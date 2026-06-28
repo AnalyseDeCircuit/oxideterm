@@ -43,7 +43,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
@@ -86,7 +86,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
@@ -125,7 +125,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.read(cx).focus(window);
@@ -569,7 +569,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;
@@ -1059,7 +1059,7 @@ impl WorkspaceApp {
             });
             tab_id
         };
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Settings;
         self.needs_active_pane_focus = false;
         if self.sidebar_collapsed {

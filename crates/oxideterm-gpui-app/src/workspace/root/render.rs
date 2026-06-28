@@ -127,6 +127,7 @@ impl Render for WorkspaceApp {
         } else {
             0.0
         };
+        self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode);
 
         div()
             .id("workspace-root")
@@ -776,7 +777,7 @@ impl Render for WorkspaceApp {
             .when(self.node_disconnect_confirm.is_some(), |root| {
                 root.child(self.render_node_disconnect_confirm_dialog(cx))
             })
-            .when(self.tab_close_confirm.is_some(), |root| {
+            .when(self.main_window_tabs.close_confirm.is_some(), |root| {
                 root.child(self.render_tab_close_confirm_dialog(cx))
             })
             .when_some(self.render_host_process_confirm_dialog(cx), |root, dialog| {
@@ -862,6 +863,15 @@ impl Render for WorkspaceApp {
                     )
                 },
             )
+            .when_some(self.render_detached_tab_return_drop_hint(window), |root, hint| {
+                root.child(hint)
+            })
+            .when_some(self.render_tab_detach_drag_preview(window), |root, preview| {
+                root.child(preview)
+            })
+            .when_some(self.render_tab_context_menu(window, cx), |root, menu| {
+                root.child(menu)
+            })
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
             })

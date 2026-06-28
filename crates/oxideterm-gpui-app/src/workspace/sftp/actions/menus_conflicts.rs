@@ -40,7 +40,7 @@ impl WorkspaceApp {
     }
 
     fn extract_remote_sftp_archive(&mut self, file: SftpFileEntry) {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             self.push_sftp_toast(
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
@@ -123,7 +123,7 @@ impl WorkspaceApp {
         direction: SftpTransferDirection,
         selected_names: Vec<String>,
     ) {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -185,7 +185,7 @@ impl WorkspaceApp {
     }
 
     fn queue_sftp_external_upload_paths(&mut self, paths: &[std::path::PathBuf]) {
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -380,7 +380,7 @@ impl WorkspaceApp {
         let Some(mut conflict_state) = self.sftp_view.conflict_state.clone() else {
             return;
         };
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             self.cancel_sftp_transfer_conflicts();
             return;
         };

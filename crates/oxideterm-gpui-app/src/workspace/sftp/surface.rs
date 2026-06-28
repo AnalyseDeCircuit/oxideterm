@@ -4,10 +4,19 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let Some(tab_id) = self.active_tab_id else {
+        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return self.render_empty_workspace(cx);
         };
+        self.render_sftp_surface_for_tab(tab_id, window, cx)
+    }
+
+    pub(super) fn render_sftp_surface_for_tab(
+        &self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
             return self.render_empty_workspace(cx);
         };
@@ -789,64 +798,30 @@ impl WorkspaceApp {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let target = WorkspaceImeTarget::Sftp(input);
-        let marked = self.marked_text_for_target(target).unwrap_or_default();
-        let display = if value.is_empty() && marked.is_empty() {
-            self.i18n.t(placeholder_key)
-        } else if value.is_empty() {
-            String::new()
-        } else {
-            value.to_string()
-        };
-        let visually_empty = value.is_empty() && marked.is_empty();
-        let input_range = if focused && !value.is_empty() && marked.is_empty() {
-            self.ime_selected_range_for_target(target)
-        } else {
-            None
-        }
-        .map(|range| text_input_visual_range(value, false, range));
-        let selection_range = input_range.clone().filter(|range| range.start < range.end);
-        let caret_offset = input_range
-            .as_ref()
-            .filter(|range| range.start == range.end)
-            .map(|range| range.start);
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
-            div()
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder: self.i18n.t(placeholder_key),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
                 .flex_1()
                 .min_w(px(0.0))
                 .h_full()
-                .flex()
-                .items_center()
-                .overflow_hidden()
-                .cursor(CursorStyle::IBeam)
+                .px(px(0.0))
+                .border_0()
+                .bg(rgba(0x00000000))
                 .text_size(px(SFTP_TEXT_XS))
-                .text_color(if visually_empty {
-                    rgb(theme.text_muted)
-                } else {
-                    rgb(theme.text)
-                })
-                .when(focused && visually_empty, |input| {
-                    input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                })
-                .child(
-                    div()
-                        .min_w(px(0.0))
-                        .overflow_hidden()
-                        .child(text_input_value_segments(
-                            &self.tokens,
-                            &display,
-                            visually_empty,
-                            selection_range,
-                            caret_offset,
-                            self.new_connection_caret_visible,
-                        )),
-                )
-                .when(!marked.is_empty(), |input| {
-                    input.child(div().underline().child(marked.to_string()))
-                })
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {

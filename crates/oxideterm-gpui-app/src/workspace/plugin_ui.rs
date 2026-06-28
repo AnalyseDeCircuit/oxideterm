@@ -50,7 +50,7 @@ impl WorkspaceApp {
             });
             tab_id_value
         };
-        self.active_tab_id = Some(tab_id_value);
+        self.main_window_tabs.active_tab_id = Some(tab_id_value);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.persist_sidebar_settings();

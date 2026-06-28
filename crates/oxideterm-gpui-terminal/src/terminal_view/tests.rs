@@ -3,8 +3,9 @@ use std::{path::Path, sync::Arc};
 
 use gpui::{Bounds, FontFeatures, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
 use oxideterm_terminal::{
-    TermMode, TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkConfidence,
-    TerminalCommandMarkDetectionSource, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
+    TermMode, TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCursorShape,
+    TerminalSearchMatch, TerminalSnapshot,
 };
 
 use crate::terminal_ui::*;
@@ -539,12 +540,135 @@ fn open_command_mark_overlay_uses_transient_prompt_boundary() {
         None,
         None,
     )
-    .command_marks(vec![mark], Some("cmd-1".to_string()))
+    .command_marks(vec![mark], Some("cmd-1".to_string()), None)
     .layout();
 
     assert_eq!(layout.command_mark_overlays.len(), 1);
     assert_eq!(layout.command_mark_overlays[0].start_row, 0);
     assert_eq!(layout.command_mark_overlays[0].end_row, 2);
+    assert!(layout.command_mark_overlays[0].selected);
+    assert!(!layout.command_mark_overlays[0].hovered);
+}
+
+#[test]
+fn command_mark_overlays_include_visible_unselected_blocks() {
+    let mut snapshot = test_snapshot(0, 0);
+    snapshot.rows = 6;
+    snapshot.cols = 80;
+    snapshot.lines = vec![
+        row_from_text("❯ true", snapshot.cols),
+        row_from_text("ok", snapshot.cols),
+        row_from_text("❯ false", snapshot.cols),
+        row_from_text("err", snapshot.cols),
+        row_from_text("more err", snapshot.cols),
+        row_from_text("❯", snapshot.cols),
+    ];
+    let success = test_command_mark("cmd-success", 0, Some(1), Some(0));
+    let failure = test_command_mark("cmd-failure", 2, Some(4), Some(1));
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .command_marks(vec![success, failure], None, None)
+    .layout();
+
+    assert_eq!(layout.command_mark_overlays.len(), 2);
+    assert!(
+        layout
+            .command_mark_overlays
+            .iter()
+            .all(|overlay| { !overlay.selected && !overlay.hovered && !overlay.running })
+    );
+    assert!(layout.command_mark_overlays.iter().any(|overlay| {
+        overlay.start_row == 0 && overlay.end_row == 1 && overlay.exit_code == Some(0)
+    }));
+    assert!(layout.command_mark_overlays.iter().any(|overlay| {
+        overlay.start_row == 2 && overlay.end_row == 4 && overlay.exit_code == Some(1)
+    }));
+}
+
+#[test]
+fn command_mark_overlay_distinguishes_hovered_and_selected_blocks() {
+    let mut snapshot = test_snapshot(0, 0);
+    snapshot.rows = 4;
+    snapshot.cols = 80;
+    snapshot.lines = vec![
+        row_from_text("❯ pwd", snapshot.cols),
+        row_from_text("/tmp", snapshot.cols),
+        row_from_text("❯ ls", snapshot.cols),
+        row_from_text("file", snapshot.cols),
+    ];
+    let selected = test_command_mark("cmd-selected", 0, Some(1), Some(0));
+    let hovered = test_command_mark("cmd-hovered", 2, Some(3), Some(0));
+
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .command_marks(
+        vec![selected, hovered],
+        Some("cmd-selected".to_string()),
+        Some("cmd-hovered".to_string()),
+    )
+    .layout();
+
+    let selected_overlay = layout
+        .command_mark_overlays
+        .iter()
+        .find(|overlay| overlay.start_row == 0)
+        .expect("selected overlay");
+    let hovered_overlay = layout
+        .command_mark_overlays
+        .iter()
+        .find(|overlay| overlay.start_row == 2)
+        .expect("hovered overlay");
+    assert!(selected_overlay.selected);
+    assert!(!selected_overlay.hovered);
+    assert!(!hovered_overlay.selected);
+    assert!(hovered_overlay.hovered);
+}
+
+fn test_command_mark(
+    command_id: &str,
+    start_line: usize,
+    end_line: Option<usize>,
+    exit_code: Option<i32>,
+) -> TerminalCommandMark {
+    TerminalCommandMark {
+        command_id: command_id.to_string(),
+        command: Some("test".to_string()),
+        start_line,
+        command_line: start_line,
+        end_line,
+        is_closed: end_line.is_some(),
+        closed_by: end_line.map(|_| TerminalCommandMarkClosedBy::ShellIntegration),
+        exit_code,
+        duration_ms: Some(10),
+        detection_source: TerminalCommandMarkDetectionSource::ShellIntegration,
+        submitted_by: None,
+        confidence: TerminalCommandMarkConfidence::High,
+        output_confidence: TerminalCommandMarkConfidence::High,
+        stale: false,
+        started_at: 1,
+        finished_at: end_line.map(|_| 2),
+    }
 }
 
 #[test]

@@ -29,7 +29,7 @@ impl WorkspaceApp {
                 false,
                 cx.listener(|this, _event, _window, cx| {
                     this.sftp_view.init_error = None;
-                    if let Some(tab_id) = this.active_tab_id
+                    if let Some(tab_id) = this.main_window_tabs.active_tab_id
                         && let Some(node_id) = this.sftp_tab_nodes.get(&tab_id).cloned()
                     {
                         // Retry mirrors Tauri node_sftp_list_dir: it retries

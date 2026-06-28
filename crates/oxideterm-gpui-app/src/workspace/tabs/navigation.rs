@@ -6,6 +6,11 @@ fn tab_drag_is_horizontal_reorder(delta_x: f32, delta_y: f32) -> bool {
     horizontal > TAB_DRAG_THRESHOLD_PX && horizontal >= vertical
 }
 
+fn tab_drag_is_detach(delta_x: f32, delta_y: f32, tabbar_height: f32) -> bool {
+    let threshold = (tabbar_height * 0.72).max(24.0);
+    delta_y > threshold && delta_y.abs() >= delta_x.abs() * 0.85
+}
+
 fn tabbar_tauri_wheel_scroll_delta(delta_x: f32, delta_y: f32) -> f32 {
     if delta_y != 0.0 { delta_y } else { delta_x }
 }
@@ -38,32 +43,32 @@ fn attach_terminal_to_existing_ssh_node(
 
 impl WorkspaceApp {
     pub(super) fn observe_active_tab_for_history(&mut self) {
-        let active_tab_id = self.active_tab_id;
-        if self.tab_navigation_observed_tab == active_tab_id {
+        let active_tab_id = self.main_window_tabs.active_tab_id;
+        if self.main_window_tabs.navigation_observed_tab == active_tab_id {
             return;
         }
-        self.tab_navigation_observed_tab = active_tab_id;
+        self.main_window_tabs.navigation_observed_tab = active_tab_id;
 
         let Some(tab_id) = active_tab_id else {
             return;
         };
-        if self.tab_navigation_replaying {
-            self.tab_navigation_replaying = false;
+        if self.main_window_tabs.navigation_replaying {
+            self.main_window_tabs.navigation_replaying = false;
             return;
         }
 
-        if let Some(index) = self.tab_navigation_index {
-            self.tab_navigation_history.truncate(index.saturating_add(1));
+        if let Some(index) = self.main_window_tabs.navigation_index {
+            self.main_window_tabs.navigation_history.truncate(index.saturating_add(1));
         }
-        if self.tab_navigation_history.last().copied() != Some(tab_id) {
-            self.tab_navigation_history.push(tab_id);
+        if self.main_window_tabs.navigation_history.last().copied() != Some(tab_id) {
+            self.main_window_tabs.navigation_history.push(tab_id);
         }
         const MAX_TAB_HISTORY: usize = 50;
-        if self.tab_navigation_history.len() > MAX_TAB_HISTORY {
-            let overflow = self.tab_navigation_history.len() - MAX_TAB_HISTORY;
-            self.tab_navigation_history.drain(0..overflow);
+        if self.main_window_tabs.navigation_history.len() > MAX_TAB_HISTORY {
+            let overflow = self.main_window_tabs.navigation_history.len() - MAX_TAB_HISTORY;
+            self.main_window_tabs.navigation_history.drain(0..overflow);
         }
-        self.tab_navigation_index = self.tab_navigation_history.len().checked_sub(1);
+        self.main_window_tabs.navigation_index = self.main_window_tabs.navigation_history.len().checked_sub(1);
     }
 
     pub(super) fn navigate_tab_history(
@@ -73,13 +78,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prune_tab_navigation_history();
-        let Some(mut index) = self.tab_navigation_index else {
+        let Some(mut index) = self.main_window_tabs.navigation_index else {
             return;
         };
 
         loop {
             if forward {
-                if index + 1 >= self.tab_navigation_history.len() {
+                if index + 1 >= self.main_window_tabs.navigation_history.len() {
                     return;
                 }
                 index += 1;
@@ -89,11 +94,15 @@ impl WorkspaceApp {
                 index -= 1;
             }
 
-            let tab_id = self.tab_navigation_history[index];
-            if self.tabs.iter().any(|tab| tab.id == tab_id) {
-                self.tab_navigation_index = Some(index);
-                self.tab_navigation_replaying = true;
-                self.active_tab_id = Some(tab_id);
+            let tab_id = self.main_window_tabs.navigation_history[index];
+            if self
+                .tabs
+                .iter()
+                .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
+            {
+                self.main_window_tabs.navigation_index = Some(index);
+                self.main_window_tabs.navigation_replaying = true;
+                self.main_window_tabs.active_tab_id = Some(tab_id);
                 self.sync_active_tab_surface();
                 self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                     matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
@@ -107,19 +116,25 @@ impl WorkspaceApp {
     }
 
     fn prune_tab_navigation_history(&mut self) {
-        let existing = self.tabs.iter().map(|tab| tab.id).collect::<HashSet<_>>();
+        let existing = self
+            .tabs
+            .iter()
+            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .map(|tab| tab.id)
+            .collect::<HashSet<_>>();
         let current = self
-            .tab_navigation_index
-            .and_then(|index| self.tab_navigation_history.get(index).copied());
-        self.tab_navigation_history
+            .main_window_tabs
+            .navigation_index
+            .and_then(|index| self.main_window_tabs.navigation_history.get(index).copied());
+        self.main_window_tabs.navigation_history
             .retain(|tab_id| existing.contains(tab_id));
-        self.tab_navigation_index = current
+        self.main_window_tabs.navigation_index = current
             .and_then(|tab_id| {
-                self.tab_navigation_history
+                self.main_window_tabs.navigation_history
                     .iter()
                     .position(|candidate| *candidate == tab_id)
             })
-            .or_else(|| self.tab_navigation_history.len().checked_sub(1));
+            .or_else(|| self.main_window_tabs.navigation_history.len().checked_sub(1));
     }
 
     pub(super) fn set_active_tab(
@@ -128,8 +143,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tabs.iter().any(|tab| tab.id == tab_id) {
-            self.active_tab_id = Some(tab_id);
+        if self
+            .tabs
+            .iter()
+            .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
+        {
+            self.main_window_tabs.active_tab_id = Some(tab_id);
             self.sync_active_tab_surface();
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
@@ -151,7 +170,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Forwards) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id
+                if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
                     && let Some(node_id) = self.forward_tab_nodes.get(&active_tab_id).cloned()
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -161,7 +180,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Sftp) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id
+                if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
                     && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id).cloned()
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -171,7 +190,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Ide) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id
+                if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
                     && let Some(node_id) = self.ide_tab_nodes.get(&active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -320,7 +339,7 @@ impl WorkspaceApp {
         }) else {
             return false;
         };
-        self.active_tab_id = Some(tab_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
         if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) {
             tab.active_pane_id = Some(pane_id);
         }
@@ -514,7 +533,7 @@ impl WorkspaceApp {
         if self.tabs[index].kind == TabKind::SshTerminal {
             // Tauri confirms user-initiated SSH terminal tab closes while
             // still allowing backend/session cleanup paths to close directly.
-            self.tab_close_confirm = Some(TabCloseConfirm::Single { tab_id });
+            self.main_window_tabs.close_confirm = Some(TabCloseConfirm::Single { tab_id });
             self.reset_standard_confirm_focus();
             cx.notify();
             return;
@@ -525,7 +544,7 @@ impl WorkspaceApp {
             // Tauri warns before closing a local terminal whose foreground
             // process is not the original shell. Native derives the same guard
             // from the PTY process snapshot refreshed by the terminal tick.
-            self.tab_close_confirm = Some(TabCloseConfirm::LocalChildProcess { tab_id });
+            self.main_window_tabs.close_confirm = Some(TabCloseConfirm::LocalChildProcess { tab_id });
             self.reset_standard_confirm_focus();
             cx.notify();
             return;
@@ -545,7 +564,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_tab_id) = self.active_tab_id else {
+        let Some(active_tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         if self
@@ -578,7 +597,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_tab_id) = self.active_tab_id else {
+        let Some(active_tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         if self
@@ -605,13 +624,13 @@ impl WorkspaceApp {
             return;
         }
         if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
-            self.tab_close_confirm = Some(TabCloseConfirm::Other { tab_ids });
+            self.main_window_tabs.close_confirm = Some(TabCloseConfirm::Other { tab_ids });
             self.reset_standard_confirm_focus();
             cx.notify();
             return;
         }
         if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
-            self.tab_close_confirm = Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
+            self.main_window_tabs.close_confirm = Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
             self.reset_standard_confirm_focus();
             cx.notify();
             return;
@@ -660,7 +679,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn cancel_tab_close_confirm(&mut self, cx: &mut Context<Self>) {
-        self.tab_close_confirm = None;
+        self.main_window_tabs.close_confirm = None;
         self.clear_standard_confirm_focus();
         cx.notify();
     }
@@ -670,7 +689,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(confirm) = self.tab_close_confirm.take() else {
+        let Some(confirm) = self.main_window_tabs.close_confirm.take() else {
             return;
         };
         self.clear_standard_confirm_focus();
@@ -683,7 +702,7 @@ impl WorkspaceApp {
             }
             TabCloseConfirm::Other { tab_ids } => {
                 if self.tab_close_ids_include_local_foreground_child_process(&tab_ids, cx) {
-                    self.tab_close_confirm =
+                    self.main_window_tabs.close_confirm =
                         Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
                     self.reset_standard_confirm_focus();
                     cx.notify();
@@ -737,9 +756,17 @@ impl WorkspaceApp {
     }
 
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let old_active_tab_id = self.active_tab_id;
+        let old_active_tab_id = self.main_window_tabs.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
         let tab = self.tabs.remove(index);
+        self.detached_tabs.remove(&tab.id);
+        if self
+            .main_window_tabs
+            .context_menu
+            .is_some_and(|menu| menu.tab_id == tab.id)
+        {
+            self.main_window_tabs.context_menu = None;
+        }
         if tab.kind == TabKind::Graphics {
             self.shutdown_graphics_session();
         }
@@ -777,14 +804,31 @@ impl WorkspaceApp {
             }
         }
 
-        self.active_tab_id = if self.tabs.is_empty() {
+        self.main_window_tabs.active_tab_id = if self.tabs.is_empty() {
             None
         } else if !removed_was_active
-            && old_active_tab_id.is_some_and(|tab_id| self.tabs.iter().any(|tab| tab.id == tab_id))
+            && old_active_tab_id.is_some_and(|tab_id| {
+                self.tabs
+                    .iter()
+                    .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
+            })
         {
             old_active_tab_id
         } else {
-            Some(self.tabs[index.min(self.tabs.len() - 1)].id)
+            self.tabs
+                .iter()
+                .enumerate()
+                .skip(index.min(self.tabs.len().saturating_sub(1)))
+                .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                .or_else(|| {
+                    self.tabs
+                        .iter()
+                        .enumerate()
+                        .take(index)
+                        .rev()
+                        .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                })
+                .map(|(_, tab)| tab.id)
         };
         self.sync_active_tab_surface();
         self.needs_active_pane_focus = self
@@ -832,18 +876,28 @@ impl WorkspaceApp {
     }
 
     pub(super) fn next_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tabs.is_empty() {
+        let visible_tabs = self
+            .tabs
+            .iter()
+            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        if visible_tabs.is_empty() {
             return;
         }
-        let current = self.active_tab_index().unwrap_or(0);
+        let current = self
+            .main_window_tabs
+            .active_tab_id
+            .and_then(|active| visible_tabs.iter().position(|tab_id| *tab_id == active))
+            .unwrap_or(0);
         let next = if forward {
-            (current + 1) % self.tabs.len()
+            (current + 1) % visible_tabs.len()
         } else if current == 0 {
-            self.tabs.len() - 1
+            visible_tabs.len() - 1
         } else {
             current - 1
         };
-        self.active_tab_id = Some(self.tabs[next].id);
+        self.main_window_tabs.active_tab_id = Some(visible_tabs[next]);
         self.sync_active_tab_surface();
         self.needs_active_pane_focus = self
             .active_tab()
@@ -854,8 +908,14 @@ impl WorkspaceApp {
     }
 
     pub(super) fn go_to_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(tab) = self.tabs.get(index) {
-            self.active_tab_id = Some(tab.id);
+        if let Some(tab_id) = self
+            .tabs
+            .iter()
+            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .nth(index)
+            .map(|tab| tab.id)
+        {
+            self.main_window_tabs.active_tab_id = Some(tab_id);
             self.sync_active_tab_surface();
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
@@ -882,7 +942,7 @@ impl WorkspaceApp {
     }
 
     fn tabbar_scroll_viewport_width(&self, window: &Window) -> f32 {
-        let measured_width = f32::from(self.tab_scroll_handle.bounds().size.width);
+        let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
         if measured_width > 1.0 {
             return measured_width;
         }
@@ -907,9 +967,9 @@ impl WorkspaceApp {
     }
 
     fn tabbar_max_scroll(&self, window: &Window) -> f32 {
-        let measured_width = f32::from(self.tab_scroll_handle.bounds().size.width);
+        let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
         if measured_width > 1.0 {
-            return f32::from(self.tab_scroll_handle.max_offset().width);
+            return f32::from(self.main_window_tabs.scroll_handle.max_offset().width);
         }
         (self.tabbar_content_width() - self.tabbar_scroll_viewport_width(window)).max(0.0)
     }
@@ -925,7 +985,7 @@ impl WorkspaceApp {
 
     pub(super) fn tabbar_effective_scroll_x(&self, window: &Window) -> f32 {
         if self.tabbar_has_overflow(window) {
-            f32::from(-self.tab_scroll_handle.offset().x).clamp(0.0, self.tabbar_max_scroll(window))
+            f32::from(-self.main_window_tabs.scroll_handle.offset().x).clamp(0.0, self.tabbar_max_scroll(window))
         } else {
             0.0
         }
@@ -933,7 +993,7 @@ impl WorkspaceApp {
 
     fn set_tabbar_scroll_x(&mut self, scroll_x: f32, window: &Window) {
         let next = scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
-        self.tab_scroll_handle
+        self.main_window_tabs.scroll_handle
             .set_offset(Point::new(px(-next), px(0.0)));
     }
 
@@ -945,7 +1005,7 @@ impl WorkspaceApp {
     ) {
         let max_scroll = self.tabbar_max_scroll(window);
         if max_scroll <= 1.0 {
-            let had_offset = self.tab_scroll_handle.offset().x != px(0.0);
+            let had_offset = self.main_window_tabs.scroll_handle.offset().x != px(0.0);
             self.set_tabbar_scroll_x(0.0, window);
             if had_offset {
                 cx.notify();
@@ -978,7 +1038,7 @@ impl WorkspaceApp {
         // for this wheel event, and re-reading it on every trackpad frame causes
         // unnecessary work. The handle owns the measured clamp, so write the
         // matching negative GPUI offset directly.
-        self.tab_scroll_handle
+        self.main_window_tabs.scroll_handle
             .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
         cx.notify();
         cx.stop_propagation();
@@ -1085,7 +1145,7 @@ impl WorkspaceApp {
             .map(|tab| self.tab_visual_width(tab))
             .collect::<Vec<_>>();
         let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths);
-        self.tab_drag = Some(TabDragState {
+        self.main_window_tabs.drag = Some(TabDragState {
             tab_id,
             from_index: index,
             start_x,
@@ -1094,6 +1154,7 @@ impl WorkspaceApp {
             current_y: start_y,
             tab_widths,
             active: false,
+            mode: TabDragMode::Pending,
             drop_target_index,
         });
         cx.notify();
@@ -1105,10 +1166,11 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(mut drag) = self.tab_drag.clone() else {
+        let Some(mut drag) = self.main_window_tabs.drag.clone() else {
             return;
         };
         let was_active = drag.active;
+        let previous_mode = drag.mode.clone();
         let previous_drop_target_index = drag.drop_target_index;
         // Browser tab drags keep pointer capture after leaving the tab label;
         // the root mouse-up is responsible for finishing or cancelling.
@@ -1119,16 +1181,24 @@ impl WorkspaceApp {
         // Tauri uses a 10px pointer threshold for reorder. GPUI also needs the
         // browser strip axis check here so vertical drags do not become tab
         // reorders just because the root view is acting as pointer capture.
-        if tab_drag_is_horizontal_reorder(delta_x, delta_y) {
+        if tab_drag_is_detach(delta_x, delta_y, self.tokens.metrics.tabbar_height) {
             drag.active = true;
+            drag.mode = TabDragMode::Detach;
+            drag.drop_target_index = drag.from_index;
+        } else if tab_drag_is_horizontal_reorder(delta_x, delta_y) {
+            drag.active = true;
+            drag.mode = TabDragMode::Reorder;
             drag.drop_target_index =
                 self.tab_drop_target_index_for_x(drag.current_x, window, &drag.tab_widths);
         } else {
+            drag.active = false;
+            drag.mode = TabDragMode::Pending;
             drag.drop_target_index = drag.from_index;
         }
-        let changed =
-            drag.active != was_active || drag.drop_target_index != previous_drop_target_index;
-        self.tab_drag = Some(drag);
+        let changed = drag.active != was_active
+            || drag.mode != previous_mode
+            || drag.drop_target_index != previous_drop_target_index;
+        self.main_window_tabs.drag = Some(drag);
         if changed {
             // The tab strip renders activation and drop-target changes, not raw
             // pointer coordinates. Avoid repainting every captured mouse move.
@@ -1145,13 +1215,25 @@ impl WorkspaceApp {
         if event.button != MouseButton::Left {
             return;
         }
-        let Some(drag) = self.tab_drag.take() else {
+        let Some(drag) = self.main_window_tabs.drag.take() else {
             return;
         };
-        if drag.active {
-            self.move_tab(drag.from_index, drag.drop_target_index, window, cx);
-        } else if self.tabs.get(drag.from_index).is_some_and(|tab| tab.id == drag.tab_id) {
-            self.set_active_tab(drag.tab_id, window, cx);
+        match drag.mode {
+            TabDragMode::Detach => {
+                self.detach_tab_to_window(drag.tab_id, window, cx);
+            }
+            TabDragMode::Reorder if drag.active => {
+                self.move_tab(drag.from_index, drag.drop_target_index, window, cx);
+            }
+            TabDragMode::Pending | TabDragMode::Reorder => {
+                if self
+                    .tabs
+                    .get(drag.from_index)
+                    .is_some_and(|tab| tab.id == drag.tab_id)
+                {
+                    self.set_active_tab(drag.tab_id, window, cx);
+                }
+            }
         }
         cx.notify();
     }
@@ -1223,6 +1305,14 @@ mod tests {
         assert!(!tab_drag_is_horizontal_reorder(12.0, 24.0));
         assert!(tab_drag_is_horizontal_reorder(12.0, 8.0));
         assert!(tab_drag_is_horizontal_reorder(-18.0, 4.0));
+    }
+
+    #[test]
+    fn tab_drag_detach_requires_downward_browser_axis() {
+        assert!(!tab_drag_is_detach(4.0, 10.0, 36.0));
+        assert!(!tab_drag_is_detach(36.0, 30.0, 36.0));
+        assert!(!tab_drag_is_detach(4.0, -36.0, 36.0));
+        assert!(tab_drag_is_detach(4.0, 32.0, 36.0));
     }
 
     #[test]

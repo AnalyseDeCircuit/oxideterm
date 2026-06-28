@@ -672,13 +672,13 @@ impl WorkspaceApp {
     fn close_active_tab_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Tauri command-palette close actions call appStore.closeTab directly;
         // confirmations live in TabBar/global shortcut handlers, not here.
-        if let Some(tab_id) = self.active_tab_id {
+        if let Some(tab_id) = self.main_window_tabs.active_tab_id {
             self.close_tab_by_id(tab_id, window, cx);
         }
     }
 
     fn close_other_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(active_tab_id) = self.active_tab_id else {
+        let Some(active_tab_id) = self.main_window_tabs.active_tab_id else {
             return;
         };
         // Tauri splits command-palette behavior from the global keybinding:

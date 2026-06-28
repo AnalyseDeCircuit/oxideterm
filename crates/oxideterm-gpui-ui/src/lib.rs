@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod action_row;
 pub mod ai;
 pub mod badge;
 pub mod button;
@@ -35,6 +36,7 @@ pub mod tooltip;
 pub mod tree;
 pub mod typography;
 
+pub use action_row::{ActionSlotRowAlignment, ActionSlotRowOptions, action_slot_row};
 pub use badge::{
     IconBadgeMetrics, StatusPillColors, StatusPillOptions, StatusPillSize, StatusTone, icon_badge,
     icon_badge_metrics_from_tokens, status_pill, status_pill_colors, status_pill_element,

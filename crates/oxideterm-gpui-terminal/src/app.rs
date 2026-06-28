@@ -149,6 +149,7 @@ pub struct TerminalPane {
     search_query: Option<String>,
     selected_search_match: Option<usize>,
     hovered_link: Option<TerminalLinkRange>,
+    hovered_command_mark_id: Option<String>,
     selecting: bool,
     last_mouse_report_point: Option<TerminalPoint>,
     title: SharedString,
@@ -440,6 +441,7 @@ impl TerminalPane {
             search_query: None,
             selected_search_match: None,
             hovered_link: None,
+            hovered_command_mark_id: None,
             selecting: false,
             last_mouse_report_point: None,
             title: SharedString::from("OxideTerm"),
@@ -682,6 +684,7 @@ impl TerminalPane {
         if !next_settings.command_marks_enabled {
             self.command_marks.clear();
             self.selected_command_mark_id = None;
+            self.hovered_command_mark_id = None;
             self.command_mark_id_aliases.clear();
         }
         if !next_settings.smooth_scroll {
@@ -1012,7 +1015,7 @@ impl TerminalPane {
     }
 
     fn clear_command_mark_selection_for_tui_mode(&mut self, mode: TermMode) -> bool {
-        if self.selected_command_mark_id.is_none()
+        if self.selected_command_mark_id.is_none() && self.hovered_command_mark_id.is_none()
             || !(mode.contains(TermMode::ALT_SCREEN) || mode.intersects(TermMode::MOUSE_MODE))
         {
             return false;
@@ -1021,6 +1024,7 @@ impl TerminalPane {
         // Command mark selection overlays belong to the normal scrollback UI.
         // TUI applications own the active screen and mouse surface instead.
         self.selected_command_mark_id = None;
+        self.hovered_command_mark_id = None;
         true
     }
 
@@ -1202,6 +1206,7 @@ impl TerminalPane {
                 if !self.settings.command_marks_enabled {
                     self.command_marks.clear();
                     self.selected_command_mark_id = None;
+                    self.hovered_command_mark_id = None;
                 } else {
                     match event {
                         TerminalCommandMarkEvent::Created(mut mark) => {
@@ -1256,6 +1261,14 @@ impl TerminalPane {
                             .any(|mark| mark.command_id == *selected_id)
                     {
                         self.selected_command_mark_id = None;
+                    }
+                    if let Some(hovered_id) = &self.hovered_command_mark_id
+                        && !self
+                            .command_marks
+                            .iter()
+                            .any(|mark| mark.command_id == *hovered_id)
+                    {
+                        self.hovered_command_mark_id = None;
                     }
                 }
                 TerminalEventEffect::notify()
@@ -1486,7 +1499,11 @@ impl TerminalPane {
         self.bounds = Some(bounds);
         let cell_width = self.metrics.cell_width_f32();
         let line_height = self.metrics.line_height_f32();
-        let width = terminal_grid_span_for_viewport(bounds.size.width, cell_width);
+        let width = terminal_grid_span_for_viewport(
+            bounds.size.width,
+            cell_width,
+            self.command_mark_gutter_width(),
+        );
         let height =
             (f32::from(bounds.size.height) - TERMINAL_CONTENT_PADDING * 2.0).max(line_height * 2.0);
         let cols = whole_cells_in_span(width, cell_width).max(2);
@@ -1553,7 +1570,15 @@ impl TerminalPane {
     }
 
     fn terminal_content_padding_x(&self) -> f32 {
-        TERMINAL_CONTENT_PADDING + self.timestamp_gutter_width()
+        TERMINAL_CONTENT_PADDING + self.timestamp_gutter_width() + self.command_mark_gutter_width()
+    }
+
+    fn command_mark_gutter_width(&self) -> f32 {
+        if self.settings.command_marks_enabled {
+            TERMINAL_COMMAND_MARK_GUTTER_WIDTH
+        } else {
+            0.0
+        }
     }
 
     pub fn cursor_anchor(&self) -> Option<TerminalCursorAnchor> {
@@ -1662,13 +1687,20 @@ fn whole_cells_in_span(span: f32, cell_span: f32) -> usize {
     }
 }
 
-fn terminal_grid_span_for_viewport(viewport_width: Pixels, cell_width: f32) -> f32 {
+fn terminal_grid_span_for_viewport(
+    viewport_width: Pixels,
+    cell_width: f32,
+    left_gutter_width: f32,
+) -> f32 {
     // Browser terminals reserve right-side scrollbar chrome outside the grid.
     // Keep that gutter stable even before scrollback exists so history growth
     // does not resize the PTY and push the scrollbar outside the viewport.
     // Timestamp labels are a visual overlay and must not change PTY columns;
     // toggling them should never reflow scrollback or restamp old rows.
-    (f32::from(viewport_width) - TERMINAL_CONTENT_PADDING * 2.0 - SCROLLBAR_RESERVED_WIDTH)
+    (f32::from(viewport_width)
+        - TERMINAL_CONTENT_PADDING * 2.0
+        - left_gutter_width
+        - SCROLLBAR_RESERVED_WIDTH)
         .max(cell_width * 2.0)
 }
 
@@ -1740,7 +1772,7 @@ mod tests {
     #[test]
     fn terminal_grid_span_reserves_scrollbar_gutter() {
         let cell_width = 10.0;
-        let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width);
+        let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width, 0.0);
         let cols = whole_cells_in_span(grid_span, cell_width);
         let scrollbar_right =
             f32::from(terminal_scrollbar_x_for_viewport(px(120.0))) + SCROLLBAR_WIDTH;
@@ -1753,10 +1785,19 @@ mod tests {
     #[test]
     fn terminal_grid_span_keeps_timestamp_gutter_paint_only() {
         let cell_width = 10.0;
-        let grid_span = terminal_grid_span_for_viewport(px(160.0), cell_width);
+        let grid_span = terminal_grid_span_for_viewport(px(160.0), cell_width, 0.0);
         let cols = whole_cells_in_span(grid_span, cell_width);
 
         assert_eq!(cols, 15);
+    }
+
+    #[test]
+    fn terminal_grid_span_reserves_command_mark_gutter() {
+        let cell_width = 10.0;
+        let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width, 4.0);
+        let cols = whole_cells_in_span(grid_span, cell_width);
+
+        assert_eq!(cols, 10);
     }
 
     #[test]
