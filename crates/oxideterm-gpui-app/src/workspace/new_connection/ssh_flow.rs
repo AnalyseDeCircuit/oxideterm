@@ -12,6 +12,10 @@ use oxideterm_connections::{
     SaveConnectionRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
     SavedUpstreamProxyProtocol, first_available_default_key_path,
 };
+use oxideterm_remote_desktop::{
+    RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
+    RemoteDesktopSecret,
+};
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
@@ -482,6 +486,24 @@ impl WorkspaceApp {
             self.submit_telnet_connection_form(action, window, cx);
             return;
         }
+        if self
+            .new_connection_form
+            .as_ref()
+            .and_then(|form| remote_desktop_protocol_for_transport(form.transport))
+            .is_some()
+            && self.drill_down_parent_node_id.is_none()
+            && matches!(
+                new_connection_form_mode(
+                    self.editing_saved_connection_id.as_deref(),
+                    self.duplicating_saved_connection_id.as_deref(),
+                    self.saved_connection_prompt_action,
+                ),
+                NewConnectionFormMode::NewConnection
+            )
+        {
+            self.submit_remote_desktop_connection_form(window, cx);
+            return;
+        }
         if let Some(parent_id) = self.drill_down_parent_node_id.clone() {
             match action {
                 NewConnectionSubmitAction::Save => {
@@ -867,6 +889,85 @@ impl WorkspaceApp {
             }
         }
         cx.notify();
+    }
+
+    fn submit_remote_desktop_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let Some(protocol) = remote_desktop_protocol_for_transport(form.transport) else {
+            return;
+        };
+        let host = form.host.trim().to_string();
+        let port = form
+            .port
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port > 0);
+        if host.is_empty() {
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.remote_desktop_host_required"),
+            );
+            cx.notify();
+            return;
+        }
+        let Some(port) = port else {
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.remote_desktop_invalid_port"),
+            );
+            cx.notify();
+            return;
+        };
+        if protocol == RemoteDesktopProtocol::Rdp && form.username.trim().is_empty() {
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.remote_desktop_username_required"),
+            );
+            cx.notify();
+            return;
+        }
+        if protocol == RemoteDesktopProtocol::Rdp && form.password.is_empty() {
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.remote_desktop_password_required"),
+            );
+            cx.notify();
+            return;
+        }
+        let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
+        let username = (protocol == RemoteDesktopProtocol::Rdp)
+            .then(|| form.username.trim().to_string())
+            .filter(|username| !username.is_empty());
+        let password = if protocol == RemoteDesktopProtocol::Rdp && !form.password.is_empty() {
+            // Remote desktop passwords are runtime-only. Move the UI draft into
+            // a zeroizing wrapper before the form is dropped.
+            Some(RemoteDesktopSecret::from(std::mem::take(
+                &mut form.password,
+            )))
+        } else {
+            None
+        };
+        let profile = RemoteDesktopConnectionProfile {
+            id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
+            label,
+            protocol,
+            endpoint: RemoteDesktopEndpoint::new(host, port),
+            username,
+            domain: None,
+            credential_ref: None,
+            read_only: false,
+        };
+
+        self.new_connection_form = None;
+        self.close_new_connection_select();
+        self.open_remote_desktop_connection_tab(profile, password, window, cx);
     }
 
     pub(in crate::workspace) fn start_new_connection_flow(
@@ -2707,6 +2808,43 @@ fn telnet_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String 
         format!("{}:{}", host.trim(), port)
     } else {
         name.to_string()
+    }
+}
+
+fn remote_desktop_protocol_for_transport(
+    transport: NewConnectionTransport,
+) -> Option<RemoteDesktopProtocol> {
+    match transport {
+        NewConnectionTransport::Rdp => Some(RemoteDesktopProtocol::Rdp),
+        NewConnectionTransport::Vnc => Some(RemoteDesktopProtocol::Vnc),
+        _ => None,
+    }
+}
+
+fn remote_desktop_profile_label(
+    name: &str,
+    protocol: RemoteDesktopProtocol,
+    host: &str,
+    port: u16,
+) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!(
+            "{}://{}:{port}",
+            protocol.provider_id(),
+            remote_desktop_label_host(host)
+        )
+    } else {
+        name.to_string()
+    }
+}
+
+fn remote_desktop_label_host(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        // Keep IPv6 endpoint labels parseable when shown in tab titles.
+        format!("[{host}]")
+    } else {
+        host.to_string()
     }
 }
 

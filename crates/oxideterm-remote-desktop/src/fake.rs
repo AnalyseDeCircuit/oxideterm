@@ -159,7 +159,7 @@ mod tests {
 
     use crate::{
         RemoteDesktopEndpoint, RemoteDesktopHelperRequest, RemoteDesktopProtocol,
-        RemoteDesktopSessionStatus, RemoteDesktopSize, decode_event_line, encode_request_line,
+        RemoteDesktopSessionStatus, RemoteDesktopSize, encode_request_line, read_event_line,
     };
 
     use super::*;
@@ -248,11 +248,11 @@ mod tests {
         let mut output = Vec::new();
         let handled =
             run_fake_backend_stdio(&mut backend, &mut Cursor::new(input), &mut output).unwrap();
-        let lines = String::from_utf8(output).unwrap();
-        let decoded: Vec<_> = lines
-            .lines()
-            .map(|line| decode_event_line(line).unwrap())
-            .collect();
+        let mut decoded = Vec::new();
+        let mut output_reader = Cursor::new(output);
+        while let Some(event) = read_event_line(&mut output_reader).unwrap() {
+            decoded.push(event);
+        }
 
         assert_eq!(handled, 2);
         assert!(matches!(

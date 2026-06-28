@@ -11,6 +11,8 @@ mod input;
 mod state;
 mod view;
 
-pub use input::{RemoteDesktopMappedPoint, RemoteDesktopViewportMapper};
+pub use input::{
+    RemoteDesktopMappedPoint, RemoteDesktopViewportMapper, SharedRemoteDesktopGeometry,
+};
 pub use state::{RemoteDesktopViewSnapshot, RemoteDesktopViewState};
-pub use view::remote_desktop_surface;
+pub use view::{remote_desktop_surface, remote_desktop_surface_with_geometry};

@@ -83,7 +83,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/install-linux-deps
         with:
-          extra_packages: 'curl file patchelf desktop-file-utils'
+          extra_packages: 'curl file patchelf desktop-file-utils freerdp2-dev'
 
       - name: Install Linux AppImage tooling
         if: runner.os == 'Linux'

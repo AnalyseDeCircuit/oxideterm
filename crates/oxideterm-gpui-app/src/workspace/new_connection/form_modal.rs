@@ -31,7 +31,28 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Telnet;
+        let remote_desktop_protocol = if !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+        {
+            match form.transport {
+                NewConnectionTransport::Rdp => {
+                    Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
+                }
+                NewConnectionTransport::Vnc => {
+                    Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let local_transport_mode = serial_mode || telnet_mode;
+        let remote_desktop_mode = remote_desktop_protocol.is_some();
+        let ssh_submission_mode = !local_transport_mode && !remote_desktop_mode;
+        let shows_transport_selector =
+            !prompt_mode && !duplicate_mode && !edit_properties_mode && !drill_down_mode;
         let title = if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
@@ -68,6 +89,13 @@ impl WorkspaceApp {
             self.i18n.t("modals.new_connection.telnet_description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
+        } else if remote_desktop_protocol == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
+        {
+            self.i18n.t("modals.new_connection.rdp_description")
+        } else if remote_desktop_protocol
+            == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc)
+        {
+            self.i18n.t("modals.new_connection.vnc_description")
         } else {
             self.i18n.t("ssh.form.subtitle")
         };
@@ -80,6 +108,16 @@ impl WorkspaceApp {
                     .is_ok_and(|baud| baud > 0)
         } else if telnet_mode {
             !form.host.trim().is_empty() && form.port.trim().parse::<u16>().is_ok()
+        } else if remote_desktop_protocol
+            == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
+        {
+            !form.host.trim().is_empty()
+                && !form.username.trim().is_empty()
+                && !form.password.is_empty()
+                && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
+        } else if remote_desktop_mode {
+            !form.host.trim().is_empty()
+                && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
         } else {
             !form.host.trim().is_empty()
                 && !form.username.trim().is_empty()
@@ -103,6 +141,10 @@ impl WorkspaceApp {
                     TAURI_DRILL_DOWN_MODAL_WIDTH
                 } else if prompt_mode || edit_properties_mode {
                     TAURI_EDIT_MODAL_WIDTH
+                } else if shows_transport_selector {
+                    self.tokens.metrics.modal_width
+                        + NEW_CONNECTION_TYPE_SIDEBAR_WIDTH
+                        + self.tokens.metrics.modal_section_gap
                 } else {
                     self.tokens.metrics.modal_width
                 }))
@@ -115,49 +157,65 @@ impl WorkspaceApp {
                 .child(modal_header(&self.tokens, title, description))
                 .child(
                     modal_body(&self.tokens)
-                        .id("new-connection-modal-body-scroll")
                         .flex_1()
                         .min_h(px(0.0))
-                        .selectable_overflow_y_scroll(
-                            &self.selectable_text_scroll_handle(
-                                "new-connection-modal-body-scroll",
-                            ),
-                        )
-                        .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                            // Tauri/Radix closes select content when the modal
-                            // scroll body moves its trigger. Native caches the
-                            // trigger anchor explicitly, so clear both popup
-                            // ownership and the stale group-select bounds here.
-                            let had_open_select =
-                                browser_behavior::close_browser_trigger_select_on_container_scroll(
-                                    &mut this.open_new_connection_select,
-                                    &mut this.new_connection_select_focus_origin,
-                                );
-                            this.clear_new_connection_select_anchor();
-                            if had_open_select {
-                                cx.notify();
-                            }
-                        }))
                         .child(
                             div()
+                                .size_full()
+                                .min_h(px(0.0))
                                 .flex()
-                                .flex_col()
                                 .gap(px(self.tokens.metrics.modal_section_gap))
-                                .when(
-                                    !prompt_mode
-                                        && !duplicate_mode
-                                        && !edit_properties_mode
-                                        && !drill_down_mode,
-                                    |content| content.child(self.render_transport_selector(cx)),
-                                )
-                                .when(serial_mode, |content| {
-                                    content.child(self.render_serial_form_branch(cx))
+                                .when(shows_transport_selector, |content| {
+                                    content.child(self.render_transport_selector(cx))
                                 })
-                                .when(telnet_mode, |content| {
-                                    content.child(self.render_telnet_form_branch(cx))
-                                })
-                                .when(!serial_mode && !telnet_mode, |content| {
-                                    content
+                                .child(
+                                    div()
+                                        .id("new-connection-modal-form-scroll")
+                                        .flex_1()
+                                        .min_h(px(0.0))
+                                        .min_w(px(0.0))
+                                        .selectable_overflow_y_scroll(
+                                            &self.selectable_text_scroll_handle(
+                                                "new-connection-modal-form-scroll",
+                                            ),
+                                        )
+                                        .on_scroll_wheel(cx.listener(
+                                            |this, _event, _window, cx| {
+                                                // Tauri/Radix closes select content when the modal
+                                                // scroll body moves its trigger. Native caches the
+                                                // trigger anchor explicitly, so clear both popup
+                                                // ownership and the stale group-select bounds here.
+                                                let had_open_select =
+                                                    browser_behavior::close_browser_trigger_select_on_container_scroll(
+                                                        &mut this.open_new_connection_select,
+                                                        &mut this.new_connection_select_focus_origin,
+                                                    );
+                                                this.clear_new_connection_select_anchor();
+                                                if had_open_select {
+                                                    cx.notify();
+                                                }
+                                            },
+                                        ))
+                                        .child(
+                                            div()
+                                        .flex()
+                                        .flex_col()
+                                        .min_w(px(0.0))
+                                        .gap(px(self.tokens.metrics.modal_section_gap))
+                                        .when(serial_mode, |content| {
+                                            content.child(self.render_serial_form_branch(cx))
+                                        })
+                                        .when(telnet_mode, |content| {
+                                            content.child(self.render_telnet_form_branch(cx))
+                                        })
+                                        .when_some(remote_desktop_protocol, |content, protocol| {
+                                            content
+                                                .child(self.render_remote_desktop_form_branch(protocol, cx))
+                                        })
+                                        .when(
+                                            !serial_mode && !telnet_mode && !remote_desktop_mode,
+                                            |content| {
+                                                content
                                 .when(!prompt_mode && !drill_down_mode, |content| {
                                     content
                                         .child(self.render_connection_field(
@@ -643,7 +701,9 @@ impl WorkspaceApp {
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
                                 })
-                                    }),
+                                    })
+                                ),
+                        )
                         )
                         .when_some(
                             if prompt_mode {
@@ -675,7 +735,7 @@ impl WorkspaceApp {
                             !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
                                 && !drill_down_mode
-                                && !local_transport_mode,
+                                && ssh_submission_mode,
                             |footer| {
                                 footer.child(self.render_connection_button(
                                     self.i18n.t("ssh.form.test"),
@@ -688,7 +748,8 @@ impl WorkspaceApp {
                         )
                         .when(
                             !edit_properties_mode
-                                && self.saved_connection_prompt_action.is_none(),
+                                && self.saved_connection_prompt_action.is_none()
+                                && !remote_desktop_mode,
                             |footer| {
                                 footer
                                     .child(self.render_connection_button(
@@ -752,6 +813,20 @@ impl WorkspaceApp {
                                     } else {
                                         ConnectionButtonAction::Connect
                                     },
+                                    primary_disabled,
+                                    cx,
+                                ))
+                            },
+                        )
+                        .when(
+                            remote_desktop_mode
+                                && !edit_properties_mode
+                                && self.saved_connection_prompt_action.is_none(),
+                            |footer| {
+                                footer.child(self.render_connection_button(
+                                    self.i18n.t("ssh.form.connect"),
+                                    true,
+                                    ConnectionButtonAction::Connect,
                                     primary_disabled,
                                     cx,
                                 ))

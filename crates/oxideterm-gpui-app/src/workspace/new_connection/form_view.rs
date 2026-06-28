@@ -8,8 +8,9 @@ use super::{
     form_state::{
         NewConnectionField, NewConnectionForm, NewConnectionSelect, NewConnectionSubmitAction,
         NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthTab, TELNET_DEFAULT_PORT_TEXT,
-        apply_transport_default_port, backspace_current_connection_field,
+        RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthTab,
+        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_transport_default_port,
+        apply_transport_default_username, backspace_current_connection_field,
         clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
         current_connection_field, insert_text_into_current_connection_field,
         new_connection_form_mode, next_connection_field, next_jump_connection_field,
@@ -63,6 +64,7 @@ const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
 const TAURI_SERIAL_PANEL_BG_ALPHA: u32 = 0x66; // Tauri serial bg-theme-bg/40
+const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionButtonAction {

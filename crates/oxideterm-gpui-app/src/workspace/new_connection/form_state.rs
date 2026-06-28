@@ -17,12 +17,16 @@ pub(in crate::workspace) enum SshAuthTab {
 
 pub(in crate::workspace) const SSH_DEFAULT_PORT_TEXT: &str = "22";
 pub(in crate::workspace) const TELNET_DEFAULT_PORT_TEXT: &str = "23";
+pub(in crate::workspace) const RDP_DEFAULT_PORT_TEXT: &str = "3389";
+pub(in crate::workspace) const VNC_DEFAULT_PORT_TEXT: &str = "5900";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionTransport {
     Ssh,
     Telnet,
     Serial,
+    Rdp,
+    Vnc,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -439,18 +443,75 @@ pub(in crate::workspace) fn apply_transport_default_port(
     next_transport: NewConnectionTransport,
 ) {
     let current_port = form.port.trim();
-    let should_use_telnet_default = next_transport == NewConnectionTransport::Telnet
-        && (current_port.is_empty() || current_port == SSH_DEFAULT_PORT_TEXT);
-    let should_use_ssh_default = next_transport == NewConnectionTransport::Ssh
-        && previous_transport == NewConnectionTransport::Telnet
-        && (current_port.is_empty() || current_port == TELNET_DEFAULT_PORT_TEXT);
+    let Some(next_default_port) = default_port_for_transport(next_transport) else {
+        return;
+    };
+    let current_matches_previous_default =
+        if let Some(previous_default_port) = default_port_for_transport(previous_transport) {
+            current_port == previous_default_port
+        } else {
+            is_known_transport_default_port(current_port)
+        };
 
     // Switching transports updates only untouched default ports; user-entered
-    // custom ports are preserved across SSH/Telnet/Serial mode changes.
-    if should_use_telnet_default {
-        form.port = TELNET_DEFAULT_PORT_TEXT.to_string();
-    } else if should_use_ssh_default {
-        form.port = SSH_DEFAULT_PORT_TEXT.to_string();
+    // custom ports are preserved across SSH/Telnet/RDP/VNC mode changes.
+    if current_port.is_empty() || current_matches_previous_default {
+        form.port = next_default_port.to_string();
+    }
+}
+
+fn default_port_for_transport(transport: NewConnectionTransport) -> Option<&'static str> {
+    match transport {
+        NewConnectionTransport::Ssh => Some(SSH_DEFAULT_PORT_TEXT),
+        NewConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
+        NewConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
+        NewConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
+        NewConnectionTransport::Serial => None,
+    }
+}
+
+fn is_known_transport_default_port(port: &str) -> bool {
+    [
+        SSH_DEFAULT_PORT_TEXT,
+        TELNET_DEFAULT_PORT_TEXT,
+        RDP_DEFAULT_PORT_TEXT,
+        VNC_DEFAULT_PORT_TEXT,
+    ]
+    .contains(&port)
+}
+
+pub(in crate::workspace) fn apply_transport_default_username(
+    form: &mut NewConnectionForm,
+    previous_transport: NewConnectionTransport,
+    next_transport: NewConnectionTransport,
+) {
+    let username = form.username.trim();
+    match next_transport {
+        NewConnectionTransport::Rdp
+            if username.is_empty()
+                || (previous_transport == NewConnectionTransport::Ssh && username == "root") =>
+        {
+            form.username = "Administrator".to_string();
+        }
+        NewConnectionTransport::Vnc
+            if matches!(
+                previous_transport,
+                NewConnectionTransport::Ssh | NewConnectionTransport::Rdp
+            ) && matches!(username, "root" | "Administrator") =>
+        {
+            form.username.clear();
+        }
+        NewConnectionTransport::Ssh
+            if previous_transport == NewConnectionTransport::Rdp && username == "Administrator" =>
+        {
+            form.username = "root".to_string();
+        }
+        NewConnectionTransport::Ssh
+            if previous_transport == NewConnectionTransport::Vnc && username.is_empty() =>
+        {
+            form.username = "root".to_string();
+        }
+        _ => {}
     }
 }
 
@@ -487,6 +548,37 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Port,
             NewConnectionField::TelnetProfileName,
         ];
+        let index = fields
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        let next = if forward {
+            (index + 1) % fields.len()
+        } else if index == 0 {
+            fields.len() - 1
+        } else {
+            index - 1
+        };
+        return fields[next];
+    }
+    if matches!(
+        transport,
+        NewConnectionTransport::Rdp | NewConnectionTransport::Vnc
+    ) {
+        let fields = if transport == NewConnectionTransport::Rdp {
+            vec![
+                NewConnectionField::Name,
+                NewConnectionField::Host,
+                NewConnectionField::Port,
+                NewConnectionField::Username,
+            ]
+        } else {
+            vec![
+                NewConnectionField::Name,
+                NewConnectionField::Host,
+                NewConnectionField::Port,
+            ]
+        };
         let index = fields
             .iter()
             .position(|candidate| *candidate == field)
@@ -885,10 +977,12 @@ mod tests {
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionTransport, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthTab,
-        TELNET_DEFAULT_PORT_TEXT, apply_transport_default_port, backspace_current_connection_field,
-        insert_text_into_current_connection_field, new_connection_form_mode, next_connection_field,
-        select_current_connection_field, text_from_keystroke,
+        NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
+        SavedConnectionPromptAction, SshAuthTab, TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
+        apply_transport_default_port, apply_transport_default_username,
+        backspace_current_connection_field, insert_text_into_current_connection_field,
+        new_connection_form_mode, next_connection_field, select_current_connection_field,
+        text_from_keystroke,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -996,6 +1090,43 @@ mod tests {
     }
 
     #[test]
+    fn remote_desktop_transport_tabs_through_rdp_login_fields() {
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Name,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Rdp,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Host
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Port,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Rdp,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Username
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Port,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Vnc,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Name
+        );
+    }
+
+    #[test]
     fn transport_default_port_changes_only_for_untouched_defaults() {
         let mut form = NewConnectionForm::default();
         apply_transport_default_port(
@@ -1012,13 +1143,69 @@ mod tests {
         );
         assert_eq!(form.port, SSH_DEFAULT_PORT_TEXT);
 
-        form.port = "2323".to_string();
         apply_transport_default_port(
             &mut form,
             NewConnectionTransport::Ssh,
-            NewConnectionTransport::Telnet,
+            NewConnectionTransport::Rdp,
+        );
+        assert_eq!(form.port, RDP_DEFAULT_PORT_TEXT);
+
+        apply_transport_default_port(
+            &mut form,
+            NewConnectionTransport::Rdp,
+            NewConnectionTransport::Vnc,
+        );
+        assert_eq!(form.port, VNC_DEFAULT_PORT_TEXT);
+
+        form.port = SSH_DEFAULT_PORT_TEXT.to_string();
+        apply_transport_default_port(
+            &mut form,
+            NewConnectionTransport::Serial,
+            NewConnectionTransport::Rdp,
+        );
+        assert_eq!(form.port, RDP_DEFAULT_PORT_TEXT);
+
+        form.port = "2323".to_string();
+        apply_transport_default_port(
+            &mut form,
+            NewConnectionTransport::Vnc,
+            NewConnectionTransport::Rdp,
         );
         assert_eq!(form.port, "2323");
+    }
+
+    #[test]
+    fn transport_default_username_changes_only_for_protocol_defaults() {
+        let mut form = NewConnectionForm::default();
+
+        apply_transport_default_username(
+            &mut form,
+            NewConnectionTransport::Ssh,
+            NewConnectionTransport::Rdp,
+        );
+        assert_eq!(form.username, "Administrator");
+
+        apply_transport_default_username(
+            &mut form,
+            NewConnectionTransport::Rdp,
+            NewConnectionTransport::Vnc,
+        );
+        assert!(form.username.is_empty());
+
+        apply_transport_default_username(
+            &mut form,
+            NewConnectionTransport::Vnc,
+            NewConnectionTransport::Ssh,
+        );
+        assert_eq!(form.username, "root");
+
+        form.username = "custom".to_string();
+        apply_transport_default_username(
+            &mut form,
+            NewConnectionTransport::Ssh,
+            NewConnectionTransport::Rdp,
+        );
+        assert_eq!(form.username, "custom");
     }
 
     #[test]

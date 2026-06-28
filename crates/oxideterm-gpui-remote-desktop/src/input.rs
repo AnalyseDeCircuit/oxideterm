@@ -1,6 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::{cell::RefCell, rc::Rc};
+
+use gpui::{Bounds, Pixels, Point};
 use oxideterm_remote_desktop::{
     RemoteDesktopHelperRequest, RemoteDesktopSize, RemoteDesktopWheelDelta,
 };
@@ -9,6 +12,54 @@ use oxideterm_remote_desktop::{
 pub struct RemoteDesktopMappedPoint {
     pub x: u32,
     pub y: u32,
+}
+
+#[derive(Clone, Default)]
+pub struct SharedRemoteDesktopGeometry(Rc<RefCell<RemoteDesktopGeometry>>);
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RemoteDesktopGeometry {
+    image_bounds: Option<Bounds<Pixels>>,
+    frame_size: Option<RemoteDesktopSize>,
+    viewport_size: Option<RemoteDesktopSize>,
+}
+
+impl SharedRemoteDesktopGeometry {
+    pub fn clear(&self) {
+        *self.0.borrow_mut() = RemoteDesktopGeometry::default();
+    }
+
+    pub(crate) fn update(
+        &self,
+        image_bounds: Option<Bounds<Pixels>>,
+        frame_size: Option<RemoteDesktopSize>,
+        viewport_size: Option<RemoteDesktopSize>,
+    ) {
+        *self.0.borrow_mut() = RemoteDesktopGeometry {
+            image_bounds,
+            frame_size,
+            viewport_size,
+        };
+    }
+
+    pub fn viewport_size(&self) -> Option<RemoteDesktopSize> {
+        self.0.borrow().viewport_size
+    }
+
+    pub fn map_window_point(&self, position: Point<Pixels>) -> Option<RemoteDesktopMappedPoint> {
+        let geometry = self.0.borrow();
+        let bounds = geometry.image_bounds?;
+        let remote_size = geometry.frame_size?;
+        let viewport_width = f32::from(bounds.size.width).max(1.0);
+        let viewport_height = f32::from(bounds.size.height).max(1.0);
+        let local_x = f32::from(position.x) - f32::from(bounds.origin.x);
+        let local_y = f32::from(position.y) - f32::from(bounds.origin.y);
+        if local_x < 0.0 || local_y < 0.0 || local_x > viewport_width || local_y > viewport_height {
+            return None;
+        }
+        RemoteDesktopViewportMapper::new(remote_size, viewport_width, viewport_height)
+            .map(|mapper| mapper.map_point(local_x, local_y))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,6 +135,7 @@ fn scale_axis(local: f32, viewport: f32, remote: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use gpui::{bounds, point, px, size};
     use oxideterm_remote_desktop::RemoteDesktopHelperRequest;
 
     use super::*;
@@ -151,6 +203,74 @@ mod tests {
                 10.0,
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn shared_geometry_maps_window_points_inside_image_bounds() {
+        let geometry = SharedRemoteDesktopGeometry::default();
+        geometry.update(
+            Some(bounds(
+                point(px(10.0), px(20.0)),
+                size(px(400.0), px(200.0)),
+            )),
+            Some(RemoteDesktopSize {
+                width: 800,
+                height: 600,
+            }),
+            Some(RemoteDesktopSize {
+                width: 400,
+                height: 200,
+            }),
+        );
+
+        assert_eq!(
+            geometry.map_window_point(point(px(210.0), px(120.0))),
+            Some(RemoteDesktopMappedPoint { x: 400, y: 300 })
+        );
+    }
+
+    #[test]
+    fn shared_geometry_ignores_points_outside_image_bounds() {
+        let geometry = SharedRemoteDesktopGeometry::default();
+        geometry.update(
+            Some(bounds(
+                point(px(10.0), px(20.0)),
+                size(px(400.0), px(200.0)),
+            )),
+            Some(RemoteDesktopSize {
+                width: 800,
+                height: 600,
+            }),
+            Some(RemoteDesktopSize {
+                width: 400,
+                height: 200,
+            }),
+        );
+
+        assert_eq!(geometry.map_window_point(point(px(9.0), px(120.0))), None);
+        geometry.clear();
+        assert_eq!(geometry.map_window_point(point(px(210.0), px(120.0))), None);
+    }
+
+    #[test]
+    fn shared_geometry_exposes_viewport_size_for_resize_requests() {
+        let geometry = SharedRemoteDesktopGeometry::default();
+        geometry.update(
+            None,
+            None,
+            Some(RemoteDesktopSize {
+                width: 900,
+                height: 500,
+            }),
+        );
+
+        assert_eq!(
+            geometry.viewport_size(),
+            Some(RemoteDesktopSize {
+                width: 900,
+                height: 500,
+            })
         );
     }
 }

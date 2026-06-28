@@ -42,6 +42,12 @@ Keep these patches when updating russh:
 - `src/negotiation.rs`
   - Keep NIST P-256/P-384/P-521 ECDH algorithms in the default KEX fallback
     list without re-enabling SHA-1 DH fallbacks.
+- `Cargo.toml.orig` and the normalized `Cargo.toml`
+  - Keep the RustCrypto prerelease dependency set aligned with the IronRDP
+    dependency family used by the RDP helper. Cargo resolves these crates
+    workspace-wide, so mismatched `curve25519-dalek`, `ecdsa`,
+    `ed25519-dalek`, `elliptic-curve`, `p256`, `p384`, or `p521` pins can
+    make SSH and RDP impossible to build together.
 - Secret handling patches
   - Redact auth methods and keyboard-interactive responses in `Debug` output.
   - Store queued password and keyboard-interactive responses in `Zeroizing`
