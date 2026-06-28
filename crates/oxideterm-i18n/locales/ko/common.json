@@ -106,7 +106,9 @@
     "session_ssh_terminal": "SSH 터미널",
     "cmd_open_cloud_sync": "클라우드 동기화 열기",
     "cmd_open_serial_terminal": "시리얼 터미널 열기",
-    "cmd_open_telnet_terminal": "Telnet 터미널 열기"
+    "cmd_open_telnet_terminal": "Telnet 터미널 열기",
+    "cmd_open_rdp_preview": "RDP 미리보기 열기",
+    "cmd_open_vnc_preview": "VNC 미리보기 열기"
   },
   "common": {
     "enabled": "활성화됨",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "오른쪽의 {{count}}개 탭을 닫으시겠습니까? 활성 SSH 세션의 연결이 끊어집니다.",
     "send_to_background": "백그라운드로 보내기",
     "child_process_warning": "이 터미널에 실행 중인 자식 프로세스가 있습니다. 그래도 닫으시겠습니까?"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "RDP 미리보기",
+    "vnc_preview_title": "VNC 미리보기",
+    "provider_missing": "원격 데스크톱 제공자를 사용할 수 없습니다.",
+    "session_missing": "원격 데스크톱 세션을 사용할 수 없습니다.",
+    "reconnect": "다시 연결",
+    "disconnect": "연결 끊기"
   }
 }

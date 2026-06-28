@@ -587,6 +587,7 @@ fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
         TabKind::PluginManager => "plugin_manager",
         TabKind::Plugin { .. } => "plugin",
         TabKind::CloudSync => "cloud_sync",
+        TabKind::RemoteDesktop => "remote_desktop",
     }
 }
 

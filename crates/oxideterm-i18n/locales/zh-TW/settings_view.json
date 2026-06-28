@@ -1278,5 +1278,8 @@
       "test_success": "已連線，用時 {{elapsed}} ms",
       "test_error": "測試失敗：{{error}}"
     }
+  },
+  "terminal": {
+    "bg_tab_remote_desktop": "遠端桌面"
   }
 }

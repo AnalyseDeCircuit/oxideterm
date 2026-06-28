@@ -52,8 +52,12 @@ pub struct RemoteDesktopWheelDelta {
     pub y: f32,
 }
 
-#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum RemoteDesktopHelperRequest {
     Connect {
         protocol: RemoteDesktopProtocol,
@@ -113,7 +117,10 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("size", size)
                 .field("read_only", read_only)
                 .finish(),
-            Self::Resize { size } => formatter.debug_struct("Resize").field("size", size).finish(),
+            Self::Resize { size } => formatter
+                .debug_struct("Resize")
+                .field("size", size)
+                .finish(),
             Self::MouseMove { x, y } => formatter
                 .debug_struct("MouseMove")
                 .field("x", x)
@@ -124,7 +131,10 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("button", button)
                 .field("state", state)
                 .finish(),
-            Self::Wheel { delta } => formatter.debug_struct("Wheel").field("delta", delta).finish(),
+            Self::Wheel { delta } => formatter
+                .debug_struct("Wheel")
+                .field("delta", delta)
+                .finish(),
             Self::Key { key, state } => formatter
                 .debug_struct("Key")
                 .field("key", key)
@@ -145,7 +155,11 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum RemoteDesktopHelperEvent {
     Status {
         status: RemoteDesktopSessionStatus,
@@ -269,4 +283,3 @@ mod tests {
         assert_eq!(decoded, request);
     }
 }
-

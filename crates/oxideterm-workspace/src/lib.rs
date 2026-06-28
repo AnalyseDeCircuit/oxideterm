@@ -37,6 +37,7 @@ pub enum TabKind {
     PluginManager,
     Plugin { plugin_id: String, tab_id: String },
     CloudSync,
+    RemoteDesktop,
     Settings,
 }
 

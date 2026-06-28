@@ -1278,5 +1278,8 @@
       "test_success": "{{elapsed}} ms 만에 연결됨",
       "test_error": "테스트 실패: {{error}}"
     }
+  },
+  "terminal": {
+    "bg_tab_remote_desktop": "원격 데스크톱"
   }
 }

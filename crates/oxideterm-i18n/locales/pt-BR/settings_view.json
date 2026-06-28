@@ -1278,5 +1278,8 @@
       "test_success": "Conectado em {{elapsed}} ms",
       "test_error": "Falha no teste: {{error}}"
     }
+  },
+  "terminal": {
+    "bg_tab_remote_desktop": "Área de trabalho remota"
   }
 }

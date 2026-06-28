@@ -11,6 +11,7 @@ impl Render for WorkspaceApp {
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.poll_forwarding_worker_results(cx);
         self.poll_graphics_worker_results(window, cx);
+        self.poll_remote_desktop_worker_results(cx);
         self.poll_connection_monitor_updates(false, cx);
         self.poll_host_process_action_results(cx);
         self.poll_host_docker_action_results(cx);
@@ -71,6 +72,7 @@ impl Render for WorkspaceApp {
                             | TabKind::PluginManager
                             | TabKind::Plugin { .. }
                             | TabKind::CloudSync
+                            | TabKind::RemoteDesktop
                     )
                 })
             && !self.search.visible
@@ -108,6 +110,7 @@ impl Render for WorkspaceApp {
                     self.render_native_plugin_tab_surface(&plugin_id, &tab_id, cx)
                 }
                 (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
+                (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab.id, cx),
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
             }

@@ -24,6 +24,7 @@ mod plugin_runtime;
 mod plugin_settings_store;
 mod plugin_ui;
 mod quick_commands;
+mod remote_desktop;
 mod selectable_text;
 mod session_manager;
 mod settings;
@@ -1043,6 +1044,10 @@ pub(crate) struct WorkspaceApp {
     native_plugin_event_log_last_id: u64,
     native_plugin_event_log_polling: bool,
     session_manager: SessionManagerState,
+    remote_desktop_sessions: HashMap<TabId, remote_desktop::RemoteDesktopSession>,
+    remote_desktop_worker_tx: std::sync::mpsc::Sender<remote_desktop::RemoteDesktopWorkerDelivery>,
+    remote_desktop_worker_rx:
+        std::sync::mpsc::Receiver<remote_desktop::RemoteDesktopWorkerDelivery>,
     oxide_export_connection_list_state: ListState,
     oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
     oxide_import_connection_preview_list_state: ListState,

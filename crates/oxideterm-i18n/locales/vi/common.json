@@ -106,7 +106,9 @@
     "session_ssh_terminal": "Terminal SSH",
     "cmd_open_cloud_sync": "Mở đồng bộ đám mây",
     "cmd_open_serial_terminal": "Mở terminal serial",
-    "cmd_open_telnet_terminal": "Mở terminal Telnet"
+    "cmd_open_telnet_terminal": "Mở terminal Telnet",
+    "cmd_open_rdp_preview": "Mở bản xem trước RDP",
+    "cmd_open_vnc_preview": "Mở bản xem trước VNC"
   },
   "common": {
     "enabled": "Đã bật",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "Đóng {{count}} tab bên phải? Các phiên SSH đang hoạt động sẽ bị ngắt kết nối.",
     "send_to_background": "Gửi vào nền",
     "child_process_warning": "Terminal này có các tiến trình con đang chạy. Vẫn đóng?"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "Xem trước RDP",
+    "vnc_preview_title": "Xem trước VNC",
+    "provider_missing": "Trình cung cấp máy tính từ xa không khả dụng.",
+    "session_missing": "Phiên máy tính từ xa không khả dụng.",
+    "reconnect": "Kết nối lại",
+    "disconnect": "Ngắt kết nối"
   }
 }

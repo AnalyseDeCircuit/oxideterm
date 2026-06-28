@@ -29,6 +29,7 @@ mod tests {
                 tab_id: "tab".to_string(),
             },
             TabKind::CloudSync,
+            TabKind::RemoteDesktop,
             TabKind::Settings,
         ]
         .iter()

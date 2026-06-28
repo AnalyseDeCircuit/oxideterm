@@ -106,7 +106,9 @@
     "footer_hint": "按 Esc 关闭",
     "session_ssh_terminal": "SSH 终端",
     "cmd_open_serial_terminal": "打开串口终端",
-    "cmd_open_telnet_terminal": "打开 Telnet 终端"
+    "cmd_open_telnet_terminal": "打开 Telnet 终端",
+    "cmd_open_rdp_preview": "打开 RDP 预览",
+    "cmd_open_vnc_preview": "打开 VNC 预览"
   },
   "shortcuts_modal": {
     "title": "键盘快捷键",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "关闭右侧的 {{count}} 个标签页？活动 SSH 会话将被断开。",
     "send_to_background": "移至后台",
     "child_process_warning": "此终端有正在运行的子进程。确定要关闭吗？"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "RDP 预览",
+    "vnc_preview_title": "VNC 预览",
+    "provider_missing": "远程桌面提供器不可用。",
+    "session_missing": "远程桌面会话不可用。",
+    "reconnect": "重新连接",
+    "disconnect": "断开连接"
   }
 }

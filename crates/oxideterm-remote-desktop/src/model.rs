@@ -1,6 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -127,6 +128,7 @@ pub enum RemoteDesktopFrameFormat {
 pub struct RemoteDesktopFrame {
     pub size: RemoteDesktopSize,
     pub format: RemoteDesktopFrameFormat,
+    #[serde(with = "base64_frame_bytes")]
     pub bytes: Vec<u8>,
 }
 
@@ -140,12 +142,40 @@ impl RemoteDesktopFrame {
     }
 
     pub fn expected_len(size: RemoteDesktopSize) -> Option<usize> {
-        let pixels = usize::try_from(size.width).ok()? * usize::try_from(size.height).ok()?;
+        let pixels = usize::try_from(size.width)
+            .ok()?
+            .checked_mul(usize::try_from(size.height).ok()?)?;
         pixels.checked_mul(4)
     }
 
     pub fn is_complete(&self) -> bool {
         Self::expected_len(self.size).is_some_and(|expected| expected == self.bytes.len())
+    }
+}
+
+mod base64_frame_bytes {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+
+    use super::BASE64_STANDARD;
+    use base64::Engine as _;
+
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Frame payloads are large, so the JSON helper protocol uses base64
+        // instead of expanding every byte into a decimal array element.
+        BASE64_STANDARD.encode(bytes).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        BASE64_STANDARD
+            .decode(encoded)
+            .map_err(|error| D::Error::custom(error.to_string()))
     }
 }
 
@@ -173,5 +203,23 @@ mod tests {
         assert!(complete.is_complete());
         assert!(!short.is_complete());
     }
-}
 
+    #[test]
+    fn frame_json_uses_base64_bytes() {
+        let frame = RemoteDesktopFrame::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![1, 2, 3, 4],
+        );
+
+        let encoded = serde_json::to_string(&frame).unwrap();
+        let decoded: RemoteDesktopFrame = serde_json::from_str(&encoded).unwrap();
+
+        assert!(encoded.contains("\"bytes\":\"AQIDBA==\""));
+        assert!(!encoded.contains("[1,2,3,4]"));
+        assert_eq!(decoded, frame);
+    }
+}

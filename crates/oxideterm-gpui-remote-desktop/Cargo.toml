@@ -1,0 +1,12 @@
+[package]
+name = "oxideterm-gpui-remote-desktop"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+image.workspace = true
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+oxideterm-theme = { path = "../oxideterm-theme" }

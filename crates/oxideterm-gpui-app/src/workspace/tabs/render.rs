@@ -75,6 +75,7 @@ impl WorkspaceApp {
                 TabKind::PluginManager => LucideIcon::Puzzle,
                 TabKind::Plugin { .. } => LucideIcon::Puzzle,
                 TabKind::CloudSync => LucideIcon::Cloud,
+                TabKind::RemoteDesktop => LucideIcon::Monitor,
                 TabKind::Settings => LucideIcon::Settings,
             };
             let tab_text = self.tab_display_title(tab);

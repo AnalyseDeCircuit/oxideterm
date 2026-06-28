@@ -6707,6 +6707,7 @@ dependencies = [
  "oxideterm-gpui-ide",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
+ "oxideterm-gpui-remote-desktop",
  "oxideterm-gpui-settings-view",
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",
@@ -6722,6 +6723,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-preview",
  "oxideterm-quick-commands",
+ "oxideterm-remote-desktop",
  "oxideterm-render-policy",
  "oxideterm-session-adapter",
  "oxideterm-settings",
@@ -6826,6 +6828,17 @@ dependencies = [
  "oxideterm-theme",
  "raw-window-handle",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "oxideterm-gpui-remote-desktop"
+version = "2.0.0-gpui-preview.10"
+dependencies = [
+ "gpui",
+ "image",
+ "oxideterm-gpui-ui",
+ "oxideterm-remote-desktop",
+ "oxideterm-theme",
 ]
 
 [[package]]
@@ -7051,6 +7064,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-rdp-helper"
+version = "2.0.0-gpui-preview.10"
+dependencies = [
+ "oxideterm-remote-desktop",
+]
+
+[[package]]
+name = "oxideterm-remote-desktop"
+version = "2.0.0-gpui-preview.10"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "oxideterm-render-policy"
 version = "2.0.0-gpui-preview.10"
 dependencies = [
@@ -7251,6 +7283,13 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "oxideterm-vnc-helper"
+version = "2.0.0-gpui-preview.10"
+dependencies = [
+ "oxideterm-remote-desktop",
 ]
 
 [[package]]

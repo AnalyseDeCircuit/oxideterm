@@ -106,7 +106,9 @@
     "session_ssh_terminal": "SSH ターミナル",
     "cmd_open_cloud_sync": "クラウド同期を開く",
     "cmd_open_serial_terminal": "シリアルターミナルを開く",
-    "cmd_open_telnet_terminal": "Telnet ターミナルを開く"
+    "cmd_open_telnet_terminal": "Telnet ターミナルを開く",
+    "cmd_open_rdp_preview": "RDP プレビューを開く",
+    "cmd_open_vnc_preview": "VNC プレビューを開く"
   },
   "common": {
     "enabled": "有効",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "右側の {{count}} 個のタブを閉じますか？アクティブな SSH セッションは切断されます。",
     "send_to_background": "バックグラウンドに送る",
     "child_process_warning": "このターミナルには実行中の子プロセスがあります。それでも閉じますか？"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "RDP プレビュー",
+    "vnc_preview_title": "VNC プレビュー",
+    "provider_missing": "リモートデスクトッププロバイダーを利用できません。",
+    "session_missing": "リモートデスクトップセッションを利用できません。",
+    "reconnect": "再接続",
+    "disconnect": "切断"
   }
 }

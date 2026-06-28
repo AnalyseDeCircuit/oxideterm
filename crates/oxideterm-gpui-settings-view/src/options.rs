@@ -230,6 +230,11 @@ pub fn background_tab_options() -> &'static [(&'static str, &'static str, Settin
             SettingsBackgroundTabIcon::Cloud,
         ),
         (
+            "remote_desktop",
+            "settings_view.terminal.bg_tab_remote_desktop",
+            SettingsBackgroundTabIcon::Monitor,
+        ),
+        (
             "settings",
             "settings_view.terminal.bg_tab_settings",
             SettingsBackgroundTabIcon::Settings,

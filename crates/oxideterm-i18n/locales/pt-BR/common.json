@@ -106,7 +106,9 @@
     "session_ssh_terminal": "Terminal SSH",
     "cmd_open_cloud_sync": "Abrir sincronização na nuvem",
     "cmd_open_serial_terminal": "Abrir terminal serial",
-    "cmd_open_telnet_terminal": "Abrir terminal Telnet"
+    "cmd_open_telnet_terminal": "Abrir terminal Telnet",
+    "cmd_open_rdp_preview": "Abrir prévia RDP",
+    "cmd_open_vnc_preview": "Abrir prévia VNC"
   },
   "common": {
     "enabled": "Ativado",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "Fechar as {{count}} abas à direita? As sessões SSH ativas serão desconectadas.",
     "send_to_background": "Enviar para segundo plano",
     "child_process_warning": "Este terminal tem processos filhos em execução. Fechar mesmo assim?"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "Prévia RDP",
+    "vnc_preview_title": "Prévia VNC",
+    "provider_missing": "O provedor de área de trabalho remota está indisponível.",
+    "session_missing": "A sessão de área de trabalho remota está indisponível.",
+    "reconnect": "Reconectar",
+    "disconnect": "Desconectar"
   }
 }

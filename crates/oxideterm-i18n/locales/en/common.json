@@ -106,7 +106,9 @@
     "footer_hint": "Press Esc to close",
     "session_ssh_terminal": "SSH Terminal",
     "cmd_open_serial_terminal": "Open Serial Terminal",
-    "cmd_open_telnet_terminal": "Open Telnet Terminal"
+    "cmd_open_telnet_terminal": "Open Telnet Terminal",
+    "cmd_open_rdp_preview": "Open RDP Preview",
+    "cmd_open_vnc_preview": "Open VNC Preview"
   },
   "shortcuts_modal": {
     "title": "Keyboard Shortcuts",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "Close {{count}} tabs to the right? Active SSH sessions will be disconnected.",
     "send_to_background": "Send to Background",
     "child_process_warning": "This terminal has running child processes. Close anyway?"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "RDP Preview",
+    "vnc_preview_title": "VNC Preview",
+    "provider_missing": "Remote desktop provider is unavailable.",
+    "session_missing": "Remote desktop session is unavailable.",
+    "reconnect": "Reconnect",
+    "disconnect": "Disconnect"
   }
 }

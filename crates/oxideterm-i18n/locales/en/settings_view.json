@@ -1278,5 +1278,8 @@
       "test_success": "Connected in {{elapsed}} ms",
       "test_error": "Test failed: {{error}}"
     }
+  },
+  "terminal": {
+    "bg_tab_remote_desktop": "Remote Desktop"
   }
 }

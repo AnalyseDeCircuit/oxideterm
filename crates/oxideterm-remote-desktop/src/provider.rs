@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use crate::RemoteDesktopProtocol;
 
 pub const REMOTE_DESKTOP_PROVIDER_MANIFEST: &str = "remote_desktop_provider.json";
+const BUILTIN_RDP_PROVIDER_ID: &str = "builtin-rdp";
+const BUILTIN_VNC_PROVIDER_ID: &str = "builtin-vnc";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +159,76 @@ pub fn read_manifest(
     Ok(manifest)
 }
 
+pub fn builtin_provider_manifest(protocol: RemoteDesktopProtocol) -> RemoteDesktopProviderManifest {
+    builtin_provider_manifest_with_mode(protocol, false)
+}
+
+pub fn builtin_preview_provider_manifest(
+    protocol: RemoteDesktopProtocol,
+) -> RemoteDesktopProviderManifest {
+    builtin_provider_manifest_with_mode(protocol, true)
+}
+
+fn builtin_provider_manifest_with_mode(
+    protocol: RemoteDesktopProtocol,
+    fake_preview: bool,
+) -> RemoteDesktopProviderManifest {
+    let (id, name, command) = match protocol {
+        RemoteDesktopProtocol::Rdp => (
+            BUILTIN_RDP_PROVIDER_ID,
+            "Built-in RDP Helper",
+            "oxideterm-rdp-helper",
+        ),
+        RemoteDesktopProtocol::Vnc => (
+            BUILTIN_VNC_PROVIDER_ID,
+            "Built-in VNC Helper",
+            "oxideterm-vnc-helper",
+        ),
+    };
+    let mut args = vec!["--stdio".to_string()];
+    if fake_preview {
+        args.push("--fake".to_string());
+    }
+
+    RemoteDesktopProviderManifest {
+        id: id.to_string(),
+        name: name.to_string(),
+        description: "Bundled OxideTerm remote desktop helper.".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        protocol,
+        entry: RemoteDesktopProviderEntry {
+            command: command.to_string(),
+            args,
+            working_dir: None,
+        },
+        capabilities: RemoteDesktopProviderCapabilities {
+            clipboard_text: true,
+            resize: true,
+            cursor: true,
+            binary_frames: true,
+        },
+        ui: Some(RemoteDesktopProviderUi {
+            default_port: Some(protocol.default_port()),
+        }),
+    }
+}
+
+pub fn builtin_provider_registry()
+-> Result<RemoteDesktopProviderRegistry, RemoteDesktopProviderError> {
+    RemoteDesktopProviderRegistry::from_manifests([
+        builtin_provider_manifest(RemoteDesktopProtocol::Rdp),
+        builtin_provider_manifest(RemoteDesktopProtocol::Vnc),
+    ])
+}
+
+pub fn builtin_preview_provider_registry()
+-> Result<RemoteDesktopProviderRegistry, RemoteDesktopProviderError> {
+    RemoteDesktopProviderRegistry::from_manifests([
+        builtin_preview_provider_manifest(RemoteDesktopProtocol::Rdp),
+        builtin_preview_provider_manifest(RemoteDesktopProtocol::Vnc),
+    ])
+}
+
 fn validate_provider_id(value: &str) -> Result<(), RemoteDesktopProviderError> {
     require_non_empty("id", value)?;
     if value.contains('/') || value.contains('\\') || value.contains("..") {
@@ -249,10 +321,59 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn builtin_registry_exposes_rdp_and_vnc_helpers() {
+        let registry = builtin_provider_registry().unwrap();
+
+        assert_eq!(
+            registry
+                .get_for_protocol(RemoteDesktopProtocol::Rdp)
+                .unwrap()
+                .entry
+                .command,
+            "oxideterm-rdp-helper"
+        );
+        assert_eq!(
+            registry
+                .get_for_protocol(RemoteDesktopProtocol::Rdp)
+                .unwrap()
+                .entry
+                .args,
+            vec!["--stdio".to_string()]
+        );
+        assert_eq!(
+            registry
+                .get_for_protocol(RemoteDesktopProtocol::Vnc)
+                .unwrap()
+                .effective_default_port(),
+            5900
+        );
+    }
+
+    #[test]
+    fn builtin_preview_registry_keeps_fake_helpers_explicit() {
+        let registry = builtin_preview_provider_registry().unwrap();
+
+        assert!(
+            registry
+                .get_for_protocol(RemoteDesktopProtocol::Rdp)
+                .unwrap()
+                .entry
+                .args
+                .contains(&"--fake".to_string())
+        );
+        assert_eq!(
+            registry
+                .get_for_protocol(RemoteDesktopProtocol::Vnc)
+                .unwrap()
+                .effective_default_port(),
+            5900
+        );
+    }
+
     fn unique_temp_dir(label: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("{label}-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&path).unwrap();
         path
     }
 }
-

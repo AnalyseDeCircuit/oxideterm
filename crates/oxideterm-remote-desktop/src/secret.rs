@@ -66,4 +66,3 @@ mod tests {
         assert!(!debug.contains("rdp-password"));
     }
 }
-

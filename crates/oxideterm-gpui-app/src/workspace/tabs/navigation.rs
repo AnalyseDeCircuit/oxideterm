@@ -222,6 +222,9 @@ impl WorkspaceApp {
             Some(TabKind::CloudSync) => {
                 self.active_surface = ActiveSurface::Terminal;
             }
+            Some(TabKind::RemoteDesktop) => {
+                self.active_surface = ActiveSurface::Terminal;
+            }
             _ => {
                 self.active_surface = ActiveSurface::Terminal;
             }
@@ -769,6 +772,9 @@ impl WorkspaceApp {
         }
         if tab.kind == TabKind::Graphics {
             self.shutdown_graphics_session();
+        }
+        if tab.kind == TabKind::RemoteDesktop {
+            self.close_remote_desktop_tab(tab.id);
         }
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
         // only a view over the node-owned ConnectionEntry session.

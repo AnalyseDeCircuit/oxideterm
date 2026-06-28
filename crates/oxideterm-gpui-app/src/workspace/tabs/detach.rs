@@ -607,6 +607,7 @@ impl WorkspaceApp {
                 self.render_native_plugin_tab_surface(plugin_id, tab_id, cx)
             }
             (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
+            (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, cx),
             (_, Some(root_pane)) => self.render_detached_terminal_surface(tab_id, root_pane, cx),
             _ => self.render_empty_workspace(cx),
         }

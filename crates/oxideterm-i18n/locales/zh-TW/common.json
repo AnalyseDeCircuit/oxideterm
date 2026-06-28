@@ -106,7 +106,9 @@
     "session_ssh_terminal": "SSH 終端機",
     "cmd_open_cloud_sync": "開啟雲端同步",
     "cmd_open_serial_terminal": "開啟序列埠終端機",
-    "cmd_open_telnet_terminal": "開啟 Telnet 終端機"
+    "cmd_open_telnet_terminal": "開啟 Telnet 終端機",
+    "cmd_open_rdp_preview": "開啟 RDP 預覽",
+    "cmd_open_vnc_preview": "開啟 VNC 預覽"
   },
   "common": {
     "enabled": "已啟用",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "要關閉右側的 {{count}} 個標籤頁嗎？活動中的 SSH 工作階段將被中斷。",
     "send_to_background": "移至背景",
     "child_process_warning": "此終端機有正在執行的子行程序。確定要關閉嗎？"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "RDP 預覽",
+    "vnc_preview_title": "VNC 預覽",
+    "provider_missing": "遠端桌面提供器無法使用。",
+    "session_missing": "遠端桌面工作階段無法使用。",
+    "reconnect": "重新連線",
+    "disconnect": "中斷連線"
   }
 }

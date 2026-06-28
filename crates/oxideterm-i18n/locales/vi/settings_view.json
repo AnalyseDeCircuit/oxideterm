@@ -1278,5 +1278,8 @@
       "test_success": "Đã kết nối trong {{elapsed}} ms",
       "test_error": "Kiểm tra thất bại: {{error}}"
     }
+  },
+  "terminal": {
+    "bg_tab_remote_desktop": "Máy tính từ xa"
   }
 }

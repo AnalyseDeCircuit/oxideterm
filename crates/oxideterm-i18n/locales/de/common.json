@@ -106,7 +106,9 @@
     "session_ssh_terminal": "SSH-Terminal",
     "cmd_open_cloud_sync": "Cloud-Sync öffnen",
     "cmd_open_serial_terminal": "Serielles Terminal öffnen",
-    "cmd_open_telnet_terminal": "Telnet-Terminal öffnen"
+    "cmd_open_telnet_terminal": "Telnet-Terminal öffnen",
+    "cmd_open_rdp_preview": "RDP-Vorschau öffnen",
+    "cmd_open_vnc_preview": "VNC-Vorschau öffnen"
   },
   "common": {
     "enabled": "Aktiviert",
@@ -993,5 +995,13 @@
     "confirm_close_tabs_to_right_desc": "{{count}} Tabs rechts schließen? Aktive SSH-Sitzungen werden getrennt.",
     "send_to_background": "In den Hintergrund senden",
     "child_process_warning": "Dieses Terminal hat laufende Kindprozesse. Trotzdem schließen?"
+  },
+  "remote_desktop": {
+    "rdp_preview_title": "RDP-Vorschau",
+    "vnc_preview_title": "VNC-Vorschau",
+    "provider_missing": "Remote-Desktop-Anbieter ist nicht verfügbar.",
+    "session_missing": "Remote-Desktop-Sitzung ist nicht verfügbar.",
+    "reconnect": "Neu verbinden",
+    "disconnect": "Trennen"
   }
 }

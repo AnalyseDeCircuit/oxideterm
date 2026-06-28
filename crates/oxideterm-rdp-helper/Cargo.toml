@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-rdp-helper"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }

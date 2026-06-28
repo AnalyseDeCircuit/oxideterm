@@ -26,6 +26,7 @@ oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
+oxideterm-gpui-remote-desktop = { path = "../oxideterm-gpui-remote-desktop" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
@@ -43,6 +44,7 @@ oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-preview = { path = "../oxideterm-preview" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
