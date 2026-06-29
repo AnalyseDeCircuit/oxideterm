@@ -271,6 +271,44 @@ fn printable_remote_text(key: &RemoteDesktopKey) -> Option<char> {
 fn rdp_key_code_prefers_physical_scancode(code: &str) -> bool {
     let normalized = normalize_rdp_key_code(code);
     normalized.starts_with("numpad")
+        || matches!(
+            normalized.as_str(),
+            "escape"
+                | "esc"
+                | "backspace"
+                | "tab"
+                | "enter"
+                | "return"
+                | "capslock"
+                | "caps_lock"
+                | "numlock"
+                | "num_lock"
+                | "scrolllock"
+                | "scroll_lock"
+                | "printscreen"
+                | "print"
+                | "snapshot"
+                | "contextmenu"
+                | "context_menu"
+                | "menu"
+                | "apps"
+                | "delete"
+                | "insert"
+                | "home"
+                | "end"
+                | "pageup"
+                | "page_up"
+                | "pagedown"
+                | "page_down"
+                | "arrowup"
+                | "arrowdown"
+                | "arrowleft"
+                | "arrowright"
+        )
+        || normalized
+            .strip_prefix('f')
+            .and_then(|number| number.parse::<u8>().ok())
+            .is_some_and(|number| (1..=12).contains(&number))
 }
 
 pub(crate) fn single_non_control_char(text: &str) -> Option<char> {
@@ -583,6 +621,25 @@ mod tests {
 
         assert_eq!(keypad_down.len(), 1);
         assert_eq!(scancode(&keypad_down[0]), 0x4f);
+    }
+
+    #[test]
+    fn keyboard_mapper_prefers_special_key_scancode_over_text() {
+        let mut mapper = RdpKeyboardInputMapper::default();
+
+        let enter_down = mapper.operations(
+            &key("Enter", Some("\n"), false),
+            RemoteDesktopKeyState::Pressed,
+        );
+        assert_eq!(enter_down.len(), 1);
+        assert_eq!(scancode(&enter_down[0]), 0x1c);
+
+        let backspace_down = mapper.operations(
+            &key("Backspace", Some("\u{8}"), false),
+            RemoteDesktopKeyState::Pressed,
+        );
+        assert_eq!(backspace_down.len(), 1);
+        assert_eq!(scancode(&backspace_down[0]), 0x0e);
     }
 
     #[test]

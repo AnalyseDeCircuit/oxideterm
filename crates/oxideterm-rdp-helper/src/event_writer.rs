@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     io,
     sync::{Arc, Condvar, Mutex},
     thread,
@@ -17,7 +18,7 @@ pub(crate) struct SharedEventWriter {
 
 #[derive(Default)]
 struct EventWriterQueue {
-    frame: Option<RemoteDesktopHelperEvent>,
+    frames: VecDeque<RemoteDesktopHelperEvent>,
 }
 
 impl SharedEventWriter {
@@ -44,15 +45,11 @@ impl SharedEventWriter {
             .lock()
             .map_err(|_| "RDP event queue lock is poisoned.".to_string())?;
         if is_frame_event(&event) {
-            if let Some(frame) = queue.frame.as_mut() {
-                merge_frame_event(frame, event);
-            } else {
-                queue.frame = Some(event);
-            }
+            push_frame_event(&mut queue.frames, event);
             wake.notify_one();
             return Ok(());
         }
-        let pending_frame = queue.frame.take();
+        let pending_frames = queue.frames.drain(..).collect::<Vec<_>>();
         drop(queue);
 
         // Control events are written synchronously so short-lived failures are
@@ -61,7 +58,7 @@ impl SharedEventWriter {
             .stdout
             .lock()
             .map_err(|_| "RDP stdout writer lock is poisoned.".to_string())?;
-        if let Some(frame) = pending_frame {
+        for frame in pending_frames {
             write_event_line(&mut *stdout, &frame)
                 .map_err(|error| format!("RDP event write failed: {error}"))?;
         }
@@ -95,13 +92,13 @@ fn next_frame_for_stdout(
     let (queue_lock, wake) = &**queue;
     let mut queue = queue_lock.lock().ok()?;
     loop {
-        if queue.frame.is_none() {
+        if queue.frames.is_empty() {
             queue = wake.wait(queue).ok()?;
             continue;
         }
 
-        // Keep only one pending frame and give fast bursts one refresh tick to
-        // merge into a smaller stdout write workload.
+        // Give fast bursts one refresh tick to merge adjacent dirty regions,
+        // while preserving sparse regions as ordered updates.
         let deadline = Instant::now() + FRAME_COALESCE_WINDOW;
         loop {
             let now = Instant::now();
@@ -115,7 +112,7 @@ fn next_frame_for_stdout(
                 break;
             }
         }
-        if let Some(frame) = queue.frame.take() {
+        if let Some(frame) = queue.frames.pop_front() {
             return Some(frame);
         }
     }
@@ -128,12 +125,34 @@ fn is_frame_event(event: &RemoteDesktopHelperEvent) -> bool {
     )
 }
 
-fn merge_frame_event(existing: &mut RemoteDesktopHelperEvent, incoming: RemoteDesktopHelperEvent) {
+fn push_frame_event(
+    frames: &mut VecDeque<RemoteDesktopHelperEvent>,
+    event: RemoteDesktopHelperEvent,
+) {
+    if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
+        frames.clear();
+        frames.push_back(event);
+        return;
+    }
+
+    if let Some(existing) = frames.back_mut() {
+        if let Err(incoming) = try_merge_frame_event(existing, event) {
+            frames.push_back(incoming);
+        }
+    } else {
+        frames.push_back(event);
+    }
+}
+
+fn try_merge_frame_event(
+    existing: &mut RemoteDesktopHelperEvent,
+    incoming: RemoteDesktopHelperEvent,
+) -> Result<(), RemoteDesktopHelperEvent> {
     match existing {
         RemoteDesktopHelperEvent::Frame { frame } => match incoming {
             RemoteDesktopHelperEvent::FrameUpdate { update } => {
                 if !frame.apply_update(&update) {
-                    *existing = RemoteDesktopHelperEvent::FrameUpdate { update };
+                    return Err(RemoteDesktopHelperEvent::FrameUpdate { update });
                 }
             }
             incoming => {
@@ -145,9 +164,9 @@ fn merge_frame_event(existing: &mut RemoteDesktopHelperEvent, incoming: RemoteDe
                 update: incoming_update,
             } => {
                 if !update.merge(&incoming_update) {
-                    *existing = RemoteDesktopHelperEvent::FrameUpdate {
+                    return Err(RemoteDesktopHelperEvent::FrameUpdate {
                         update: incoming_update,
-                    };
+                    });
                 }
             }
             incoming => {
@@ -158,6 +177,7 @@ fn merge_frame_event(existing: &mut RemoteDesktopHelperEvent, incoming: RemoteDe
             *slot = incoming;
         }
     }
+    Ok(())
 }
 
 pub(crate) fn send_event(

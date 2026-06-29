@@ -1,6 +1,6 @@
 use ironrdp::{
     pdu::geometry::{InclusiveRectangle, Rectangle as _},
-    session::{self, SessionResult, image::DecodedImage},
+    session::{SessionResult, image::DecodedImage},
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
@@ -12,19 +12,23 @@ pub(crate) fn graphics_update_event(
     region: InclusiveRectangle,
     sent_initial_frame: &mut bool,
 ) -> SessionResult<Option<RemoteDesktopHelperEvent>> {
-    let rect = normalized_update_rect(image, region)?;
+    let Some(rect) = normalized_update_rect(image, region)? else {
+        return Ok(None);
+    };
     if !*sent_initial_frame {
-        // The first dirty update establishes the UI-side backing buffer. It can
-        // be temporarily black, but publishing it immediately lets later dirty
-        // rectangles patch the buffer instead of waiting for a full-screen update.
+        if !rect_covers_image(rect, image) && !image_has_visible_rgb(image.data()) {
+            // A zero-filled partial update is not a valid desktop base. Keep
+            // waiting until IronRDP has decoded a real backing image.
+            return Ok(None);
+        }
         *sent_initial_frame = true;
-        return Ok(Some(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                remote_size_for_image(image),
-                RemoteDesktopFrameFormat::Rgba8,
-                opaque_rgba_bytes(image.data()),
-            ),
-        }));
+        return Ok(Some(base_frame_event(image)));
+    }
+    if rect_covers_image(rect, image) {
+        // A full-screen dirty region is already a complete backing buffer. Send
+        // it as a base frame so the UI can recover after logon reactivation or
+        // any missed incremental rectangles.
+        return Ok(Some(base_frame_event(image)));
     }
 
     Ok(Some(RemoteDesktopHelperEvent::FrameUpdate {
@@ -37,6 +41,16 @@ pub(crate) fn graphics_update_event(
     }))
 }
 
+pub(crate) fn base_frame_event(image: &DecodedImage) -> RemoteDesktopHelperEvent {
+    RemoteDesktopHelperEvent::Frame {
+        frame: RemoteDesktopFrame::new(
+            remote_size_for_image(image),
+            RemoteDesktopFrameFormat::Rgba8,
+            opaque_rgba_bytes(image.data()),
+        ),
+    }
+}
+
 pub(crate) fn remote_size_for_image(image: &DecodedImage) -> RemoteDesktopSize {
     RemoteDesktopSize {
         width: u32::from(image.width()),
@@ -47,22 +61,23 @@ pub(crate) fn remote_size_for_image(image: &DecodedImage) -> RemoteDesktopSize {
 pub(crate) fn normalized_update_rect(
     image: &DecodedImage,
     region: InclusiveRectangle,
-) -> SessionResult<RemoteDesktopRect> {
+) -> SessionResult<Option<RemoteDesktopRect>> {
     if region.right >= image.width()
         || region.bottom >= image.height()
         || region.left > region.right
         || region.top > region.bottom
     {
-        return Err(session::general_err!(
-            "RDP graphics update region is outside the image"
-        ));
+        // IronRDP can surface a stale region while the desktop size is being
+        // renegotiated. Treat it as a dropped dirty update instead of tearing
+        // down an otherwise healthy session.
+        return Ok(None);
     }
-    Ok(RemoteDesktopRect::new(
+    Ok(Some(RemoteDesktopRect::new(
         u32::from(region.left),
         u32::from(region.top),
         u32::from(region.width()),
         u32::from(region.height()),
-    ))
+    )))
 }
 
 pub(crate) fn copy_image_rect(
@@ -84,6 +99,19 @@ pub(crate) fn copy_image_rect(
     }
     set_rgba_alpha_opaque(&mut bytes);
     bytes
+}
+
+fn rect_covers_image(rect: RemoteDesktopRect, image: &DecodedImage) -> bool {
+    rect.x == 0
+        && rect.y == 0
+        && rect.width == u32::from(image.width())
+        && rect.height == u32::from(image.height())
+}
+
+fn image_has_visible_rgb(bytes: &[u8]) -> bool {
+    bytes
+        .chunks_exact(RemoteDesktopFrameFormat::Rgba8.bytes_per_pixel())
+        .any(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
 }
 
 pub(crate) fn opaque_rgba_bytes(bytes: &[u8]) -> Vec<u8> {

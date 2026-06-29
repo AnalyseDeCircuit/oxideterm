@@ -190,6 +190,58 @@ impl RemoteDesktopRect {
             height: bottom.checked_sub(y)?,
         })
     }
+
+    fn intersection(self, other: Self) -> Option<Self> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let right = self
+            .x
+            .checked_add(self.width)?
+            .min(other.x.checked_add(other.width)?);
+        let bottom = self
+            .y
+            .checked_add(self.height)?
+            .min(other.y.checked_add(other.height)?);
+        if right <= x || bottom <= y {
+            return None;
+        }
+        Some(Self {
+            x,
+            y,
+            width: right.checked_sub(x)?,
+            height: bottom.checked_sub(y)?,
+        })
+    }
+
+    fn area(self) -> Option<u64> {
+        Some(u64::from(self.width).checked_mul(u64::from(self.height))?)
+    }
+
+    fn union_is_fully_covered_by(self, other: Self) -> bool {
+        let Some(union) = self.union(other) else {
+            return false;
+        };
+        let Some(union_area) = union.area() else {
+            return false;
+        };
+        let Some(self_area) = self.area() else {
+            return false;
+        };
+        let Some(other_area) = other.area() else {
+            return false;
+        };
+        let overlap_area = self
+            .intersection(other)
+            .and_then(Self::area)
+            .unwrap_or_default();
+        let Some(covered_area) = self_area
+            .checked_add(other_area)
+            .and_then(|area| area.checked_sub(overlap_area))
+        else {
+            return false;
+        };
+        union_area == covered_area
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -301,6 +353,9 @@ impl RemoteDesktopFrameUpdate {
             || !self.is_complete()
             || !incoming.is_complete()
         {
+            return false;
+        }
+        if !self.rect.union_is_fully_covered_by(incoming.rect) {
             return false;
         }
         let Some(union) = self.rect.union(incoming.rect) else {
@@ -550,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_updates_merge_into_union_rect() {
+    fn adjacent_frame_updates_merge_into_union_rect() {
         let size = RemoteDesktopSize {
             width: 4,
             height: 2,
@@ -563,15 +618,39 @@ mod tests {
         );
         let incoming = RemoteDesktopFrameUpdate::new(
             size,
-            RemoteDesktopRect::new(2, 0, 1, 1),
+            RemoteDesktopRect::new(1, 0, 1, 1),
             RemoteDesktopFrameFormat::Rgba8,
             vec![2, 2, 2, 2],
         );
 
         assert!(update.merge(&incoming));
 
-        assert_eq!(update.rect, RemoteDesktopRect::new(0, 0, 3, 1));
-        assert_eq!(update.bytes, vec![1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 2, 2]);
+        assert_eq!(update.rect, RemoteDesktopRect::new(0, 0, 2, 1));
+        assert_eq!(update.bytes, vec![1, 1, 1, 1, 2, 2, 2, 2]);
+    }
+
+    #[test]
+    fn sparse_frame_updates_do_not_merge_into_zero_filled_holes() {
+        let size = RemoteDesktopSize {
+            width: 4,
+            height: 2,
+        };
+        let mut update = RemoteDesktopFrameUpdate::new(
+            size,
+            RemoteDesktopRect::new(0, 0, 1, 1),
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![1, 1, 1, 1],
+        );
+        let original = update.clone();
+        let incoming = RemoteDesktopFrameUpdate::new(
+            size,
+            RemoteDesktopRect::new(2, 0, 1, 1),
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![2, 2, 2, 2],
+        );
+
+        assert!(!update.merge(&incoming));
+        assert_eq!(update, original);
     }
 
     #[test]

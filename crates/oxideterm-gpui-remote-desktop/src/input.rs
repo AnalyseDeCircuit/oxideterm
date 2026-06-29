@@ -110,6 +110,7 @@ impl RemoteDesktopViewportMapper {
 
         Some(RemoteDesktopHelperRequest::Resize {
             size: RemoteDesktopSize::clamped(width.round() as u32, height.round() as u32),
+            scale_factor: None,
         })
     }
 
@@ -186,7 +187,8 @@ mod tests {
                 size: RemoteDesktopSize {
                     width: 200,
                     height: 120
-                }
+                },
+                ..
             }
         ));
     }
