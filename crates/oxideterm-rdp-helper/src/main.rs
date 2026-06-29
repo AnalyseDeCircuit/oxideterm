@@ -6,7 +6,7 @@ use std::{
     io::{self, BufRead, BufReader},
     sync::mpsc,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use ironrdp::{
@@ -14,9 +14,9 @@ use ironrdp::{
         CliprdrClient,
         backend::{ClipboardMessage, CliprdrBackend},
         pdu::{
-            ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags,
-            FileContentsRequest, FileContentsResponse, FormatDataRequest, FormatDataResponse,
-            LockDataId,
+            ClipboardFormat, ClipboardFormatId, ClipboardFormatName,
+            ClipboardGeneralCapabilityFlags, FileContentsRequest, FileContentsResponse,
+            FormatDataRequest, FormatDataResponse, LockDataId,
         },
     },
     connector::connection_activation::ConnectionActivationState,
@@ -42,11 +42,13 @@ use ironrdp::{
         image::DecodedImage,
     },
 };
+use ironrdp_cliprdr_format::bitmap::{dib_to_png, dibv5_to_png, png_to_cf_dib, png_to_cf_dibv5};
 use ironrdp_core::{IntoOwned as _, WriteBuf, impl_as_any};
 use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp_tokio::{FramedWrite, single_sequence_step_read, split_tokio_framed};
 use oxideterm_remote_desktop::{
-    RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFakeBackend,
+    RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopCursorShape,
+    RemoteDesktopEndpoint, RemoteDesktopErrorCategory, RemoteDesktopFakeBackend,
     RemoteDesktopFrameFormat, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
     RemoteDesktopLockKeys, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
     RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line,
@@ -70,14 +72,40 @@ use input::*;
 
 const RDP_CLIENT_NAME: &str = "OxideTerm";
 const RDP_CLIENT_LOOP_POLL_INTERVAL: Duration = Duration::from_millis(8);
+const RDP_CLIENT_REQUEST_DRAIN_LIMIT: usize = 128;
 const RDP_CLIENT_OUTPUT_DRAIN_LIMIT: usize = 32;
-const RDP_RECONNECT_DELAY: Duration = Duration::from_secs(1);
+const RDP_CLIENT_OUTPUT_QUEUE_CAPACITY: usize = 64;
+const RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 0;
+const RDP_DISPLAYCONTROL_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 100;
+const RDP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
+const RDP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const RDP_CLIPBOARD_TIMEOUT_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const RDP_CLIPBOARD_TEMPORARY_DIRECTORY: &str = ".cliprdr";
+const RDP_CLIPBOARD_FORMAT_IMAGE_PNG: ClipboardFormatId = ClipboardFormatId(0xc001);
+const RDP_CLIPBOARD_FORMAT_IMAGE_JPEG: ClipboardFormatId = ClipboardFormatId(0xc002);
+const RDP_CLIPBOARD_FORMAT_IMAGE_WEBP: ClipboardFormatId = ClipboardFormatId(0xc003);
+const RDP_CLIPBOARD_FORMAT_IMAGE_GIF: ClipboardFormatId = ClipboardFormatId(0xc004);
+const RDP_CLIPBOARD_FORMAT_IMAGE_SVG: ClipboardFormatId = ClipboardFormatId(0xc005);
+const RDP_CLIPBOARD_FORMAT_IMAGE_BMP: ClipboardFormatId = ClipboardFormatId(0xc006);
+const RDP_CLIPBOARD_FORMAT_IMAGE_TIFF: ClipboardFormatId = ClipboardFormatId(0xc007);
 const LEGACY_RDP_SECURITY_MESSAGE: &str =
     "该服务器只支持旧版 RDP 安全模式，需要启用 legacy RDP 支持";
 const LEGACY_RDP_ENGINE_UNAVAILABLE_MESSAGE: &str =
     "该服务器只支持旧版 RDP 安全模式，但当前 helper 构建未包含 FreeRDP legacy 引擎";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RdpClipboardDataFormat {
+    id: ClipboardFormatId,
+    format: RemoteDesktopClipboardFormat,
+    encoding: RdpClipboardDataEncoding,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RdpClipboardDataEncoding {
+    Encoded,
+    Dib,
+    DibV5,
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -120,6 +148,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         password,
         domain,
         size,
+        scale_factor,
         read_only,
     } = first_request
     else {
@@ -127,6 +156,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "RDP helper expected an initial connect request.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
         return Ok(());
@@ -137,6 +167,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "RDP helper received a non-RDP connect request.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
         return Ok(());
@@ -147,6 +178,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "RDP username is required.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
         return Ok(());
@@ -156,6 +188,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "RDP password is required.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
         return Ok(());
@@ -169,6 +202,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             password,
             domain,
             size,
+            scale_factor: rdp_connector_scale_factor(scale_factor),
             read_only,
         },
         writer.clone(),
@@ -196,6 +230,7 @@ struct RdpWorkerConfig {
     password: RemoteDesktopSecret,
     domain: Option<String>,
     size: RemoteDesktopSize,
+    scale_factor: u32,
     read_only: bool,
 }
 
@@ -210,7 +245,10 @@ fn start_rdp_worker(
             if let Err(error) = run_rdp_worker(config, writer.clone(), request_rx) {
                 let _ = send_event(
                     &writer,
-                    RemoteDesktopHelperEvent::ConnectionFailure { message: error },
+                    RemoteDesktopHelperEvent::ConnectionFailure {
+                        category: Some(remote_desktop_error_category_from_message(&error)),
+                        message: error,
+                    },
                 );
             }
         })
@@ -265,23 +303,22 @@ fn run_rdp_worker(
             ClientRdpSessionExit::ReconnectRequested => {
                 reconnecting = true;
             }
-            ClientRdpSessionExit::RemoteEnded => {
-                send_event(
+            ClientRdpSessionExit::RemoteEnded(reason) => {
+                return send_event(
                     &writer,
-                    RemoteDesktopHelperEvent::Status {
-                        status: RemoteDesktopSessionStatus::Reconnecting,
-                        message: Some("RDP session ended. Reconnecting.".to_string()),
+                    RemoteDesktopHelperEvent::Disconnected {
+                        reason: sanitize_rdp_disconnect_reason(reason.as_deref()),
                     },
-                )?;
-                if !wait_before_rdp_reconnect(&request_rx, &mut config, RDP_RECONNECT_DELAY) {
-                    return send_event(
-                        &writer,
-                        RemoteDesktopHelperEvent::Disconnected {
-                            reason: Some("RDP session closed.".to_string()),
-                        },
-                    );
-                }
-                reconnecting = true;
+                );
+            }
+            ClientRdpSessionExit::ConnectionFailed { message, category } => {
+                return send_event(
+                    &writer,
+                    RemoteDesktopHelperEvent::ConnectionFailure {
+                        message,
+                        category: Some(category),
+                    },
+                );
             }
             ClientRdpSessionExit::LegacySecurityRequired => {
                 return run_legacy_rdp_worker(config, writer, request_rx);
@@ -294,7 +331,11 @@ fn run_rdp_worker(
 enum ClientRdpSessionExit {
     Closed,
     ReconnectRequested,
-    RemoteEnded,
+    RemoteEnded(Option<String>),
+    ConnectionFailed {
+        message: String,
+        category: RemoteDesktopErrorCategory,
+    },
     LegacySecurityRequired,
 }
 
@@ -303,6 +344,8 @@ struct ClientRdpSession {
     output_rx: mpsc::Receiver<ClientRdpOutput>,
     join_handle: thread::JoinHandle<()>,
 }
+
+type ClientRdpOutputTx = mpsc::SyncSender<ClientRdpOutput>;
 
 #[derive(Default)]
 struct ClientRdpRequestCoalescer {
@@ -354,7 +397,8 @@ fn start_client_rdp_session(config: &RdpWorkerConfig) -> Result<ClientRdpSession
     let client_config = build_client_rdp_config(config)?;
     let (input_tx, input_rx) = tokio_mpsc::unbounded_channel();
     let client_input_tx = input_tx.clone();
-    let (client_output_tx, client_output_rx) = mpsc::channel::<ClientRdpOutput>();
+    let (client_output_tx, client_output_rx) =
+        mpsc::sync_channel::<ClientRdpOutput>(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
 
     let join_handle = thread::Builder::new()
         .name("oxideterm-rdp-client".to_string())
@@ -374,7 +418,7 @@ fn run_client_rdp_thread(
     mut config: ClientRdpConfig,
     mut input_rx: tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    client_output_tx: mpsc::Sender<ClientRdpOutput>,
+    client_output_tx: ClientRdpOutputTx,
 ) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -383,6 +427,7 @@ fn run_client_rdp_thread(
         let _ = client_output_tx.send(ClientRdpOutput::Event(
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "RDP async runtime startup failed.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Dependency),
             },
         ));
         return;
@@ -414,8 +459,13 @@ fn run_client_rdp_thread(
                     ));
                     break;
                 }
-                Ok(ClientRdpControlFlow::ReconnectWithNewSize { width, height }) => {
+                Ok(ClientRdpControlFlow::ReconnectWithNewSize {
+                    width,
+                    height,
+                    scale_factor,
+                }) => {
                     config.connector.desktop_size = DesktopSize { width, height };
+                    config.connector.desktop_scale_factor = scale_factor;
                     let _ = client_output_tx.send(ClientRdpOutput::Event(
                         RemoteDesktopHelperEvent::Status {
                             status: RemoteDesktopSessionStatus::Reconnecting,
@@ -474,9 +524,11 @@ impl ClientRdpDestination {
 
 struct ClientClipboardBackend {
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_tx: mpsc::Sender<ClientRdpOutput>,
+    output_tx: ClientRdpOutputTx,
     local_text: Option<String>,
+    local_data: Option<RemoteDesktopClipboardData>,
     remote_text_format: Option<ClipboardFormatId>,
+    remote_data_format: Option<RdpClipboardDataFormat>,
 }
 
 impl fmt::Debug for ClientClipboardBackend {
@@ -484,7 +536,9 @@ impl fmt::Debug for ClientClipboardBackend {
         formatter
             .debug_struct("ClientClipboardBackend")
             .field("has_local_text", &self.local_text.is_some())
+            .field("has_local_data", &self.local_data.is_some())
             .field("remote_text_format", &self.remote_text_format)
+            .field("remote_data_format", &self.remote_data_format)
             .finish()
     }
 }
@@ -494,18 +548,26 @@ impl_as_any!(ClientClipboardBackend);
 impl ClientClipboardBackend {
     fn new(
         input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-        output_tx: mpsc::Sender<ClientRdpOutput>,
+        output_tx: ClientRdpOutputTx,
     ) -> Self {
         Self {
             input_tx,
             output_tx,
             local_text: None,
+            local_data: None,
             remote_text_format: None,
+            remote_data_format: None,
         }
     }
 
     fn set_local_text(&mut self, text: String) {
         self.local_text = Some(text);
+        self.local_data = None;
+    }
+
+    fn set_local_data(&mut self, data: RemoteDesktopClipboardData) {
+        self.local_text = None;
+        self.local_data = Some(data);
     }
 
     fn send_clipboard_message(&self, message: ClipboardMessage) {
@@ -513,11 +575,13 @@ impl ClientClipboardBackend {
     }
 
     fn send_local_format_list(&self) {
-        let formats = self
-            .local_text
-            .as_ref()
-            .map(|_| text_clipboard_formats())
-            .unwrap_or_default();
+        let formats = if let Some(data) = self.local_data.as_ref() {
+            image_clipboard_formats(data.format)
+        } else if self.local_text.is_some() {
+            text_clipboard_formats()
+        } else {
+            Vec::new()
+        };
         self.send_clipboard_message(ClipboardMessage::SendInitiateCopy(formats));
     }
 }
@@ -551,22 +615,38 @@ impl CliprdrBackend for ClientClipboardBackend {
     }
 
     fn on_remote_copy(&mut self, available_formats: &[ClipboardFormat]) {
-        let Some(format) = preferred_text_clipboard_format(available_formats) else {
+        self.remote_text_format = None;
+        self.remote_data_format = None;
+
+        if let Some(format) = preferred_image_clipboard_format(available_formats) {
+            self.remote_data_format = Some(format);
+            self.send_clipboard_message(ClipboardMessage::SendInitiatePaste(format.id));
             return;
-        };
-        self.remote_text_format = Some(format);
-        self.send_clipboard_message(ClipboardMessage::SendInitiatePaste(format));
+        }
+
+        if let Some(format) = preferred_text_clipboard_format(available_formats) {
+            self.remote_text_format = Some(format);
+            self.send_clipboard_message(ClipboardMessage::SendInitiatePaste(format));
+        }
     }
 
     fn on_format_data_request(&mut self, request: FormatDataRequest) {
-        let response = match (request.format, self.local_text.as_deref()) {
-            (ClipboardFormatId::CF_UNICODETEXT, Some(text)) => {
-                FormatDataResponse::new_unicode_string(text).into_owned()
+        let response = if let Some(data) = self.local_data.as_ref() {
+            if let Some(bytes) = encode_local_clipboard_data(data, request.format) {
+                FormatDataResponse::new_data(bytes).into_owned()
+            } else {
+                FormatDataResponse::new_error().into_owned()
             }
-            (ClipboardFormatId::CF_TEXT, Some(text)) => {
-                FormatDataResponse::new_string(text).into_owned()
+        } else {
+            match (request.format, self.local_text.as_deref()) {
+                (ClipboardFormatId::CF_UNICODETEXT, Some(text)) => {
+                    FormatDataResponse::new_unicode_string(text).into_owned()
+                }
+                (ClipboardFormatId::CF_TEXT, Some(text)) => {
+                    FormatDataResponse::new_string(text).into_owned()
+                }
+                _ => FormatDataResponse::new_error().into_owned(),
             }
-            _ => FormatDataResponse::new_error().into_owned(),
         };
         self.send_clipboard_message(ClipboardMessage::SendFormatData(response));
     }
@@ -576,7 +656,17 @@ impl CliprdrBackend for ClientClipboardBackend {
             return;
         }
 
-        let text = match self.remote_text_format {
+        if let Some(format) = self.remote_data_format.take() {
+            let data = decode_remote_clipboard_data(format, response.data().to_vec());
+            if let Some(data) = data {
+                let _ = self.output_tx.send(ClientRdpOutput::Event(
+                    RemoteDesktopHelperEvent::ClipboardData { data },
+                ));
+            }
+            return;
+        }
+
+        let text = match self.remote_text_format.take() {
             Some(ClipboardFormatId::CF_UNICODETEXT) => response.to_unicode_string().ok(),
             Some(ClipboardFormatId::CF_TEXT) => response.to_string().ok(),
             _ => response
@@ -611,18 +701,23 @@ enum RdpInputEvent {
     FastPath(SmallVec<[FastPathInputEvent; 2]>),
     Clipboard(ClipboardMessage),
     SetClipboardText(String),
+    SetClipboardData(RemoteDesktopClipboardData),
     Close,
 }
 
 enum ClientRdpControlFlow {
     TerminatedGracefully(GracefulDisconnectReason),
-    ReconnectWithNewSize { width: u16, height: u16 },
+    ReconnectWithNewSize {
+        width: u16,
+        height: u16,
+        scale_factor: u32,
+    },
 }
 
 async fn connect_native_rdp(
     config: &ClientRdpConfig,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_tx: mpsc::Sender<ClientRdpOutput>,
+    output_tx: ClientRdpOutputTx,
 ) -> connector::ConnectorResult<(ConnectionResult, UpgradedRdpFramed)> {
     let socket = TcpStream::connect((config.destination.host(), config.destination.port()))
         .await
@@ -665,7 +760,7 @@ async fn connect_native_rdp(
 fn attach_client_virtual_channels(
     connector: &mut connector::ClientConnector,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_tx: mpsc::Sender<ClientRdpOutput>,
+    output_tx: ClientRdpOutputTx,
 ) {
     let display_control =
         DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
@@ -681,7 +776,7 @@ async fn run_native_rdp_active_session(
     framed: UpgradedRdpFramed,
     connection_result: ConnectionResult,
     input_rx: &mut tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
-    output_tx: &mpsc::Sender<ClientRdpOutput>,
+    output_tx: &ClientRdpOutputTx,
 ) -> SessionResult<ClientRdpControlFlow> {
     let (mut reader, mut writer) = split_tokio_framed(framed);
     let mut image = DecodedImage::new(
@@ -692,8 +787,11 @@ async fn run_native_rdp_active_session(
     let mut active_stage = ActiveStage::new(connection_result);
     let mut clipboard_cleanup = tokio::time::interval(RDP_CLIPBOARD_TIMEOUT_POLL_INTERVAL);
     let mut sent_initial_frame = false;
+    let mut pending_base_frame = false;
 
     let disconnect_reason = 'session: loop {
+        flush_pending_rdp_base_frame(output_tx, &image, &mut pending_base_frame)?;
+
         let outputs = tokio::select! {
             frame = reader.read_pdu() => {
                 let (action, payload) = frame
@@ -709,20 +807,21 @@ async fn run_native_rdp_active_session(
                         scale_factor,
                         physical_size,
                     } => {
-                        let (width, height) = MonitorLayoutEntry::adjust_display_size(
-                            u32::from(width),
-                            u32::from(height),
-                        );
                         if let Some(response_frame) =
-                            active_stage.encode_resize(width, height, Some(scale_factor), physical_size)
+                            active_stage.encode_resize(
+                                u32::from(width),
+                                u32::from(height),
+                                Some(scale_factor),
+                                physical_size,
+                            )
                         {
                             vec![ActiveStageOutput::ResponseFrame(response_frame?)]
                         } else {
-                            let width = u16::try_from(width)
-                                .map_err(|error| session::custom_err!("resize width", error))?;
-                            let height = u16::try_from(height)
-                                .map_err(|error| session::custom_err!("resize height", error))?;
-                            return Ok(ClientRdpControlFlow::ReconnectWithNewSize { width, height });
+                            return Ok(ClientRdpControlFlow::ReconnectWithNewSize {
+                                width,
+                                height,
+                                scale_factor,
+                            });
                         }
                     }
                     RdpInputEvent::FastPath(events) => {
@@ -733,6 +832,9 @@ async fn run_native_rdp_active_session(
                     }
                     RdpInputEvent::SetClipboardText(text) => {
                         advertise_local_clipboard_text(&mut active_stage, text)?
+                    }
+                    RdpInputEvent::SetClipboardData(data) => {
+                        advertise_local_clipboard_data(&mut active_stage, data)?
                     }
                     RdpInputEvent::Close => active_stage.graceful_shutdown()?,
                 }
@@ -752,52 +854,42 @@ async fn run_native_rdp_active_session(
                     if let Some(event) =
                         graphics_update_event(&image, region, &mut sent_initial_frame)?
                     {
-                        output_tx
-                            .send(ClientRdpOutput::Event(event))
-                            .map_err(|error| session::custom_err!("send graphics update", error))?;
+                        send_client_rdp_graphics_event(output_tx, event, &mut pending_base_frame)?;
                     }
                 }
                 ActiveStageOutput::PointerPosition { x, y } => {
-                    output_tx
-                        .send(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Cursor {
+                    send_client_rdp_event(
+                        output_tx,
+                        RemoteDesktopHelperEvent::Cursor {
                             x: u32::from(x),
                             y: u32::from(y),
                             width: 0,
                             height: 0,
-                        }))
-                        .map_err(|error| session::custom_err!("send pointer position", error))?;
+                        },
+                    )?;
                 }
                 ActiveStageOutput::PointerDefault => {
-                    output_tx
-                        .send(ClientRdpOutput::Event(
-                            RemoteDesktopHelperEvent::CursorDefault,
-                        ))
-                        .map_err(|error| session::custom_err!("send default pointer", error))?;
+                    send_client_rdp_event(output_tx, RemoteDesktopHelperEvent::CursorDefault)?;
                 }
                 ActiveStageOutput::PointerHidden => {
-                    output_tx
-                        .send(ClientRdpOutput::Event(
-                            RemoteDesktopHelperEvent::CursorHidden,
-                        ))
-                        .map_err(|error| session::custom_err!("send hidden pointer", error))?;
+                    send_client_rdp_event(output_tx, RemoteDesktopHelperEvent::CursorHidden)?;
                 }
                 ActiveStageOutput::PointerBitmap(pointer) => {
-                    output_tx
-                        .send(ClientRdpOutput::Event(
-                            RemoteDesktopHelperEvent::CursorShape {
-                                shape: RemoteDesktopCursorShape::new(
-                                    RemoteDesktopSize {
-                                        width: u32::from(pointer.width),
-                                        height: u32::from(pointer.height),
-                                    },
-                                    u32::from(pointer.hotspot_x),
-                                    u32::from(pointer.hotspot_y),
-                                    RemoteDesktopFrameFormat::Rgba8,
-                                    pointer.bitmap_data.clone(),
-                                ),
-                            },
-                        ))
-                        .map_err(|error| session::custom_err!("send bitmap pointer", error))?;
+                    send_client_rdp_event(
+                        output_tx,
+                        RemoteDesktopHelperEvent::CursorShape {
+                            shape: RemoteDesktopCursorShape::new(
+                                RemoteDesktopSize {
+                                    width: u32::from(pointer.width),
+                                    height: u32::from(pointer.height),
+                                },
+                                u32::from(pointer.hotspot_x),
+                                u32::from(pointer.hotspot_y),
+                                RemoteDesktopFrameFormat::Rgba8,
+                                pointer.bitmap_data.clone(),
+                            ),
+                        },
+                    )?;
                 }
                 ActiveStageOutput::DeactivateAll(connection_activation) => {
                     handle_deactivate_all(
@@ -808,7 +900,15 @@ async fn run_native_rdp_active_session(
                         connection_activation,
                     )
                     .await?;
-                    sent_initial_frame = false;
+                    // Reactivation resets the server-side backing surface. Give
+                    // the UI a fresh full-frame base before accepting new dirty
+                    // rectangles so updates are not applied to the old desktop.
+                    send_client_rdp_graphics_event(
+                        output_tx,
+                        base_frame_event(&image),
+                        &mut pending_base_frame,
+                    )?;
+                    sent_initial_frame = true;
                 }
                 ActiveStageOutput::Terminate(reason) => break 'session reason,
                 ActiveStageOutput::MultitransportRequest(_) | ActiveStageOutput::AutoDetect(_) => {}
@@ -819,6 +919,75 @@ async fn run_native_rdp_active_session(
     Ok(ClientRdpControlFlow::TerminatedGracefully(
         disconnect_reason,
     ))
+}
+
+fn flush_pending_rdp_base_frame(
+    output_tx: &ClientRdpOutputTx,
+    image: &DecodedImage,
+    pending_base_frame: &mut bool,
+) -> SessionResult<()> {
+    if !*pending_base_frame {
+        return Ok(());
+    }
+
+    match output_tx.try_send(ClientRdpOutput::Event(base_frame_event(image))) {
+        Ok(()) => {
+            *pending_base_frame = false;
+            Ok(())
+        }
+        Err(mpsc::TrySendError::Full(_)) => Ok(()),
+        Err(mpsc::TrySendError::Disconnected(_)) => {
+            Err(session::general_err!("RDP output channel closed"))
+        }
+    }
+}
+
+fn send_client_rdp_graphics_event(
+    output_tx: &ClientRdpOutputTx,
+    event: RemoteDesktopHelperEvent,
+    pending_base_frame: &mut bool,
+) -> SessionResult<()> {
+    if *pending_base_frame {
+        return Ok(());
+    }
+
+    match output_tx.try_send(ClientRdpOutput::Event(event)) {
+        Ok(()) => Ok(()),
+        Err(mpsc::TrySendError::Full(_)) => {
+            // Dirty rectangles are relative to the UI's backing frame. If the
+            // bridge is saturated, recover by sending the latest complete image
+            // once capacity returns instead of silently dropping a delta.
+            *pending_base_frame = true;
+            Ok(())
+        }
+        Err(mpsc::TrySendError::Disconnected(_)) => {
+            Err(session::general_err!("RDP output channel closed"))
+        }
+    }
+}
+
+fn send_client_rdp_event(
+    output_tx: &ClientRdpOutputTx,
+    event: RemoteDesktopHelperEvent,
+) -> SessionResult<()> {
+    if client_rdp_event_can_be_dropped_under_backpressure(&event) {
+        match output_tx.try_send(ClientRdpOutput::Event(event)) {
+            Ok(()) | Err(mpsc::TrySendError::Full(_)) => return Ok(()),
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                return Err(session::general_err!("RDP output channel closed"));
+            }
+        }
+    }
+
+    // Base frames and control-like visual events must not be dropped because
+    // the UI relies on them to establish backing state and cursor shape.
+    output_tx
+        .send(ClientRdpOutput::Event(event))
+        .map_err(|error| session::custom_err!("send RDP client event", error))
+}
+
+fn client_rdp_event_can_be_dropped_under_backpressure(event: &RemoteDesktopHelperEvent) -> bool {
+    matches!(event, RemoteDesktopHelperEvent::Cursor { .. })
 }
 
 fn process_clipboard_message(
@@ -885,6 +1054,27 @@ fn advertise_local_clipboard_text(
     response_frame_output(frame)
 }
 
+fn advertise_local_clipboard_data(
+    active_stage: &mut ActiveStage,
+    data: RemoteDesktopClipboardData,
+) -> SessionResult<Vec<ActiveStageOutput>> {
+    let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() else {
+        return Ok(Vec::new());
+    };
+    let formats = image_clipboard_formats(data.format);
+    if let Some(backend) = cliprdr.downcast_backend_mut::<ClientClipboardBackend>() {
+        backend.set_local_data(data);
+    }
+
+    // If CLIPRDR is not fully ready yet, the backend keeps the data and the
+    // initialization callback will advertise it later.
+    let Ok(svc_messages) = cliprdr.initiate_copy(&formats) else {
+        return Ok(Vec::new());
+    };
+    let frame = active_stage.process_svc_processor_messages(svc_messages)?;
+    response_frame_output(frame)
+}
+
 fn drive_clipboard_timeouts(
     active_stage: &mut ActiveStage,
 ) -> SessionResult<Vec<ActiveStageOutput>> {
@@ -926,7 +1116,8 @@ fn run_client_rdp_loop(
         let mut handled_requests = false;
         let mut coalesced_requests = Vec::new();
         let mut request_coalescer = ClientRdpRequestCoalescer::default();
-        loop {
+        // Bound request draining so display output still advances during input bursts.
+        for _ in 0..RDP_CLIENT_REQUEST_DRAIN_LIMIT {
             match request_rx.try_recv() {
                 Ok(RemoteDesktopHelperRequest::Close) => return Ok(ClientRdpSessionExit::Closed),
                 Ok(RemoteDesktopHelperRequest::Reconnect) => {
@@ -982,28 +1173,28 @@ fn drain_client_rdp_outputs(
                             drain.exit = Some(ClientRdpSessionExit::LegacySecurityRequired);
                             return Ok(drain);
                         }
-                        return Err(format_connector_error("RDP connection failed", &error));
+                        // Keep the typed connector error available until the
+                        // helper event is built; string messages are only the
+                        // display surface, not the classification source.
+                        drain.exit = Some(ClientRdpSessionExit::ConnectionFailed {
+                            message: format_connector_error("RDP connection failed", &error),
+                            category: connector_error_category(&error),
+                        });
+                        return Ok(drain);
                     }
                     ClientRdpOutput::Terminated(message) => {
-                        send_event(
-                            writer,
-                            RemoteDesktopHelperEvent::Status {
-                                status: RemoteDesktopSessionStatus::Reconnecting,
-                                message: Some(format_reconnect_status(&message)),
-                            },
-                        )?;
-                        drain.exit = Some(ClientRdpSessionExit::RemoteEnded);
+                        drain.exit = Some(ClientRdpSessionExit::RemoteEnded(Some(message)));
                         return Ok(drain);
                     }
                     ClientRdpOutput::OutputEnded => {
-                        drain.exit = Some(ClientRdpSessionExit::RemoteEnded);
+                        drain.exit = Some(ClientRdpSessionExit::RemoteEnded(None));
                         return Ok(drain);
                     }
                 }
             }
             Err(mpsc::TryRecvError::Empty) => return Ok(drain),
             Err(mpsc::TryRecvError::Disconnected) => {
-                drain.exit = Some(ClientRdpSessionExit::RemoteEnded);
+                drain.exit = Some(ClientRdpSessionExit::RemoteEnded(None));
                 return Ok(drain);
             }
         }
@@ -1011,51 +1202,51 @@ fn drain_client_rdp_outputs(
     Ok(drain)
 }
 
-fn wait_before_rdp_reconnect(
-    request_rx: &mpsc::Receiver<RemoteDesktopHelperRequest>,
-    config: &mut RdpWorkerConfig,
-    delay: Duration,
-) -> bool {
-    let deadline = Instant::now() + delay;
-    loop {
-        let now = Instant::now();
-        if now >= deadline {
-            return true;
-        }
-        let remaining = deadline.saturating_duration_since(now);
-        let poll = remaining.min(RDP_CLIENT_LOOP_POLL_INTERVAL);
-        match request_rx.recv_timeout(poll) {
-            Ok(RemoteDesktopHelperRequest::Close) => return false,
-            Ok(RemoteDesktopHelperRequest::Reconnect) => return true,
-            Ok(RemoteDesktopHelperRequest::ReleaseAllInputs) => {}
-            Ok(request) => remember_rdp_reconnect_state(&request, config),
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
-        }
-    }
-}
-
 fn remember_rdp_reconnect_state(
     request: &RemoteDesktopHelperRequest,
     config: &mut RdpWorkerConfig,
 ) {
-    if let RemoteDesktopHelperRequest::Resize { size } = request {
+    if let RemoteDesktopHelperRequest::Resize { size, scale_factor } = request {
         // Reconnects rebuild the IronRDP connector from RdpWorkerConfig, so the
         // last requested display size must live there instead of only in the
         // active client thread.
-        config.size = *size;
+        config.size = normalized_rdp_desktop_size(*size);
+        config.scale_factor = rdp_connector_scale_factor(*scale_factor);
     }
 }
 
-fn format_reconnect_status(reason: &str) -> String {
-    if reason.trim().is_empty()
-        || reason.contains("/Users/")
-        || reason.contains(".cargo/git/checkouts")
-    {
-        "RDP session ended. Reconnecting.".to_string()
-    } else {
-        format!("RDP session ended: {reason}. Reconnecting.")
+fn normalized_rdp_desktop_size(size: RemoteDesktopSize) -> RemoteDesktopSize {
+    let size = RemoteDesktopSize::clamped(size.width, size.height);
+    let (width, height) = MonitorLayoutEntry::adjust_display_size(size.width, size.height);
+    RemoteDesktopSize { width, height }
+}
+
+fn rdp_connector_scale_factor(scale_factor: Option<u32>) -> u32 {
+    rdp_valid_scale_factor(scale_factor).unwrap_or(RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT)
+}
+
+fn rdp_displaycontrol_scale_factor(scale_factor: Option<u32>) -> u32 {
+    rdp_valid_scale_factor(scale_factor).unwrap_or(RDP_DISPLAYCONTROL_DEFAULT_SCALE_FACTOR_PERCENT)
+}
+
+fn rdp_valid_scale_factor(scale_factor: Option<u32>) -> Option<u32> {
+    match scale_factor {
+        Some(scale_factor)
+            if (RDP_MIN_SCALE_FACTOR_PERCENT..=RDP_MAX_SCALE_FACTOR_PERCENT)
+                .contains(&scale_factor) =>
+        {
+            Some(scale_factor)
+        }
+        _ => None,
     }
+}
+
+fn sanitize_rdp_disconnect_reason(reason: Option<&str>) -> Option<String> {
+    let reason = reason?.trim();
+    if reason.is_empty() || reason.contains("/Users/") || reason.contains(".cargo/git/checkouts") {
+        return Some("RDP session ended.".to_string());
+    }
+    Some(format!("RDP session ended: {reason}."))
 }
 
 async fn handle_deactivate_all<ReadStream, WriteStream>(
@@ -1116,11 +1307,9 @@ where
 }
 
 fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<ClientRdpConfig, String> {
-    let requested_size = RemoteDesktopSize::clamped(config.size.width, config.size.height);
-    let (adjusted_width, adjusted_height) =
-        MonitorLayoutEntry::adjust_display_size(requested_size.width, requested_size.height);
-    let width = u16::try_from(adjusted_width).unwrap_or(u16::MAX);
-    let height = u16::try_from(adjusted_height).unwrap_or(u16::MAX);
+    let requested_size = normalized_rdp_desktop_size(config.size);
+    let width = u16::try_from(requested_size.width).unwrap_or(u16::MAX);
+    let height = u16::try_from(requested_size.height).unwrap_or(u16::MAX);
     let codecs = client_codecs_capabilities(&[])
         .map_err(|error| format!("RDP bitmap codec setup failed: {error}"))?;
     let password = config.password.expose_secret().to_string();
@@ -1138,7 +1327,7 @@ fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<ClientRdpConfig, 
         enable_tls: true,
         enable_credssp: true,
         desktop_size: connector::DesktopSize { width, height },
-        desktop_scale_factor: 0,
+        desktop_scale_factor: config.scale_factor,
         keyboard_type: KeyboardType::IbmEnhanced,
         keyboard_subtype: 0,
         keyboard_layout: 0,
@@ -1183,13 +1372,13 @@ fn forward_client_rdp_request(
     read_only: bool,
 ) -> Result<(), String> {
     match request {
-        RemoteDesktopHelperRequest::Resize { size } => {
-            let (width, height) = MonitorLayoutEntry::adjust_display_size(size.width, size.height);
+        RemoteDesktopHelperRequest::Resize { size, scale_factor } => {
+            let requested_size = normalized_rdp_desktop_size(size);
             input_tx
                 .send(RdpInputEvent::Resize {
-                    width: clamp_u32_to_u16(width),
-                    height: clamp_u32_to_u16(height),
-                    scale_factor: 100,
+                    width: clamp_u32_to_u16(requested_size.width),
+                    height: clamp_u32_to_u16(requested_size.height),
+                    scale_factor: rdp_displaycontrol_scale_factor(scale_factor),
                     physical_size: None,
                 })
                 .map_err(|_| "RDP input channel is closed.".to_string())?;
@@ -1248,6 +1437,11 @@ fn forward_client_rdp_request(
                 .send(RdpInputEvent::SetClipboardText(text))
                 .map_err(|_| "RDP input channel is closed.".to_string())?;
         }
+        RemoteDesktopHelperRequest::ClipboardData { data } if !read_only => {
+            input_tx
+                .send(RdpInputEvent::SetClipboardData(data))
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
+        }
         RemoteDesktopHelperRequest::SynchronizeLockKeys { keys } if !read_only => {
             send_client_rdp_lock_key_state(input_tx, keys)?;
         }
@@ -1275,6 +1469,7 @@ fn forward_client_rdp_request(
         | RemoteDesktopHelperRequest::Key { .. }
         | RemoteDesktopHelperRequest::Text { .. }
         | RemoteDesktopHelperRequest::ClipboardText { .. }
+        | RemoteDesktopHelperRequest::ClipboardData { .. }
         | RemoteDesktopHelperRequest::SynchronizeLockKeys { .. }
         | RemoteDesktopHelperRequest::ReleaseAllInputs => {}
     }
@@ -1353,6 +1548,24 @@ fn connector_error_requires_legacy_security(error: &connector::ConnectorError) -
     connector_error_search_text(error).contains("STANDARD_RDP_SECURITY")
 }
 
+fn connector_error_category(error: &connector::ConnectorError) -> RemoteDesktopErrorCategory {
+    match error.kind() {
+        _ if connector_error_requires_legacy_security(error) => {
+            RemoteDesktopErrorCategory::LegacySecurity
+        }
+        ConnectorErrorKind::Credssp(_) | ConnectorErrorKind::AccessDenied => {
+            RemoteDesktopErrorCategory::Authentication
+        }
+        ConnectorErrorKind::Negotiation(_)
+        | ConnectorErrorKind::Encode(_)
+        | ConnectorErrorKind::Decode(_)
+        | ConnectorErrorKind::Reason(_) => RemoteDesktopErrorCategory::Protocol,
+        ConnectorErrorKind::Custom => RemoteDesktopErrorCategory::Unknown,
+        ConnectorErrorKind::General => RemoteDesktopErrorCategory::Unknown,
+        _ => RemoteDesktopErrorCategory::Unknown,
+    }
+}
+
 fn format_connector_error(stage: &str, error: &connector::ConnectorError) -> String {
     match error.kind() {
         _ if connector_error_requires_legacy_security(error) => {
@@ -1375,6 +1588,39 @@ fn format_connector_error(stage: &str, error: &connector::ConnectorError) -> Str
         _ => connector_error_source_summary(error)
             .map(|summary| format!("{stage}: {summary}"))
             .unwrap_or_else(|| format!("{stage}: RDP connector error.")),
+    }
+}
+
+fn remote_desktop_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("standard_rdp_security") || message.contains(LEGACY_RDP_SECURITY_MESSAGE)
+    {
+        RemoteDesktopErrorCategory::LegacySecurity
+    } else if normalized.contains("authentication")
+        || normalized.contains("access denied")
+        || normalized.contains("password")
+        || normalized.contains("credssp")
+    {
+        RemoteDesktopErrorCategory::Authentication
+    } else if normalized.contains("tcp")
+        || normalized.contains("socket")
+        || normalized.contains("network")
+        || normalized.contains("transport")
+    {
+        RemoteDesktopErrorCategory::Network
+    } else if normalized.contains("protocol")
+        || normalized.contains("decode")
+        || normalized.contains("encode")
+        || normalized.contains("negotiation")
+    {
+        RemoteDesktopErrorCategory::Protocol
+    } else if normalized.contains("unavailable")
+        || normalized.contains("not available")
+        || normalized.contains("runtime startup")
+    {
+        RemoteDesktopErrorCategory::Dependency
+    } else {
+        RemoteDesktopErrorCategory::Unknown
     }
 }
 
@@ -1462,6 +1708,23 @@ fn text_clipboard_formats() -> Vec<ClipboardFormat> {
     ]
 }
 
+fn image_clipboard_formats(format: RemoteDesktopClipboardFormat) -> Vec<ClipboardFormat> {
+    let (id, name) = local_image_clipboard_format(format);
+    let mut formats = vec![ClipboardFormat::new(id).with_name(ClipboardFormatName::new(name))];
+    if format == RemoteDesktopClipboardFormat::ImagePng {
+        // Windows peers commonly request bitmap clipboard data even when a PNG
+        // registered format is also available.
+        formats.push(ClipboardFormat::new(ClipboardFormatId::CF_DIBV5));
+        formats.push(ClipboardFormat::new(ClipboardFormatId::CF_DIB));
+    }
+    if format == RemoteDesktopClipboardFormat::ImageTiff {
+        // TIFF is one of the standard Win32 clipboard formats. Advertise it
+        // alongside the registered MIME name so older peers can request it.
+        formats.push(ClipboardFormat::new(ClipboardFormatId::CF_TIFF));
+    }
+    formats
+}
+
 fn preferred_text_clipboard_format(formats: &[ClipboardFormat]) -> Option<ClipboardFormatId> {
     formats
         .iter()
@@ -1474,13 +1737,161 @@ fn preferred_text_clipboard_format(formats: &[ClipboardFormat]) -> Option<Clipbo
         .map(|format| format.id)
 }
 
+fn preferred_image_clipboard_format(formats: &[ClipboardFormat]) -> Option<RdpClipboardDataFormat> {
+    formats
+        .iter()
+        .find_map(rdp_clipboard_data_format_from_named_format)
+        .or_else(|| {
+            formats
+                .iter()
+                .find(|format| format.id == ClipboardFormatId::CF_DIBV5)
+                .map(|format| RdpClipboardDataFormat {
+                    id: format.id,
+                    format: RemoteDesktopClipboardFormat::ImagePng,
+                    encoding: RdpClipboardDataEncoding::DibV5,
+                })
+        })
+        .or_else(|| {
+            formats
+                .iter()
+                .find(|format| format.id == ClipboardFormatId::CF_DIB)
+                .map(|format| RdpClipboardDataFormat {
+                    id: format.id,
+                    format: RemoteDesktopClipboardFormat::ImagePng,
+                    encoding: RdpClipboardDataEncoding::Dib,
+                })
+        })
+        .or_else(|| {
+            formats
+                .iter()
+                .find(|format| format.id == ClipboardFormatId::CF_TIFF)
+                .map(|format| RdpClipboardDataFormat {
+                    id: format.id,
+                    format: RemoteDesktopClipboardFormat::ImageTiff,
+                    encoding: RdpClipboardDataEncoding::Encoded,
+                })
+        })
+}
+
+fn decode_remote_clipboard_data(
+    format: RdpClipboardDataFormat,
+    bytes: Vec<u8>,
+) -> Option<RemoteDesktopClipboardData> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let bytes = match format.encoding {
+        RdpClipboardDataEncoding::Encoded => bytes,
+        RdpClipboardDataEncoding::Dib => dib_to_png(&bytes).ok()?,
+        RdpClipboardDataEncoding::DibV5 => dibv5_to_png(&bytes).ok()?,
+    };
+    Some(RemoteDesktopClipboardData::new(format.format, bytes))
+}
+
+fn local_image_clipboard_format(
+    format: RemoteDesktopClipboardFormat,
+) -> (ClipboardFormatId, &'static str) {
+    match format {
+        RemoteDesktopClipboardFormat::ImagePng => (RDP_CLIPBOARD_FORMAT_IMAGE_PNG, "PNG"),
+        RemoteDesktopClipboardFormat::ImageJpeg => (RDP_CLIPBOARD_FORMAT_IMAGE_JPEG, "JFIF"),
+        RemoteDesktopClipboardFormat::ImageWebp => (RDP_CLIPBOARD_FORMAT_IMAGE_WEBP, "image/webp"),
+        RemoteDesktopClipboardFormat::ImageGif => (RDP_CLIPBOARD_FORMAT_IMAGE_GIF, "GIF"),
+        RemoteDesktopClipboardFormat::ImageSvg => (RDP_CLIPBOARD_FORMAT_IMAGE_SVG, "image/svg+xml"),
+        RemoteDesktopClipboardFormat::ImageBmp => (RDP_CLIPBOARD_FORMAT_IMAGE_BMP, "image/bmp"),
+        RemoteDesktopClipboardFormat::ImageTiff => (RDP_CLIPBOARD_FORMAT_IMAGE_TIFF, "image/tiff"),
+    }
+}
+
+fn local_image_clipboard_format_ids(
+    format: RemoteDesktopClipboardFormat,
+) -> Vec<ClipboardFormatId> {
+    let (id, _) = local_image_clipboard_format(format);
+    let mut ids = vec![id];
+    if format == RemoteDesktopClipboardFormat::ImagePng {
+        ids.push(ClipboardFormatId::CF_DIBV5);
+        ids.push(ClipboardFormatId::CF_DIB);
+    }
+    if format == RemoteDesktopClipboardFormat::ImageTiff {
+        ids.push(ClipboardFormatId::CF_TIFF);
+    }
+    ids
+}
+
+fn encode_local_clipboard_data(
+    data: &RemoteDesktopClipboardData,
+    format: ClipboardFormatId,
+) -> Option<Vec<u8>> {
+    if !local_image_clipboard_format_ids(data.format).contains(&format) {
+        return None;
+    }
+    match (data.format, format) {
+        (RemoteDesktopClipboardFormat::ImagePng, ClipboardFormatId::CF_DIB) => {
+            png_to_cf_dib(&data.bytes).ok()
+        }
+        (RemoteDesktopClipboardFormat::ImagePng, ClipboardFormatId::CF_DIBV5) => {
+            png_to_cf_dibv5(&data.bytes).ok()
+        }
+        _ => Some(data.bytes.clone()),
+    }
+}
+
+fn rdp_clipboard_data_format_from_named_format(
+    format: &ClipboardFormat,
+) -> Option<RdpClipboardDataFormat> {
+    let name = format.name()?.value();
+    let clipboard_format = remote_desktop_clipboard_format_from_rdp_name(name)?;
+    Some(RdpClipboardDataFormat {
+        id: format.id,
+        format: clipboard_format,
+        encoding: RdpClipboardDataEncoding::Encoded,
+    })
+}
+
+fn remote_desktop_clipboard_format_from_rdp_name(
+    name: &str,
+) -> Option<RemoteDesktopClipboardFormat> {
+    if name.eq_ignore_ascii_case("PNG") || name.eq_ignore_ascii_case("image/png") {
+        return Some(RemoteDesktopClipboardFormat::ImagePng);
+    }
+    if name.eq_ignore_ascii_case("JFIF")
+        || name.eq_ignore_ascii_case("JPEG")
+        || name.eq_ignore_ascii_case("JPG")
+        || name.eq_ignore_ascii_case("image/jpeg")
+        || name.eq_ignore_ascii_case("image/jpg")
+    {
+        return Some(RemoteDesktopClipboardFormat::ImageJpeg);
+    }
+    if name.eq_ignore_ascii_case("image/webp") {
+        return Some(RemoteDesktopClipboardFormat::ImageWebp);
+    }
+    if name.eq_ignore_ascii_case("GIF") || name.eq_ignore_ascii_case("image/gif") {
+        return Some(RemoteDesktopClipboardFormat::ImageGif);
+    }
+    if name.eq_ignore_ascii_case("image/svg+xml") {
+        return Some(RemoteDesktopClipboardFormat::ImageSvg);
+    }
+    if name.eq_ignore_ascii_case("image/bmp") {
+        return Some(RemoteDesktopClipboardFormat::ImageBmp);
+    }
+    if name.eq_ignore_ascii_case("image/tiff") || name.eq_ignore_ascii_case("image/tif") {
+        return Some(RemoteDesktopClipboardFormat::ImageTiff);
+    }
+    None
+}
+
 #[cfg(feature = "legacy-freerdp")]
 mod legacy_freerdp {
-    use std::ffi::{CStr, CString};
+    use std::{
+        ffi::{CStr, CString},
+        sync::{Arc, Mutex},
+    };
 
     use freerdp2::{
         PIXEL_FORMAT_BGRA32, RdpError, Settings,
-        client::{Context, Handler},
+        channels::cliprdr::{
+            Format as FreeRdpClipboardFormat, GeneralCapabilities as FreeRdpClipboardCapabilities,
+        },
+        client::{CliprdrClientContext, CliprdrFormat, CliprdrHandler, Context, Handler},
         input::{KbdFlags, PtrFlags, PtrXFlags, SyncFlags, WHEEL_ROTATION_MASK},
         locale::keyboard_init_ex,
         sys,
@@ -1510,8 +1921,10 @@ mod legacy_freerdp {
             },
         )?;
 
+        let clipboard = Arc::new(Mutex::new(LegacyClipboardState::default()));
         let mut context = Context::new(LegacyFreeRdpHandler {
             writer: writer.clone(),
+            clipboard,
         });
         context
             .client_start()
@@ -1588,7 +2001,7 @@ mod legacy_freerdp {
     }
 
     fn configure_settings(settings: &mut Settings, config: &RdpWorkerConfig) -> Result<(), String> {
-        let requested_size = RemoteDesktopSize::clamped(config.size.width, config.size.height);
+        let requested_size = normalized_rdp_desktop_size(config.size);
         settings
             .set_server_hostname(Some(&config.endpoint.host))
             .map_err(|error| format_freerdp_error("Legacy RDP hostname setup failed", &error))?;
@@ -1638,6 +2051,7 @@ mod legacy_freerdp {
         set_freerdp_bool(settings, sys::FreeRDP_GfxAVC444, false)?;
         set_freerdp_bool(settings, sys::FreeRDP_GfxAVC444v2, false)?;
         set_freerdp_bool(settings, sys::FreeRDP_NetworkAutoDetect, false)?;
+        set_freerdp_bool(settings, sys::FreeRDP_RedirectClipboard, true)?;
         settings.set_support_display_control(false);
         Ok(())
     }
@@ -1696,9 +2110,8 @@ mod legacy_freerdp {
                     .reconnect()
                     .map_err(|error| format_freerdp_error("Legacy RDP reconnect failed", &error))?;
             }
-            RemoteDesktopHelperRequest::Resize { .. } => {
-                // FreeRDP 2 display-control support is not reliable enough for
-                // the legacy fallback yet; keep the existing desktop size.
+            RemoteDesktopHelperRequest::Resize { size, .. } => {
+                resize_legacy_session(context, size)?;
             }
             RemoteDesktopHelperRequest::MouseMove { x, y } if !read_only => {
                 mouse_position.update(x, y);
@@ -1725,9 +2138,8 @@ mod legacy_freerdp {
                     send_unicode_key(context, character, RemoteDesktopKeyState::Released)?;
                 }
             }
-            RemoteDesktopHelperRequest::ClipboardText { .. } => {
-                // Clipboard transport is intentionally left with the primary
-                // IronRDP path until the helper protocol grows CLIPRDR parity.
+            RemoteDesktopHelperRequest::ClipboardText { text } if !read_only => {
+                set_legacy_clipboard_text(context, text)?;
             }
             RemoteDesktopHelperRequest::SynchronizeLockKeys { keys } if !read_only => {
                 input(context)?
@@ -1747,6 +2159,271 @@ mod legacy_freerdp {
             _ => {}
         }
         Ok(())
+    }
+
+    fn resize_legacy_session(
+        context: &mut Context<LegacyFreeRdpHandler>,
+        size: RemoteDesktopSize,
+    ) -> Result<(), String> {
+        let requested_size = normalized_rdp_desktop_size(size);
+        set_freerdp_u32(
+            &mut context.settings,
+            sys::FreeRDP_DesktopWidth,
+            requested_size.width,
+        )?;
+        set_freerdp_u32(
+            &mut context.settings,
+            sys::FreeRDP_DesktopHeight,
+            requested_size.height,
+        )?;
+        send_event(
+            &context.handler.writer,
+            RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Reconnecting,
+                message: Some(
+                    "Reopening legacy RDP session with the new display size.".to_string(),
+                ),
+            },
+        )?;
+        // FreeRDP 2 does not give the legacy fallback a reliable
+        // display-control path, so apply the requested desktop size by
+        // reconnecting with updated settings.
+        context
+            .instance
+            .reconnect()
+            .map_err(|error| format_freerdp_error("Legacy RDP resize reconnect failed", &error))
+    }
+
+    fn set_legacy_clipboard_text(
+        context: &mut Context<LegacyFreeRdpHandler>,
+        text: String,
+    ) -> Result<(), String> {
+        {
+            let mut clipboard = context
+                .handler
+                .clipboard
+                .lock()
+                .map_err(|_| "Legacy RDP clipboard state lock failed.".to_string())?;
+            clipboard.local_text = Some(text);
+        }
+        advertise_legacy_clipboard_formats(context)
+    }
+
+    fn advertise_legacy_clipboard_formats(
+        context: &mut Context<LegacyFreeRdpHandler>,
+    ) -> Result<(), String> {
+        let formats = {
+            let clipboard = context
+                .handler
+                .clipboard
+                .lock()
+                .map_err(|_| "Legacy RDP clipboard state lock failed.".to_string())?;
+            legacy_clipboard_formats(clipboard.local_text.is_some())
+        };
+        let Some(cliprdr) = context.cliprdr.as_mut() else {
+            return Ok(());
+        };
+        cliprdr.send_client_format_list(&formats).map_err(|error| {
+            format_freerdp_error("Legacy RDP clipboard format list failed", &error)
+        })
+    }
+
+    fn legacy_clipboard_formats(has_text: bool) -> Vec<CliprdrFormat> {
+        if has_text {
+            vec![
+                CliprdrFormat {
+                    id: Some(FreeRdpClipboardFormat::UnicodeText),
+                    name: None,
+                },
+                CliprdrFormat {
+                    id: Some(FreeRdpClipboardFormat::Text),
+                    name: None,
+                },
+            ]
+        } else {
+            Vec::new()
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum LegacyClipboardTextFormat {
+        UnicodeText,
+        Text,
+    }
+
+    impl LegacyClipboardTextFormat {
+        fn from_freerdp(format: FreeRdpClipboardFormat) -> Option<Self> {
+            match format {
+                FreeRdpClipboardFormat::UnicodeText => Some(Self::UnicodeText),
+                FreeRdpClipboardFormat::Text | FreeRdpClipboardFormat::OemText => Some(Self::Text),
+                _ => None,
+            }
+        }
+
+        fn as_freerdp(self) -> FreeRdpClipboardFormat {
+            match self {
+                Self::UnicodeText => FreeRdpClipboardFormat::UnicodeText,
+                Self::Text => FreeRdpClipboardFormat::Text,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct LegacyClipboardState {
+        local_text: Option<String>,
+        remote_text_format: Option<LegacyClipboardTextFormat>,
+    }
+
+    struct LegacyClipboardHandler {
+        writer: SharedEventWriter,
+        state: Arc<Mutex<LegacyClipboardState>>,
+    }
+
+    impl CliprdrHandler for LegacyClipboardHandler {
+        fn monitor_ready(&mut self, context: &mut CliprdrClientContext) -> freerdp2::Result<()> {
+            context.send_client_general_capabilities(&FreeRdpClipboardCapabilities::empty())?;
+            send_legacy_clipboard_format_list(context, &self.state)
+        }
+
+        fn server_format_list(
+            &mut self,
+            context: &mut CliprdrClientContext,
+            formats: &[CliprdrFormat],
+        ) -> freerdp2::Result<()> {
+            let remote_text_format = preferred_legacy_clipboard_text_format(formats);
+            {
+                let mut state = self.state.lock().map_err(|_| {
+                    RdpError::Failed("Legacy RDP clipboard state lock failed.".into())
+                })?;
+                state.remote_text_format = remote_text_format;
+            }
+            context.send_client_format_list_response(true)?;
+            if let Some(format) = remote_text_format {
+                context.send_client_format_data_request(format.as_freerdp())?;
+            }
+            Ok(())
+        }
+
+        fn server_format_data_request(
+            &mut self,
+            context: &mut CliprdrClientContext,
+            format: FreeRdpClipboardFormat,
+        ) -> freerdp2::Result<()> {
+            let response = {
+                let state = self.state.lock().map_err(|_| {
+                    RdpError::Failed("Legacy RDP clipboard state lock failed.".into())
+                })?;
+                let Some(text) = state.local_text.as_deref() else {
+                    return context.send_client_format_data_response(None);
+                };
+                let Some(format) = LegacyClipboardTextFormat::from_freerdp(format) else {
+                    return context.send_client_format_data_response(None);
+                };
+                encode_legacy_clipboard_text(text, format)
+            };
+            context.send_client_format_data_response(Some(&response))
+        }
+
+        fn server_format_data_response(
+            &mut self,
+            _context: &mut CliprdrClientContext,
+            data: &[u8],
+        ) -> freerdp2::Result<()> {
+            let format = {
+                let state = self.state.lock().map_err(|_| {
+                    RdpError::Failed("Legacy RDP clipboard state lock failed.".into())
+                })?;
+                state.remote_text_format
+            };
+            let Some(format) = format else {
+                return Ok(());
+            };
+            if let Some(text) = decode_legacy_clipboard_text(data, format) {
+                send_event(
+                    &self.writer,
+                    RemoteDesktopHelperEvent::ClipboardText { text },
+                )
+                .map_err(RdpError::Failed)?;
+            }
+            Ok(())
+        }
+    }
+
+    fn send_legacy_clipboard_format_list(
+        context: &mut CliprdrClientContext,
+        state: &Arc<Mutex<LegacyClipboardState>>,
+    ) -> freerdp2::Result<()> {
+        let formats = {
+            let state = state
+                .lock()
+                .map_err(|_| RdpError::Failed("Legacy RDP clipboard state lock failed.".into()))?;
+            legacy_clipboard_formats(state.local_text.is_some())
+        };
+        context.send_client_format_list(&formats)
+    }
+
+    fn preferred_legacy_clipboard_text_format(
+        formats: &[CliprdrFormat],
+    ) -> Option<LegacyClipboardTextFormat> {
+        formats
+            .iter()
+            .find_map(|format| match format.id {
+                Some(FreeRdpClipboardFormat::UnicodeText) => {
+                    Some(LegacyClipboardTextFormat::UnicodeText)
+                }
+                _ => None,
+            })
+            .or_else(|| {
+                formats.iter().find_map(|format| match format.id {
+                    Some(FreeRdpClipboardFormat::Text | FreeRdpClipboardFormat::OemText) => {
+                        Some(LegacyClipboardTextFormat::Text)
+                    }
+                    _ => None,
+                })
+            })
+    }
+
+    fn encode_legacy_clipboard_text(text: &str, format: LegacyClipboardTextFormat) -> Vec<u8> {
+        match format {
+            LegacyClipboardTextFormat::UnicodeText => {
+                let mut bytes = Vec::with_capacity(text.len().saturating_mul(2).saturating_add(2));
+                for code_unit in text.encode_utf16().chain(std::iter::once(0)) {
+                    bytes.extend_from_slice(&code_unit.to_le_bytes());
+                }
+                bytes
+            }
+            LegacyClipboardTextFormat::Text => {
+                let mut bytes = text.as_bytes().to_vec();
+                bytes.push(0);
+                bytes
+            }
+        }
+    }
+
+    fn decode_legacy_clipboard_text(
+        data: &[u8],
+        format: LegacyClipboardTextFormat,
+    ) -> Option<String> {
+        match format {
+            LegacyClipboardTextFormat::UnicodeText => {
+                let mut code_units = Vec::with_capacity(data.len() / 2);
+                for chunk in data.chunks_exact(2) {
+                    let code_unit = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    if code_unit == 0 {
+                        break;
+                    }
+                    code_units.push(code_unit);
+                }
+                Some(String::from_utf16_lossy(&code_units))
+            }
+            LegacyClipboardTextFormat::Text => {
+                let end = data
+                    .iter()
+                    .position(|byte| *byte == 0)
+                    .unwrap_or(data.len());
+                Some(String::from_utf8_lossy(&data[..end]).into_owned())
+            }
+        }
     }
 
     fn legacy_sync_flags(keys: RemoteDesktopLockKeys) -> SyncFlags {
@@ -2051,10 +2728,12 @@ mod legacy_freerdp {
             return Err("Legacy RDP frame stride is smaller than the row width.".to_string());
         }
         if stride == row_len {
-            return buffer
+            let mut pixels = buffer
                 .get(..frame_len)
                 .map(ToOwned::to_owned)
-                .ok_or_else(|| "Legacy RDP frame buffer is shorter than expected.".to_string());
+                .ok_or_else(|| "Legacy RDP frame buffer is shorter than expected.".to_string())?;
+            set_bgra_alpha_opaque(&mut pixels);
+            return Ok(pixels);
         }
 
         let mut pixels = Vec::with_capacity(frame_len);
@@ -2070,14 +2749,34 @@ mod legacy_freerdp {
                 .ok_or_else(|| "Legacy RDP frame buffer is shorter than expected.".to_string())?;
             pixels.extend_from_slice(row_bytes);
         }
+        set_bgra_alpha_opaque(&mut pixels);
         Ok(pixels)
+    }
+
+    fn set_bgra_alpha_opaque(bytes: &mut [u8]) {
+        for pixel in bytes.chunks_exact_mut(4) {
+            // FreeRDP's BGRA32 desktop surface uses the last byte as padding
+            // for our opaque framebuffer contract.
+            pixel[3] = 0xff;
+        }
     }
 
     struct LegacyFreeRdpHandler {
         writer: SharedEventWriter,
+        clipboard: Arc<Mutex<LegacyClipboardState>>,
     }
 
     impl Handler for LegacyFreeRdpHandler {
+        fn clipboard_connected(&mut self, clip: &mut CliprdrClientContext) {
+            // FreeRDP owns the CLIPRDR context, while the helper event loop owns
+            // protocol requests. Shared state keeps text-only clipboard parity
+            // without exposing file or image clipboard formats.
+            clip.register_handler(LegacyClipboardHandler {
+                writer: self.writer.clone(),
+                state: Arc::clone(&self.clipboard),
+            });
+        }
+
         fn post_connect(&mut self, context: &mut Context<Self>) -> freerdp2::Result<()> {
             context.instance.gdi_init(PIXEL_FORMAT_BGRA32)?;
             let mut update = context.update().ok_or(RdpError::Unsupported)?;
@@ -2150,6 +2849,53 @@ mod legacy_freerdp {
             self.y = clamp_u32_to_u16(y);
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn legacy_clipboard_prefers_unicode_text() {
+            let formats = vec![
+                CliprdrFormat {
+                    id: Some(FreeRdpClipboardFormat::Text),
+                    name: None,
+                },
+                CliprdrFormat {
+                    id: Some(FreeRdpClipboardFormat::UnicodeText),
+                    name: None,
+                },
+            ];
+
+            assert_eq!(
+                preferred_legacy_clipboard_text_format(&formats),
+                Some(LegacyClipboardTextFormat::UnicodeText)
+            );
+        }
+
+        #[test]
+        fn legacy_unicode_clipboard_text_round_trips_with_nul_terminator() {
+            let encoded =
+                encode_legacy_clipboard_text("hello 世界", LegacyClipboardTextFormat::UnicodeText);
+
+            assert_eq!(encoded[encoded.len() - 2..], [0, 0]);
+            assert_eq!(
+                decode_legacy_clipboard_text(&encoded, LegacyClipboardTextFormat::UnicodeText),
+                Some("hello 世界".to_string())
+            );
+        }
+
+        #[test]
+        fn legacy_ansi_clipboard_text_round_trips_with_nul_terminator() {
+            let encoded = encode_legacy_clipboard_text("plain", LegacyClipboardTextFormat::Text);
+
+            assert_eq!(encoded.last(), Some(&0));
+            assert_eq!(
+                decode_legacy_clipboard_text(&encoded, LegacyClipboardTextFormat::Text),
+                Some("plain".to_string())
+            );
+        }
+    }
 }
 
 fn clamp_u32_to_u16(value: u32) -> u16 {
@@ -2174,12 +2920,22 @@ mod tests {
 
     use ironrdp::pdu::{geometry::InclusiveRectangle, input::fast_path::SynchronizeFlags};
     use oxideterm_remote_desktop::{
-        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopKey, RemoteDesktopKeyState,
-        RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopRect,
-        RemoteDesktopWheelDelta,
+        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopKey,
+        RemoteDesktopKeyState, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
+        RemoteDesktopRect, RemoteDesktopWheelDelta,
     };
 
     use super::*;
+
+    fn tiny_png_bytes() -> Vec<u8> {
+        vec![
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H',
+            b'D', b'R', 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, b'I', b'D', b'A', b'T', 0x78,
+            0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99,
+            0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, b'I', b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
+        ]
+    }
 
     #[derive(Debug)]
     struct StaticConnectorSource(&'static str);
@@ -2448,7 +3204,7 @@ mod tests {
     #[test]
     fn client_output_drain_yields_after_budget() {
         let writer = SharedEventWriter::inert_for_tests();
-        let (output_tx, output_rx) = mpsc::channel();
+        let (output_tx, output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         for _ in 0..=RDP_CLIENT_OUTPUT_DRAIN_LIMIT {
             output_tx
                 .send(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
@@ -2468,11 +3224,62 @@ mod tests {
     }
 
     #[test]
+    fn saturated_graphics_queue_defers_latest_base_frame_without_dropping_state() {
+        let (output_tx, output_rx) = mpsc::sync_channel(1);
+        output_tx
+            .send(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
+                frame: test_frame(),
+            }))
+            .unwrap();
+        let image = DecodedImage::new(PixelFormat::RgbA32, 2, 2);
+        let mut pending_base_frame = false;
+
+        send_client_rdp_graphics_event(
+            &output_tx,
+            RemoteDesktopHelperEvent::FrameUpdate {
+                update: RemoteDesktopFrameUpdate::new(
+                    RemoteDesktopSize {
+                        width: 2,
+                        height: 2,
+                    },
+                    RemoteDesktopRect::new(0, 0, 1, 1),
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![1, 1, 1, 0xff],
+                ),
+            },
+            &mut pending_base_frame,
+        )
+        .unwrap();
+
+        assert!(pending_base_frame);
+        assert!(matches!(
+            output_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+        assert!(matches!(
+            output_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        flush_pending_rdp_base_frame(&output_tx, &image, &mut pending_base_frame).unwrap();
+
+        assert!(!pending_base_frame);
+        assert!(matches!(
+            output_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+    }
+
+    #[test]
     fn client_loop_prioritizes_queued_close_over_pending_output_error() {
         let writer = SharedEventWriter::inert_for_tests();
         let (request_tx, request_rx) = mpsc::channel();
         let (input_tx, _input_rx) = tokio_mpsc::unbounded_channel();
-        let (output_tx, output_rx) = mpsc::channel();
+        let (output_tx, output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         output_tx
             .send(ClientRdpOutput::ConnectionFailure(
                 connector::ConnectorError::new(
@@ -2491,6 +3298,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
+            scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
             read_only: false,
         };
 
@@ -2508,6 +3316,29 @@ mod tests {
     }
 
     #[test]
+    fn connector_failure_exit_preserves_structured_category() {
+        let writer = SharedEventWriter::inert_for_tests();
+        let (output_tx, output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        output_tx
+            .send(ClientRdpOutput::ConnectionFailure(
+                connector::ConnectorError::new("Authentication", ConnectorErrorKind::AccessDenied),
+            ))
+            .unwrap();
+
+        let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
+
+        // The helper event should classify from the connector error kind, not
+        // from a localized display string.
+        match drain.exit {
+            Some(ClientRdpSessionExit::ConnectionFailed { message, category }) => {
+                assert_eq!(category, RemoteDesktopErrorCategory::Authentication);
+                assert!(message.contains("access denied"));
+            }
+            other => panic!("unexpected drain exit: {other:?}"),
+        }
+    }
+
+    #[test]
     fn clipboard_formats_prefer_unicode_text() {
         let formats = text_clipboard_formats();
 
@@ -2520,7 +3351,7 @@ mod tests {
     #[test]
     fn clipboard_ready_advertises_cached_local_text() {
         let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
-        let (output_tx, _output_rx) = mpsc::channel();
+        let (output_tx, _output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         let mut backend = ClientClipboardBackend::new(input_tx, output_tx);
         backend.set_local_text("hello".to_string());
 
@@ -2540,6 +3371,115 @@ mod tests {
                 );
             }
             message => panic!("unexpected clipboard message: {message:?}"),
+        }
+    }
+
+    #[test]
+    fn clipboard_ready_advertises_cached_local_image_data() {
+        let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+        let (output_tx, _output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let mut backend = ClientClipboardBackend::new(input_tx, output_tx);
+        backend.set_local_data(RemoteDesktopClipboardData::new(
+            RemoteDesktopClipboardFormat::ImagePng,
+            vec![1, 2, 3],
+        ));
+
+        backend.on_ready();
+
+        match input_rx.try_recv().unwrap() {
+            RdpInputEvent::Clipboard(ClipboardMessage::SendInitiateCopy(formats)) => {
+                assert!(formats.iter().any(|format| {
+                    format.id == RDP_CLIPBOARD_FORMAT_IMAGE_PNG
+                        && format
+                            .name
+                            .as_ref()
+                            .is_some_and(|name| name.value() == "PNG")
+                }));
+                assert!(
+                    !formats
+                        .iter()
+                        .any(|format| format.id == ClipboardFormatId::CF_UNICODETEXT)
+                );
+            }
+            message => panic!("unexpected clipboard message: {message:?}"),
+        }
+    }
+
+    #[test]
+    fn clipboard_image_format_prefers_named_png_before_text() {
+        let formats = vec![
+            ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT),
+            ClipboardFormat::new(ClipboardFormatId::new(0xc080))
+                .with_name(ClipboardFormatName::new("image/png")),
+        ];
+
+        assert_eq!(
+            preferred_image_clipboard_format(&formats),
+            Some(RdpClipboardDataFormat {
+                id: ClipboardFormatId::new(0xc080),
+                format: RemoteDesktopClipboardFormat::ImagePng,
+                encoding: RdpClipboardDataEncoding::Encoded,
+            })
+        );
+    }
+
+    #[test]
+    fn local_png_clipboard_can_answer_dib_requests() {
+        let data = RemoteDesktopClipboardData::new(
+            RemoteDesktopClipboardFormat::ImagePng,
+            tiny_png_bytes(),
+        );
+
+        assert!(encode_local_clipboard_data(&data, ClipboardFormatId::CF_DIB).is_some());
+        assert!(encode_local_clipboard_data(&data, ClipboardFormatId::CF_DIBV5).is_some());
+        assert_eq!(
+            encode_local_clipboard_data(&data, RDP_CLIPBOARD_FORMAT_IMAGE_PNG),
+            Some(data.bytes.clone())
+        );
+    }
+
+    #[test]
+    fn remote_dib_clipboard_decodes_to_png_data() {
+        let data = RemoteDesktopClipboardData::new(
+            RemoteDesktopClipboardFormat::ImagePng,
+            tiny_png_bytes(),
+        );
+        let dib = encode_local_clipboard_data(&data, ClipboardFormatId::CF_DIB).unwrap();
+
+        let decoded = decode_remote_clipboard_data(
+            RdpClipboardDataFormat {
+                id: ClipboardFormatId::CF_DIB,
+                format: RemoteDesktopClipboardFormat::ImagePng,
+                encoding: RdpClipboardDataEncoding::Dib,
+            },
+            dib,
+        )
+        .unwrap();
+
+        assert_eq!(decoded.format, RemoteDesktopClipboardFormat::ImagePng);
+        assert!(decoded.bytes.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[test]
+    fn clipboard_data_request_enters_client_loop() {
+        let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+        let mut input_database = RdpInputDatabase::new();
+        let mut keyboard_mapper = RdpKeyboardInputMapper::default();
+        let data =
+            RemoteDesktopClipboardData::new(RemoteDesktopClipboardFormat::ImageGif, vec![9, 8, 7]);
+
+        forward_client_rdp_request(
+            &input_tx,
+            &mut input_database,
+            &mut keyboard_mapper,
+            RemoteDesktopHelperRequest::ClipboardData { data: data.clone() },
+            false,
+        )
+        .unwrap();
+
+        match input_rx.try_recv().unwrap() {
+            RdpInputEvent::SetClipboardData(received) => assert_eq!(received, data),
+            event => panic!("expected clipboard data event, got {event:?}"),
         }
     }
 
@@ -2591,6 +3531,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
+            scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
             read_only: false,
         };
 
@@ -2605,6 +3546,10 @@ mod tests {
         assert!(!client_config.connector.pointer_software_rendering);
         assert_eq!(client_config.connector.desktop_size.width, 1280);
         assert_eq!(client_config.connector.desktop_size.height, 720);
+        assert_eq!(
+            client_config.connector.desktop_scale_factor,
+            RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT
+        );
         let bitmap = client_config.connector.bitmap.as_ref().unwrap();
         assert!(bitmap.lossy_compression);
         assert_eq!(bitmap.color_depth, 32);
@@ -2621,6 +3566,7 @@ mod tests {
                 width: 1601,
                 height: 899,
             },
+            scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
             read_only: false,
         };
 
@@ -2628,6 +3574,66 @@ mod tests {
 
         assert_eq!(client_config.connector.desktop_size.width % 2, 0);
         assert_eq!(client_config.connector.desktop_size.height, 899);
+    }
+
+    #[test]
+    fn rdp_desktop_size_normalization_matches_displaycontrol_bounds() {
+        assert_eq!(
+            normalized_rdp_desktop_size(RemoteDesktopSize {
+                width: 201,
+                height: 121,
+            }),
+            RemoteDesktopSize {
+                width: 200,
+                height: 200,
+            }
+        );
+        assert_eq!(
+            normalized_rdp_desktop_size(RemoteDesktopSize {
+                width: 9001,
+                height: 9001,
+            }),
+            RemoteDesktopSize {
+                width: 8192,
+                height: 8192,
+            }
+        );
+    }
+
+    #[test]
+    fn resize_request_enters_client_loop_with_normalized_rdp_size() {
+        let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+        let mut input_database = RdpInputDatabase::new();
+        let mut keyboard_mapper = RdpKeyboardInputMapper::default();
+
+        forward_client_rdp_request(
+            &input_tx,
+            &mut input_database,
+            &mut keyboard_mapper,
+            RemoteDesktopHelperRequest::Resize {
+                size: RemoteDesktopSize {
+                    width: 201,
+                    height: 121,
+                },
+                scale_factor: Some(125),
+            },
+            false,
+        )
+        .unwrap();
+
+        match input_rx.try_recv().unwrap() {
+            RdpInputEvent::Resize {
+                width,
+                height,
+                scale_factor,
+                ..
+            } => {
+                assert_eq!(width, 200);
+                assert_eq!(height, 200);
+                assert_eq!(scale_factor, 125);
+            }
+            event => panic!("expected resize event, got {event:?}"),
+        }
     }
 
     #[test]
@@ -2641,6 +3647,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
+            scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
             read_only: false,
         };
 
@@ -2650,6 +3657,7 @@ mod tests {
                     width: 1600,
                     height: 900,
                 },
+                scale_factor: Some(150),
             },
             &mut config,
         );
@@ -2661,15 +3669,34 @@ mod tests {
                 height: 900
             }
         );
+        assert_eq!(config.scale_factor, 150);
     }
 
     #[test]
-    fn reconnect_status_hides_local_dependency_paths() {
-        let message = format_reconnect_status(
-            "RDP session ended: /Users/example/.cargo/git/checkouts/ironrdp/src/lib.rs",
+    fn scale_factor_defaults_match_connector_and_displaycontrol_contexts() {
+        assert_eq!(rdp_connector_scale_factor(Some(100)), 100);
+        assert_eq!(rdp_connector_scale_factor(Some(500)), 500);
+        assert_eq!(
+            rdp_connector_scale_factor(Some(99)),
+            RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT
         );
+        assert_eq!(
+            rdp_connector_scale_factor(None),
+            RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT
+        );
+        assert_eq!(
+            rdp_displaycontrol_scale_factor(None),
+            RDP_DISPLAYCONTROL_DEFAULT_SCALE_FACTOR_PERCENT
+        );
+    }
 
-        assert_eq!(message, "RDP session ended. Reconnecting.");
+    #[test]
+    fn disconnect_reason_hides_local_dependency_paths() {
+        let message = sanitize_rdp_disconnect_reason(Some(
+            "RDP session ended: /Users/example/.cargo/git/checkouts/ironrdp/src/lib.rs",
+        ));
+
+        assert_eq!(message.as_deref(), Some("RDP session ended."));
     }
 
     #[test]
@@ -2706,7 +3733,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_partial_black_update_starts_backing_frame() {
+    fn initial_partial_black_update_waits_for_base_frame() {
         let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
         let mut sent_initial_frame = false;
 
@@ -2722,19 +3749,29 @@ mod tests {
         )
         .expect("graphics update maps");
 
-        match event {
-            Some(RemoteDesktopHelperEvent::Frame { frame }) => {
-                assert_eq!(
-                    frame.size,
-                    RemoteDesktopSize {
-                        width: 4,
-                        height: 4
-                    }
-                );
-                assert!(sent_initial_frame);
-            }
-            other => panic!("expected initial backing frame, got {other:?}"),
-        }
+        assert!(event.is_none());
+        assert!(!sent_initial_frame);
+    }
+
+    #[test]
+    fn stale_graphics_region_is_skipped_without_failing_session() {
+        let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
+        let mut sent_initial_frame = true;
+
+        let event = graphics_update_event(
+            &image,
+            InclusiveRectangle {
+                left: 3,
+                top: 3,
+                right: 4,
+                bottom: 4,
+            },
+            &mut sent_initial_frame,
+        )
+        .expect("stale graphics regions should be skippable");
+
+        assert!(event.is_none());
+        assert!(sent_initial_frame);
     }
 
     #[test]
@@ -2770,6 +3807,50 @@ mod tests {
     }
 
     #[test]
+    fn full_screen_update_refreshes_base_frame_after_initial_frame() {
+        let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
+        let mut sent_initial_frame = true;
+
+        let event = graphics_update_event(
+            &image,
+            InclusiveRectangle {
+                left: 0,
+                top: 0,
+                right: 3,
+                bottom: 3,
+            },
+            &mut sent_initial_frame,
+        )
+        .expect("graphics update maps");
+
+        assert!(matches!(
+            event,
+            Some(RemoteDesktopHelperEvent::Frame { .. })
+        ));
+        assert!(sent_initial_frame);
+    }
+
+    #[test]
+    fn base_frame_event_uses_current_image_as_complete_backing_frame() {
+        let image = DecodedImage::new(PixelFormat::RgbA32, 2, 1);
+
+        match base_frame_event(&image) {
+            RemoteDesktopHelperEvent::Frame { frame } => {
+                assert_eq!(
+                    frame.size,
+                    RemoteDesktopSize {
+                        width: 2,
+                        height: 1
+                    }
+                );
+                assert_eq!(frame.format, RemoteDesktopFrameFormat::Rgba8);
+                assert_eq!(frame.bytes, vec![0, 0, 0, 0xff, 0, 0, 0, 0xff]);
+            }
+            other => panic!("expected base frame, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn full_frame_copy_sets_alpha_opaque() {
         let bytes = opaque_rgba_bytes(&[1, 2, 3, 0, 4, 5, 6, 7]);
 
@@ -2789,6 +3870,10 @@ mod tests {
         let message = format_connector_error("RDP negotiation failed", &error);
 
         assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
+        assert_eq!(
+            connector_error_category(&error),
+            RemoteDesktopErrorCategory::LegacySecurity
+        );
         assert!(!message.contains("/Users/"));
         assert!(!message.contains(".cargo"));
     }
@@ -2841,6 +3926,18 @@ mod tests {
         assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
     }
 
+    #[test]
+    fn access_denied_connector_error_is_authentication_category() {
+        let error =
+            connector::ConnectorError::new("Authentication", ConnectorErrorKind::AccessDenied);
+
+        // Access denied is a stable authentication failure constructor for tests.
+        assert_eq!(
+            connector_error_category(&error),
+            RemoteDesktopErrorCategory::Authentication
+        );
+    }
+
     #[cfg(not(feature = "legacy-freerdp"))]
     #[test]
     fn legacy_fallback_without_freerdp_feature_returns_guidance() {
@@ -2854,6 +3951,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
+            scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
             read_only: false,
         };
         let writer = SharedEventWriter::inert_for_tests();

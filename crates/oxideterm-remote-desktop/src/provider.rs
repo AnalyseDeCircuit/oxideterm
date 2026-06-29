@@ -30,6 +30,8 @@ pub struct RemoteDesktopProviderCapabilities {
     #[serde(default)]
     pub clipboard_text: bool,
     #[serde(default)]
+    pub clipboard_data: bool,
+    #[serde(default)]
     pub resize: bool,
     #[serde(default)]
     pub cursor: bool,
@@ -213,6 +215,7 @@ fn builtin_provider_capabilities(
 ) -> RemoteDesktopProviderCapabilities {
     RemoteDesktopProviderCapabilities {
         clipboard_text: true,
+        clipboard_data: matches!(protocol, RemoteDesktopProtocol::Rdp),
         resize: matches!(protocol, RemoteDesktopProtocol::Rdp),
         cursor: true,
         binary_frames: true,
@@ -274,6 +277,7 @@ mod tests {
             },
             capabilities: RemoteDesktopProviderCapabilities {
                 clipboard_text: true,
+                clipboard_data: matches!(protocol, RemoteDesktopProtocol::Rdp),
                 resize: true,
                 cursor: true,
                 binary_frames: true,
@@ -340,12 +344,14 @@ mod tests {
         assert_eq!(rdp.entry.command, "oxideterm-rdp-helper");
         assert_eq!(rdp.entry.args, vec!["--stdio".to_string()]);
         assert!(rdp.capabilities.clipboard_text);
+        assert!(rdp.capabilities.clipboard_data);
         assert!(rdp.capabilities.resize);
         assert!(rdp.capabilities.cursor);
         assert!(rdp.capabilities.binary_frames);
 
         assert_eq!(vnc.effective_default_port(), 5900);
         assert!(vnc.capabilities.clipboard_text);
+        assert!(!vnc.capabilities.clipboard_data);
         assert!(!vnc.capabilities.resize);
         assert!(vnc.capabilities.cursor);
         assert!(vnc.capabilities.binary_frames);

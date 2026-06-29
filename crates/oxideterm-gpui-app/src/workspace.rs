@@ -59,13 +59,13 @@ use self::{
 };
 use anyhow::Result;
 use gpui::{
-    AnchoredPositionMode, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context,
-    Corner, CursorStyle, FocusHandle, Focusable, Image, IntoElement, KeyDownEvent, KeyUpEvent,
-    ListAlignment, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
-    ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollHandle,
-    ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, TextLayout, Timer,
-    UniformListScrollHandle, WeakEntity, Window, anchored, deferred, div, prelude::*, px, relative,
-    rgb, rgba, svg,
+    AnchoredPositionMode, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry,
+    ClipboardItem, Context, Corner, CursorStyle, FocusHandle, Focusable, Image, ImageFormat,
+    IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
+    PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent,
+    SharedString, Styled, StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle,
+    WeakEntity, Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{

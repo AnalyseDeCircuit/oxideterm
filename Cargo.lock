@@ -3198,7 +3198,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3916,7 +3916,7 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps 7.0.8",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4742,7 +4742,7 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.6.1",
+ "windows-registry 0.4.0",
 ]
 
 [[package]]
@@ -4757,7 +4757,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -5163,6 +5163,15 @@ dependencies = [
  "ironrdp-pdu",
  "ironrdp-svc",
  "tracing",
+]
+
+[[package]]
+name = "ironrdp-cliprdr-format"
+version = "0.2.0"
+source = "git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc#9d206a3da7756fdf8ed13087592eb2298d73e0cc"
+dependencies = [
+ "ironrdp-core",
+ "png 0.18.1",
 ]
 
 [[package]]
@@ -7620,6 +7629,7 @@ version = "2.0.0-gpui-preview.10"
 dependencies = [
  "freerdp2",
  "ironrdp",
+ "ironrdp-cliprdr-format",
  "ironrdp-core",
  "ironrdp-displaycontrol",
  "ironrdp-tls",
@@ -8879,7 +8889,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9856,7 +9866,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11449,7 +11459,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13644,7 +13654,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

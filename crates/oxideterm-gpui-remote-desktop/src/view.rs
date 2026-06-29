@@ -67,7 +67,7 @@ fn frame_body(
     geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> AnyElement {
     if let Some(frame) = state.frame() {
-        let Some(image) = render_image_for_frame(frame) else {
+        let Some(image) = state.frame_image() else {
             if let Some(geometry) = geometry {
                 geometry.clear();
             }
@@ -238,34 +238,6 @@ fn remote_desktop_viewport_probe(geometry: SharedRemoteDesktopGeometry) -> impl 
     .inset_0()
 }
 
-fn render_image_for_frame(frame: &RemoteDesktopFrame) -> Option<Arc<RenderImage>> {
-    if !frame.is_complete() {
-        return None;
-    }
-
-    let mut bytes = frame.bytes.clone();
-    match frame.format {
-        RemoteDesktopFrameFormat::Rgba8 => {
-            // GPUI's RenderImage cache expects BGRA bytes, while the helper
-            // protocol keeps RGBA explicit for engines that already produce it.
-            for pixel in bytes.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
-            }
-        }
-        RemoteDesktopFrameFormat::Bgra8 => {
-            // FreeRDP and VNC-style desktop buffers often use the fourth byte
-            // as unused padding rather than alpha. Remote desktop framebuffers
-            // are opaque, so make that explicit before uploading to GPUI.
-            for pixel in bytes.chunks_exact_mut(4) {
-                pixel[3] = 0xff;
-            }
-        }
-    }
-
-    let buffer = RgbaImage::from_raw(frame.size.width, frame.size.height, bytes)?;
-    Some(Arc::new(RenderImage::new(vec![ImageFrame::new(buffer)])))
-}
-
 fn render_image_for_cursor_shape(shape: &RemoteDesktopCursorShape) -> Option<Arc<RenderImage>> {
     if !shape.is_complete() {
         return None;
@@ -348,43 +320,9 @@ fn error_body(tokens: &ThemeTokens, message: Option<String>) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_remote_desktop::{
-        RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopSize,
-    };
+    use oxideterm_remote_desktop::{RemoteDesktopCursorShape, RemoteDesktopSize};
 
     use super::*;
-
-    #[test]
-    fn bgra_frame_padding_is_rendered_as_opaque_alpha() {
-        let frame = RemoteDesktopFrame::new(
-            RemoteDesktopSize {
-                width: 1,
-                height: 1,
-            },
-            RemoteDesktopFrameFormat::Bgra8,
-            vec![0x10, 0x20, 0x30, 0x00],
-        );
-
-        let image = render_image_for_frame(&frame).expect("complete BGRA frame should render");
-
-        assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0xff].as_slice()));
-    }
-
-    #[test]
-    fn rgba_frame_is_uploaded_in_gpui_bgra_order() {
-        let frame = RemoteDesktopFrame::new(
-            RemoteDesktopSize {
-                width: 1,
-                height: 1,
-            },
-            RemoteDesktopFrameFormat::Rgba8,
-            vec![0x30, 0x20, 0x10, 0xff],
-        );
-
-        let image = render_image_for_frame(&frame).expect("complete RGBA frame should render");
-
-        assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0xff].as_slice()));
-    }
 
     #[test]
     fn cursor_shape_preserves_alpha_while_swapping_rgba_to_bgra() {

@@ -4,9 +4,10 @@
 use std::io::{BufRead, Write};
 
 use crate::{
-    RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopHelperEvent,
-    RemoteDesktopHelperRequest, RemoteDesktopJsonLineError, RemoteDesktopProtocol,
-    RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line, write_event_line,
+    RemoteDesktopEndpoint, RemoteDesktopErrorCategory, RemoteDesktopFrame,
+    RemoteDesktopFrameFormat, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
+    RemoteDesktopJsonLineError, RemoteDesktopProtocol, RemoteDesktopSessionStatus,
+    RemoteDesktopSize, read_request_line, write_event_line,
 };
 
 #[derive(Clone, Debug)]
@@ -51,6 +52,7 @@ impl RemoteDesktopFakeBackend {
                 password: _password,
                 domain: _domain,
                 size,
+                scale_factor: _scale_factor,
                 read_only,
             } => {
                 self.protocol = protocol;
@@ -69,7 +71,7 @@ impl RemoteDesktopFakeBackend {
                     },
                 ]
             }
-            RemoteDesktopHelperRequest::Resize { size } => {
+            RemoteDesktopHelperRequest::Resize { size, .. } => {
                 self.size = RemoteDesktopSize::clamped(size.width, size.height);
                 vec![
                     RemoteDesktopHelperEvent::Connected { size: self.size },
@@ -83,6 +85,7 @@ impl RemoteDesktopFakeBackend {
                     self.status = RemoteDesktopSessionStatus::Failed;
                     return vec![RemoteDesktopHelperEvent::ConnectionFailure {
                         message: "No previous fake remote desktop endpoint exists.".to_string(),
+                        category: Some(RemoteDesktopErrorCategory::Configuration),
                     }];
                 }
 
@@ -111,6 +114,7 @@ impl RemoteDesktopFakeBackend {
             | RemoteDesktopHelperRequest::Key { .. }
             | RemoteDesktopHelperRequest::Text { .. }
             | RemoteDesktopHelperRequest::ClipboardText { .. }
+            | RemoteDesktopHelperRequest::ClipboardData { .. }
             | RemoteDesktopHelperRequest::SynchronizeLockKeys { .. }
             | RemoteDesktopHelperRequest::ReleaseAllInputs => Vec::new(),
         }
@@ -180,6 +184,7 @@ mod tests {
                 width: 640,
                 height: 480,
             },
+            scale_factor: None,
             read_only: false,
         });
 
@@ -233,6 +238,7 @@ mod tests {
                         width: 320,
                         height: 240,
                     },
+                    scale_factor: None,
                 })
                 .unwrap()
                 .as_bytes(),

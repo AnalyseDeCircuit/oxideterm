@@ -11,7 +11,7 @@ impl Render for WorkspaceApp {
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.poll_forwarding_worker_results(cx);
         self.poll_graphics_worker_results(window, cx);
-        self.poll_remote_desktop_worker_results(cx);
+        self.poll_remote_desktop_worker_results(window, cx);
         self.poll_connection_monitor_updates(false, cx);
         self.poll_host_process_action_results(cx);
         self.poll_host_docker_action_results(cx);
@@ -418,6 +418,11 @@ impl Render for WorkspaceApp {
                     cx.stop_propagation();
                 }
             }))
+            .on_modifiers_changed(cx.listener(
+                |this, event: &ModifiersChangedEvent, _window, _cx| {
+                    let _ = this.forward_remote_desktop_modifiers_changed(event);
+                },
+            ))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);

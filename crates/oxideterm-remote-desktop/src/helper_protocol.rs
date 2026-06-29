@@ -10,7 +10,7 @@ use crate::{
     RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteDesktopMouseButton {
     Left,
@@ -61,6 +61,53 @@ pub struct RemoteDesktopLockKeys {
     pub kana_lock: bool,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopClipboardFormat {
+    ImagePng,
+    ImageJpeg,
+    ImageWebp,
+    ImageGif,
+    ImageSvg,
+    ImageBmp,
+    ImageTiff,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopClipboardData {
+    pub format: RemoteDesktopClipboardFormat,
+    pub bytes: Vec<u8>,
+}
+
+impl RemoteDesktopClipboardData {
+    pub fn new(format: RemoteDesktopClipboardFormat, bytes: Vec<u8>) -> Self {
+        Self { format, bytes }
+    }
+}
+
+impl fmt::Debug for RemoteDesktopClipboardData {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RemoteDesktopClipboardData")
+            .field("format", &self.format)
+            .field("bytes", &format_args!("<{} bytes>", self.bytes.len()))
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopErrorCategory {
+    Configuration,
+    Network,
+    Authentication,
+    Protocol,
+    LegacySecurity,
+    Dependency,
+    Unknown,
+}
+
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(
     tag = "type",
@@ -75,10 +122,14 @@ pub enum RemoteDesktopHelperRequest {
         password: Option<RemoteDesktopSecret>,
         domain: Option<String>,
         size: RemoteDesktopSize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale_factor: Option<u32>,
         read_only: bool,
     },
     Resize {
         size: RemoteDesktopSize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale_factor: Option<u32>,
     },
     MouseMove {
         x: u32,
@@ -101,6 +152,9 @@ pub enum RemoteDesktopHelperRequest {
     ClipboardText {
         text: String,
     },
+    ClipboardData {
+        data: RemoteDesktopClipboardData,
+    },
     SynchronizeLockKeys {
         keys: RemoteDesktopLockKeys,
     },
@@ -119,6 +173,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 password,
                 domain,
                 size,
+                scale_factor,
                 read_only,
             } => formatter
                 .debug_struct("Connect")
@@ -128,11 +183,13 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("password", &password.as_ref().map(|_| "[redacted secret]"))
                 .field("domain", &domain.as_ref().map(|_| "<present>"))
                 .field("size", size)
+                .field("scale_factor", scale_factor)
                 .field("read_only", read_only)
                 .finish(),
-            Self::Resize { size } => formatter
+            Self::Resize { size, scale_factor } => formatter
                 .debug_struct("Resize")
                 .field("size", size)
+                .field("scale_factor", scale_factor)
                 .finish(),
             Self::MouseMove { x, y } => formatter
                 .debug_struct("MouseMove")
@@ -160,6 +217,11 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
             Self::ClipboardText { text } => formatter
                 .debug_struct("ClipboardText")
                 .field("text", &format_args!("<redacted:{}>", text.chars().count()))
+                .finish(),
+            Self::ClipboardData { data } => formatter
+                .debug_struct("ClipboardData")
+                .field("format", &data.format)
+                .field("bytes", &format_args!("<{} bytes>", data.bytes.len()))
                 .finish(),
             Self::SynchronizeLockKeys { keys } => formatter
                 .debug_struct("SynchronizeLockKeys")
@@ -206,8 +268,13 @@ pub enum RemoteDesktopHelperEvent {
     ClipboardText {
         text: String,
     },
+    ClipboardData {
+        data: RemoteDesktopClipboardData,
+    },
     ConnectionFailure {
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        category: Option<RemoteDesktopErrorCategory>,
     },
     Disconnected {
         reason: Option<String>,
@@ -269,9 +336,15 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .debug_struct("ClipboardText")
                 .field("text", &format_args!("<redacted:{}>", text.chars().count()))
                 .finish(),
-            Self::ConnectionFailure { message } => formatter
+            Self::ClipboardData { data } => formatter
+                .debug_struct("ClipboardData")
+                .field("format", &data.format)
+                .field("bytes", &format_args!("<{} bytes>", data.bytes.len()))
+                .finish(),
+            Self::ConnectionFailure { message, category } => formatter
                 .debug_struct("ConnectionFailure")
                 .field("message", message)
+                .field("category", category)
                 .finish(),
             Self::Disconnected { reason } => formatter
                 .debug_struct("Disconnected")
@@ -301,6 +374,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
+            scale_factor: Some(125),
             read_only: false,
         };
 
@@ -313,18 +387,62 @@ mod tests {
     }
 
     #[test]
+    fn connect_request_accepts_missing_scale_factor() {
+        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(
+            r#"{"type":"connect","protocol":"rdp","endpoint":{"host":"example.test","port":3389},"username":null,"password":null,"domain":null,"size":{"width":1280,"height":720},"readOnly":false}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            decoded,
+            RemoteDesktopHelperRequest::Connect {
+                protocol: RemoteDesktopProtocol::Rdp,
+                endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
+                username: None,
+                password: None,
+                domain: None,
+                size: RemoteDesktopSize {
+                    width: 1280,
+                    height: 720,
+                },
+                scale_factor: None,
+                read_only: false,
+            }
+        );
+    }
+
+    #[test]
     fn helper_protocol_round_trips_json() {
         let request = RemoteDesktopHelperRequest::Resize {
             size: RemoteDesktopSize {
                 width: 1024,
                 height: 768,
             },
+            scale_factor: Some(125),
         };
 
         let encoded = serde_json::to_string(&request).unwrap();
         let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn resize_request_accepts_missing_scale_factor() {
+        let decoded: RemoteDesktopHelperRequest =
+            serde_json::from_str(r#"{"type":"resize","size":{"width":1024,"height":768}}"#)
+                .unwrap();
+
+        assert_eq!(
+            decoded,
+            RemoteDesktopHelperRequest::Resize {
+                size: RemoteDesktopSize {
+                    width: 1024,
+                    height: 768,
+                },
+                scale_factor: None,
+            }
+        );
     }
 
     #[test]
@@ -352,5 +470,34 @@ mod tests {
         let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn connection_failure_category_round_trips_json() {
+        let event = RemoteDesktopHelperEvent::ConnectionFailure {
+            message: "legacy security".to_string(),
+            category: Some(RemoteDesktopErrorCategory::LegacySecurity),
+        };
+
+        let encoded = serde_json::to_string(&event).unwrap();
+        let decoded: RemoteDesktopHelperEvent = serde_json::from_str(&encoded).unwrap();
+
+        assert!(encoded.contains("\"category\":\"legacy-security\""));
+        assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn connection_failure_accepts_missing_category() {
+        let decoded: RemoteDesktopHelperEvent =
+            serde_json::from_str(r#"{"type":"connectionFailure","message":"old helper failure"}"#)
+                .unwrap();
+
+        assert_eq!(
+            decoded,
+            RemoteDesktopHelperEvent::ConnectionFailure {
+                message: "old helper failure".to_string(),
+                category: None,
+            }
+        );
     }
 }

@@ -18,12 +18,13 @@ use des::{
     cipher::{Block, BlockCipherEncrypt, KeyInit},
 };
 use oxideterm_remote_desktop::{
-    RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFakeBackend, RemoteDesktopFrame,
-    RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopHelperEvent,
-    RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopMouseButton,
+    RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopErrorCategory,
+    RemoteDesktopFakeBackend, RemoteDesktopFrame, RemoteDesktopFrameFormat,
+    RemoteDesktopFrameUpdate, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
+    RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopMouseButton,
     RemoteDesktopMouseButtonState, RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSecret,
-    RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line, run_fake_backend_stdio,
-    write_event_line,
+    RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta, read_request_line,
+    run_fake_backend_stdio, write_event_line,
 };
 use zeroize::Zeroizing;
 
@@ -41,6 +42,8 @@ const VNC_BUTTON_MIDDLE: u8 = 2;
 const VNC_BUTTON_RIGHT: u8 = 4;
 const VNC_WHEEL_UP: u8 = 8;
 const VNC_WHEEL_DOWN: u8 = 16;
+const VNC_WHEEL_LEFT: u8 = 32;
+const VNC_WHEEL_RIGHT: u8 = 64;
 const VNC_SCROLL_STEP: f32 = 120.0;
 const MAX_VNC_FRAME_BYTES: usize =
     RemoteDesktopSize::MAX_DIMENSION as usize * RemoteDesktopSize::MAX_DIMENSION as usize * 4;
@@ -101,6 +104,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         password,
         domain: _domain,
         size: _size,
+        scale_factor: _scale_factor,
         read_only,
     } = first_request
     else {
@@ -108,6 +112,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "VNC helper expected an initial connect request.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
         return Ok(());
@@ -118,6 +123,7 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "VNC helper received a non-VNC connect request.".to_string(),
+                category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
         return Ok(());
@@ -137,7 +143,10 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         Err(error) => {
             send_event(
                 &writer,
-                RemoteDesktopHelperEvent::ConnectionFailure { message: error },
+                RemoteDesktopHelperEvent::ConnectionFailure {
+                    category: Some(vnc_error_category_from_message(&error)),
+                    message: error,
+                },
             )?;
             return Ok(());
         }
@@ -181,7 +190,10 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
                     Err(error) => {
                         send_event(
                             &writer,
-                            RemoteDesktopHelperEvent::ConnectionFailure { message: error },
+                            RemoteDesktopHelperEvent::ConnectionFailure {
+                                category: Some(vnc_error_category_from_message(&error)),
+                                message: error,
+                            },
                         )?;
                         break;
                     }
@@ -262,7 +274,7 @@ fn handle_real_vnc_request(
             )?;
         }
         RemoteDesktopHelperRequest::Wheel { delta } if !read_only => {
-            for mask in vnc_scroll_masks(delta.y) {
+            for mask in vnc_scroll_masks(delta) {
                 connection.send_pointer(
                     input_state.pointer.x,
                     input_state.pointer.y,
@@ -289,6 +301,11 @@ fn handle_real_vnc_request(
         }
         RemoteDesktopHelperRequest::ClipboardText { text } if !read_only => {
             connection.send_client_cut_text(&text)?;
+        }
+        RemoteDesktopHelperRequest::ClipboardData { .. } => {
+            // Baseline RFB clipboard messages are text-only. Keep binary
+            // clipboard data as an RDP capability unless a VNC extension is
+            // negotiated explicitly.
         }
         RemoteDesktopHelperRequest::SynchronizeLockKeys { .. } => {
             // RFB has no equivalent lock-key synchronization message in the
@@ -329,6 +346,26 @@ struct VncConnection {
     closed: Arc<AtomicBool>,
     width: u16,
     height: u16,
+}
+
+fn vnc_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("password") || normalized.contains("authentication") {
+        RemoteDesktopErrorCategory::Authentication
+    } else if normalized.contains("tcp")
+        || normalized.contains("connection")
+        || normalized.contains("read failed")
+        || normalized.contains("write failed")
+    {
+        RemoteDesktopErrorCategory::Network
+    } else if normalized.contains("security")
+        || normalized.contains("protocol")
+        || normalized.contains("unsupported")
+    {
+        RemoteDesktopErrorCategory::Protocol
+    } else {
+        RemoteDesktopErrorCategory::Unknown
+    }
 }
 
 impl VncConnection {
@@ -1038,19 +1075,31 @@ fn vnc_button_mask(button: RemoteDesktopMouseButton) -> u8 {
         RemoteDesktopMouseButton::Left => VNC_BUTTON_LEFT,
         RemoteDesktopMouseButton::Middle => VNC_BUTTON_MIDDLE,
         RemoteDesktopMouseButton::Right => VNC_BUTTON_RIGHT,
+        // The base RFB button mask only has reliable room for buttons 1-7,
+        // and 6/7 are commonly used for horizontal wheel events.
         RemoteDesktopMouseButton::Back | RemoteDesktopMouseButton::Forward => 0,
     }
 }
 
-fn vnc_scroll_masks(delta_y: f32) -> Vec<u8> {
-    if delta_y.abs() < f32::EPSILON {
+fn vnc_scroll_masks(delta: RemoteDesktopWheelDelta) -> Vec<u8> {
+    let mut masks = vnc_scroll_axis_masks(delta.y, VNC_WHEEL_UP, VNC_WHEEL_DOWN);
+    masks.extend(vnc_scroll_axis_masks(
+        delta.x,
+        VNC_WHEEL_LEFT,
+        VNC_WHEEL_RIGHT,
+    ));
+    masks
+}
+
+fn vnc_scroll_axis_masks(delta: f32, negative_mask: u8, positive_mask: u8) -> Vec<u8> {
+    if delta.abs() < f32::EPSILON {
         return Vec::new();
     }
-    let steps = (delta_y.abs() / VNC_SCROLL_STEP).ceil().clamp(1.0, 6.0) as usize;
-    let mask = if delta_y > 0.0 {
-        VNC_WHEEL_DOWN
+    let steps = (delta.abs() / VNC_SCROLL_STEP).ceil().clamp(1.0, 6.0) as usize;
+    let mask = if delta > 0.0 {
+        positive_mask
     } else {
-        VNC_WHEEL_UP
+        negative_mask
     };
     vec![mask; steps]
 }
@@ -1411,7 +1460,7 @@ impl VncFramebuffer {
         Self {
             width,
             height,
-            bgra: vec![0; width as usize * height as usize * 4],
+            bgra: opaque_bgra_buffer(width, height),
         }
     }
 
@@ -1420,7 +1469,7 @@ impl VncFramebuffer {
             VncServerEvent::SetResolution { width, height } => {
                 self.width = width as u32;
                 self.height = height as u32;
-                self.bgra = vec![0; self.width as usize * self.height as usize * 4];
+                self.bgra = opaque_bgra_buffer(self.width, self.height);
                 Some(VncFramebufferChange::Full)
             }
             VncServerEvent::RawImage(rect, data) => self.draw_rect(rect, &data),
@@ -1487,7 +1536,9 @@ impl VncFramebuffer {
             let dst_start =
                 (((u32::from(clipped.y) + y) * self.width + u32::from(clipped.x)) * 4) as usize;
             let dst_end = dst_start + (u32::from(clipped.width) * 4) as usize;
-            self.bgra[dst_start..dst_end].copy_from_slice(&data[src_start..src_end]);
+            let dst_row = &mut self.bgra[dst_start..dst_end];
+            dst_row.copy_from_slice(&data[src_start..src_end]);
+            set_bgra_alpha_opaque(dst_row);
         }
         Some(VncFramebufferChange::Rect(clipped))
     }
@@ -1570,6 +1621,21 @@ impl VncFramebuffer {
     }
 }
 
+fn opaque_bgra_buffer(width: u32, height: u32) -> Vec<u8> {
+    let len = width as usize * height as usize * 4;
+    let mut bytes = vec![0; len];
+    set_bgra_alpha_opaque(&mut bytes);
+    bytes
+}
+
+fn set_bgra_alpha_opaque(bytes: &mut [u8]) {
+    for pixel in bytes.chunks_exact_mut(4) {
+        // VNC requests 32-bit/24-depth true color, so the fourth byte is
+        // transport padding rather than framebuffer transparency.
+        pixel[3] = 0xff;
+    }
+}
+
 fn merge_vnc_framebuffer_change(
     existing: Option<VncFramebufferChange>,
     incoming: Option<VncFramebufferChange>,
@@ -1627,7 +1693,26 @@ mod tests {
 
         assert_eq!(
             framebuffer.frame().bytes,
-            vec![0, 0, 0, 0, 1, 2, 3, 255, 0, 0, 0, 0, 4, 5, 6, 255]
+            vec![0, 0, 0, 255, 1, 2, 3, 255, 0, 0, 0, 255, 4, 5, 6, 255]
+        );
+    }
+
+    #[test]
+    fn framebuffer_treats_raw_padding_as_opaque_alpha() {
+        let mut framebuffer = VncFramebuffer::new(1, 1);
+        let rect = RfbRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+
+        let _ = framebuffer.apply(VncServerEvent::RawImage(rect, vec![1, 2, 3, 0]));
+
+        assert_eq!(framebuffer.frame().bytes, vec![1, 2, 3, 255]);
+        assert_eq!(
+            framebuffer.frame_update(rect).unwrap().bytes,
+            vec![1, 2, 3, 255]
         );
     }
 
@@ -1968,6 +2053,33 @@ mod tests {
             down: false,
         }));
         assert!(mapper.release_all_events().is_empty());
+    }
+
+    #[test]
+    fn scroll_masks_include_horizontal_wheel_buttons() {
+        assert_eq!(
+            vnc_scroll_masks(RemoteDesktopWheelDelta {
+                x: 120.0,
+                y: -240.0
+            }),
+            vec![VNC_WHEEL_UP, VNC_WHEEL_UP, VNC_WHEEL_RIGHT]
+        );
+        assert_eq!(
+            vnc_scroll_masks(RemoteDesktopWheelDelta { x: -1.0, y: 0.0 }),
+            vec![VNC_WHEEL_LEFT]
+        );
+    }
+
+    #[test]
+    fn vnc_error_category_identifies_authentication_and_network_errors() {
+        assert_eq!(
+            vnc_error_category_from_message("VNC password authentication failed."),
+            RemoteDesktopErrorCategory::Authentication
+        );
+        assert_eq!(
+            vnc_error_category_from_message("VNC TCP connection failed: refused"),
+            RemoteDesktopErrorCategory::Network
+        );
     }
 
     #[test]

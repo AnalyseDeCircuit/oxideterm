@@ -20,6 +20,7 @@ pub use codec::{
 };
 pub use fake::{RemoteDesktopFakeBackend, run_fake_backend_stdio};
 pub use helper_protocol::{
+    RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopErrorCategory,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState,
     RemoteDesktopLockKeys, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
     RemoteDesktopWheelDelta,
