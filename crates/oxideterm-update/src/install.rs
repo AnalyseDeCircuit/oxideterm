@@ -146,13 +146,13 @@ pub fn plan_native_install(
             InstallStrategy::WindowsRunInstaller,
             InstallActionKind::LaunchInstaller,
             false,
-            "Launch the Windows installer.",
+            "Launch the Windows installer with elevation.",
         ),
         ("windows", InstallPackageKind::WindowsInstallerArchive) => (
             InstallStrategy::WindowsExtractAndRunInstaller,
             InstallActionKind::LaunchInstaller,
             false,
-            "Extract the Windows update archive and launch its installer.",
+            "Extract the Windows update archive and launch its installer with elevation.",
         ),
         ("linux", InstallPackageKind::LinuxAppImage)
             if current_exe_is_appimage(&context.current_exe) =>
@@ -315,28 +315,99 @@ fn execute_windows_installer(
     plan: &NativeInstallPlan,
 ) -> Result<NativeInstallOutcome, NativeUpdateError> {
     match plan.package_kind {
-        InstallPackageKind::WindowsMsi => {
-            Command::new("msiexec")
-                .arg("/i")
-                .arg(&plan.package_path)
-                .arg("/promptrestart")
-                .spawn()
-                .map_err(|error| {
-                    NativeUpdateError::State(format!("launch MSI installer failed: {error}"))
-                })?;
-        }
-        InstallPackageKind::WindowsExe => {
-            Command::new(&plan.package_path).spawn().map_err(|error| {
-                NativeUpdateError::State(format!("launch EXE installer failed: {error}"))
-            })?;
-        }
+        InstallPackageKind::WindowsMsi => launch_windows_installer_elevated(
+            "msiexec.exe",
+            &[
+                "/i".to_string(),
+                plan.package_path.to_string_lossy().into_owned(),
+                "/promptrestart".to_string(),
+            ],
+            &plan.package_path,
+        )?,
+        InstallPackageKind::WindowsExe => launch_windows_installer_elevated(
+            &plan.package_path.to_string_lossy(),
+            &[],
+            &plan.package_path,
+        )?,
         _ => open_package(&plan.package_path)?,
     }
     Ok(NativeInstallOutcome {
         status: NativeInstallStatus::InstallerLaunched,
-        message: plan.summary.clone(),
+        message: windows_installer_launched_message(&plan.package_path),
         should_quit_app: true,
     })
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_installer_launched_message(package_path: &Path) -> String {
+    format!(
+        "Windows installer launched with elevation. If setup is cancelled or fails, rerun the retained update package from: {}",
+        package_path.display()
+    )
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn powershell_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_start_process_script(file_path: &str, arguments: &[String]) -> String {
+    let mut script = format!(
+        "Start-Process -FilePath {}",
+        powershell_single_quoted(file_path)
+    );
+    if !arguments.is_empty() {
+        let argument_list = arguments
+            .iter()
+            .map(|argument| powershell_single_quoted(argument))
+            .collect::<Vec<_>>()
+            .join(", ");
+        script.push_str(&format!(" -ArgumentList @({argument_list})"));
+    }
+    script.push_str(" -Verb RunAs");
+    script
+}
+
+#[cfg(target_os = "windows")]
+fn launch_windows_installer_elevated(
+    file_path: &str,
+    arguments: &[String],
+    retained_package_path: &Path,
+) -> Result<(), NativeUpdateError> {
+    // Start-Process with runas is the Windows shell boundary that displays UAC
+    // when OxideTerm itself is not already elevated.
+    let script = windows_start_process_script(file_path, arguments);
+    let status = Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-Command")
+        .arg(script)
+        .status()
+        .map_err(|error| {
+            reveal_windows_update_package(retained_package_path);
+            NativeUpdateError::State(format!(
+                "launch Windows installer with elevation failed: {error}; update package retained at {}",
+                retained_package_path.display()
+            ))
+        })?;
+    if !status.success() {
+        reveal_windows_update_package(retained_package_path);
+        return Err(NativeUpdateError::State(format!(
+            "launch Windows installer with elevation was cancelled or failed; update package retained at {}",
+            retained_package_path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_windows_update_package(path: &Path) {
+    // Opening Explorer is best-effort guidance for manual retry. The update
+    // result should still report the original launch failure if this also fails.
+    let select_arg = format!("/select,{}", path.display());
+    let _ = Command::new("explorer").arg(select_arg).spawn();
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -682,6 +753,7 @@ mod tests {
         );
         assert_eq!(plan.strategy, InstallStrategy::WindowsRunInstaller);
         assert_eq!(plan.package_kind, InstallPackageKind::WindowsMsi);
+        assert_eq!(plan.summary, "Launch the Windows installer with elevation.");
     }
 
     #[test]
@@ -697,6 +769,41 @@ mod tests {
         assert_eq!(
             plan.package_kind,
             InstallPackageKind::WindowsInstallerArchive
+        );
+        assert_eq!(
+            plan.summary,
+            "Extract the Windows update archive and launch its installer with elevation."
+        );
+    }
+
+    #[test]
+    fn powershell_single_quotes_escape_embedded_quotes() {
+        assert_eq!(
+            powershell_single_quoted("C:/Temp/Oxide'Term Setup.exe"),
+            "'C:/Temp/Oxide''Term Setup.exe'"
+        );
+    }
+
+    #[test]
+    fn windows_start_process_script_uses_runas_and_argument_list() {
+        assert_eq!(
+            windows_start_process_script(
+                "msiexec.exe",
+                &[
+                    "/i".to_string(),
+                    "C:/Temp/OxideTerm Setup.msi".to_string(),
+                    "/promptrestart".to_string(),
+                ],
+            ),
+            "Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', 'C:/Temp/OxideTerm Setup.msi', '/promptrestart') -Verb RunAs"
+        );
+    }
+
+    #[test]
+    fn windows_installer_message_includes_retained_package_path() {
+        assert!(
+            windows_installer_launched_message(Path::new("C:/Temp/OxideTerm Setup.exe"))
+                .contains("C:/Temp/OxideTerm Setup.exe")
         );
     }
 
