@@ -7862,6 +7862,7 @@ name = "oxideterm-vnc-helper"
 version = "2.0.0-gpui-preview.10"
 dependencies = [
  "des",
+ "flate2",
  "oxideterm-remote-desktop",
  "zeroize",
 ]

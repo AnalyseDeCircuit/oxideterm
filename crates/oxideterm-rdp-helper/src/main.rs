@@ -24,9 +24,9 @@ use ironrdp::{
             FormatDataRequest, FormatDataResponse, LockDataId,
         },
     },
+    connector::ConnectionResult,
     connector::connection_activation::ConnectionActivationState,
     connector::{self, ConnectorErrorKind, Credentials},
-    connector::{ConnectionResult, DesktopSize},
     displaycontrol::client::DisplayControlClient,
     dvc::DrdynvcClient,
     graphics::image_processing::PixelFormat,
@@ -36,6 +36,7 @@ use ironrdp::{
     },
     pdu::{
         gcc::KeyboardType,
+        geometry::InclusiveRectangle,
         input::fast_path::FastPathInputEvent,
         rdp::{
             capability_sets::{MajorPlatformType, client_codecs_capabilities},
@@ -475,6 +476,15 @@ fn native_rdp_desktop_ready_events(size: RemoteDesktopSize) -> [RemoteDesktopHel
     ]
 }
 
+fn unsupported_resize_connected_event(image: &DecodedImage) -> RemoteDesktopHelperEvent {
+    RemoteDesktopHelperEvent::Connected {
+        size: RemoteDesktopSize {
+            width: u32::from(image.width()),
+            height: u32::from(image.height()),
+        },
+    }
+}
+
 #[derive(Default)]
 struct ClientRdpRequestCoalescer {
     pending_mouse_move: Option<RemoteDesktopHelperRequest>,
@@ -543,7 +553,7 @@ fn start_client_rdp_session(config: &RdpWorkerConfig) -> Result<ClientRdpSession
 }
 
 fn run_client_rdp_thread(
-    mut config: ClientRdpConfig,
+    config: ClientRdpConfig,
     mut input_rx: tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     client_output_tx: ClientRdpOutputSender,
@@ -586,22 +596,6 @@ fn run_client_rdp_thread(
                         format_graceful_disconnect(reason),
                     ));
                     break;
-                }
-                Ok(ClientRdpControlFlow::ReconnectWithNewSize {
-                    width,
-                    height,
-                    scale_factor,
-                }) => {
-                    config.connector.desktop_size = DesktopSize { width, height };
-                    config.connector.desktop_scale_factor = scale_factor;
-                    let _ = client_output_tx.send_control(ClientRdpOutput::Event(
-                        RemoteDesktopHelperEvent::Status {
-                            status: RemoteDesktopSessionStatus::Reconnecting,
-                            message: Some(
-                                "Reopening RDP session with the new display size.".to_string(),
-                            ),
-                        },
-                    ));
                 }
                 Err(error) => {
                     let _ = client_output_tx.send_control(ClientRdpOutput::Terminated(format!(
@@ -836,11 +830,6 @@ enum RdpInputEvent {
 
 enum ClientRdpControlFlow {
     TerminatedGracefully(GracefulDisconnectReason),
-    ReconnectWithNewSize {
-        width: u16,
-        height: u16,
-        scale_factor: u32,
-    },
 }
 
 #[derive(Debug)]
@@ -975,11 +964,15 @@ async fn run_native_rdp_active_session(
                         {
                             vec![ActiveStageOutput::ResponseFrame(response_frame?)]
                         } else {
-                            return Ok(ClientRdpControlFlow::ReconnectWithNewSize {
-                                width,
-                                height,
-                                scale_factor,
-                            });
+                            // Some servers, notably xrdp/GNOME setups, do not
+                            // expose DisplayControl after activation. Keep the
+                            // live framebuffer and let the UI scale it locally
+                            // instead of tearing down a usable session.
+                            send_client_rdp_event(
+                                output_tx,
+                                unsupported_resize_connected_event(&image),
+                            )?;
+                            Vec::new()
                         }
                     }
                     RdpInputEvent::FastPath(events) => {
@@ -1012,13 +1005,8 @@ async fn run_native_rdp_active_session(
                     .write_all(&frame)
                     .await
                     .map_err(|error| session::custom_err!("write response", error))?,
-                ActiveStageOutput::GraphicsUpdate(_region) => {
-                    // Match IronRDP's reference client for the native RDP path:
-                    // publish the current complete framebuffer for every
-                    // graphics update. Dirty rectangles remain available for a
-                    // later optimization pass, but login/reactivation recovery
-                    // must not depend on a relative delta chain.
-                    send_client_rdp_base_frame(output_tx, &image, &mut frame_state, true)?;
+                ActiveStageOutput::GraphicsUpdate(region) => {
+                    send_client_rdp_graphics_update(output_tx, &image, region, &mut frame_state)?;
                 }
                 ActiveStageOutput::PointerPosition { x, y } => {
                     send_client_rdp_event(
@@ -1129,6 +1117,26 @@ fn send_client_rdp_base_frame(
             Err(session::general_err!("RDP output channel closed"))
         }
     }
+}
+
+fn send_client_rdp_graphics_update(
+    output_tx: &ClientRdpOutputSender,
+    image: &DecodedImage,
+    region: InclusiveRectangle,
+    frame_state: &mut ClientRdpFrameState,
+) -> SessionResult<()> {
+    let Some(event) = graphics_update_event(image, region, &mut frame_state.graphics_sync)? else {
+        return Ok(());
+    };
+
+    if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
+        // Base frames are the synchronization boundary. Queue them through the
+        // dedicated path so the first real desktop frame can publish Connected
+        // only after the UI has a complete framebuffer.
+        return send_client_rdp_base_frame(output_tx, image, frame_state, true);
+    }
+
+    send_client_rdp_graphics_event(output_tx, event, frame_state)
 }
 
 fn send_client_rdp_graphics_event(
@@ -4152,6 +4160,21 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_resize_reports_existing_framebuffer_size() {
+        let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
+
+        assert!(matches!(
+            unsupported_resize_connected_event(&image),
+            RemoteDesktopHelperEvent::Connected {
+                size: RemoteDesktopSize {
+                    width: 4,
+                    height: 3
+                }
+            }
+        ));
+    }
+
+    #[test]
     fn first_desktop_base_frame_publishes_connected_once() {
         let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
@@ -4188,6 +4211,54 @@ mod tests {
             }))
         ));
         assert!(output_rx.control_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn graphics_update_uses_dirty_update_after_base_frame_is_synced() {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
+        let mut frame_state = ClientRdpFrameState::default();
+
+        send_client_rdp_graphics_update(
+            &output_tx,
+            &image,
+            InclusiveRectangle {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            &mut frame_state,
+        )
+        .expect("first graphics update should establish a base frame");
+
+        assert!(frame_state.published_first_desktop_frame);
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+
+        send_client_rdp_graphics_update(
+            &output_tx,
+            &image,
+            InclusiveRectangle {
+                left: 1,
+                top: 1,
+                right: 1,
+                bottom: 1,
+            },
+            &mut frame_state,
+        )
+        .expect("synced graphics updates should use dirty rectangles");
+
+        match output_rx.graphics_rx.try_recv() {
+            Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::FrameUpdate { update })) => {
+                assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 1, 1));
+            }
+            other => panic!("expected dirty frame update, got {other:?}"),
+        }
     }
 
     #[test]

@@ -39,7 +39,7 @@ const REMOTE_DESKTOP_INITIAL_HEIGHT: u32 = 720;
 const REMOTE_DESKTOP_SCROLL_LINE: f32 = 38.0;
 const REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_INTERVAL: Duration = Duration::from_millis(16);
 const REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_TICKS: usize = 120;
-const REMOTE_DESKTOP_WORKER_WAKE_POLL_INTERVAL: Duration = Duration::from_millis(8);
+const REMOTE_DESKTOP_WORKER_WAKE_POLL_INTERVAL: Duration = Duration::from_millis(4);
 const REMOTE_DESKTOP_RESIZE_DEBOUNCE: Duration = Duration::from_millis(120);
 const REMOTE_DESKTOP_RESIZE_DELTA_THRESHOLD: u32 = 16;
 const REMOTE_DESKTOP_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 100;
@@ -48,6 +48,8 @@ const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER: f32 = 100.0;
 const REMOTE_DESKTOP_SCROLL_PIXEL_STEP: f32 = 120.0;
 const REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD: usize = 24;
+const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 4;
+const REMOTE_DESKTOP_REQUEST_WRITE_DRAIN_LIMIT: usize = 128;
 
 #[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
@@ -1005,16 +1007,20 @@ impl WorkspaceApp {
             provider,
             password,
             generation,
-            initial_size,
+            initial_request_size,
+            initial_viewport_size,
             scale_factor,
             old_request_tx,
         )) = self.remote_desktop_sessions.get(&tab_id).map(|session| {
+            let (initial_request_size, initial_viewport_size) =
+                initial_remote_desktop_sizes_for_session(session);
             (
                 session.profile.clone(),
                 session.provider.clone(),
                 session.password.clone(),
                 next_remote_desktop_worker_generation(session.worker_generation),
-                initial_remote_desktop_size_for_session(session),
+                initial_request_size,
+                initial_viewport_size,
                 session.last_viewport_scale_factor,
                 session.request_tx.clone(),
             )
@@ -1037,7 +1043,7 @@ impl WorkspaceApp {
             password,
             frame_slot.clone(),
             worker_wake.clone(),
-            initial_size,
+            initial_request_size,
             scale_factor,
         );
         self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake, cx);
@@ -1052,7 +1058,7 @@ impl WorkspaceApp {
             session.frame_slot = frame_slot;
             session.request_tx = Some(request_tx);
             session.worker_generation = generation;
-            session.last_viewport_size = Some(initial_size);
+            session.last_viewport_size = initial_viewport_size;
             session.last_sent_resize = None;
             session.last_viewport_scale_factor = scale_factor;
             session.resize_generation = Arc::new(AtomicU64::new(0));
@@ -1064,7 +1070,8 @@ impl WorkspaceApp {
     fn start_remote_desktop_worker_for_session(
         &mut self,
         tab_id: TabId,
-        initial_size: RemoteDesktopSize,
+        initial_request_size: RemoteDesktopSize,
+        initial_viewport_size: Option<RemoteDesktopSize>,
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -1096,7 +1103,7 @@ impl WorkspaceApp {
             password,
             frame_slot,
             worker_wake.clone(),
-            initial_size,
+            initial_request_size,
             scale_factor,
         );
         self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake, cx);
@@ -1104,7 +1111,7 @@ impl WorkspaceApp {
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             session.request_tx = Some(request_tx);
             session.worker_generation = generation;
-            session.last_viewport_size = Some(initial_size);
+            session.last_viewport_size = initial_viewport_size;
             session.last_sent_resize = None;
             session.last_viewport_scale_factor = scale_factor;
             session.last_lock_keys = None;
@@ -1132,26 +1139,42 @@ impl WorkspaceApp {
         let mut changed = false;
         let mut pending_starts = Vec::new();
         for (tab_id, session) in self.remote_desktop_sessions.iter_mut() {
+            if let Some(scale_factor) = scale_factor {
+                // The first viewport measurement happens during layout, after
+                // render-time polling. Cache the window scale early so the
+                // layout probe does not start RDP with logical pixels only.
+                session.last_viewport_scale_factor = Some(scale_factor);
+            }
             let snapshot = session.state.snapshot();
             let Some(viewport_size) = session.geometry.viewport_size() else {
                 continue;
             };
-            let size = RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);
-            if let Some(scale_factor) = scale_factor {
-                session.last_viewport_scale_factor = Some(scale_factor);
-            }
+            let viewport_size =
+                RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);
+            let request_size = remote_desktop_requested_size_for_viewport(
+                viewport_size,
+                session.last_viewport_scale_factor,
+            );
             let resize_request = RemoteDesktopResizeRequestState {
-                size,
+                size: request_size,
                 scale_factor: session.last_viewport_scale_factor,
             };
             if session.request_tx.is_none() {
+                if session.last_viewport_scale_factor.is_none() {
+                    continue;
+                }
                 if matches!(
                     snapshot.status,
                     RemoteDesktopSessionStatus::Idle
                         | RemoteDesktopSessionStatus::Connecting
                         | RemoteDesktopSessionStatus::Reconnecting
                 ) {
-                    pending_starts.push((*tab_id, size, session.last_viewport_scale_factor));
+                    pending_starts.push((
+                        *tab_id,
+                        request_size,
+                        Some(viewport_size),
+                        session.last_viewport_scale_factor,
+                    ));
                 }
                 continue;
             }
@@ -1163,19 +1186,20 @@ impl WorkspaceApp {
                 snapshot.pending_resize,
                 session.last_viewport_size,
                 session.last_sent_resize,
-                size,
+                viewport_size,
+                request_size,
                 session.last_viewport_scale_factor,
             );
-            if Some(size) == session.last_viewport_size && !should_send_resize {
+            if Some(viewport_size) == session.last_viewport_size && !should_send_resize {
                 continue;
             }
-            session.last_viewport_size = Some(size);
+            session.last_viewport_size = Some(viewport_size);
             if !should_send_resize {
                 continue;
             }
 
             session.last_sent_resize = Some(resize_request);
-            session.state.mark_resize_requested(size);
+            session.state.mark_resize_requested(request_size);
             changed = true;
 
             let generation = session.resize_generation.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1196,8 +1220,14 @@ impl WorkspaceApp {
                 })
                 .ok();
         }
-        for (tab_id, size, scale_factor) in pending_starts {
-            changed |= self.start_remote_desktop_worker_for_session(tab_id, size, scale_factor, cx);
+        for (tab_id, request_size, viewport_size, scale_factor) in pending_starts {
+            changed |= self.start_remote_desktop_worker_for_session(
+                tab_id,
+                request_size,
+                viewport_size,
+                scale_factor,
+                cx,
+            );
         }
         changed
     }
@@ -1251,7 +1281,12 @@ impl WorkspaceApp {
         };
         let frame_slot = session.frame_slot.clone();
         let mut changed = false;
-        if let Some(event) = frame_slot.take() {
+        for _ in 0..REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT {
+            let Some(event) = frame_slot.take() else {
+                break;
+            };
+            // Apply a bounded batch so stale dirty updates do not add a full
+            // poll interval each while still yielding before large uploads.
             session.state.apply_event(event);
             changed = true;
         }
@@ -2090,7 +2125,7 @@ fn run_remote_desktop_worker(
     provider: RemoteDesktopProviderManifest,
     password: Option<RemoteDesktopSecret>,
     initial_size: RemoteDesktopSize,
-    _scale_factor: Option<u32>,
+    scale_factor: Option<u32>,
     frame_slot: RemoteDesktopFrameDeliverySlot,
     worker_wake: RemoteDesktopWorkerWake,
     request_rx: mpsc::Receiver<RemoteDesktopHelperRequest>,
@@ -2098,7 +2133,7 @@ fn run_remote_desktop_worker(
 ) {
     if let Ok((mut child, mut stdin)) = spawn_remote_desktop_helper(&provider) {
         let stdout = child.stdout.take();
-        let connect = connect_request(&profile, password, initial_size);
+        let connect = connect_request(&profile, password, initial_size, scale_factor);
         if let Err(error) = write_request_line(&mut stdin, &connect) {
             send_remote_desktop_worker_delivery(
                 &delivery_tx,
@@ -2157,7 +2192,7 @@ fn run_remote_desktop_worker(
         generation,
         profile,
         initial_size,
-        _scale_factor,
+        scale_factor,
         frame_slot,
         worker_wake,
         request_rx,
@@ -2399,12 +2434,28 @@ fn default_remote_desktop_initial_size() -> RemoteDesktopSize {
     RemoteDesktopSize::clamped(REMOTE_DESKTOP_INITIAL_WIDTH, REMOTE_DESKTOP_INITIAL_HEIGHT)
 }
 
-fn initial_remote_desktop_size_for_session(session: &RemoteDesktopSession) -> RemoteDesktopSize {
-    session
-        .geometry
-        .viewport_size()
-        .or_else(|| session.state.snapshot().size)
-        .unwrap_or_else(default_remote_desktop_initial_size)
+fn initial_remote_desktop_sizes_for_session(
+    session: &RemoteDesktopSession,
+) -> (RemoteDesktopSize, Option<RemoteDesktopSize>) {
+    if let Some(viewport_size) = session.geometry.viewport_size() {
+        let viewport_size = RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);
+        return (
+            remote_desktop_requested_size_for_viewport(
+                viewport_size,
+                session.last_viewport_scale_factor,
+            ),
+            Some(viewport_size),
+        );
+    }
+
+    (
+        session
+            .state
+            .snapshot()
+            .size
+            .unwrap_or_else(default_remote_desktop_initial_size),
+        None,
+    )
 }
 
 fn remote_desktop_scale_factor_percent(scale_factor: f32) -> u32 {
@@ -2420,38 +2471,68 @@ fn remote_desktop_scale_factor_percent(scale_factor: f32) -> u32 {
     REMOTE_DESKTOP_DEFAULT_SCALE_FACTOR_PERCENT
 }
 
+fn remote_desktop_requested_size_for_viewport(
+    viewport_size: RemoteDesktopSize,
+    scale_factor: Option<u32>,
+) -> RemoteDesktopSize {
+    let viewport_size = RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);
+    let Some(scale_factor) = scale_factor else {
+        return viewport_size;
+    };
+    if !(REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT..=REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT)
+        .contains(&scale_factor)
+    {
+        return viewport_size;
+    }
+
+    // GPUI canvas bounds are logical pixels; RDP desktop_size is the remote
+    // framebuffer pixel size, so high-DPI windows need an explicit conversion.
+    let denominator = u64::from(REMOTE_DESKTOP_DEFAULT_SCALE_FACTOR_PERCENT);
+    let scale_factor = u64::from(scale_factor);
+    let width = remote_desktop_scaled_dimension(viewport_size.width, scale_factor, denominator);
+    let height = remote_desktop_scaled_dimension(viewport_size.height, scale_factor, denominator);
+    RemoteDesktopSize::clamped(width, height)
+}
+
+fn remote_desktop_scaled_dimension(value: u32, scale_factor: u64, denominator: u64) -> u32 {
+    let scaled = (u64::from(value) * scale_factor + denominator / 2) / denominator;
+    u32::try_from(scaled).unwrap_or(u32::MAX)
+}
+
 fn remote_desktop_resize_request_needed(
     current_frame_size: Option<RemoteDesktopSize>,
     pending_resize: Option<RemoteDesktopSize>,
     last_viewport_size: Option<RemoteDesktopSize>,
     last_sent_resize: Option<RemoteDesktopResizeRequestState>,
     viewport_size: RemoteDesktopSize,
+    request_size: RemoteDesktopSize,
     viewport_scale_factor: Option<u32>,
 ) -> bool {
     let next_request = RemoteDesktopResizeRequestState {
-        size: viewport_size,
+        size: request_size,
         scale_factor: viewport_scale_factor,
     };
     if Some(next_request) == last_sent_resize {
         return false;
     }
 
-    let frame_mismatch = remote_desktop_size_delta_is_meaningful(current_frame_size, viewport_size)
-        && Some(viewport_size) != current_frame_size;
+    let frame_mismatch = remote_desktop_size_delta_is_meaningful(current_frame_size, request_size)
+        && Some(request_size) != current_frame_size;
     let viewport_changed = Some(viewport_size) != last_viewport_size;
     let scale_changed = viewport_scale_factor.is_some()
-        && last_sent_resize.is_none_or(|last_sent| last_sent.scale_factor != viewport_scale_factor);
+        && last_sent_resize
+            .is_some_and(|last_sent| last_sent.scale_factor != viewport_scale_factor);
     if !viewport_changed && !frame_mismatch && !scale_changed {
         return false;
     }
     if !frame_mismatch {
         return scale_changed;
     }
-    if Some(viewport_size) == pending_resize {
+    if Some(request_size) == pending_resize {
         return scale_changed && last_sent_resize.is_some();
     }
     let last_sent_size = last_sent_resize.map(|last_sent| last_sent.size);
-    if !remote_desktop_size_delta_is_meaningful(last_sent_size, viewport_size) && !scale_changed {
+    if !remote_desktop_size_delta_is_meaningful(last_sent_size, request_size) && !scale_changed {
         return false;
     }
     true
@@ -2536,22 +2617,80 @@ fn run_remote_desktop_writer(
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     worker_wake: RemoteDesktopWorkerWake,
 ) {
-    for request in request_rx {
-        let should_close = matches!(request, RemoteDesktopHelperRequest::Close);
-        if let Err(error) = write_request_line(stdin, &request) {
-            send_remote_desktop_worker_delivery(
-                &delivery_tx,
-                &worker_wake,
-                RemoteDesktopWorkerDelivery::TransportFailed {
-                    tab_id,
-                    generation,
-                    message: error.to_string(),
-                },
-            );
+    loop {
+        let Ok(first_request) = request_rx.recv() else {
+            return;
+        };
+        let mut disconnected = false;
+        let mut coalescer = RemoteDesktopRequestWriteCoalescer::default();
+        let mut requests = Vec::new();
+        coalescer.push(first_request, &mut requests);
+
+        for _ in 0..REMOTE_DESKTOP_REQUEST_WRITE_DRAIN_LIMIT {
+            match request_rx.try_recv() {
+                Ok(request) => coalescer.push(request, &mut requests),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+        coalescer.flush(&mut requests);
+
+        for request in requests {
+            let should_close = matches!(request, RemoteDesktopHelperRequest::Close);
+            if let Err(error) = write_request_line(stdin, &request) {
+                send_remote_desktop_worker_delivery(
+                    &delivery_tx,
+                    &worker_wake,
+                    RemoteDesktopWorkerDelivery::TransportFailed {
+                        tab_id,
+                        generation,
+                        message: error.to_string(),
+                    },
+                );
+                return;
+            }
+            if should_close {
+                return;
+            }
+        }
+
+        if disconnected {
             return;
         }
-        if should_close {
-            return;
+    }
+}
+
+#[derive(Default)]
+struct RemoteDesktopRequestWriteCoalescer {
+    pending_mouse_move: Option<RemoteDesktopHelperRequest>,
+}
+
+impl RemoteDesktopRequestWriteCoalescer {
+    fn push(
+        &mut self,
+        request: RemoteDesktopHelperRequest,
+        output: &mut Vec<RemoteDesktopHelperRequest>,
+    ) {
+        match request {
+            RemoteDesktopHelperRequest::MouseMove { .. } => {
+                // Mouse motion is lossy state. Keep the newest position before
+                // writing to helper stdin so keyboard and click edges cannot
+                // sit behind hundreds of stale move samples.
+                self.pending_mouse_move = Some(request);
+            }
+            request => {
+                self.flush(output);
+                output.push(request);
+            }
+        }
+    }
+
+    fn flush(&mut self, output: &mut Vec<RemoteDesktopHelperRequest>) {
+        if let Some(request) = self.pending_mouse_move.take() {
+            output.push(request);
         }
     }
 }
@@ -2561,14 +2700,15 @@ fn run_in_process_fake_remote_desktop(
     generation: u64,
     profile: RemoteDesktopConnectionProfile,
     initial_size: RemoteDesktopSize,
-    _scale_factor: Option<u32>,
+    scale_factor: Option<u32>,
     frame_slot: RemoteDesktopFrameDeliverySlot,
     worker_wake: RemoteDesktopWorkerWake,
     request_rx: mpsc::Receiver<RemoteDesktopHelperRequest>,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
 ) {
     let mut backend = RemoteDesktopFakeBackend::new(profile.protocol);
-    for event in backend.handle_request(connect_request(&profile, None, initial_size)) {
+    for event in backend.handle_request(connect_request(&profile, None, initial_size, scale_factor))
+    {
         deliver_remote_desktop_worker_event(
             tab_id,
             generation,
@@ -2601,6 +2741,7 @@ fn connect_request(
     profile: &RemoteDesktopConnectionProfile,
     password: Option<RemoteDesktopSecret>,
     initial_size: RemoteDesktopSize,
+    scale_factor: Option<u32>,
 ) -> RemoteDesktopHelperRequest {
     RemoteDesktopHelperRequest::Connect {
         protocol: profile.protocol,
@@ -2611,10 +2752,9 @@ fn connect_request(
         password,
         domain: profile.domain.clone(),
         size: RemoteDesktopSize::clamped(initial_size.width, initial_size.height),
-        // Initial connections request the measured desktop size only. Runtime
-        // resize events carry scale so high-DPI changes follow IronRDP's
-        // display-control path instead of inflating the first desktop.
-        scale_factor: None,
+        // Initial and runtime display requests carry the same scale metadata so
+        // IronRDP can negotiate high-DPI sessions before the first frame.
+        scale_factor,
         read_only: profile.read_only,
     }
 }
@@ -2699,6 +2839,57 @@ mod tests {
     }
 
     #[test]
+    fn remote_desktop_writer_coalesces_mouse_moves_without_reordering_clicks() {
+        let (request_tx, request_rx) = mpsc::channel();
+        request_tx
+            .send(RemoteDesktopHelperRequest::MouseMove { x: 10, y: 20 })
+            .unwrap();
+        request_tx
+            .send(RemoteDesktopHelperRequest::MouseMove { x: 30, y: 40 })
+            .unwrap();
+        request_tx
+            .send(RemoteDesktopHelperRequest::MouseButton {
+                button: RemoteDesktopMouseButton::Left,
+                state: RemoteDesktopMouseButtonState::Pressed,
+            })
+            .unwrap();
+        request_tx
+            .send(RemoteDesktopHelperRequest::MouseMove { x: 50, y: 60 })
+            .unwrap();
+        drop(request_tx);
+
+        let (delivery_tx, _delivery_rx) = mpsc::channel();
+        let mut output = Vec::new();
+        run_remote_desktop_writer(
+            TabId(9),
+            1,
+            &mut output,
+            request_rx,
+            delivery_tx,
+            RemoteDesktopWorkerWake::default(),
+        );
+
+        let mut reader = std::io::Cursor::new(output);
+        let mut decoded = Vec::new();
+        while let Some(request) = oxideterm_remote_desktop::read_request_line(&mut reader).unwrap()
+        {
+            decoded.push(request);
+        }
+
+        assert_eq!(
+            decoded,
+            vec![
+                RemoteDesktopHelperRequest::MouseMove { x: 30, y: 40 },
+                RemoteDesktopHelperRequest::MouseButton {
+                    button: RemoteDesktopMouseButton::Left,
+                    state: RemoteDesktopMouseButtonState::Pressed,
+                },
+                RemoteDesktopHelperRequest::MouseMove { x: 50, y: 60 },
+            ]
+        );
+    }
+
+    #[test]
     fn reconnect_mode_restarts_helper_after_terminal_states() {
         assert_eq!(
             remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Disconnected),
@@ -2759,7 +2950,7 @@ mod tests {
             height: 900,
         };
 
-        let request = connect_request(&profile, None, initial_size);
+        let request = connect_request(&profile, None, initial_size, Some(200));
 
         assert!(matches!(
             request,
@@ -2768,10 +2959,46 @@ mod tests {
                     width: 1600,
                     height: 900
                 },
-                scale_factor: None,
+                scale_factor: Some(200),
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn requested_size_uses_physical_pixels_for_high_dpi_viewports() {
+        let viewport = RemoteDesktopSize {
+            width: 1600,
+            height: 900,
+        };
+
+        assert_eq!(
+            remote_desktop_requested_size_for_viewport(viewport, Some(200)),
+            RemoteDesktopSize {
+                width: 3200,
+                height: 1800,
+            }
+        );
+        assert_eq!(
+            remote_desktop_requested_size_for_viewport(viewport, None),
+            viewport,
+        );
+    }
+
+    #[test]
+    fn requested_size_clamps_scaled_viewport_to_protocol_bounds() {
+        let viewport = RemoteDesktopSize {
+            width: 5000,
+            height: 5000,
+        };
+
+        assert_eq!(
+            remote_desktop_requested_size_for_viewport(viewport, Some(200)),
+            RemoteDesktopSize {
+                width: RemoteDesktopSize::MAX_DIMENSION,
+                height: RemoteDesktopSize::MAX_DIMENSION,
+            }
+        );
     }
 
     #[test]
@@ -2923,6 +3150,7 @@ mod tests {
             Some(viewport),
             None,
             viewport,
+            viewport,
             Some(100),
         ));
     }
@@ -2942,6 +3170,7 @@ mod tests {
             Some(viewport),
             Some(viewport),
             None,
+            viewport,
             viewport,
             Some(100),
         ));
@@ -3141,6 +3370,7 @@ mod tests {
             Some(viewport),
             Some(resize_state(viewport, Some(100))),
             viewport,
+            viewport,
             Some(100),
         ));
     }
@@ -3158,7 +3388,30 @@ mod tests {
             Some(viewport),
             None,
             viewport,
+            viewport,
             None,
+        ));
+    }
+
+    #[test]
+    fn resize_request_does_not_duplicate_initial_scaled_connect() {
+        let viewport = RemoteDesktopSize {
+            width: 1600,
+            height: 900,
+        };
+        let request_size = RemoteDesktopSize {
+            width: 3200,
+            height: 1800,
+        };
+
+        assert!(!remote_desktop_resize_request_needed(
+            Some(request_size),
+            None,
+            Some(viewport),
+            None,
+            viewport,
+            request_size,
+            Some(200),
         ));
     }
 
@@ -3175,6 +3428,7 @@ mod tests {
             Some(viewport),
             Some(resize_state(viewport, Some(100))),
             viewport,
+            viewport,
             Some(125),
         ));
         assert!(!remote_desktop_resize_request_needed(
@@ -3182,6 +3436,7 @@ mod tests {
             None,
             Some(viewport),
             Some(resize_state(viewport, Some(125))),
+            viewport,
             viewport,
             Some(125),
         ));
@@ -3202,6 +3457,7 @@ mod tests {
             Some(viewport),
             Some(viewport),
             Some(resize_state(viewport, Some(100))),
+            viewport,
             viewport,
             Some(125),
         ));

@@ -7,7 +7,7 @@ use std::{
     net::{Shutdown, TcpStream},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
     },
     thread,
     time::Duration,
@@ -17,6 +17,7 @@ use des::{
     Des,
     cipher::{Block, BlockCipherEncrypt, KeyInit},
 };
+use flate2::{Decompress, FlushDecompress, Status};
 use oxideterm_remote_desktop::{
     RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopErrorCategory,
     RemoteDesktopFakeBackend, RemoteDesktopFrame, RemoteDesktopFrameFormat,
@@ -34,9 +35,21 @@ const VNC_SECURITY_NONE: u8 = 1;
 const VNC_SECURITY_VNC_AUTH: u8 = 2;
 const VNC_ENCODING_RAW: i32 = 0;
 const VNC_ENCODING_COPY_RECT: i32 = 1;
+const VNC_ENCODING_HEXTILE: i32 = 5;
+const VNC_ENCODING_ZRLE: i32 = 16;
 const VNC_ENCODING_DESKTOP_SIZE: i32 = -223;
 const VNC_ENCODING_CURSOR: i32 = -239;
 const VNC_ENCODING_X_CURSOR: i32 = -240;
+const VNC_HEXTILE_TILE_SIZE: u16 = 16;
+const VNC_HEXTILE_RAW: u8 = 1;
+const VNC_HEXTILE_BACKGROUND_SPECIFIED: u8 = 2;
+const VNC_HEXTILE_FOREGROUND_SPECIFIED: u8 = 4;
+const VNC_HEXTILE_ANY_SUBRECTS: u8 = 8;
+const VNC_HEXTILE_SUBRECTS_COLORED: u8 = 16;
+const VNC_ZRLE_TILE_SIZE: u16 = 64;
+const VNC_TRLE_RAW: u8 = 0;
+const VNC_TRLE_SOLID: u8 = 1;
+const VNC_TRLE_PLAIN_RLE: u8 = 128;
 const VNC_BUTTON_LEFT: u8 = 1;
 const VNC_BUTTON_MIDDLE: u8 = 2;
 const VNC_BUTTON_RIGHT: u8 = 4;
@@ -312,9 +325,7 @@ fn handle_real_vnc_request(
             // baseline protocol, so this request is RDP-only.
         }
         RemoteDesktopHelperRequest::RequestFrame => {
-            // VNC framebuffer recovery is driven by framebuffer-update
-            // requests in the reader loop; this explicit recovery request is
-            // currently an RDP helper capability.
+            connection.request_full_frame_recovery()?;
         }
         RemoteDesktopHelperRequest::ReleaseAllInputs if !read_only => {
             if input_state.pointer.buttons != 0 {
@@ -349,8 +360,15 @@ struct VncConnection {
     reader: Option<TcpStream>,
     event_writer: SharedEventWriter,
     closed: Arc<AtomicBool>,
+    session_state: Arc<VncSessionSharedState>,
     width: u16,
     height: u16,
+}
+
+struct VncSessionSharedState {
+    width: AtomicU16,
+    height: AtomicU16,
+    force_next_base_frame: AtomicBool,
 }
 
 fn vnc_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory {
@@ -370,6 +388,42 @@ fn vnc_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory 
         RemoteDesktopErrorCategory::Protocol
     } else {
         RemoteDesktopErrorCategory::Unknown
+    }
+}
+
+impl VncSessionSharedState {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            width: AtomicU16::new(width),
+            height: AtomicU16::new(height),
+            force_next_base_frame: AtomicBool::new(false),
+        }
+    }
+
+    fn size(&self) -> (u16, u16) {
+        (
+            self.width.load(Ordering::Acquire),
+            self.height.load(Ordering::Acquire),
+        )
+    }
+
+    fn store_size(&self, width: u16, height: u16) {
+        self.width.store(width, Ordering::Release);
+        self.height.store(height, Ordering::Release);
+    }
+
+    fn request_base_frame(&self) {
+        // RequestFrame is a UI recovery path, so the next framebuffer payload
+        // must rebuild the front-end backing buffer instead of remaining dirty.
+        self.force_next_base_frame.store(true, Ordering::Release);
+    }
+
+    fn cancel_base_frame_request(&self) {
+        self.force_next_base_frame.store(false, Ordering::Release);
+    }
+
+    fn take_base_frame_request(&self) -> bool {
+        self.force_next_base_frame.swap(false, Ordering::AcqRel)
     }
 }
 
@@ -395,11 +449,13 @@ impl VncConnection {
         let reader = stream
             .try_clone()
             .map_err(|error| format!("VNC stream clone failed: {error}"))?;
+        let session_state = Arc::new(VncSessionSharedState::new(width, height));
         Ok(Self {
             writer: Arc::new(Mutex::new(stream)),
             reader: Some(reader),
             event_writer,
             closed: Arc::new(AtomicBool::new(false)),
+            session_state,
             width,
             height,
         })
@@ -412,16 +468,37 @@ impl VncConnection {
         let writer = self.writer.clone();
         let event_writer = self.event_writer.clone();
         let closed = self.closed.clone();
+        let session_state = self.session_state.clone();
         let width = self.width;
         let height = self.height;
         thread::Builder::new()
             .name("oxideterm-vnc-reader".to_string())
-            .spawn(move || read_vnc_events(reader, writer, event_writer, closed, width, height))
+            .spawn(move || {
+                read_vnc_events(
+                    reader,
+                    writer,
+                    event_writer,
+                    closed,
+                    session_state,
+                    width,
+                    height,
+                )
+            })
             .ok();
     }
 
     fn request_framebuffer_update(&self, incremental: bool) -> Result<(), String> {
-        request_framebuffer_update(&self.writer, incremental, self.width, self.height)
+        let (width, height) = self.session_state.size();
+        request_framebuffer_update(&self.writer, incremental, width, height)
+    }
+
+    fn request_full_frame_recovery(&self) -> Result<(), String> {
+        self.session_state.request_base_frame();
+        if let Err(error) = self.request_framebuffer_update(false) {
+            self.session_state.cancel_base_frame_request();
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn send_pointer(&self, x: u16, y: u16, buttons: u8) -> Result<(), String> {
@@ -637,18 +714,24 @@ fn write_pixel_format(stream: &mut TcpStream) -> Result<(), String> {
 }
 
 fn write_encodings(stream: &mut TcpStream) -> Result<(), String> {
-    let mut message = Vec::with_capacity(24);
+    stream
+        .write_all(&set_encodings_message())
+        .map_err(|error| format!("VNC encoding write failed: {error}"))
+}
+
+fn set_encodings_message() -> Vec<u8> {
+    let mut message = Vec::with_capacity(32);
     message.push(2);
     message.push(0);
-    push_be_u16(&mut message, 5);
+    push_be_u16(&mut message, 7);
     push_be_i32(&mut message, VNC_ENCODING_DESKTOP_SIZE);
     push_be_i32(&mut message, VNC_ENCODING_CURSOR);
     push_be_i32(&mut message, VNC_ENCODING_X_CURSOR);
     push_be_i32(&mut message, VNC_ENCODING_COPY_RECT);
+    push_be_i32(&mut message, VNC_ENCODING_ZRLE);
+    push_be_i32(&mut message, VNC_ENCODING_HEXTILE);
     push_be_i32(&mut message, VNC_ENCODING_RAW);
-    stream
-        .write_all(&message)
-        .map_err(|error| format!("VNC encoding write failed: {error}"))
+    message
 }
 
 fn read_vnc_events(
@@ -656,42 +739,27 @@ fn read_vnc_events(
     writer: SharedVncWriter,
     event_writer: SharedEventWriter,
     closed: Arc<AtomicBool>,
+    session_state: Arc<VncSessionSharedState>,
     width: u16,
     height: u16,
 ) {
     let mut framebuffer = VncFramebuffer::new(width, height);
+    let mut decode_state = VncDecodeState::default();
     let mut sent_initial_frame = false;
     loop {
-        match read_vnc_event(&mut reader) {
+        match read_vnc_event(&mut reader, &mut decode_state) {
             Ok(event) => {
                 for helper_event in vnc_helper_events(&event) {
                     let _ = send_event(&event_writer, helper_event);
                 }
                 if let Some(change) = framebuffer.apply(event) {
-                    let frame_event = match change {
-                        VncFramebufferChange::Full => {
-                            sent_initial_frame = true;
-                            RemoteDesktopHelperEvent::Frame {
-                                frame: framebuffer.frame(),
-                            }
-                        }
-                        VncFramebufferChange::Rect(rect) if sent_initial_frame => {
-                            if let Some(update) = framebuffer.frame_update(rect) {
-                                RemoteDesktopHelperEvent::FrameUpdate { update }
-                            } else {
-                                sent_initial_frame = true;
-                                RemoteDesktopHelperEvent::Frame {
-                                    frame: framebuffer.frame(),
-                                }
-                            }
-                        }
-                        VncFramebufferChange::Rect(_) => {
-                            sent_initial_frame = true;
-                            RemoteDesktopHelperEvent::Frame {
-                                frame: framebuffer.frame(),
-                            }
-                        }
-                    };
+                    session_state.store_size(framebuffer.width as u16, framebuffer.height as u16);
+                    let frame_event = vnc_frame_event_for_change(
+                        &framebuffer,
+                        change,
+                        &mut sent_initial_frame,
+                        session_state.take_base_frame_request(),
+                    );
                     let _ = send_event(&event_writer, frame_event);
                 }
                 let _ = request_framebuffer_update(
@@ -711,6 +779,61 @@ fn read_vnc_events(
                     );
                 }
                 return;
+            }
+        }
+    }
+}
+
+struct VncDecodeState {
+    zrle_decompressor: Decompress,
+}
+
+impl Default for VncDecodeState {
+    fn default() -> Self {
+        Self {
+            // ZRLE uses one zlib stream object for the lifetime of the RFB
+            // connection, so keep the inflater in reader state.
+            zrle_decompressor: Decompress::new(true),
+        }
+    }
+}
+
+fn vnc_frame_event_for_change(
+    framebuffer: &VncFramebuffer,
+    change: VncFramebufferChange,
+    sent_initial_frame: &mut bool,
+    force_base_frame: bool,
+) -> RemoteDesktopHelperEvent {
+    // Recovery requests rebuild the UI backing buffer from the helper's
+    // complete framebuffer snapshot, even when the server reports a dirty rect.
+    if force_base_frame {
+        *sent_initial_frame = true;
+        return RemoteDesktopHelperEvent::Frame {
+            frame: framebuffer.frame(),
+        };
+    }
+
+    match change {
+        VncFramebufferChange::Full => {
+            *sent_initial_frame = true;
+            RemoteDesktopHelperEvent::Frame {
+                frame: framebuffer.frame(),
+            }
+        }
+        VncFramebufferChange::Rect(rect) if *sent_initial_frame => {
+            if let Some(update) = framebuffer.frame_update(rect) {
+                RemoteDesktopHelperEvent::FrameUpdate { update }
+            } else {
+                *sent_initial_frame = true;
+                RemoteDesktopHelperEvent::Frame {
+                    frame: framebuffer.frame(),
+                }
+            }
+        }
+        VncFramebufferChange::Rect(_) => {
+            *sent_initial_frame = true;
+            RemoteDesktopHelperEvent::Frame {
+                frame: framebuffer.frame(),
             }
         }
     }
@@ -740,11 +863,14 @@ fn vnc_helper_events(event: &VncServerEvent) -> Vec<RemoteDesktopHelperEvent> {
     }
 }
 
-fn read_vnc_event(reader: &mut TcpStream) -> Result<VncServerEvent, String> {
+fn read_vnc_event(
+    reader: &mut TcpStream,
+    decode_state: &mut VncDecodeState,
+) -> Result<VncServerEvent, String> {
     let message_type =
         read_u8(reader).map_err(|error| format!("VNC server message read failed: {error}"))?;
     match message_type {
-        0 => read_framebuffer_update(reader),
+        0 => read_framebuffer_update(reader, decode_state),
         1 => {
             skip_color_map_entries(reader)?;
             Ok(VncServerEvent::Noop)
@@ -755,7 +881,10 @@ fn read_vnc_event(reader: &mut TcpStream) -> Result<VncServerEvent, String> {
     }
 }
 
-fn read_framebuffer_update(reader: &mut TcpStream) -> Result<VncServerEvent, String> {
+fn read_framebuffer_update(
+    reader: &mut TcpStream,
+    decode_state: &mut VncDecodeState,
+) -> Result<VncServerEvent, String> {
     let _padding =
         read_u8(reader).map_err(|error| format!("VNC framebuffer padding read failed: {error}"))?;
     let rect_count = read_be_u16(reader)
@@ -788,6 +917,18 @@ fn read_framebuffer_update(reader: &mut TcpStream) -> Result<VncServerEvent, Str
                     src_y: be_u16(&source[2..4]),
                 });
             }
+            VNC_ENCODING_HEXTILE => {
+                events.push(VncServerEvent::RawImage(
+                    rect,
+                    read_hextile_rect(reader, rect)?,
+                ));
+            }
+            VNC_ENCODING_ZRLE => {
+                events.push(VncServerEvent::RawImage(
+                    rect,
+                    read_zrle_rect(reader, rect, decode_state)?,
+                ));
+            }
             VNC_ENCODING_DESKTOP_SIZE => {
                 events.push(VncServerEvent::SetResolution {
                     width: rect.width,
@@ -819,6 +960,471 @@ fn skip_color_map_entries(reader: &mut TcpStream) -> Result<(), String> {
         .map_err(|error| format!("VNC color-map entries read failed: {error}"))
 }
 
+#[derive(Default)]
+struct HextileState {
+    background: Option<[u8; 4]>,
+    foreground: Option<[u8; 4]>,
+}
+
+fn read_hextile_rect(reader: &mut impl Read, rect: RfbRect) -> Result<Vec<u8>, String> {
+    let mut bytes = vec![0; rect_byte_len(rect)?];
+    let mut state = HextileState::default();
+
+    for tile_y in (0..rect.height).step_by(VNC_HEXTILE_TILE_SIZE as usize) {
+        for tile_x in (0..rect.width).step_by(VNC_HEXTILE_TILE_SIZE as usize) {
+            let tile_width = (rect.width - tile_x).min(VNC_HEXTILE_TILE_SIZE);
+            let tile_height = (rect.height - tile_y).min(VNC_HEXTILE_TILE_SIZE);
+            read_hextile_tile(
+                reader,
+                &mut bytes,
+                rect.width,
+                RfbRect {
+                    x: tile_x,
+                    y: tile_y,
+                    width: tile_width,
+                    height: tile_height,
+                },
+                &mut state,
+            )?;
+        }
+    }
+
+    Ok(bytes)
+}
+
+fn read_hextile_tile(
+    reader: &mut impl Read,
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+    state: &mut HextileState,
+) -> Result<(), String> {
+    let subencoding =
+        read_u8(reader).map_err(|error| format!("VNC hextile subencoding read failed: {error}"))?;
+    if subencoding & VNC_HEXTILE_RAW != 0 {
+        let raw = read_exact_vec(reader, rect_byte_len(tile)?)
+            .map_err(|error| format!("VNC hextile raw tile read failed: {error}"))?;
+        copy_hextile_tile(target, target_width, tile, &raw)?;
+        state.background = None;
+        state.foreground = None;
+        return Ok(());
+    }
+
+    if subencoding & VNC_HEXTILE_BACKGROUND_SPECIFIED != 0 {
+        state.background = Some(read_hextile_pixel(reader)?);
+    }
+    let Some(background) = state.background else {
+        return Err("VNC hextile background color is missing.".to_string());
+    };
+    fill_hextile_area(target, target_width, tile, background)?;
+
+    if subencoding & VNC_HEXTILE_FOREGROUND_SPECIFIED != 0 {
+        state.foreground = Some(read_hextile_pixel(reader)?);
+    }
+    let subrect_count = if subencoding & VNC_HEXTILE_ANY_SUBRECTS != 0 {
+        read_u8(reader)
+            .map_err(|error| format!("VNC hextile subrect count read failed: {error}"))?
+    } else {
+        0
+    };
+
+    let colored_subrects = subencoding & VNC_HEXTILE_SUBRECTS_COLORED != 0;
+    if subrect_count > 0 && !colored_subrects && state.foreground.is_none() {
+        return Err("VNC hextile foreground color is missing.".to_string());
+    }
+
+    for _ in 0..subrect_count {
+        let color = if colored_subrects {
+            read_hextile_pixel(reader)?
+        } else {
+            state
+                .foreground
+                .ok_or_else(|| "VNC hextile foreground color is missing.".to_string())?
+        };
+        let position =
+            read_u8(reader).map_err(|error| format!("VNC hextile subrect read failed: {error}"))?;
+        let size =
+            read_u8(reader).map_err(|error| format!("VNC hextile subrect read failed: {error}"))?;
+        let subrect = hextile_subrect(tile, position, size)?;
+        fill_hextile_area(target, target_width, subrect, color)?;
+    }
+
+    if colored_subrects {
+        // The foreground color is not meaningful after a colored-subrect tile
+        // because every subrect carried its own color.
+        state.foreground = None;
+    }
+
+    Ok(())
+}
+
+fn read_hextile_pixel(reader: &mut impl Read) -> Result<[u8; 4], String> {
+    read_exact_array::<4, _>(reader)
+        .map_err(|error| format!("VNC hextile color read failed: {error}"))
+}
+
+fn hextile_subrect(tile: RfbRect, position: u8, size: u8) -> Result<RfbRect, String> {
+    let local_x = u16::from(position >> 4);
+    let local_y = u16::from(position & 0x0f);
+    let width = u16::from(size >> 4) + 1;
+    let height = u16::from(size & 0x0f) + 1;
+    if local_x + width > tile.width || local_y + height > tile.height {
+        return Err("VNC hextile subrect exceeds its tile.".to_string());
+    }
+    Ok(RfbRect {
+        x: tile.x + local_x,
+        y: tile.y + local_y,
+        width,
+        height,
+    })
+}
+
+fn copy_hextile_tile(
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+    raw: &[u8],
+) -> Result<(), String> {
+    let tile_width = usize::from(tile.width);
+    let tile_height = usize::from(tile.height);
+    if raw.len() < tile_width * tile_height * 4 {
+        return Err("VNC hextile raw tile is incomplete.".to_string());
+    }
+    for row in 0..tile_height {
+        let src_start = row * tile_width * 4;
+        let src_end = src_start + tile_width * 4;
+        let dst_start =
+            ((usize::from(tile.y) + row) * usize::from(target_width) + usize::from(tile.x)) * 4;
+        let dst_end = dst_start + tile_width * 4;
+        let Some(dst) = target.get_mut(dst_start..dst_end) else {
+            return Err("VNC hextile raw tile exceeds its target rectangle.".to_string());
+        };
+        dst.copy_from_slice(&raw[src_start..src_end]);
+    }
+    Ok(())
+}
+
+fn fill_hextile_area(
+    target: &mut [u8],
+    target_width: u16,
+    area: RfbRect,
+    color: [u8; 4],
+) -> Result<(), String> {
+    let width = usize::from(area.width);
+    let target_width = usize::from(target_width);
+    for row in 0..usize::from(area.height) {
+        let start = ((usize::from(area.y) + row) * target_width + usize::from(area.x)) * 4;
+        let end = start + width * 4;
+        let Some(dst_row) = target.get_mut(start..end) else {
+            return Err("VNC hextile fill exceeds its target rectangle.".to_string());
+        };
+        for pixel in dst_row.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&color);
+        }
+    }
+    Ok(())
+}
+
+fn read_zrle_rect(
+    reader: &mut impl Read,
+    rect: RfbRect,
+    decode_state: &mut VncDecodeState,
+) -> Result<Vec<u8>, String> {
+    let compressed_len = read_be_u32(reader)
+        .map_err(|error| format!("VNC ZRLE length read failed: {error}"))?
+        as usize;
+    if compressed_len > MAX_VNC_FRAME_BYTES {
+        return Err("VNC ZRLE rectangle is larger than the helper limit.".to_string());
+    }
+    let compressed = read_exact_vec(reader, compressed_len)
+        .map_err(|error| format!("VNC ZRLE payload read failed: {error}"))?;
+    let decompressed = inflate_zrle_payload(
+        &mut decode_state.zrle_decompressor,
+        &compressed,
+        zrle_uncompressed_limit(rect)?,
+    )?;
+    decode_trle_rect(&decompressed, rect)
+}
+
+fn inflate_zrle_payload(
+    decompressor: &mut Decompress,
+    compressed: &[u8],
+    output_limit: usize,
+) -> Result<Vec<u8>, String> {
+    let input_start = decompressor.total_in();
+    let mut input_offset = 0usize;
+    let mut output = Vec::with_capacity(output_limit.min(64 * 1024));
+
+    while input_offset < compressed.len() {
+        let total_in_before = decompressor.total_in();
+        let total_out_before = decompressor.total_out();
+        let status = decompressor
+            .decompress_vec(
+                &compressed[input_offset..],
+                &mut output,
+                FlushDecompress::Sync,
+            )
+            .map_err(|error| format!("VNC ZRLE inflate failed: {error}"))?;
+        input_offset = (decompressor.total_in() - input_start) as usize;
+        if output.len() > output_limit {
+            return Err("VNC ZRLE rectangle expanded beyond the helper limit.".to_string());
+        }
+        let consumed = decompressor.total_in() != total_in_before;
+        let produced = decompressor.total_out() != total_out_before;
+        if input_offset >= compressed.len() {
+            break;
+        }
+        if matches!(status, Status::StreamEnd) {
+            return Err(
+                "VNC ZRLE stream ended before the rectangle payload was consumed.".to_string(),
+            );
+        }
+        if !consumed && !produced {
+            return Err("VNC ZRLE inflater made no progress.".to_string());
+        }
+    }
+
+    Ok(output)
+}
+
+fn zrle_uncompressed_limit(rect: RfbRect) -> Result<usize, String> {
+    let pixels = usize::from(rect.width)
+        .checked_mul(usize::from(rect.height))
+        .ok_or_else(|| "VNC ZRLE rectangle dimensions overflowed.".to_string())?;
+    let tile_columns = usize::from(rect.width).div_ceil(usize::from(VNC_ZRLE_TILE_SIZE));
+    let tile_rows = usize::from(rect.height).div_ceil(usize::from(VNC_ZRLE_TILE_SIZE));
+    let tile_count = tile_columns
+        .checked_mul(tile_rows)
+        .ok_or_else(|| "VNC ZRLE tile count overflowed.".to_string())?;
+    pixels
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(tile_count * 1024))
+        .ok_or_else(|| "VNC ZRLE expanded byte count overflowed.".to_string())
+}
+
+fn decode_trle_rect(data: &[u8], rect: RfbRect) -> Result<Vec<u8>, String> {
+    let mut reader = io::Cursor::new(data);
+    let mut bytes = vec![0; rect_byte_len(rect)?];
+
+    for tile_y in (0..rect.height).step_by(VNC_ZRLE_TILE_SIZE as usize) {
+        for tile_x in (0..rect.width).step_by(VNC_ZRLE_TILE_SIZE as usize) {
+            let tile_width = (rect.width - tile_x).min(VNC_ZRLE_TILE_SIZE);
+            let tile_height = (rect.height - tile_y).min(VNC_ZRLE_TILE_SIZE);
+            decode_trle_tile(
+                &mut reader,
+                &mut bytes,
+                rect.width,
+                RfbRect {
+                    x: tile_x,
+                    y: tile_y,
+                    width: tile_width,
+                    height: tile_height,
+                },
+            )?;
+        }
+    }
+
+    if reader.position() != data.len() as u64 {
+        return Err("VNC ZRLE rectangle has trailing tile bytes.".to_string());
+    }
+
+    Ok(bytes)
+}
+
+fn decode_trle_tile(
+    reader: &mut impl Read,
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+) -> Result<(), String> {
+    let subencoding =
+        read_u8(reader).map_err(|error| format!("VNC ZRLE tile type read failed: {error}"))?;
+    // ZRLE wraps the TRLE tile grammar, but unlike TRLE it never allows palette
+    // reuse between tiles.
+    match subencoding {
+        VNC_TRLE_RAW => decode_trle_raw_tile(reader, target, target_width, tile),
+        VNC_TRLE_SOLID => {
+            let color = read_zrle_cpixel(reader)?;
+            fill_hextile_area(target, target_width, tile, color)
+        }
+        2..=16 => decode_trle_packed_palette(reader, target, target_width, tile, subencoding),
+        17..=126 => Err(format!("Unsupported VNC ZRLE tile type {subencoding}.")),
+        127 | 129 => Err("VNC ZRLE palette reuse is not valid for ZRLE.".to_string()),
+        VNC_TRLE_PLAIN_RLE => decode_trle_plain_rle(reader, target, target_width, tile),
+        130..=255 => decode_trle_palette_rle(reader, target, target_width, tile, subencoding - 128),
+    }
+}
+
+fn decode_trle_raw_tile(
+    reader: &mut impl Read,
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+) -> Result<(), String> {
+    for index in 0..tile_pixel_count(tile) {
+        write_trle_tile_pixel(target, target_width, tile, index, read_zrle_cpixel(reader)?)?;
+    }
+    Ok(())
+}
+
+fn decode_trle_packed_palette(
+    reader: &mut impl Read,
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+    palette_size: u8,
+) -> Result<(), String> {
+    let palette = read_zrle_palette(reader, palette_size)?;
+    let bits_per_index = match palette_size {
+        2 => 1,
+        3..=4 => 2,
+        5..=16 => 4,
+        _ => return Err("VNC ZRLE packed palette size is invalid.".to_string()),
+    };
+    let bytes_per_row = (usize::from(tile.width) * bits_per_index as usize).div_ceil(8);
+
+    for y in 0..tile.height {
+        let row = read_exact_vec(reader, bytes_per_row)
+            .map_err(|error| format!("VNC ZRLE packed row read failed: {error}"))?;
+        for x in 0..tile.width {
+            let bit_index = usize::from(x) * bits_per_index as usize;
+            let byte = row[bit_index / 8];
+            let shift = 8 - bits_per_index - (bit_index % 8) as u8;
+            let palette_index = ((byte >> shift) & ((1u8 << bits_per_index) - 1)) as usize;
+            let Some(color) = palette.get(palette_index).copied() else {
+                return Err("VNC ZRLE packed palette index is invalid.".to_string());
+            };
+            write_trle_tile_pixel(
+                target,
+                target_width,
+                tile,
+                usize::from(y) * usize::from(tile.width) + usize::from(x),
+                color,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn decode_trle_plain_rle(
+    reader: &mut impl Read,
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+) -> Result<(), String> {
+    let mut written = 0usize;
+    let total = tile_pixel_count(tile);
+    while written < total {
+        let color = read_zrle_cpixel(reader)?;
+        let run_length = read_zrle_run_length(reader)?;
+        write_trle_run(target, target_width, tile, written, run_length, color)?;
+        written += run_length;
+    }
+    Ok(())
+}
+
+fn decode_trle_palette_rle(
+    reader: &mut impl Read,
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+    palette_size: u8,
+) -> Result<(), String> {
+    let palette = read_zrle_palette(reader, palette_size)?;
+    let mut written = 0usize;
+    let total = tile_pixel_count(tile);
+    while written < total {
+        let index = read_u8(reader)
+            .map_err(|error| format!("VNC ZRLE palette RLE index read failed: {error}"))?;
+        let palette_index = usize::from(index & 0x7f);
+        let Some(color) = palette.get(palette_index).copied() else {
+            return Err("VNC ZRLE palette RLE index is invalid.".to_string());
+        };
+        let run_length = if index & 0x80 != 0 {
+            read_zrle_run_length(reader)?
+        } else {
+            1
+        };
+        write_trle_run(target, target_width, tile, written, run_length, color)?;
+        written += run_length;
+    }
+    Ok(())
+}
+
+fn read_zrle_palette(reader: &mut impl Read, palette_size: u8) -> Result<Vec<[u8; 4]>, String> {
+    let mut palette = Vec::with_capacity(usize::from(palette_size));
+    for _ in 0..palette_size {
+        palette.push(read_zrle_cpixel(reader)?);
+    }
+    Ok(palette)
+}
+
+fn read_zrle_cpixel(reader: &mut impl Read) -> Result<[u8; 4], String> {
+    let pixel = read_exact_array::<3, _>(reader)
+        .map_err(|error| format!("VNC ZRLE compact pixel read failed: {error}"))?;
+    // With our negotiated 32-bit little-endian true-color format, CPIXEL omits
+    // the unused fourth transport byte and leaves B, G, R in wire order.
+    Ok([pixel[0], pixel[1], pixel[2], 0])
+}
+
+fn read_zrle_run_length(reader: &mut impl Read) -> Result<usize, String> {
+    let mut run_length = 1usize;
+    loop {
+        let byte =
+            read_u8(reader).map_err(|error| format!("VNC ZRLE run length read failed: {error}"))?;
+        run_length = run_length
+            .checked_add(usize::from(byte))
+            .ok_or_else(|| "VNC ZRLE run length overflowed.".to_string())?;
+        if byte != u8::MAX {
+            return Ok(run_length);
+        }
+    }
+}
+
+fn tile_pixel_count(tile: RfbRect) -> usize {
+    usize::from(tile.width) * usize::from(tile.height)
+}
+
+fn write_trle_run(
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+    start: usize,
+    run_length: usize,
+    color: [u8; 4],
+) -> Result<(), String> {
+    let total = tile_pixel_count(tile);
+    let Some(end) = start.checked_add(run_length) else {
+        return Err("VNC ZRLE run exceeds its tile.".to_string());
+    };
+    if end > total {
+        return Err("VNC ZRLE run exceeds its tile.".to_string());
+    }
+    for index in start..end {
+        write_trle_tile_pixel(target, target_width, tile, index, color)?;
+    }
+    Ok(())
+}
+
+fn write_trle_tile_pixel(
+    target: &mut [u8],
+    target_width: u16,
+    tile: RfbRect,
+    index: usize,
+    color: [u8; 4],
+) -> Result<(), String> {
+    let tile_width = usize::from(tile.width);
+    let x = usize::from(tile.x) + index % tile_width;
+    let y = usize::from(tile.y) + index / tile_width;
+    let offset = (y * usize::from(target_width) + x) * 4;
+    let Some(pixel) = target.get_mut(offset..offset + 4) else {
+        return Err("VNC ZRLE tile pixel exceeds its target rectangle.".to_string());
+    };
+    pixel.copy_from_slice(&color);
+    Ok(())
+}
+
 fn read_server_cut_text(reader: &mut TcpStream) -> Result<String, String> {
     let _padding = read_exact_array::<3, _>(reader)
         .map_err(|error| format!("VNC clipboard padding read failed: {error}"))?;
@@ -836,6 +1442,13 @@ fn request_framebuffer_update(
     width: u16,
     height: u16,
 ) -> Result<(), String> {
+    write_vnc_message(
+        writer,
+        &framebuffer_update_request_message(incremental, width, height),
+    )
+}
+
+fn framebuffer_update_request_message(incremental: bool, width: u16, height: u16) -> Vec<u8> {
     let mut message = Vec::with_capacity(10);
     message.push(3);
     message.push(u8::from(incremental));
@@ -843,7 +1456,7 @@ fn request_framebuffer_update(
     push_be_u16(&mut message, 0);
     push_be_u16(&mut message, width);
     push_be_u16(&mut message, height);
-    write_vnc_message(writer, &message)
+    message
 }
 
 fn write_vnc_message(writer: &SharedVncWriter, message: &[u8]) -> Result<(), String> {
@@ -1677,6 +2290,8 @@ fn union_rfb_rect(left: RfbRect, right: RfbRect) -> Option<RfbRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{Compression, write::ZlibEncoder};
+    use std::io::Cursor;
 
     #[test]
     fn framebuffer_draws_bgra_rect() {
@@ -1783,6 +2398,278 @@ mod tests {
         );
         assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 2, 1));
         assert_eq!(update.bytes, vec![7, 8, 9, 255, 10, 11, 12, 255]);
+    }
+
+    #[test]
+    fn set_encodings_prefers_zrle_and_hextile_before_raw() {
+        let message = set_encodings_message();
+        assert_eq!(&message[0..4], &[2, 0, 0, 7]);
+
+        let encodings = message[4..].chunks_exact(4).map(be_i32).collect::<Vec<_>>();
+        assert_eq!(
+            encodings,
+            vec![
+                VNC_ENCODING_DESKTOP_SIZE,
+                VNC_ENCODING_CURSOR,
+                VNC_ENCODING_X_CURSOR,
+                VNC_ENCODING_COPY_RECT,
+                VNC_ENCODING_ZRLE,
+                VNC_ENCODING_HEXTILE,
+                VNC_ENCODING_RAW,
+            ]
+        );
+    }
+
+    #[test]
+    fn hextile_background_and_colored_subrect_decode_to_raw_rect() {
+        let mut payload = vec![
+            VNC_HEXTILE_BACKGROUND_SPECIFIED
+                | VNC_HEXTILE_ANY_SUBRECTS
+                | VNC_HEXTILE_SUBRECTS_COLORED,
+            1,
+            2,
+            3,
+            0,
+            1,
+            9,
+            8,
+            7,
+            0,
+            0x10,
+            0x00,
+        ];
+        let mut reader = Cursor::new(payload.split_off(0));
+
+        let bytes = read_hextile_rect(
+            &mut reader,
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![1, 2, 3, 0, 9, 8, 7, 0, 1, 2, 3, 0, 1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn hextile_raw_tile_decodes_without_background_state() {
+        let mut payload = vec![VNC_HEXTILE_RAW, 1, 2, 3, 0, 4, 5, 6, 0];
+        let mut reader = Cursor::new(payload.split_off(0));
+
+        let bytes = read_hextile_rect(
+            &mut reader,
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![1, 2, 3, 0, 4, 5, 6, 0]);
+    }
+
+    #[test]
+    fn hextile_rejects_out_of_bounds_subrect() {
+        let mut payload = vec![
+            VNC_HEXTILE_BACKGROUND_SPECIFIED
+                | VNC_HEXTILE_ANY_SUBRECTS
+                | VNC_HEXTILE_SUBRECTS_COLORED,
+            1,
+            2,
+            3,
+            0,
+            1,
+            9,
+            8,
+            7,
+            0,
+            0x10,
+            0x10,
+        ];
+        let mut reader = Cursor::new(payload.split_off(0));
+
+        let error = read_hextile_rect(
+            &mut reader,
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("subrect exceeds"));
+    }
+
+    #[test]
+    fn zrle_raw_tile_decodes_compact_pixels() {
+        let bytes = decode_trle_rect(
+            &[VNC_TRLE_RAW, 1, 2, 3, 4, 5, 6],
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![1, 2, 3, 0, 4, 5, 6, 0]);
+    }
+
+    #[test]
+    fn zrle_packed_palette_decodes_bit_indices() {
+        let bytes = decode_trle_rect(
+            &[2, 1, 2, 3, 9, 8, 7, 0b0100_0000],
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![1, 2, 3, 0, 9, 8, 7, 0]);
+    }
+
+    #[test]
+    fn zrle_plain_rle_decodes_run_lengths() {
+        let bytes = decode_trle_rect(
+            &[VNC_TRLE_PLAIN_RLE, 7, 8, 9, 2],
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 3,
+                height: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![7, 8, 9, 0, 7, 8, 9, 0, 7, 8, 9, 0]);
+    }
+
+    #[test]
+    fn zrle_palette_rle_decodes_single_pixels_and_runs() {
+        let bytes = decode_trle_rect(
+            &[130, 1, 2, 3, 9, 8, 7, 0, 0x81, 1],
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 3,
+                height: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![1, 2, 3, 0, 9, 8, 7, 0, 9, 8, 7, 0]);
+    }
+
+    #[test]
+    fn zrle_rectangle_inflates_persistent_zlib_stream() {
+        let trle = [VNC_TRLE_RAW, 1, 2, 3, 4, 5, 6];
+        let compressed = zlib_payload(&trle);
+        let mut payload = Vec::new();
+        push_be_u32(&mut payload, compressed.len() as u32);
+        payload.extend_from_slice(&compressed);
+        let mut reader = Cursor::new(payload);
+        let mut decode_state = VncDecodeState::default();
+
+        let bytes = read_zrle_rect(
+            &mut reader,
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            &mut decode_state,
+        )
+        .unwrap();
+
+        assert_eq!(bytes, vec![1, 2, 3, 0, 4, 5, 6, 0]);
+    }
+
+    #[test]
+    fn framebuffer_update_request_message_uses_incremental_flag() {
+        assert_eq!(
+            framebuffer_update_request_message(false, 800, 600),
+            vec![3, 0, 0, 0, 0, 0, 3, 32, 2, 88]
+        );
+        assert_eq!(
+            framebuffer_update_request_message(true, 800, 600),
+            vec![3, 1, 0, 0, 0, 0, 3, 32, 2, 88]
+        );
+    }
+
+    #[test]
+    fn forced_vnc_recovery_promotes_dirty_rect_to_base_frame() {
+        let mut framebuffer = VncFramebuffer::new(2, 2);
+        let rect = RfbRect {
+            x: 1,
+            y: 1,
+            width: 1,
+            height: 1,
+        };
+        let _ = framebuffer.apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]));
+        let mut sent_initial_frame = true;
+
+        let event = vnc_frame_event_for_change(
+            &framebuffer,
+            VncFramebufferChange::Rect(rect),
+            &mut sent_initial_frame,
+            true,
+        );
+
+        match event {
+            RemoteDesktopHelperEvent::Frame { frame } => {
+                assert_eq!(
+                    frame.size,
+                    RemoteDesktopSize {
+                        width: 2,
+                        height: 2,
+                    }
+                );
+                assert_eq!(frame.bytes.len(), 16);
+            }
+            other => panic!("expected forced base frame, got {other:?}"),
+        }
+        assert!(sent_initial_frame);
+    }
+
+    #[test]
+    fn ordinary_vnc_dirty_rect_stays_incremental_after_base_frame() {
+        let mut framebuffer = VncFramebuffer::new(2, 2);
+        let rect = RfbRect {
+            x: 1,
+            y: 1,
+            width: 1,
+            height: 1,
+        };
+        let _ = framebuffer.apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]));
+        let mut sent_initial_frame = true;
+
+        let event = vnc_frame_event_for_change(
+            &framebuffer,
+            VncFramebufferChange::Rect(rect),
+            &mut sent_initial_frame,
+            false,
+        );
+
+        match event {
+            RemoteDesktopHelperEvent::FrameUpdate { update } => {
+                assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 1, 1));
+                assert_eq!(update.bytes, vec![9, 8, 7, 255]);
+            }
+            other => panic!("expected dirty update, got {other:?}"),
+        }
+        assert!(sent_initial_frame);
     }
 
     #[test]
@@ -2095,5 +2982,11 @@ mod tests {
             vnc_auth_key(&secret).as_slice(),
             &[0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6, 0x16]
         );
+    }
+
+    fn zlib_payload(data: &[u8]) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
     }
 }

@@ -8,8 +8,11 @@ use image::{Frame as ImageFrame, RgbaImage};
 use oxideterm_remote_desktop::{
     RemoteDesktopCursorShape, RemoteDesktopErrorCategory, RemoteDesktopFrame,
     RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
-    RemoteDesktopHelperEvent, RemoteDesktopProtocol, RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopHelperEvent, RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionStatus,
+    RemoteDesktopSize,
 };
+
+const REMOTE_DESKTOP_TILE_SIZE: u32 = 256;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemoteDesktopCursorState {
@@ -77,7 +80,13 @@ impl PartialEq for RemoteDesktopViewState {
 struct CachedRemoteDesktopFrameImage {
     size: RemoteDesktopSize,
     bytes: Vec<u8>,
-    image: Arc<RenderImage>,
+    tiles: Vec<RemoteDesktopFrameTile>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RemoteDesktopFrameTile {
+    pub(crate) rect: RemoteDesktopRect,
+    pub(crate) image: Arc<RenderImage>,
 }
 
 impl fmt::Debug for CachedRemoteDesktopFrameImage {
@@ -85,7 +94,7 @@ impl fmt::Debug for CachedRemoteDesktopFrameImage {
         formatter
             .debug_struct("CachedRemoteDesktopFrameImage")
             .field("size", &self.size)
-            .field("id", &self.image.id)
+            .field("tile_count", &self.tiles.len())
             .finish()
     }
 }
@@ -98,11 +107,11 @@ impl CachedRemoteDesktopFrameImage {
 
         let mut bytes = frame.bytes.clone();
         convert_framebuffer_bytes_to_gpui_bgra(&mut bytes, frame.format);
-        let image = render_image_for_bgra_bytes(frame.size, bytes.clone())?;
+        let tiles = render_tiles_for_bgra_bytes(frame.size, &bytes)?;
         Some(Self {
             size: frame.size,
             bytes,
-            image,
+            tiles,
         })
     }
 
@@ -120,10 +129,20 @@ impl CachedRemoteDesktopFrameImage {
         if !copy_update_to_bgra_backing(&mut self.bytes, self.size.width, update) {
             return false;
         }
-        let Some(image) = render_image_for_bgra_bytes(self.size, self.bytes.clone()) else {
-            return false;
-        };
-        self.image = image;
+        self.refresh_tiles_in_rect(update.rect)
+    }
+
+    fn refresh_tiles_in_rect(&mut self, rect: RemoteDesktopRect) -> bool {
+        for tile in &mut self.tiles {
+            if !rects_intersect(tile.rect, rect) {
+                continue;
+            }
+            let Some(image) = render_tile_for_bgra_bytes(self.size.width, &self.bytes, tile.rect)
+            else {
+                return false;
+            };
+            tile.image = image;
+        }
         true
     }
 }
@@ -264,10 +283,8 @@ impl RemoteDesktopViewState {
         self.frame.as_ref()
     }
 
-    pub fn frame_image(&self) -> Option<Arc<RenderImage>> {
-        self.frame_image
-            .as_ref()
-            .map(|cached| Arc::clone(&cached.image))
+    pub(crate) fn frame_tiles(&self) -> Option<Vec<RemoteDesktopFrameTile>> {
+        self.frame_image.as_ref().map(|cached| cached.tiles.clone())
     }
 
     pub fn cursor(&self) -> &RemoteDesktopCursorState {
@@ -400,6 +417,89 @@ fn render_image_for_bgra_bytes(
     Some(Arc::new(RenderImage::new(vec![ImageFrame::new(buffer)])))
 }
 
+fn render_tiles_for_bgra_bytes(
+    size: RemoteDesktopSize,
+    bytes: &[u8],
+) -> Option<Vec<RemoteDesktopFrameTile>> {
+    let mut tiles = Vec::new();
+    let mut y = 0;
+    while y < size.height {
+        let tile_height = REMOTE_DESKTOP_TILE_SIZE.min(size.height - y);
+        let mut x = 0;
+        while x < size.width {
+            let tile_width = REMOTE_DESKTOP_TILE_SIZE.min(size.width - x);
+            let rect = RemoteDesktopRect::new(x, y, tile_width, tile_height);
+            let image = render_tile_for_bgra_bytes(size.width, bytes, rect)?;
+            tiles.push(RemoteDesktopFrameTile { rect, image });
+            x += tile_width;
+        }
+        y += tile_height;
+    }
+    Some(tiles)
+}
+
+fn render_tile_for_bgra_bytes(
+    backing_width: u32,
+    bytes: &[u8],
+    rect: RemoteDesktopRect,
+) -> Option<Arc<RenderImage>> {
+    let tile_bytes = copy_bgra_rect_from_backing(bytes, backing_width, rect)?;
+    render_image_for_bgra_bytes(
+        RemoteDesktopSize {
+            width: rect.width,
+            height: rect.height,
+        },
+        tile_bytes,
+    )
+}
+
+fn copy_bgra_rect_from_backing(
+    src: &[u8],
+    src_width: u32,
+    rect: RemoteDesktopRect,
+) -> Option<Vec<u8>> {
+    let src_width = usize::try_from(src_width).ok()?;
+    let src_x = usize::try_from(rect.x).ok()?;
+    let src_y = usize::try_from(rect.y).ok()?;
+    let rect_width = usize::try_from(rect.width).ok()?;
+    let rect_height = usize::try_from(rect.height).ok()?;
+    let src_stride = src_width.checked_mul(4)?;
+    let row_len = rect_width.checked_mul(4)?;
+    let mut bytes = vec![0; row_len.checked_mul(rect_height)?];
+
+    for row in 0..rect_height {
+        let src_offset = src_y
+            .checked_add(row)?
+            .checked_mul(src_stride)?
+            .checked_add(src_x.checked_mul(4)?)?;
+        let src_end = src_offset.checked_add(row_len)?;
+        let dst_offset = row.checked_mul(row_len)?;
+        let dst_end = dst_offset.checked_add(row_len)?;
+        bytes
+            .get_mut(dst_offset..dst_end)?
+            .copy_from_slice(src.get(src_offset..src_end)?);
+    }
+
+    Some(bytes)
+}
+
+fn rects_intersect(a: RemoteDesktopRect, b: RemoteDesktopRect) -> bool {
+    let Some(a_right) = a.x.checked_add(a.width) else {
+        return false;
+    };
+    let Some(a_bottom) = a.y.checked_add(a.height) else {
+        return false;
+    };
+    let Some(b_right) = b.x.checked_add(b.width) else {
+        return false;
+    };
+    let Some(b_bottom) = b.y.checked_add(b.height) else {
+        return false;
+    };
+
+    a.x < b_right && b.x < a_right && a.y < b_bottom && b.y < a_bottom
+}
+
 #[cfg(test)]
 mod tests {
     use oxideterm_remote_desktop::{
@@ -446,7 +546,7 @@ mod tests {
 
         assert!(state.snapshot().has_frame);
         assert!(state.frame().unwrap().is_complete());
-        assert!(state.frame_image().is_some());
+        assert!(state.frame_tiles().is_some());
     }
 
     #[test]
@@ -474,8 +574,9 @@ mod tests {
         });
 
         assert_eq!(state.frame().unwrap().bytes, vec![1, 1, 1, 1, 9, 9, 9, 9]);
+        let tiles = state.frame_tiles().unwrap();
         assert_eq!(
-            state.frame_image().unwrap().as_bytes(0),
+            tiles[0].image.as_bytes(0),
             Some([1, 1, 1, 1, 9, 9, 9, 9].as_slice())
         );
     }
@@ -502,7 +603,7 @@ mod tests {
             Some([0x30, 0x20, 0x10, 0xff, 0x60, 0x50, 0x40, 0xff].as_slice())
         );
         assert_eq!(
-            state.frame_image().unwrap().as_bytes(0),
+            state.frame_tiles().unwrap()[0].image.as_bytes(0),
             Some([0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff].as_slice())
         );
     }
@@ -542,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_update_patches_cached_bgra_backing_locally() {
+    fn frame_update_patches_cached_tile_bgra_backing_locally() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
         let size = RemoteDesktopSize {
             width: 2,
@@ -558,9 +659,7 @@ mod tests {
                 ],
             ),
         });
-        let before = state
-            .frame_image()
-            .expect("base frame should create image cache");
+        let before = state.frame_tiles().expect("base frame should create tiles");
 
         state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
             update: RemoteDesktopFrameUpdate::new(
@@ -572,11 +671,11 @@ mod tests {
         });
 
         let after = state
-            .frame_image()
-            .expect("dirty update should keep image cache");
-        assert!(!Arc::ptr_eq(&before, &after));
+            .frame_tiles()
+            .expect("dirty update should keep image tiles");
+        assert!(!Arc::ptr_eq(&before[0].image, &after[0].image));
         assert_eq!(
-            after.as_bytes(0),
+            after[0].image.as_bytes(0),
             Some(
                 [
                     0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff, 0x70, 0x80, 0x90, 0xff, 0xcc,
@@ -588,7 +687,42 @@ mod tests {
     }
 
     #[test]
-    fn cursor_event_does_not_rebuild_cached_frame_image() {
+    fn dirty_update_only_rebuilds_intersecting_tiles() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let size = RemoteDesktopSize {
+            width: 300,
+            height: 300,
+        };
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![0; RemoteDesktopFrame::expected_len(size).unwrap()],
+            ),
+        });
+        let before = state.frame_tiles().expect("base frame should create tiles");
+        assert_eq!(before.len(), 4);
+
+        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(10, 10, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![0xaa, 0xbb, 0xcc, 0xdd],
+            ),
+        });
+
+        let after = state
+            .frame_tiles()
+            .expect("dirty update should keep image tiles");
+        assert!(!Arc::ptr_eq(&before[0].image, &after[0].image));
+        assert!(Arc::ptr_eq(&before[1].image, &after[1].image));
+        assert!(Arc::ptr_eq(&before[2].image, &after[2].image));
+        assert!(Arc::ptr_eq(&before[3].image, &after[3].image));
+    }
+
+    #[test]
+    fn cursor_event_does_not_rebuild_cached_frame_tiles() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
         let size = RemoteDesktopSize {
             width: 1,
@@ -601,9 +735,9 @@ mod tests {
                 vec![0x30, 0x20, 0x10, 0xff],
             ),
         });
-        let image = state
-            .frame_image()
-            .expect("frame should create image cache");
+        let tiles = state
+            .frame_tiles()
+            .expect("frame should create image tiles");
 
         state.apply_event(RemoteDesktopHelperEvent::Cursor {
             x: 10,
@@ -612,10 +746,10 @@ mod tests {
             height: 1,
         });
 
-        let cached_image = state
-            .frame_image()
-            .expect("cursor updates should keep the image cache");
-        assert!(Arc::ptr_eq(&image, &cached_image));
+        let cached_tiles = state
+            .frame_tiles()
+            .expect("cursor updates should keep image tiles");
+        assert!(Arc::ptr_eq(&tiles[0].image, &cached_tiles[0].image));
     }
 
     #[test]
@@ -634,7 +768,7 @@ mod tests {
         });
 
         assert_eq!(
-            state.frame_image().unwrap().as_bytes(0),
+            state.frame_tiles().unwrap()[0].image.as_bytes(0),
             Some([0x10, 0x20, 0x30, 0xff].as_slice())
         );
     }
@@ -655,7 +789,7 @@ mod tests {
         });
 
         assert_eq!(
-            state.frame_image().unwrap().as_bytes(0),
+            state.frame_tiles().unwrap()[0].image.as_bytes(0),
             Some([0x10, 0x20, 0x30, 0xff].as_slice())
         );
     }

@@ -6,5 +6,6 @@ version.workspace = true
 
 [dependencies]
 des = "0.9"
+flate2 = "1.1.9"
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 zeroize.workspace = true

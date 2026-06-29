@@ -8,7 +8,8 @@ use std::{
 
 use oxideterm_remote_desktop::{RemoteDesktopHelperEvent, write_event_line};
 
-const FRAME_COALESCE_WINDOW: Duration = Duration::from_millis(16);
+const FRAME_QUIET_COALESCE_WINDOW: Duration = Duration::from_millis(4);
+const FRAME_MAX_COALESCE_WINDOW: Duration = Duration::from_millis(16);
 const FRAME_RECOVERY_THRESHOLD: usize = 24;
 
 #[derive(Clone)]
@@ -112,20 +113,25 @@ fn next_frame_for_stdout(
             continue;
         }
 
-        // Give fast bursts one refresh tick to merge adjacent dirty regions,
-        // while preserving sparse regions as ordered updates.
-        let deadline = Instant::now() + FRAME_COALESCE_WINDOW;
+        // Sparse updates should not wait a whole refresh tick, but a burst can
+        // still use the full coalescing window to collapse dirty rectangles.
+        let start = Instant::now();
+        let max_deadline = start + FRAME_MAX_COALESCE_WINDOW;
+        let mut quiet_deadline = start + FRAME_QUIET_COALESCE_WINDOW;
         loop {
             let now = Instant::now();
-            if now >= deadline {
+            if now >= quiet_deadline || now >= max_deadline {
                 break;
             }
-            let remaining = deadline.saturating_duration_since(now);
+            let remaining = quiet_deadline
+                .min(max_deadline)
+                .saturating_duration_since(now);
             let (next_queue, timeout) = wake.wait_timeout(queue, remaining).ok()?;
             queue = next_queue;
             if timeout.timed_out() {
                 break;
             }
+            quiet_deadline = Instant::now() + FRAME_QUIET_COALESCE_WINDOW;
         }
         if let Some(frame) = queue.frames.pop_front() {
             return Some(frame);
