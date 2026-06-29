@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "Xem trước VNC",
     "provider_missing": "Trình cung cấp máy tính từ xa không khả dụng.",
     "session_missing": "Phiên máy tính từ xa không khả dụng.",
+    "force_recover": "Khôi phục",
     "reconnect": "Kết nối lại",
     "disconnect": "Ngắt kết nối"
   }

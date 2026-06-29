@@ -9,6 +9,7 @@ use std::{
 use oxideterm_remote_desktop::{RemoteDesktopHelperEvent, write_event_line};
 
 const FRAME_COALESCE_WINDOW: Duration = Duration::from_millis(16);
+const FRAME_RECOVERY_THRESHOLD: usize = 24;
 
 #[derive(Clone)]
 pub(crate) struct SharedEventWriter {
@@ -19,6 +20,8 @@ pub(crate) struct SharedEventWriter {
 #[derive(Default)]
 struct EventWriterQueue {
     frames: VecDeque<RemoteDesktopHelperEvent>,
+    needs_frame_recovery: bool,
+    frame_recovery_notified: bool,
 }
 
 impl SharedEventWriter {
@@ -45,7 +48,7 @@ impl SharedEventWriter {
             .lock()
             .map_err(|_| "RDP event queue lock is poisoned.".to_string())?;
         if is_frame_event(&event) {
-            push_frame_event(&mut queue.frames, event);
+            push_frame_event(&mut queue, event);
             wake.notify_one();
             return Ok(());
         }
@@ -65,6 +68,18 @@ impl SharedEventWriter {
         write_event_line(&mut *stdout, &event)
             .map_err(|error| format!("RDP event write failed: {error}"))?;
         Ok(())
+    }
+
+    pub(crate) fn take_frame_recovery_request(&self) -> Result<bool, String> {
+        let (queue, _) = &*self.queue;
+        let mut queue = queue
+            .lock()
+            .map_err(|_| "RDP event queue lock is poisoned.".to_string())?;
+        let requested = queue.needs_frame_recovery && !queue.frame_recovery_notified;
+        if requested {
+            queue.frame_recovery_notified = true;
+        }
+        Ok(requested)
     }
 
     fn start_stdout_thread(&self) {
@@ -125,22 +140,34 @@ fn is_frame_event(event: &RemoteDesktopHelperEvent) -> bool {
     )
 }
 
-fn push_frame_event(
-    frames: &mut VecDeque<RemoteDesktopHelperEvent>,
-    event: RemoteDesktopHelperEvent,
-) {
+fn push_frame_event(queue: &mut EventWriterQueue, event: RemoteDesktopHelperEvent) {
     if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
-        frames.clear();
-        frames.push_back(event);
+        queue.frames.clear();
+        queue.frames.push_back(event);
+        queue.needs_frame_recovery = false;
+        queue.frame_recovery_notified = false;
         return;
     }
 
-    if let Some(existing) = frames.back_mut() {
+    if queue.needs_frame_recovery {
+        return;
+    }
+
+    if let Some(existing) = queue.frames.back_mut() {
         if let Err(incoming) = try_merge_frame_event(existing, event) {
-            frames.push_back(incoming);
+            queue.frames.push_back(incoming);
         }
     } else {
-        frames.push_back(event);
+        queue.frames.push_back(event);
+    }
+
+    if queue.frames.len() > FRAME_RECOVERY_THRESHOLD {
+        // Sparse dirty updates are only useful while the downstream UI can
+        // consume them in order. Once the writer falls too far behind, discard
+        // the stale delta chain and ask the RDP session for a new base frame.
+        queue.frames.clear();
+        queue.needs_frame_recovery = true;
+        queue.frame_recovery_notified = false;
     }
 }
 
@@ -185,4 +212,87 @@ pub(crate) fn send_event(
     event: RemoteDesktopHelperEvent,
 ) -> Result<(), String> {
     writer.send(event)
+}
+
+#[cfg(test)]
+mod tests {
+    use oxideterm_remote_desktop::{
+        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopRect,
+        RemoteDesktopSize,
+    };
+
+    use super::*;
+
+    fn dirty_update_at(x: u32) -> RemoteDesktopHelperEvent {
+        RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                RemoteDesktopSize {
+                    width: 128,
+                    height: 1,
+                },
+                RemoteDesktopRect::new(x, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![x as u8, 0, 0, 0xff],
+            ),
+        }
+    }
+
+    #[test]
+    fn sparse_dirty_backlog_requests_base_frame_recovery() {
+        let writer = SharedEventWriter::inert_for_tests();
+
+        for index in 0..=FRAME_RECOVERY_THRESHOLD {
+            writer
+                .send(dirty_update_at((index as u32) * 2))
+                .expect("dirty update should enqueue");
+        }
+
+        assert!(writer.take_frame_recovery_request().unwrap());
+        assert!(!writer.take_frame_recovery_request().unwrap());
+    }
+
+    #[test]
+    fn base_frame_clears_writer_recovery_state() {
+        let writer = SharedEventWriter::inert_for_tests();
+        for index in 0..=FRAME_RECOVERY_THRESHOLD {
+            writer
+                .send(dirty_update_at((index as u32) * 2))
+                .expect("dirty update should enqueue");
+        }
+
+        writer
+            .send(RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    RemoteDesktopSize {
+                        width: 1,
+                        height: 1,
+                    },
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![0, 0, 0, 0xff],
+                ),
+            })
+            .expect("base frame should enqueue");
+
+        assert!(!writer.take_frame_recovery_request().unwrap());
+    }
+
+    #[test]
+    fn dirty_updates_are_dropped_while_writer_waits_for_base_frame() {
+        let writer = SharedEventWriter::inert_for_tests();
+        for index in 0..=FRAME_RECOVERY_THRESHOLD {
+            writer
+                .send(dirty_update_at((index as u32) * 2))
+                .expect("dirty update should enqueue");
+        }
+        assert!(writer.take_frame_recovery_request().unwrap());
+
+        writer
+            .send(dirty_update_at(99))
+            .expect("dirty update should be accepted and dropped");
+
+        let (queue, _) = &*writer.queue;
+        let queue = queue.lock().unwrap();
+        assert!(queue.frames.is_empty());
+        assert!(queue.needs_frame_recovery);
+    }
 }

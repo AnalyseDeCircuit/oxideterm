@@ -52,6 +52,7 @@ pub(crate) struct RdpKeyboardInputMapper {
     physical_modifiers: HashSet<Scancode>,
     pressed_scancodes: HashSet<Scancode>,
     pressed_unicode: HashSet<char>,
+    pressed_unicode_by_code: HashMap<String, char>,
     synthetic_modifiers_by_key: HashMap<Scancode, Vec<Scancode>>,
 }
 
@@ -65,6 +66,7 @@ impl RdpKeyboardInputMapper {
         for character in self.pressed_unicode.drain() {
             operations.push(RdpInputOperation::UnicodeKeyReleased(character));
         }
+        self.pressed_unicode_by_code.clear();
         let mut released_synthetic_modifiers = HashSet::new();
         for modifier in self
             .synthetic_modifiers_by_key
@@ -88,23 +90,46 @@ impl RdpKeyboardInputMapper {
             return self.modifier_operations(scancode, state);
         }
 
-        if let Some(character) = printable_remote_text(key) {
-            remember_unicode_key(&mut self.pressed_unicode, character, state);
-            return unicode_key_operations(character, state);
-        }
-
         if let Some(scancode) = rdp_scancode(&key.code) {
             return self.scancode_operations(scancode, rdp_modifier_scancodes(key), state);
+        }
+
+        let unicode_key_code = tracked_unicode_key_code(&key.code);
+        if let Some(character) = printable_remote_text(key) {
+            return self.unicode_operations(unicode_key_code, character, state);
+        }
+
+        if state == RemoteDesktopKeyState::Released
+            && let Some(character) = self.pressed_unicode_by_code.remove(&unicode_key_code)
+        {
+            self.pressed_unicode.remove(&character);
+            return unicode_key_operations(character, state);
         }
 
         key.text
             .as_deref()
             .and_then(single_non_control_char)
-            .map(|character| {
-                remember_unicode_key(&mut self.pressed_unicode, character, state);
-                unicode_key_operations(character, state)
-            })
+            .map(|character| self.unicode_operations(unicode_key_code, character, state))
             .unwrap_or_default()
+    }
+
+    fn unicode_operations(
+        &mut self,
+        key_code: String,
+        character: char,
+        state: RemoteDesktopKeyState,
+    ) -> Vec<RdpInputOperation> {
+        match state {
+            RemoteDesktopKeyState::Pressed => {
+                self.pressed_unicode.insert(character);
+                self.pressed_unicode_by_code.insert(key_code, character);
+            }
+            RemoteDesktopKeyState::Released => {
+                self.pressed_unicode.remove(&character);
+                self.pressed_unicode_by_code.remove(&key_code);
+            }
+        }
+        unicode_key_operations(character, state)
     }
 
     fn modifier_operations(
@@ -195,13 +220,6 @@ pub(crate) fn rdp_key_operations(
     key: &RemoteDesktopKey,
     state: RemoteDesktopKeyState,
 ) -> Vec<RdpInputOperation> {
-    if let Some(character) = printable_remote_text(key) {
-        return vec![match state {
-            RemoteDesktopKeyState::Pressed => RdpInputOperation::UnicodeKeyPressed(character),
-            RemoteDesktopKeyState::Released => RdpInputOperation::UnicodeKeyReleased(character),
-        }];
-    }
-
     if let Some(scancode) = rdp_scancode(&key.code) {
         let mut operations = Vec::new();
         let is_modifier_key = rdp_modifier_scancode_for_key(&key.code).is_some();
@@ -224,6 +242,13 @@ pub(crate) fn rdp_key_operations(
         return operations;
     }
 
+    if let Some(character) = printable_remote_text(key) {
+        return vec![match state {
+            RemoteDesktopKeyState::Pressed => RdpInputOperation::UnicodeKeyPressed(character),
+            RemoteDesktopKeyState::Released => RdpInputOperation::UnicodeKeyReleased(character),
+        }];
+    }
+
     key.text
         .as_deref()
         .and_then(single_non_control_char)
@@ -243,19 +268,10 @@ fn unicode_key_operations(character: char, state: RemoteDesktopKeyState) -> Vec<
     }]
 }
 
-fn remember_unicode_key(
-    pressed_unicode: &mut HashSet<char>,
-    character: char,
-    state: RemoteDesktopKeyState,
-) {
-    match state {
-        RemoteDesktopKeyState::Pressed => {
-            pressed_unicode.insert(character);
-        }
-        RemoteDesktopKeyState::Released => {
-            pressed_unicode.remove(&character);
-        }
-    }
+fn tracked_unicode_key_code(code: &str) -> String {
+    // GPUI can omit key_char on key-up. Track printable Unicode presses by the
+    // normalized physical-ish key code so the release still matches the press.
+    normalize_rdp_key_code(code)
 }
 
 fn printable_remote_text(key: &RemoteDesktopKey) -> Option<char> {
@@ -387,6 +403,10 @@ pub(crate) fn rdp_scancode(code: &str) -> Option<Scancode> {
 }
 
 fn normalize_rdp_key_code(code: &str) -> String {
+    if matches!(code, "\n" | "\r") {
+        return "enter".to_string();
+    }
+
     let normalized = code.trim().to_ascii_lowercase();
     if let Some(letter) = normalized.strip_prefix("key")
         && letter.len() == 1
@@ -643,9 +663,27 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_mapper_prefers_physical_scancode_for_printable_key_events() {
+        let mut mapper = RdpKeyboardInputMapper::default();
+
+        let key_down = mapper.operations(
+            &key("KeyA", Some("a"), false),
+            RemoteDesktopKeyState::Pressed,
+        );
+        assert_eq!(key_down.len(), 1);
+        assert_eq!(scancode(&key_down[0]), 0x1e);
+
+        let key_up = mapper.operations(&key("KeyA", None, false), RemoteDesktopKeyState::Released);
+        assert_eq!(key_up.len(), 1);
+        assert_eq!(scancode(&key_up[0]), 0x1e);
+    }
+
+    #[test]
     fn keyboard_mapper_maps_extended_desktop_keys() {
         assert_eq!(rdp_scancode("Return").unwrap().as_u16(), 0x1c);
         assert_eq!(rdp_scancode("EnterKey").unwrap().as_u16(), 0x1c);
+        assert_eq!(rdp_scancode("\n").unwrap().as_u16(), 0x1c);
+        assert_eq!(rdp_scancode("\r").unwrap().as_u16(), 0x1c);
         assert_eq!(rdp_scancode("NumpadDivide").unwrap().as_u16(), 0xe035);
         assert_eq!(rdp_scancode("NumpadEnter").unwrap().as_u16(), 0xe01c);
         assert_eq!(rdp_scancode("KP_Enter").unwrap().as_u16(), 0xe01c);
@@ -672,7 +710,7 @@ mod tests {
             matches!(operation, RdpInputOperation::KeyReleased(scancode) if scancode.as_u16() == 0x1d)
         }));
         assert!(released.iter().any(|operation| {
-            matches!(operation, RdpInputOperation::UnicodeKeyReleased(character) if *character == 'a')
+            matches!(operation, RdpInputOperation::KeyReleased(scancode) if scancode.as_u16() == 0x1e)
         }));
         assert!(mapper.release_all_operations().is_empty());
     }

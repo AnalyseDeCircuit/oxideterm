@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
+    collections::VecDeque,
     fmt,
     io::{self, BufRead, BufReader},
-    sync::mpsc,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -341,11 +346,134 @@ enum ClientRdpSessionExit {
 
 struct ClientRdpSession {
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_rx: mpsc::Receiver<ClientRdpOutput>,
+    output_rx: ClientRdpOutputReceiver,
     join_handle: thread::JoinHandle<()>,
 }
 
-type ClientRdpOutputTx = mpsc::SyncSender<ClientRdpOutput>;
+#[derive(Clone)]
+struct ClientRdpOutputSender {
+    control_tx: mpsc::Sender<ClientRdpOutput>,
+    graphics_tx: ClientRdpGraphicsSender,
+}
+
+struct ClientRdpOutputReceiver {
+    control_rx: mpsc::Receiver<ClientRdpOutput>,
+    graphics_rx: ClientRdpGraphicsReceiver,
+}
+
+struct ClientRdpGraphicsQueue {
+    queue: Mutex<VecDeque<ClientRdpOutput>>,
+    capacity: usize,
+    receiver_alive: AtomicBool,
+}
+
+#[derive(Clone)]
+struct ClientRdpGraphicsSender {
+    inner: Arc<ClientRdpGraphicsQueue>,
+}
+
+struct ClientRdpGraphicsReceiver {
+    inner: Arc<ClientRdpGraphicsQueue>,
+}
+
+impl Drop for ClientRdpGraphicsReceiver {
+    fn drop(&mut self) {
+        self.inner.receiver_alive.store(false, Ordering::Release);
+    }
+}
+
+impl ClientRdpOutputSender {
+    fn send_control(
+        &self,
+        output: ClientRdpOutput,
+    ) -> Result<(), mpsc::SendError<ClientRdpOutput>> {
+        self.control_tx.send(output)
+    }
+
+    fn try_send_graphics(
+        &self,
+        output: ClientRdpOutput,
+    ) -> Result<(), mpsc::TrySendError<ClientRdpOutput>> {
+        self.graphics_tx.try_send(output)
+    }
+}
+
+impl ClientRdpGraphicsSender {
+    fn try_send(&self, output: ClientRdpOutput) -> Result<(), mpsc::TrySendError<ClientRdpOutput>> {
+        if !self.inner.receiver_alive.load(Ordering::Acquire) {
+            return Err(mpsc::TrySendError::Disconnected(output));
+        }
+        let Ok(mut queue) = self.inner.queue.lock() else {
+            return Err(mpsc::TrySendError::Disconnected(output));
+        };
+        if client_rdp_output_is_base_frame(&output) {
+            // A base frame supersedes every older dirty event because it
+            // re-establishes the full UI backing buffer.
+            queue.clear();
+            queue.push_back(output);
+            return Ok(());
+        }
+        if queue.len() >= self.inner.capacity {
+            return Err(mpsc::TrySendError::Full(output));
+        }
+        queue.push_back(output);
+        Ok(())
+    }
+}
+
+impl ClientRdpGraphicsReceiver {
+    fn try_recv(&self) -> Result<ClientRdpOutput, mpsc::TryRecvError> {
+        let Ok(mut queue) = self.inner.queue.lock() else {
+            return Err(mpsc::TryRecvError::Disconnected);
+        };
+        if let Some(output) = queue.pop_front() {
+            return Ok(output);
+        }
+        if Arc::strong_count(&self.inner) == 1 {
+            Err(mpsc::TryRecvError::Disconnected)
+        } else {
+            Err(mpsc::TryRecvError::Empty)
+        }
+    }
+}
+
+fn client_rdp_output_channel(capacity: usize) -> (ClientRdpOutputSender, ClientRdpOutputReceiver) {
+    let (control_tx, control_rx) = mpsc::channel();
+    let graphics = Arc::new(ClientRdpGraphicsQueue {
+        queue: Mutex::new(VecDeque::new()),
+        capacity,
+        receiver_alive: AtomicBool::new(true),
+    });
+    (
+        ClientRdpOutputSender {
+            control_tx,
+            graphics_tx: ClientRdpGraphicsSender {
+                inner: graphics.clone(),
+            },
+        },
+        ClientRdpOutputReceiver {
+            control_rx,
+            graphics_rx: ClientRdpGraphicsReceiver { inner: graphics },
+        },
+    )
+}
+
+fn client_rdp_output_is_base_frame(output: &ClientRdpOutput) -> bool {
+    matches!(
+        output,
+        ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame { .. })
+    )
+}
+
+fn native_rdp_desktop_ready_events(size: RemoteDesktopSize) -> [RemoteDesktopHelperEvent; 2] {
+    [
+        RemoteDesktopHelperEvent::Connected { size },
+        RemoteDesktopHelperEvent::Status {
+            status: RemoteDesktopSessionStatus::Connected,
+            message: Some("RDP desktop frame received.".to_string()),
+        },
+    ]
+}
 
 #[derive(Default)]
 struct ClientRdpRequestCoalescer {
@@ -398,7 +526,7 @@ fn start_client_rdp_session(config: &RdpWorkerConfig) -> Result<ClientRdpSession
     let (input_tx, input_rx) = tokio_mpsc::unbounded_channel();
     let client_input_tx = input_tx.clone();
     let (client_output_tx, client_output_rx) =
-        mpsc::sync_channel::<ClientRdpOutput>(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
 
     let join_handle = thread::Builder::new()
         .name("oxideterm-rdp-client".to_string())
@@ -418,13 +546,13 @@ fn run_client_rdp_thread(
     mut config: ClientRdpConfig,
     mut input_rx: tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    client_output_tx: ClientRdpOutputTx,
+    client_output_tx: ClientRdpOutputSender,
 ) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build();
     let Ok(runtime) = runtime else {
-        let _ = client_output_tx.send(ClientRdpOutput::Event(
+        let _ = client_output_tx.send_control(ClientRdpOutput::Event(
             RemoteDesktopHelperEvent::ConnectionFailure {
                 message: "RDP async runtime startup failed.".to_string(),
                 category: Some(RemoteDesktopErrorCategory::Dependency),
@@ -440,11 +568,11 @@ fn run_client_rdp_thread(
                 {
                     Ok(result) => result,
                     Err(error) => {
-                        let _ = client_output_tx.send(ClientRdpOutput::ConnectionFailure(error));
+                        let _ = client_output_tx
+                            .send_control(ClientRdpOutput::ConnectionFailure(error));
                         break;
                     }
                 };
-
             match run_native_rdp_active_session(
                 framed,
                 connection_result,
@@ -454,7 +582,7 @@ fn run_client_rdp_thread(
             .await
             {
                 Ok(ClientRdpControlFlow::TerminatedGracefully(reason)) => {
-                    let _ = client_output_tx.send(ClientRdpOutput::Terminated(
+                    let _ = client_output_tx.send_control(ClientRdpOutput::Terminated(
                         format_graceful_disconnect(reason),
                     ));
                     break;
@@ -466,7 +594,7 @@ fn run_client_rdp_thread(
                 }) => {
                     config.connector.desktop_size = DesktopSize { width, height };
                     config.connector.desktop_scale_factor = scale_factor;
-                    let _ = client_output_tx.send(ClientRdpOutput::Event(
+                    let _ = client_output_tx.send_control(ClientRdpOutput::Event(
                         RemoteDesktopHelperEvent::Status {
                             status: RemoteDesktopSessionStatus::Reconnecting,
                             message: Some(
@@ -476,14 +604,14 @@ fn run_client_rdp_thread(
                     ));
                 }
                 Err(error) => {
-                    let _ = client_output_tx.send(ClientRdpOutput::Terminated(format!(
+                    let _ = client_output_tx.send_control(ClientRdpOutput::Terminated(format!(
                         "RDP session ended: {error}"
                     )));
                     break;
                 }
             }
         }
-        let _ = client_output_tx.send(ClientRdpOutput::OutputEnded);
+        let _ = client_output_tx.send_control(ClientRdpOutput::OutputEnded);
     });
 }
 
@@ -524,7 +652,7 @@ impl ClientRdpDestination {
 
 struct ClientClipboardBackend {
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_tx: ClientRdpOutputTx,
+    output_tx: ClientRdpOutputSender,
     local_text: Option<String>,
     local_data: Option<RemoteDesktopClipboardData>,
     remote_text_format: Option<ClipboardFormatId>,
@@ -548,7 +676,7 @@ impl_as_any!(ClientClipboardBackend);
 impl ClientClipboardBackend {
     fn new(
         input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-        output_tx: ClientRdpOutputTx,
+        output_tx: ClientRdpOutputSender,
     ) -> Self {
         Self {
             input_tx,
@@ -659,7 +787,7 @@ impl CliprdrBackend for ClientClipboardBackend {
         if let Some(format) = self.remote_data_format.take() {
             let data = decode_remote_clipboard_data(format, response.data().to_vec());
             if let Some(data) = data {
-                let _ = self.output_tx.send(ClientRdpOutput::Event(
+                let _ = self.output_tx.send_control(ClientRdpOutput::Event(
                     RemoteDesktopHelperEvent::ClipboardData { data },
                 ));
             }
@@ -675,7 +803,7 @@ impl CliprdrBackend for ClientClipboardBackend {
                 .ok(),
         };
         if let Some(text) = text {
-            let _ = self.output_tx.send(ClientRdpOutput::Event(
+            let _ = self.output_tx.send_control(ClientRdpOutput::Event(
                 RemoteDesktopHelperEvent::ClipboardText { text },
             ));
         }
@@ -702,6 +830,7 @@ enum RdpInputEvent {
     Clipboard(ClipboardMessage),
     SetClipboardText(String),
     SetClipboardData(RemoteDesktopClipboardData),
+    RequestFrame,
     Close,
 }
 
@@ -714,10 +843,29 @@ enum ClientRdpControlFlow {
     },
 }
 
+#[derive(Debug)]
+struct ClientRdpFrameState {
+    graphics_sync: RdpGraphicsSyncState,
+    pending_base_frame: bool,
+    pending_base_frame_can_publish_ready: bool,
+    published_first_desktop_frame: bool,
+}
+
+impl Default for ClientRdpFrameState {
+    fn default() -> Self {
+        Self {
+            graphics_sync: RdpGraphicsSyncState::default(),
+            pending_base_frame: false,
+            pending_base_frame_can_publish_ready: false,
+            published_first_desktop_frame: false,
+        }
+    }
+}
+
 async fn connect_native_rdp(
     config: &ClientRdpConfig,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_tx: ClientRdpOutputTx,
+    output_tx: ClientRdpOutputSender,
 ) -> connector::ConnectorResult<(ConnectionResult, UpgradedRdpFramed)> {
     let socket = TcpStream::connect((config.destination.host(), config.destination.port()))
         .await
@@ -760,7 +908,7 @@ async fn connect_native_rdp(
 fn attach_client_virtual_channels(
     connector: &mut connector::ClientConnector,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_tx: ClientRdpOutputTx,
+    output_tx: ClientRdpOutputSender,
 ) {
     let display_control =
         DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
@@ -776,7 +924,7 @@ async fn run_native_rdp_active_session(
     framed: UpgradedRdpFramed,
     connection_result: ConnectionResult,
     input_rx: &mut tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
-    output_tx: &ClientRdpOutputTx,
+    output_tx: &ClientRdpOutputSender,
 ) -> SessionResult<ClientRdpControlFlow> {
     let (mut reader, mut writer) = split_tokio_framed(framed);
     let mut image = DecodedImage::new(
@@ -786,16 +934,26 @@ async fn run_native_rdp_active_session(
     );
     let mut active_stage = ActiveStage::new(connection_result);
     let mut clipboard_cleanup = tokio::time::interval(RDP_CLIPBOARD_TIMEOUT_POLL_INTERVAL);
-    let mut sent_initial_frame = false;
-    let mut pending_base_frame = false;
+    let mut frame_state = ClientRdpFrameState::default();
 
     let disconnect_reason = 'session: loop {
-        flush_pending_rdp_base_frame(output_tx, &image, &mut pending_base_frame)?;
+        flush_pending_rdp_base_frame(output_tx, &image, &mut frame_state)?;
 
         let outputs = tokio::select! {
             frame = reader.read_pdu() => {
                 let (action, payload) = frame
-                    .map_err(|error| session::custom_err!("read frame", error))?;
+                    .map_err(|error| {
+                        if rdp_frame_read_error_context(&error)
+                            == "server closed established RDP session while reading frames"
+                        {
+                            session::custom_err!(
+                                "server closed established RDP session while reading frames",
+                                error
+                            )
+                        } else {
+                            session::custom_err!("read RDP frame", error)
+                        }
+                    })?;
                 active_stage.process(&mut image, action, &payload)?
             }
             input = input_rx.recv() => {
@@ -836,6 +994,10 @@ async fn run_native_rdp_active_session(
                     RdpInputEvent::SetClipboardData(data) => {
                         advertise_local_clipboard_data(&mut active_stage, data)?
                     }
+                    RdpInputEvent::RequestFrame => {
+                        send_client_rdp_base_frame(output_tx, &image, &mut frame_state, false)?;
+                        Vec::new()
+                    }
                     RdpInputEvent::Close => active_stage.graceful_shutdown()?,
                 }
             }
@@ -850,12 +1012,13 @@ async fn run_native_rdp_active_session(
                     .write_all(&frame)
                     .await
                     .map_err(|error| session::custom_err!("write response", error))?,
-                ActiveStageOutput::GraphicsUpdate(region) => {
-                    if let Some(event) =
-                        graphics_update_event(&image, region, &mut sent_initial_frame)?
-                    {
-                        send_client_rdp_graphics_event(output_tx, event, &mut pending_base_frame)?;
-                    }
+                ActiveStageOutput::GraphicsUpdate(_region) => {
+                    // Match IronRDP's reference client for the native RDP path:
+                    // publish the current complete framebuffer for every
+                    // graphics update. Dirty rectangles remain available for a
+                    // later optimization pass, but login/reactivation recovery
+                    // must not depend on a relative delta chain.
+                    send_client_rdp_base_frame(output_tx, &image, &mut frame_state, true)?;
                 }
                 ActiveStageOutput::PointerPosition { x, y } => {
                     send_client_rdp_event(
@@ -900,15 +1063,7 @@ async fn run_native_rdp_active_session(
                         connection_activation,
                     )
                     .await?;
-                    // Reactivation resets the server-side backing surface. Give
-                    // the UI a fresh full-frame base before accepting new dirty
-                    // rectangles so updates are not applied to the old desktop.
-                    send_client_rdp_graphics_event(
-                        output_tx,
-                        base_frame_event(&image),
-                        &mut pending_base_frame,
-                    )?;
-                    sent_initial_frame = true;
+                    reset_graphics_base_after_reactivation(&mut frame_state);
                 }
                 ActiveStageOutput::Terminate(reason) => break 'session reason,
                 ActiveStageOutput::MultitransportRequest(_) | ActiveStageOutput::AutoDetect(_) => {}
@@ -921,21 +1076,55 @@ async fn run_native_rdp_active_session(
     ))
 }
 
+fn reset_graphics_base_after_reactivation(frame_state: &mut ClientRdpFrameState) {
+    frame_state.graphics_sync.mark_needs_base();
+    frame_state.pending_base_frame = false;
+    frame_state.pending_base_frame_can_publish_ready = false;
+}
+
 fn flush_pending_rdp_base_frame(
-    output_tx: &ClientRdpOutputTx,
+    output_tx: &ClientRdpOutputSender,
     image: &DecodedImage,
-    pending_base_frame: &mut bool,
+    frame_state: &mut ClientRdpFrameState,
 ) -> SessionResult<()> {
-    if !*pending_base_frame {
+    if !frame_state.pending_base_frame {
         return Ok(());
     }
 
-    match output_tx.try_send(ClientRdpOutput::Event(base_frame_event(image))) {
+    let publish_ready = frame_state.pending_base_frame_can_publish_ready;
+    send_client_rdp_base_frame(output_tx, image, frame_state, publish_ready)
+}
+
+fn send_client_rdp_base_frame(
+    output_tx: &ClientRdpOutputSender,
+    image: &DecodedImage,
+    frame_state: &mut ClientRdpFrameState,
+    publish_ready: bool,
+) -> SessionResult<()> {
+    let event = base_frame_event(image);
+    match output_tx.try_send_graphics(ClientRdpOutput::Event(event)) {
         Ok(()) => {
-            *pending_base_frame = false;
+            frame_state.pending_base_frame = false;
+            frame_state.pending_base_frame_can_publish_ready = false;
+            frame_state.graphics_sync.mark_synced();
+            if publish_ready && !frame_state.published_first_desktop_frame {
+                for event in native_rdp_desktop_ready_events(remote_size_for_image(image)) {
+                    output_tx
+                        .send_control(ClientRdpOutput::Event(event))
+                        .map_err(|error| session::custom_err!("send RDP ready event", error))?;
+                }
+                frame_state.published_first_desktop_frame = true;
+            }
             Ok(())
         }
-        Err(mpsc::TrySendError::Full(_)) => Ok(()),
+        Err(mpsc::TrySendError::Full(_)) => {
+            // Keep retrying a complete frame; dirty updates are not safe again
+            // until this recovery boundary is queued successfully.
+            frame_state.pending_base_frame = true;
+            frame_state.pending_base_frame_can_publish_ready |= publish_ready;
+            frame_state.graphics_sync.mark_needs_base();
+            Ok(())
+        }
         Err(mpsc::TrySendError::Disconnected(_)) => {
             Err(session::general_err!("RDP output channel closed"))
         }
@@ -943,21 +1132,41 @@ fn flush_pending_rdp_base_frame(
 }
 
 fn send_client_rdp_graphics_event(
-    output_tx: &ClientRdpOutputTx,
+    output_tx: &ClientRdpOutputSender,
     event: RemoteDesktopHelperEvent,
-    pending_base_frame: &mut bool,
+    frame_state: &mut ClientRdpFrameState,
 ) -> SessionResult<()> {
-    if *pending_base_frame {
+    if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
+        match output_tx.try_send_graphics(ClientRdpOutput::Event(event)) {
+            Ok(()) => {
+                frame_state.pending_base_frame = false;
+                frame_state.pending_base_frame_can_publish_ready = false;
+                frame_state.graphics_sync.mark_synced();
+                return Ok(());
+            }
+            Err(mpsc::TrySendError::Full(_)) => {
+                frame_state.pending_base_frame = true;
+                frame_state.graphics_sync.mark_needs_base();
+                return Ok(());
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                return Err(session::general_err!("RDP output channel closed"));
+            }
+        }
+    }
+    if frame_state.pending_base_frame || frame_state.graphics_sync.needs_base() {
+        frame_state.graphics_sync.mark_needs_base();
         return Ok(());
     }
 
-    match output_tx.try_send(ClientRdpOutput::Event(event)) {
+    match output_tx.try_send_graphics(ClientRdpOutput::Event(event)) {
         Ok(()) => Ok(()),
         Err(mpsc::TrySendError::Full(_)) => {
             // Dirty rectangles are relative to the UI's backing frame. If the
-            // bridge is saturated, recover by sending the latest complete image
-            // once capacity returns instead of silently dropping a delta.
-            *pending_base_frame = true;
+            // bridge is saturated, drop the stale delta chain and recover with
+            // the latest complete image once capacity returns.
+            frame_state.pending_base_frame = true;
+            frame_state.graphics_sync.mark_needs_base();
             Ok(())
         }
         Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -967,11 +1176,11 @@ fn send_client_rdp_graphics_event(
 }
 
 fn send_client_rdp_event(
-    output_tx: &ClientRdpOutputTx,
+    output_tx: &ClientRdpOutputSender,
     event: RemoteDesktopHelperEvent,
 ) -> SessionResult<()> {
     if client_rdp_event_can_be_dropped_under_backpressure(&event) {
-        match output_tx.try_send(ClientRdpOutput::Event(event)) {
+        match output_tx.try_send_graphics(ClientRdpOutput::Event(event)) {
             Ok(()) | Err(mpsc::TrySendError::Full(_)) => return Ok(()),
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 return Err(session::general_err!("RDP output channel closed"));
@@ -982,7 +1191,7 @@ fn send_client_rdp_event(
     // Base frames and control-like visual events must not be dropped because
     // the UI relies on them to establish backing state and cursor shape.
     output_tx
-        .send(ClientRdpOutput::Event(event))
+        .send_control(ClientRdpOutput::Event(event))
         .map_err(|error| session::custom_err!("send RDP client event", error))
 }
 
@@ -1106,7 +1315,7 @@ fn run_client_rdp_loop(
     writer: &SharedEventWriter,
     request_rx: &mpsc::Receiver<RemoteDesktopHelperRequest>,
     input_tx: &tokio_mpsc::UnboundedSender<RdpInputEvent>,
-    output_rx: mpsc::Receiver<ClientRdpOutput>,
+    output_rx: ClientRdpOutputReceiver,
     config: &mut RdpWorkerConfig,
     read_only: bool,
 ) -> Result<ClientRdpSessionExit, String> {
@@ -1150,6 +1359,9 @@ fn run_client_rdp_loop(
         if let Some(exit) = output_drain.exit {
             return Ok(exit);
         }
+        if writer.take_frame_recovery_request()? {
+            let _ = input_tx.send(RdpInputEvent::RequestFrame);
+        }
 
         if output_drain.drained < RDP_CLIENT_OUTPUT_DRAIN_LIMIT && !handled_requests {
             thread::sleep(RDP_CLIENT_LOOP_POLL_INTERVAL);
@@ -1159,47 +1371,75 @@ fn run_client_rdp_loop(
 
 fn drain_client_rdp_outputs(
     writer: &SharedEventWriter,
-    output_rx: &mpsc::Receiver<ClientRdpOutput>,
+    output_rx: &ClientRdpOutputReceiver,
 ) -> Result<ClientRdpOutputDrain, String> {
     let mut drain = ClientRdpOutputDrain::default();
     while drain.drained < RDP_CLIENT_OUTPUT_DRAIN_LIMIT {
-        match output_rx.try_recv() {
+        match output_rx.control_rx.try_recv() {
             Ok(output) => {
                 drain.drained += 1;
-                match output {
-                    ClientRdpOutput::Event(event) => send_event(writer, event)?,
-                    ClientRdpOutput::ConnectionFailure(error) => {
-                        if connector_error_requires_legacy_security(&error) {
-                            drain.exit = Some(ClientRdpSessionExit::LegacySecurityRequired);
-                            return Ok(drain);
-                        }
-                        // Keep the typed connector error available until the
-                        // helper event is built; string messages are only the
-                        // display surface, not the classification source.
-                        drain.exit = Some(ClientRdpSessionExit::ConnectionFailed {
-                            message: format_connector_error("RDP connection failed", &error),
-                            category: connector_error_category(&error),
-                        });
-                        return Ok(drain);
-                    }
-                    ClientRdpOutput::Terminated(message) => {
-                        drain.exit = Some(ClientRdpSessionExit::RemoteEnded(Some(message)));
-                        return Ok(drain);
-                    }
-                    ClientRdpOutput::OutputEnded => {
-                        drain.exit = Some(ClientRdpSessionExit::RemoteEnded(None));
+                handle_client_rdp_output(writer, output, &mut drain)?;
+                if drain.exit.is_some() {
+                    return Ok(drain);
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => match output_rx.graphics_rx.try_recv() {
+                Ok(output) => {
+                    drain.drained += 1;
+                    handle_client_rdp_output(writer, output, &mut drain)?;
+                    if drain.exit.is_some() {
                         return Ok(drain);
                     }
                 }
-            }
-            Err(mpsc::TryRecvError::Empty) => return Ok(drain),
-            Err(mpsc::TryRecvError::Disconnected) => {
-                drain.exit = Some(ClientRdpSessionExit::RemoteEnded(None));
-                return Ok(drain);
-            }
+                Err(mpsc::TryRecvError::Empty) => return Ok(drain),
+                Err(mpsc::TryRecvError::Disconnected) => return Ok(drain),
+            },
+            Err(mpsc::TryRecvError::Disconnected) => match output_rx.graphics_rx.try_recv() {
+                Ok(output) => {
+                    drain.drained += 1;
+                    handle_client_rdp_output(writer, output, &mut drain)?;
+                    if drain.exit.is_some() {
+                        return Ok(drain);
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => {
+                    drain.exit = Some(ClientRdpSessionExit::RemoteEnded(None));
+                    return Ok(drain);
+                }
+            },
         }
     }
     Ok(drain)
+}
+
+fn handle_client_rdp_output(
+    writer: &SharedEventWriter,
+    output: ClientRdpOutput,
+    drain: &mut ClientRdpOutputDrain,
+) -> Result<(), String> {
+    match output {
+        ClientRdpOutput::Event(event) => send_event(writer, event)?,
+        ClientRdpOutput::ConnectionFailure(error) => {
+            if connector_error_requires_legacy_security(&error) {
+                drain.exit = Some(ClientRdpSessionExit::LegacySecurityRequired);
+                return Ok(());
+            }
+            // Keep the typed connector error available until the helper event
+            // is built; string messages are only the display surface, not the
+            // classification source.
+            drain.exit = Some(ClientRdpSessionExit::ConnectionFailed {
+                message: format_connector_error("RDP connection failed", &error),
+                category: connector_error_category(&error),
+            });
+        }
+        ClientRdpOutput::Terminated(message) => {
+            drain.exit = Some(ClientRdpSessionExit::RemoteEnded(Some(message)));
+        }
+        ClientRdpOutput::OutputEnded => {
+            drain.exit = Some(ClientRdpSessionExit::RemoteEnded(None));
+        }
+    }
+    Ok(())
 }
 
 fn remember_rdp_reconnect_state(
@@ -1247,6 +1487,20 @@ fn sanitize_rdp_disconnect_reason(reason: Option<&str>) -> Option<String> {
         return Some("RDP session ended.".to_string());
     }
     Some(format!("RDP session ended: {reason}."))
+}
+
+fn rdp_frame_read_error_context(error: &impl fmt::Display) -> &'static str {
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("eof")
+        || message.contains("connection reset")
+        || message.contains("broken pipe")
+    {
+        // The server accepted the session and then closed the transport. Keep
+        // this distinct from authentication and connector failures.
+        "server closed established RDP session while reading frames"
+    } else {
+        "read RDP frame"
+    }
 }
 
 async fn handle_deactivate_all<ReadStream, WriteStream>(
@@ -1444,6 +1698,11 @@ fn forward_client_rdp_request(
         }
         RemoteDesktopHelperRequest::SynchronizeLockKeys { keys } if !read_only => {
             send_client_rdp_lock_key_state(input_tx, keys)?;
+        }
+        RemoteDesktopHelperRequest::RequestFrame => {
+            input_tx
+                .send(RdpInputEvent::RequestFrame)
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
         }
         RemoteDesktopHelperRequest::ReleaseAllInputs if !read_only => {
             // Release mapper-owned Unicode and synthetic modifier state before
@@ -3019,7 +3278,7 @@ mod tests {
     }
 
     #[test]
-    fn printable_key_uses_text_instead_of_us_scancode() {
+    fn printable_key_prefers_physical_scancode() {
         let operations = rdp_key_operations(
             &RemoteDesktopKey {
                 code: "a".to_string(),
@@ -3032,9 +3291,13 @@ mod tests {
             RemoteDesktopKeyState::Pressed,
         );
 
-        assert_eq!(operations.len(), 1);
+        assert_eq!(operations.len(), 2);
         match &operations[0] {
-            RdpInputOperation::UnicodeKeyPressed(character) => assert_eq!(*character, 'A'),
+            RdpInputOperation::KeyPressed(scancode) => assert_eq!(scancode.as_u16(), 0x2a),
+            operation => panic!("unexpected operation: {operation:?}"),
+        }
+        match &operations[1] {
+            RdpInputOperation::KeyPressed(scancode) => assert_eq!(scancode.as_u16(), 0x1e),
             operation => panic!("unexpected operation: {operation:?}"),
         }
     }
@@ -3204,12 +3467,22 @@ mod tests {
     #[test]
     fn client_output_drain_yields_after_budget() {
         let writer = SharedEventWriter::inert_for_tests();
-        let (output_tx, output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-        for _ in 0..=RDP_CLIENT_OUTPUT_DRAIN_LIMIT {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        for index in 0..=RDP_CLIENT_OUTPUT_DRAIN_LIMIT {
             output_tx
-                .send(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
-                    frame: test_frame(),
-                }))
+                .try_send_graphics(ClientRdpOutput::Event(
+                    RemoteDesktopHelperEvent::FrameUpdate {
+                        update: RemoteDesktopFrameUpdate::new(
+                            RemoteDesktopSize {
+                                width: 128,
+                                height: 1,
+                            },
+                            RemoteDesktopRect::new(index as u32, 0, 1, 1),
+                            RemoteDesktopFrameFormat::Rgba8,
+                            vec![index as u8, 0, 0, 0xff],
+                        ),
+                    },
+                ))
                 .unwrap();
         }
 
@@ -3218,21 +3491,34 @@ mod tests {
         assert_eq!(drain.drained, RDP_CLIENT_OUTPUT_DRAIN_LIMIT);
         assert!(drain.exit.is_none());
         assert!(matches!(
-            output_rx.try_recv(),
+            output_rx.graphics_rx.try_recv(),
             Ok(ClientRdpOutput::Event(_))
         ));
     }
 
     #[test]
     fn saturated_graphics_queue_defers_latest_base_frame_without_dropping_state() {
-        let (output_tx, output_rx) = mpsc::sync_channel(1);
+        let (output_tx, output_rx) = client_rdp_output_channel(1);
         output_tx
-            .send(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
-                frame: test_frame(),
-            }))
+            .try_send_graphics(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::FrameUpdate {
+                    update: RemoteDesktopFrameUpdate::new(
+                        RemoteDesktopSize {
+                            width: 2,
+                            height: 2,
+                        },
+                        RemoteDesktopRect::new(0, 0, 1, 1),
+                        RemoteDesktopFrameFormat::Rgba8,
+                        vec![9, 9, 9, 0xff],
+                    ),
+                },
+            ))
             .unwrap();
         let image = DecodedImage::new(PixelFormat::RgbA32, 2, 2);
-        let mut pending_base_frame = false;
+        let mut frame_state = ClientRdpFrameState {
+            graphics_sync: RdpGraphicsSyncState::Synced,
+            ..ClientRdpFrameState::default()
+        };
 
         send_client_rdp_graphics_event(
             &output_tx,
@@ -3247,29 +3533,149 @@ mod tests {
                     vec![1, 1, 1, 0xff],
                 ),
             },
-            &mut pending_base_frame,
+            &mut frame_state,
         )
         .unwrap();
 
-        assert!(pending_base_frame);
+        assert!(frame_state.pending_base_frame);
+        assert!(frame_state.graphics_sync.needs_base());
         assert!(matches!(
-            output_rx.try_recv(),
+            output_rx.graphics_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::FrameUpdate { .. }
+            ))
+        ));
+
+        flush_pending_rdp_base_frame(&output_tx, &image, &mut frame_state).unwrap();
+
+        assert!(!frame_state.pending_base_frame);
+        assert_eq!(frame_state.graphics_sync, RdpGraphicsSyncState::Synced);
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn graphics_base_frame_replaces_queued_dirty_updates() {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        output_tx
+            .try_send_graphics(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::FrameUpdate {
+                    update: RemoteDesktopFrameUpdate::new(
+                        RemoteDesktopSize {
+                            width: 2,
+                            height: 1,
+                        },
+                        RemoteDesktopRect::new(1, 0, 1, 1),
+                        RemoteDesktopFrameFormat::Rgba8,
+                        vec![1, 1, 1, 0xff],
+                    ),
+                },
+            ))
+            .unwrap();
+
+        output_tx
+            .try_send_graphics(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
+                frame: test_frame(),
+            }))
+            .unwrap();
+
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
             Ok(ClientRdpOutput::Event(
                 RemoteDesktopHelperEvent::Frame { .. }
             ))
         ));
         assert!(matches!(
-            output_rx.try_recv(),
+            output_rx.graphics_rx.try_recv(),
             Err(mpsc::TryRecvError::Empty)
         ));
+    }
 
-        flush_pending_rdp_base_frame(&output_tx, &image, &mut pending_base_frame).unwrap();
+    #[test]
+    fn client_output_drain_prioritizes_control_events_over_saturated_graphics() {
+        let writer = SharedEventWriter::inert_for_tests();
+        let (output_tx, output_rx) = client_rdp_output_channel(1);
+        output_tx
+            .try_send_graphics(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
+                frame: test_frame(),
+            }))
+            .unwrap();
+        output_tx
+            .send_control(ClientRdpOutput::ConnectionFailure(
+                connector::ConnectorError::new("Authentication", ConnectorErrorKind::AccessDenied),
+            ))
+            .unwrap();
 
-        assert!(!pending_base_frame);
+        let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
+
+        match drain.exit {
+            Some(ClientRdpSessionExit::ConnectionFailed { category, .. }) => {
+                assert_eq!(category, RemoteDesktopErrorCategory::Authentication);
+            }
+            other => panic!("expected control failure before graphics, got {other:?}"),
+        }
         assert!(matches!(
-            output_rx.try_recv(),
+            output_rx.graphics_rx.try_recv(),
             Ok(ClientRdpOutput::Event(
                 RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn cursor_position_can_drop_under_backpressure_but_shape_is_preserved() {
+        let (output_tx, output_rx) = client_rdp_output_channel(1);
+        output_tx
+            .try_send_graphics(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame {
+                frame: test_frame(),
+            }))
+            .unwrap();
+
+        send_client_rdp_event(
+            &output_tx,
+            RemoteDesktopHelperEvent::Cursor {
+                x: 10,
+                y: 20,
+                width: 1,
+                height: 1,
+            },
+        )
+        .unwrap();
+        send_client_rdp_event(
+            &output_tx,
+            RemoteDesktopHelperEvent::CursorShape {
+                shape: RemoteDesktopCursorShape::new(
+                    RemoteDesktopSize {
+                        width: 1,
+                        height: 1,
+                    },
+                    0,
+                    0,
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![0xff, 0xff, 0xff, 0xff],
+                ),
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            output_rx.control_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::CursorShape { .. }
             ))
         ));
     }
@@ -3279,9 +3685,9 @@ mod tests {
         let writer = SharedEventWriter::inert_for_tests();
         let (request_tx, request_rx) = mpsc::channel();
         let (input_tx, _input_rx) = tokio_mpsc::unbounded_channel();
-        let (output_tx, output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         output_tx
-            .send(ClientRdpOutput::ConnectionFailure(
+            .send_control(ClientRdpOutput::ConnectionFailure(
                 connector::ConnectorError::new(
                     "test",
                     ConnectorErrorKind::Reason("queued failure".to_string()),
@@ -3318,9 +3724,9 @@ mod tests {
     #[test]
     fn connector_failure_exit_preserves_structured_category() {
         let writer = SharedEventWriter::inert_for_tests();
-        let (output_tx, output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         output_tx
-            .send(ClientRdpOutput::ConnectionFailure(
+            .send_control(ClientRdpOutput::ConnectionFailure(
                 connector::ConnectorError::new("Authentication", ConnectorErrorKind::AccessDenied),
             ))
             .unwrap();
@@ -3351,7 +3757,7 @@ mod tests {
     #[test]
     fn clipboard_ready_advertises_cached_local_text() {
         let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
-        let (output_tx, _output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         let mut backend = ClientClipboardBackend::new(input_tx, output_tx);
         backend.set_local_text("hello".to_string());
 
@@ -3377,7 +3783,7 @@ mod tests {
     #[test]
     fn clipboard_ready_advertises_cached_local_image_data() {
         let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
-        let (output_tx, _output_rx) = mpsc::sync_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
         let mut backend = ClientClipboardBackend::new(input_tx, output_tx);
         backend.set_local_data(RemoteDesktopClipboardData::new(
             RemoteDesktopClipboardFormat::ImagePng,
@@ -3480,6 +3886,27 @@ mod tests {
         match input_rx.try_recv().unwrap() {
             RdpInputEvent::SetClipboardData(received) => assert_eq!(received, data),
             event => panic!("expected clipboard data event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn request_frame_request_enters_client_loop() {
+        let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+        let mut input_database = RdpInputDatabase::new();
+        let mut keyboard_mapper = RdpKeyboardInputMapper::default();
+
+        forward_client_rdp_request(
+            &input_tx,
+            &mut input_database,
+            &mut keyboard_mapper,
+            RemoteDesktopHelperRequest::RequestFrame,
+            false,
+        )
+        .unwrap();
+
+        match input_rx.try_recv().unwrap() {
+            RdpInputEvent::RequestFrame => {}
+            event => panic!("expected request-frame event, got {event:?}"),
         }
     }
 
@@ -3700,6 +4127,79 @@ mod tests {
     }
 
     #[test]
+    fn native_rdp_desktop_ready_events_report_first_frame_ready() {
+        let events = native_rdp_desktop_ready_events(RemoteDesktopSize {
+            width: 1280,
+            height: 720,
+        });
+
+        assert!(matches!(
+            events[0],
+            RemoteDesktopHelperEvent::Connected {
+                size: RemoteDesktopSize {
+                    width: 1280,
+                    height: 720
+                }
+            }
+        ));
+        assert!(matches!(
+            &events[1],
+            RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Connected,
+                message: Some(message),
+            } if message.contains("desktop frame")
+        ));
+    }
+
+    #[test]
+    fn first_desktop_base_frame_publishes_connected_once() {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
+        let mut frame_state = ClientRdpFrameState::default();
+
+        send_client_rdp_base_frame(&output_tx, &image, &mut frame_state, true)
+            .expect("first desktop frame should queue");
+        send_client_rdp_base_frame(&output_tx, &image, &mut frame_state, true)
+            .expect("later desktop frame should queue");
+
+        assert!(frame_state.published_first_desktop_frame);
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
+        assert!(matches!(
+            output_rx.control_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Connected {
+                    size: RemoteDesktopSize {
+                        width: 4,
+                        height: 3
+                    }
+                }
+            ))
+        ));
+        assert!(matches!(
+            output_rx.control_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Connected,
+                ..
+            }))
+        ));
+        assert!(output_rx.control_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn rdp_frame_read_eof_is_reported_as_established_session_close() {
+        assert_eq!(
+            rdp_frame_read_error_context(&"unexpected eof while reading"),
+            "server closed established RDP session while reading frames"
+        );
+        assert_eq!(rdp_frame_read_error_context(&"bad pdu"), "read RDP frame");
+    }
+
+    #[test]
     fn dirty_rect_copy_extracts_only_region_and_sets_alpha() {
         let pixels = [
             [0, 1, 2, 0],
@@ -3733,9 +4233,9 @@ mod tests {
     }
 
     #[test]
-    fn initial_partial_black_update_waits_for_base_frame() {
+    fn initial_partial_black_update_starts_base_frame() {
         let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
-        let mut sent_initial_frame = false;
+        let mut graphics_sync = RdpGraphicsSyncState::default();
 
         let event = graphics_update_event(
             &image,
@@ -3745,18 +4245,21 @@ mod tests {
                 right: 1,
                 bottom: 1,
             },
-            &mut sent_initial_frame,
+            &mut graphics_sync,
         )
         .expect("graphics update maps");
 
-        assert!(event.is_none());
-        assert!(!sent_initial_frame);
+        assert!(matches!(
+            event,
+            Some(RemoteDesktopHelperEvent::Frame { .. })
+        ));
+        assert_eq!(graphics_sync, RdpGraphicsSyncState::Synced);
     }
 
     #[test]
     fn stale_graphics_region_is_skipped_without_failing_session() {
         let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
-        let mut sent_initial_frame = true;
+        let mut graphics_sync = RdpGraphicsSyncState::Synced;
 
         let event = graphics_update_event(
             &image,
@@ -3766,18 +4269,18 @@ mod tests {
                 right: 4,
                 bottom: 4,
             },
-            &mut sent_initial_frame,
+            &mut graphics_sync,
         )
         .expect("stale graphics regions should be skippable");
 
         assert!(event.is_none());
-        assert!(sent_initial_frame);
+        assert_eq!(graphics_sync, RdpGraphicsSyncState::Synced);
     }
 
     #[test]
     fn initial_full_black_update_can_start_base_frame() {
         let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
-        let mut sent_initial_frame = false;
+        let mut graphics_sync = RdpGraphicsSyncState::default();
 
         let event = graphics_update_event(
             &image,
@@ -3787,7 +4290,7 @@ mod tests {
                 right: 3,
                 bottom: 3,
             },
-            &mut sent_initial_frame,
+            &mut graphics_sync,
         )
         .expect("graphics update maps");
 
@@ -3800,16 +4303,32 @@ mod tests {
                         height: 4
                     }
                 );
-                assert!(sent_initial_frame);
+                assert_eq!(graphics_sync, RdpGraphicsSyncState::Synced);
             }
             other => panic!("expected initial frame, got {other:?}"),
         }
     }
 
     #[test]
+    fn reactivation_resets_graphics_base_without_publishing_empty_image() {
+        let mut frame_state = ClientRdpFrameState {
+            graphics_sync: RdpGraphicsSyncState::Synced,
+            pending_base_frame: true,
+            pending_base_frame_can_publish_ready: true,
+            published_first_desktop_frame: true,
+        };
+
+        reset_graphics_base_after_reactivation(&mut frame_state);
+
+        assert!(frame_state.graphics_sync.needs_base());
+        assert!(!frame_state.pending_base_frame);
+        assert!(!frame_state.pending_base_frame_can_publish_ready);
+    }
+
+    #[test]
     fn full_screen_update_refreshes_base_frame_after_initial_frame() {
         let image = DecodedImage::new(PixelFormat::RgbA32, 4, 4);
-        let mut sent_initial_frame = true;
+        let mut graphics_sync = RdpGraphicsSyncState::Synced;
 
         let event = graphics_update_event(
             &image,
@@ -3819,7 +4338,7 @@ mod tests {
                 right: 3,
                 bottom: 3,
             },
-            &mut sent_initial_frame,
+            &mut graphics_sync,
         )
         .expect("graphics update maps");
 
@@ -3827,7 +4346,7 @@ mod tests {
             event,
             Some(RemoteDesktopHelperEvent::Frame { .. })
         ));
-        assert!(sent_initial_frame);
+        assert_eq!(graphics_sync, RdpGraphicsSyncState::Synced);
     }
 
     #[test]

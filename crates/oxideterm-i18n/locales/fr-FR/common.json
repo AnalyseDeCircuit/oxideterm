@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "Aperçu VNC",
     "provider_missing": "Le fournisseur de bureau distant est indisponible.",
     "session_missing": "La session de bureau distant est indisponible.",
+    "force_recover": "Récupérer",
     "reconnect": "Reconnecter",
     "disconnect": "Déconnecter"
   }

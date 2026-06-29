@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "VNC 预览",
     "provider_missing": "远程桌面提供器不可用。",
     "session_missing": "远程桌面会话不可用。",
+    "force_recover": "恢复",
     "reconnect": "重新连接",
     "disconnect": "断开连接"
   }
