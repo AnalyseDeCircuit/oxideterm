@@ -148,6 +148,14 @@ impl WorkspaceApp {
             .iter()
             .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
         {
+            if self.main_window_tabs.active_tab_id != Some(tab_id)
+                && let Some(previous_tab_id) = self.main_window_tabs.active_tab_id
+            {
+                // Remote desktops keep server-side input state. Release it when
+                // the tab loses focus so modifiers or mouse buttons cannot stick
+                // on the remote host while the user works elsewhere.
+                self.release_remote_desktop_inputs_for_tab(previous_tab_id);
+            }
             self.main_window_tabs.active_tab_id = Some(tab_id);
             self.sync_active_tab_surface();
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {

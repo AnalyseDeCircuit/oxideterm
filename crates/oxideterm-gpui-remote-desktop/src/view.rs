@@ -4,17 +4,18 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, Corners, DevicePixels, Div, FontWeight, ObjectFit, ParentElement, RenderImage,
-    Styled, Window, canvas, div, fill, prelude::*, px, rgb, rgba, size,
+    AnyElement, Bounds, Corners, CursorStyle, DevicePixels, Div, ObjectFit, ParentElement, Pixels,
+    RenderImage, Styled, Window, canvas, div, fill, point, prelude::*, px, rgb, rgba, size,
 };
 use image::{Frame as ImageFrame, RgbaImage};
 use oxideterm_gpui_ui::{empty_state, error_state};
 use oxideterm_remote_desktop::{
-    RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopProtocol, RemoteDesktopSessionStatus,
+    RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopFrameFormat,
+    RemoteDesktopSessionStatus,
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::{RemoteDesktopViewState, SharedRemoteDesktopGeometry};
+use crate::{RemoteDesktopCursorState, RemoteDesktopViewState, SharedRemoteDesktopGeometry};
 
 const VIEW_PADDING: f32 = 14.0;
 const FRAME_BORDER_ALPHA: u32 = 0x80;
@@ -34,128 +35,30 @@ pub fn remote_desktop_surface_with_geometry(
         .size_full()
         .min_w(px(0.0))
         .min_h(px(0.0))
-        .p(px(VIEW_PADDING))
         .bg(rgb(tokens.ui.bg_panel))
         .flex()
-        .flex_col()
-        .gap(px(tokens.spacing.three))
-        .child(header(
-            tokens,
-            &snapshot.title,
-            snapshot.protocol,
-            snapshot.status,
-            snapshot.read_only,
-            snapshot.pending_resize.is_some(),
-        ))
         .child(div().min_h(px(0.0)).flex_1().child(match snapshot.status {
             RemoteDesktopSessionStatus::Failed => error_body(tokens, snapshot.message),
+            status if should_render_remote_frame(status, snapshot.has_frame) => {
+                // Keep the last framebuffer visible while an engine performs an
+                // internal resize reconnect. The footer already exposes the
+                // transient status without blanking the desktop surface.
+                frame_body(tokens, state, geometry)
+            }
             RemoteDesktopSessionStatus::Idle
             | RemoteDesktopSessionStatus::Connecting
             | RemoteDesktopSessionStatus::Reconnecting
             | RemoteDesktopSessionStatus::Disconnected => {
-                placeholder_body(tokens, snapshot.status, snapshot.message)
+                placeholder_body(tokens, snapshot.status, snapshot.message, geometry)
             }
             RemoteDesktopSessionStatus::Connected => frame_body(tokens, state, geometry),
         }))
         .into_any_element()
 }
 
-fn header(
-    tokens: &ThemeTokens,
-    title: &str,
-    protocol: RemoteDesktopProtocol,
-    status: RemoteDesktopSessionStatus,
-    read_only: bool,
-    pending_resize: bool,
-) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(tokens.spacing.three))
-        .child(
-            div()
-                .min_w(px(0.0))
-                .flex_1()
-                .flex()
-                .items_center()
-                .gap(px(tokens.spacing.two))
-                .child(protocol_badge(tokens, protocol))
-                .child(
-                    div()
-                        .min_w(px(0.0))
-                        .truncate()
-                        .text_size(px(tokens.metrics.ui_text_sm))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(tokens.ui.text_heading))
-                        .child(title.to_string()),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(tokens.spacing.one))
-                .when(read_only, |row| row.child(aux_badge(tokens, "Read only")))
-                .when(pending_resize, |row| {
-                    row.child(aux_badge(tokens, "Resizing"))
-                })
-                .child(status_badge(tokens, status)),
-        )
-}
-
-fn protocol_badge(tokens: &ThemeTokens, protocol: RemoteDesktopProtocol) -> Div {
-    let label = match protocol {
-        RemoteDesktopProtocol::Rdp => "RDP",
-        RemoteDesktopProtocol::Vnc => "VNC",
-    };
-
-    div()
-        .h(px(22.0))
-        .px(px(tokens.spacing.two))
-        .flex()
-        .items_center()
-        .rounded(px(tokens.radii.sm))
-        .bg(rgba((tokens.ui.accent << 8) | 0x1f))
-        .text_size(px(tokens.metrics.ui_text_xs))
-        .font_weight(FontWeight::BOLD)
-        .text_color(rgb(tokens.ui.accent))
-        .child(label)
-}
-
-fn status_badge(tokens: &ThemeTokens, status: RemoteDesktopSessionStatus) -> Div {
-    let (label, color) = match status {
-        RemoteDesktopSessionStatus::Idle => ("Idle", tokens.ui.text_muted),
-        RemoteDesktopSessionStatus::Connecting => ("Connecting", tokens.ui.warning),
-        RemoteDesktopSessionStatus::Connected => ("Connected", tokens.ui.success),
-        RemoteDesktopSessionStatus::Reconnecting => ("Reconnecting", tokens.ui.warning),
-        RemoteDesktopSessionStatus::Disconnected => ("Disconnected", tokens.ui.text_muted),
-        RemoteDesktopSessionStatus::Failed => ("Failed", tokens.ui.error),
-    };
-
-    div()
-        .h(px(22.0))
-        .px(px(tokens.spacing.two))
-        .flex()
-        .items_center()
-        .rounded(px(tokens.radii.sm))
-        .bg(rgba((color << 8) | 0x18))
-        .text_size(px(tokens.metrics.ui_text_xs))
-        .text_color(rgb(color))
-        .child(label)
-}
-
-fn aux_badge(tokens: &ThemeTokens, label: &'static str) -> Div {
-    div()
-        .h(px(22.0))
-        .px(px(tokens.spacing.two))
-        .flex()
-        .items_center()
-        .rounded(px(tokens.radii.sm))
-        .bg(rgba((tokens.ui.border << 8) | 0x33))
-        .text_size(px(tokens.metrics.ui_text_xs))
-        .text_color(rgb(tokens.ui.text_muted))
-        .child(label)
+fn should_render_remote_frame(status: RemoteDesktopSessionStatus, has_frame: bool) -> bool {
+    matches!(status, RemoteDesktopSessionStatus::Connected)
+        || (status == RemoteDesktopSessionStatus::Reconnecting && has_frame)
 }
 
 fn frame_body(
@@ -171,35 +74,43 @@ fn frame_body(
             return corrupted_frame_body(tokens, frame).into_any_element();
         };
         let frame_size = frame.size;
+        let cursor = state.cursor().clone();
+        let cursor_image = cursor
+            .shape
+            .as_ref()
+            .and_then(render_image_for_cursor_shape);
 
         return div()
             .size_full()
             .min_w(px(0.0))
             .min_h(px(0.0))
-            .border_1()
-            .border_color(rgba((tokens.ui.border << 8) | FRAME_BORDER_ALPHA))
-            .bg(rgba((tokens.ui.bg_sunken << 8) | FRAME_BG_ALPHA))
+            .bg(rgb(0x000000))
             .overflow_hidden()
             .child(remote_desktop_frame_canvas(
                 image,
                 frame_size.width,
                 frame_size.height,
+                cursor,
+                cursor_image,
                 geometry,
             ))
             .into_any_element();
     }
 
-    if let Some(geometry) = geometry {
-        geometry.clear();
-    }
-    empty_state(
-        tokens,
-        "RD",
-        "Waiting for the first remote frame",
-        Some("The helper is connected, but no desktop frame has arrived yet.".to_string()),
-        None,
-    )
-    .into_any_element()
+    div()
+        .size_full()
+        .relative()
+        .child(empty_state(
+            tokens,
+            "RD",
+            "Waiting for the first remote frame",
+            Some("The helper is connected, but no desktop frame has arrived yet.".to_string()),
+            None,
+        ))
+        .when_some(geometry, |element, geometry| {
+            element.child(remote_desktop_viewport_probe(geometry))
+        })
+        .into_any_element()
 }
 
 fn corrupted_frame_body(tokens: &ThemeTokens, frame: &RemoteDesktopFrame) -> Div {
@@ -225,7 +136,7 @@ fn corrupted_frame_body(tokens: &ThemeTokens, frame: &RemoteDesktopFrame) -> Div
         .child(
             div()
                 .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(FontWeight::MEDIUM)
+                .font_weight(gpui::FontWeight::MEDIUM)
                 .text_color(rgb(tokens.ui.text_heading))
                 .child("Remote frame is incomplete"),
         )
@@ -245,8 +156,12 @@ fn remote_desktop_frame_canvas(
     image: Arc<RenderImage>,
     width: u32,
     height: u32,
+    cursor: RemoteDesktopCursorState,
+    cursor_image: Option<Arc<RenderImage>>,
     geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> impl IntoElement {
+    let cursor_for_paint = cursor.clone();
+    let cursor_image_for_paint = cursor_image.clone();
     canvas(
         move |bounds, _window: &mut Window, _cx| {
             let image_bounds = ObjectFit::Contain.get_bounds(
@@ -268,9 +183,59 @@ fn remote_desktop_frame_canvas(
         move |bounds, image_bounds, window: &mut Window, _cx| {
             window.paint_quad(fill(bounds, rgb(0x000000)));
             let _ = window.paint_image(image_bounds, Corners::all(px(0.0)), image, 0, false);
+            if cursor_for_paint.visible
+                && let (Some(shape), Some(cursor_image)) = (
+                    cursor_for_paint.shape.as_ref(),
+                    cursor_image_for_paint.as_ref(),
+                )
+                && let Some(cursor_bounds) =
+                    cursor_bounds(image_bounds, width, height, &cursor_for_paint, shape)
+            {
+                let cursor_image: Arc<RenderImage> = Arc::clone(cursor_image);
+                let _ = window.paint_image(
+                    cursor_bounds,
+                    Corners::all(px(0.0)),
+                    cursor_image,
+                    0,
+                    false,
+                );
+            }
         },
     )
+    .when(
+        should_hide_system_cursor(&cursor, cursor_image.is_some()),
+        |element| element.cursor(CursorStyle::None),
+    )
     .size_full()
+}
+
+fn should_hide_system_cursor(
+    cursor: &RemoteDesktopCursorState,
+    cursor_image_available: bool,
+) -> bool {
+    !cursor.visible || cursor_image_available
+}
+
+fn remote_desktop_viewport_probe(geometry: SharedRemoteDesktopGeometry) -> impl IntoElement {
+    canvas(
+        move |bounds, _window: &mut Window, _cx| {
+            // The placeholder has no remote framebuffer yet, but the app can
+            // still use this measured viewport to request the initial desktop
+            // size before starting the helper.
+            geometry.update(
+                None,
+                None,
+                Some(oxideterm_remote_desktop::RemoteDesktopSize::clamped(
+                    f32::from(bounds.size.width).round() as u32,
+                    f32::from(bounds.size.height).round() as u32,
+                )),
+            );
+            bounds
+        },
+        |_bounds, _state, _window: &mut Window, _cx| {},
+    )
+    .absolute()
+    .inset_0()
 }
 
 fn render_image_for_frame(frame: &RemoteDesktopFrame) -> Option<Arc<RenderImage>> {
@@ -301,10 +266,54 @@ fn render_image_for_frame(frame: &RemoteDesktopFrame) -> Option<Arc<RenderImage>
     Some(Arc::new(RenderImage::new(vec![ImageFrame::new(buffer)])))
 }
 
+fn render_image_for_cursor_shape(shape: &RemoteDesktopCursorShape) -> Option<Arc<RenderImage>> {
+    if !shape.is_complete() {
+        return None;
+    }
+
+    let mut bytes = shape.bytes.clone();
+    if shape.format == RemoteDesktopFrameFormat::Rgba8 {
+        // Cursor images carry real transparency, so preserve the alpha channel
+        // unlike opaque framebuffer padding.
+        for pixel in bytes.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+    }
+    let buffer = RgbaImage::from_raw(shape.size.width, shape.size.height, bytes)?;
+    Some(Arc::new(RenderImage::new(vec![ImageFrame::new(buffer)])))
+}
+
+fn cursor_bounds(
+    image_bounds: Bounds<Pixels>,
+    frame_width: u32,
+    frame_height: u32,
+    cursor: &RemoteDesktopCursorState,
+    shape: &RemoteDesktopCursorShape,
+) -> Option<Bounds<Pixels>> {
+    if frame_width == 0 || frame_height == 0 {
+        return None;
+    }
+    let scale_x = f32::from(image_bounds.size.width) / frame_width as f32;
+    let scale_y = f32::from(image_bounds.size.height) / frame_height as f32;
+    let left = (cursor.x as f32 - shape.hotspot_x as f32) * scale_x;
+    let top = (cursor.y as f32 - shape.hotspot_y as f32) * scale_y;
+    Some(Bounds::new(
+        point(
+            image_bounds.origin.x + px(left),
+            image_bounds.origin.y + px(top),
+        ),
+        size(
+            px(shape.size.width as f32 * scale_x),
+            px(shape.size.height as f32 * scale_y),
+        ),
+    ))
+}
+
 fn placeholder_body(
     tokens: &ThemeTokens,
     status: RemoteDesktopSessionStatus,
     message: Option<String>,
+    geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> AnyElement {
     let title = match status {
         RemoteDesktopSessionStatus::Idle => "Remote desktop is idle",
@@ -316,7 +325,14 @@ fn placeholder_body(
         }
     };
 
-    empty_state(tokens, "RD", title, message, None).into_any_element()
+    div()
+        .size_full()
+        .relative()
+        .child(empty_state(tokens, "RD", title, message, None))
+        .when_some(geometry, |element, geometry| {
+            element.child(remote_desktop_viewport_probe(geometry))
+        })
+        .into_any_element()
 }
 
 fn error_body(tokens: &ThemeTokens, message: Option<String>) -> AnyElement {
@@ -332,7 +348,9 @@ fn error_body(tokens: &ThemeTokens, message: Option<String>) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_remote_desktop::{RemoteDesktopFrame, RemoteDesktopSize};
+    use oxideterm_remote_desktop::{
+        RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopSize,
+    };
 
     use super::*;
 
@@ -366,5 +384,46 @@ mod tests {
         let image = render_image_for_frame(&frame).expect("complete RGBA frame should render");
 
         assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0xff].as_slice()));
+    }
+
+    #[test]
+    fn cursor_shape_preserves_alpha_while_swapping_rgba_to_bgra() {
+        let shape = RemoteDesktopCursorShape::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            0,
+            0,
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![0x30, 0x20, 0x10, 0x40],
+        );
+
+        let image = render_image_for_cursor_shape(&shape).expect("cursor shape should render");
+
+        assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0x40].as_slice()));
+    }
+
+    #[test]
+    fn reconnecting_session_keeps_last_frame_visible() {
+        assert!(should_render_remote_frame(
+            RemoteDesktopSessionStatus::Reconnecting,
+            true
+        ));
+        assert!(!should_render_remote_frame(
+            RemoteDesktopSessionStatus::Reconnecting,
+            false
+        ));
+    }
+
+    #[test]
+    fn system_cursor_hides_for_remote_hidden_or_custom_cursor() {
+        let mut cursor = RemoteDesktopCursorState::default();
+
+        assert!(!should_hide_system_cursor(&cursor, false));
+        assert!(should_hide_system_cursor(&cursor, true));
+
+        cursor.visible = false;
+        assert!(should_hide_system_cursor(&cursor, false));
     }
 }

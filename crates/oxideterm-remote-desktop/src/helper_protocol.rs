@@ -6,8 +6,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopFrameUpdate, RemoteDesktopProtocol,
-    RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopFrameUpdate,
+    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -52,6 +52,15 @@ pub struct RemoteDesktopWheelDelta {
     pub y: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopLockKeys {
+    pub scroll_lock: bool,
+    pub num_lock: bool,
+    pub caps_lock: bool,
+    pub kana_lock: bool,
+}
+
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(
     tag = "type",
@@ -92,6 +101,10 @@ pub enum RemoteDesktopHelperRequest {
     ClipboardText {
         text: String,
     },
+    SynchronizeLockKeys {
+        keys: RemoteDesktopLockKeys,
+    },
+    ReleaseAllInputs,
     Close,
     Reconnect,
 }
@@ -148,6 +161,11 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .debug_struct("ClipboardText")
                 .field("text", &format_args!("<redacted:{}>", text.chars().count()))
                 .finish(),
+            Self::SynchronizeLockKeys { keys } => formatter
+                .debug_struct("SynchronizeLockKeys")
+                .field("keys", keys)
+                .finish(),
+            Self::ReleaseAllInputs => formatter.write_str("ReleaseAllInputs"),
             Self::Close => formatter.write_str("Close"),
             Self::Reconnect => formatter.write_str("Reconnect"),
         }
@@ -180,6 +198,11 @@ pub enum RemoteDesktopHelperEvent {
         width: u32,
         height: u32,
     },
+    CursorShape {
+        shape: RemoteDesktopCursorShape,
+    },
+    CursorDefault,
+    CursorHidden,
     ClipboardText {
         text: String,
     },
@@ -232,6 +255,16 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("width", width)
                 .field("height", height)
                 .finish(),
+            Self::CursorShape { shape } => formatter
+                .debug_struct("CursorShape")
+                .field("size", &shape.size)
+                .field("hotspot_x", &shape.hotspot_x)
+                .field("hotspot_y", &shape.hotspot_y)
+                .field("format", &shape.format)
+                .field("bytes", &format_args!("<{} bytes>", shape.bytes.len()))
+                .finish(),
+            Self::CursorDefault => formatter.write_str("CursorDefault"),
+            Self::CursorHidden => formatter.write_str("CursorHidden"),
             Self::ClipboardText { text } => formatter
                 .debug_struct("ClipboardText")
                 .field("text", &format_args!("<redacted:{}>", text.chars().count()))
@@ -285,6 +318,33 @@ mod tests {
             size: RemoteDesktopSize {
                 width: 1024,
                 height: 768,
+            },
+        };
+
+        let encoded = serde_json::to_string(&request).unwrap();
+        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn release_all_inputs_round_trips_json() {
+        let request = RemoteDesktopHelperRequest::ReleaseAllInputs;
+
+        let encoded = serde_json::to_string(&request).unwrap();
+        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn synchronize_lock_keys_round_trips_json() {
+        let request = RemoteDesktopHelperRequest::SynchronizeLockKeys {
+            keys: RemoteDesktopLockKeys {
+                scroll_lock: true,
+                num_lock: false,
+                caps_lock: true,
+                kana_lock: false,
             },
         };
 

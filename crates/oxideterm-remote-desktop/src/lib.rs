@@ -21,13 +21,14 @@ pub use codec::{
 pub use fake::{RemoteDesktopFakeBackend, run_fake_backend_stdio};
 pub use helper_protocol::{
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState,
-    RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopWheelDelta,
+    RemoteDesktopLockKeys, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
+    RemoteDesktopWheelDelta,
 };
 pub use model::{
-    RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopFrame,
-    RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
-    RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionId, RemoteDesktopSessionStatus,
-    RemoteDesktopSize,
+    RemoteDesktopConnectionProfile, RemoteDesktopCursorShape, RemoteDesktopEndpoint,
+    RemoteDesktopFrame, RemoteDesktopFrameCompression, RemoteDesktopFrameFormat,
+    RemoteDesktopFrameUpdate, RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionId,
+    RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 pub use provider::{
     RemoteDesktopProviderCapabilities, RemoteDesktopProviderEntry, RemoteDesktopProviderError,

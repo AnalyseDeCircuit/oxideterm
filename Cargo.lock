@@ -7851,7 +7851,9 @@ dependencies = [
 name = "oxideterm-vnc-helper"
 version = "2.0.0-gpui-preview.10"
 dependencies = [
+ "des",
  "oxideterm-remote-desktop",
+ "zeroize",
 ]
 
 [[package]]

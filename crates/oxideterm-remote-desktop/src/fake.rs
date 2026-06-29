@@ -110,7 +110,9 @@ impl RemoteDesktopFakeBackend {
             | RemoteDesktopHelperRequest::Wheel { .. }
             | RemoteDesktopHelperRequest::Key { .. }
             | RemoteDesktopHelperRequest::Text { .. }
-            | RemoteDesktopHelperRequest::ClipboardText { .. } => Vec::new(),
+            | RemoteDesktopHelperRequest::ClipboardText { .. }
+            | RemoteDesktopHelperRequest::SynchronizeLockKeys { .. }
+            | RemoteDesktopHelperRequest::ReleaseAllInputs => Vec::new(),
         }
     }
 

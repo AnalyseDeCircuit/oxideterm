@@ -347,6 +347,46 @@ impl RemoteDesktopFrameUpdate {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopCursorShape {
+    pub size: RemoteDesktopSize,
+    pub hotspot_x: u32,
+    pub hotspot_y: u32,
+    pub format: RemoteDesktopFrameFormat,
+    #[serde(with = "base64_frame_bytes")]
+    pub bytes: Vec<u8>,
+}
+
+impl RemoteDesktopCursorShape {
+    pub fn new(
+        size: RemoteDesktopSize,
+        hotspot_x: u32,
+        hotspot_y: u32,
+        format: RemoteDesktopFrameFormat,
+        bytes: Vec<u8>,
+    ) -> Self {
+        Self {
+            size,
+            hotspot_x,
+            hotspot_y,
+            format,
+            bytes,
+        }
+    }
+
+    pub fn expected_len(&self) -> Option<usize> {
+        RemoteDesktopFrame::expected_len(self.size)
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.expected_len()
+            .is_some_and(|expected| expected == self.bytes.len())
+            && self.hotspot_x < self.size.width
+            && self.hotspot_y < self.size.height
+    }
+}
+
 fn copy_rect_bytes(
     dst: &mut [u8],
     dst_width: u32,
@@ -532,5 +572,23 @@ mod tests {
 
         assert_eq!(update.rect, RemoteDesktopRect::new(0, 0, 3, 1));
         assert_eq!(update.bytes, vec![1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 2, 2]);
+    }
+
+    #[test]
+    fn cursor_shape_requires_complete_bytes_and_valid_hotspot() {
+        let size = RemoteDesktopSize {
+            width: 2,
+            height: 1,
+        };
+        let complete =
+            RemoteDesktopCursorShape::new(size, 1, 0, RemoteDesktopFrameFormat::Rgba8, vec![0; 8]);
+        let short =
+            RemoteDesktopCursorShape::new(size, 1, 0, RemoteDesktopFrameFormat::Rgba8, vec![0; 4]);
+        let bad_hotspot =
+            RemoteDesktopCursorShape::new(size, 2, 0, RemoteDesktopFrameFormat::Rgba8, vec![0; 8]);
+
+        assert!(complete.is_complete());
+        assert!(!short.is_complete());
+        assert!(!bad_hotspot.is_complete());
     }
 }

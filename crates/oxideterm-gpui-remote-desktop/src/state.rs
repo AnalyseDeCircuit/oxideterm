@@ -2,9 +2,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use oxideterm_remote_desktop::{
-    RemoteDesktopFrame, RemoteDesktopHelperEvent, RemoteDesktopProtocol,
+    RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopHelperEvent, RemoteDesktopProtocol,
     RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemoteDesktopCursorState {
+    pub x: u32,
+    pub y: u32,
+    pub visible: bool,
+    pub shape: Option<RemoteDesktopCursorShape>,
+}
+
+impl Default for RemoteDesktopCursorState {
+    fn default() -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            visible: true,
+            shape: None,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemoteDesktopViewSnapshot {
@@ -26,6 +45,7 @@ pub struct RemoteDesktopViewState {
     size: Option<RemoteDesktopSize>,
     message: Option<String>,
     frame: Option<RemoteDesktopFrame>,
+    cursor: RemoteDesktopCursorState,
     read_only: bool,
     pending_resize: Option<RemoteDesktopSize>,
 }
@@ -39,6 +59,7 @@ impl RemoteDesktopViewState {
             size: None,
             message: None,
             frame: None,
+            cursor: RemoteDesktopCursorState::default(),
             read_only: false,
             pending_resize: None,
         }
@@ -88,14 +109,34 @@ impl RemoteDesktopViewState {
                 self.frame = None;
             }
             RemoteDesktopHelperEvent::Terminated { exit_code } => {
+                if self.status == RemoteDesktopSessionStatus::Disconnected && self.message.is_some()
+                {
+                    return;
+                }
                 self.status = RemoteDesktopSessionStatus::Disconnected;
                 self.message = exit_code.map(|code| format!("Helper exited with code {code}."));
                 self.frame = None;
             }
-            RemoteDesktopHelperEvent::Cursor { .. }
-            | RemoteDesktopHelperEvent::ClipboardText { .. } => {
-                // Cursor and clipboard changes are handled by the app surface
-                // that owns focus, clipboard, and pointer capture.
+            RemoteDesktopHelperEvent::Cursor { x, y, .. } => {
+                self.cursor.x = x;
+                self.cursor.y = y;
+            }
+            RemoteDesktopHelperEvent::CursorShape { shape } => {
+                if shape.is_complete() {
+                    self.cursor.shape = Some(shape);
+                    self.cursor.visible = true;
+                }
+            }
+            RemoteDesktopHelperEvent::CursorDefault => {
+                self.cursor.shape = None;
+                self.cursor.visible = true;
+            }
+            RemoteDesktopHelperEvent::CursorHidden => {
+                self.cursor.visible = false;
+            }
+            RemoteDesktopHelperEvent::ClipboardText { .. } => {
+                // Clipboard changes are handled by the app surface that owns
+                // focus, clipboard, and pointer capture.
             }
         }
     }
@@ -120,12 +161,17 @@ impl RemoteDesktopViewState {
     pub fn frame(&self) -> Option<&RemoteDesktopFrame> {
         self.frame.as_ref()
     }
+
+    pub fn cursor(&self) -> &RemoteDesktopCursorState {
+        &self.cursor
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use oxideterm_remote_desktop::{
-        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopRect,
+        RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopFrameFormat,
+        RemoteDesktopFrameUpdate, RemoteDesktopRect,
     };
 
     use super::*;
@@ -225,5 +271,56 @@ mod tests {
         let snapshot = state.snapshot();
         assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Failed);
         assert_eq!(snapshot.message.as_deref(), Some("authentication failed"));
+    }
+
+    #[test]
+    fn terminated_event_does_not_hide_disconnect_reason() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+
+        state.apply_event(RemoteDesktopHelperEvent::Disconnected {
+            reason: Some("RDP session closed.".to_string()),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::Terminated { exit_code: Some(0) });
+
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Disconnected);
+        assert_eq!(snapshot.message.as_deref(), Some("RDP session closed."));
+    }
+
+    #[test]
+    fn cursor_events_update_remote_cursor_state() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let shape = RemoteDesktopCursorShape::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            0,
+            0,
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![1, 2, 3, 4],
+        );
+
+        state.apply_event(RemoteDesktopHelperEvent::CursorShape {
+            shape: shape.clone(),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::Cursor {
+            x: 12,
+            y: 34,
+            width: 1,
+            height: 1,
+        });
+
+        assert_eq!(state.cursor().x, 12);
+        assert_eq!(state.cursor().y, 34);
+        assert!(state.cursor().visible);
+        assert_eq!(state.cursor().shape.as_ref(), Some(&shape));
+
+        state.apply_event(RemoteDesktopHelperEvent::CursorHidden);
+        assert!(!state.cursor().visible);
+
+        state.apply_event(RemoteDesktopHelperEvent::CursorDefault);
+        assert!(state.cursor().visible);
+        assert!(state.cursor().shape.is_none());
     }
 }

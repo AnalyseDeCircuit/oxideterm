@@ -142,6 +142,7 @@ enum ShortcutsModalVirtualRow {
 impl WorkspaceApp {
     pub(super) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
         self.bootstrap_native_plugin_runtime(cx);
+        self.release_active_remote_desktop_inputs();
         self.command_palette.open = true;
         self.command_palette.raw_query.clear();
         self.command_palette.mode = PaletteMode::All;
@@ -193,6 +194,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_shortcuts_modal(&mut self, cx: &mut Context<Self>) {
+        self.release_active_remote_desktop_inputs();
         self.shortcuts_modal.open = true;
         self.shortcuts_modal.query.clear();
         self.shortcuts_modal.scroll_handle = UniformListScrollHandle::new();

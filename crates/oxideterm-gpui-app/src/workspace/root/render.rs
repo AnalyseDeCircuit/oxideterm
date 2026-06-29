@@ -328,10 +328,10 @@ impl Render for WorkspaceApp {
                 {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.dispatch_registered_keybinding(event, window, cx) {
+                } else if this.forward_remote_desktop_key_from_capture(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.forward_remote_desktop_key_from_capture(event, cx) {
+                } else if this.dispatch_registered_keybinding(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if !this.registered_keybinding_matches(event)
@@ -438,6 +438,7 @@ impl Render for WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                    this.release_active_remote_desktop_inputs();
                     this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     this.blur_text_inputs(cx);
                     this.clear_read_only_ime_selection(cx);
@@ -446,6 +447,7 @@ impl Render for WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                    this.release_active_remote_desktop_inputs();
                     // Browser context menus and Radix popovers both treat
                     // outside pointer activity as a transient-layer dismiss.
                     // Right-click keeps input focus alone but must not leave an

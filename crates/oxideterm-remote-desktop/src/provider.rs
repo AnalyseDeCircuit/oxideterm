@@ -201,15 +201,21 @@ fn builtin_provider_manifest_with_mode(
             args,
             working_dir: None,
         },
-        capabilities: RemoteDesktopProviderCapabilities {
-            clipboard_text: true,
-            resize: true,
-            cursor: true,
-            binary_frames: true,
-        },
+        capabilities: builtin_provider_capabilities(protocol),
         ui: Some(RemoteDesktopProviderUi {
             default_port: Some(protocol.default_port()),
         }),
+    }
+}
+
+fn builtin_provider_capabilities(
+    protocol: RemoteDesktopProtocol,
+) -> RemoteDesktopProviderCapabilities {
+    RemoteDesktopProviderCapabilities {
+        clipboard_text: true,
+        resize: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        cursor: true,
+        binary_frames: true,
     }
 }
 
@@ -324,30 +330,25 @@ mod tests {
     #[test]
     fn builtin_registry_exposes_rdp_and_vnc_helpers() {
         let registry = builtin_provider_registry().unwrap();
+        let rdp = registry
+            .get_for_protocol(RemoteDesktopProtocol::Rdp)
+            .unwrap();
+        let vnc = registry
+            .get_for_protocol(RemoteDesktopProtocol::Vnc)
+            .unwrap();
 
-        assert_eq!(
-            registry
-                .get_for_protocol(RemoteDesktopProtocol::Rdp)
-                .unwrap()
-                .entry
-                .command,
-            "oxideterm-rdp-helper"
-        );
-        assert_eq!(
-            registry
-                .get_for_protocol(RemoteDesktopProtocol::Rdp)
-                .unwrap()
-                .entry
-                .args,
-            vec!["--stdio".to_string()]
-        );
-        assert_eq!(
-            registry
-                .get_for_protocol(RemoteDesktopProtocol::Vnc)
-                .unwrap()
-                .effective_default_port(),
-            5900
-        );
+        assert_eq!(rdp.entry.command, "oxideterm-rdp-helper");
+        assert_eq!(rdp.entry.args, vec!["--stdio".to_string()]);
+        assert!(rdp.capabilities.clipboard_text);
+        assert!(rdp.capabilities.resize);
+        assert!(rdp.capabilities.cursor);
+        assert!(rdp.capabilities.binary_frames);
+
+        assert_eq!(vnc.effective_default_port(), 5900);
+        assert!(vnc.capabilities.clipboard_text);
+        assert!(!vnc.capabilities.resize);
+        assert!(vnc.capabilities.cursor);
+        assert!(vnc.capabilities.binary_frames);
     }
 
     #[test]
