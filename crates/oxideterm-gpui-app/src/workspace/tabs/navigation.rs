@@ -107,7 +107,7 @@ impl WorkspaceApp {
                 self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                     matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
                 });
-                self.focus_active_pane(window, cx);
+                self.focus_active_tab_keyboard_owner(window, cx);
                 self.reveal_active_tab(window);
                 cx.notify();
                 return;
@@ -161,7 +161,7 @@ impl WorkspaceApp {
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });
-            self.focus_active_pane(window, cx);
+            self.focus_active_tab_keyboard_owner(window, cx);
             self.reveal_active_tab(window);
             cx.notify();
         }
@@ -260,6 +260,20 @@ impl WorkspaceApp {
             pane.read(cx).focus(window);
         } else {
             window.focus(&self.focus_handle);
+        }
+    }
+
+    fn focus_active_tab_keyboard_owner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::RemoteDesktop)
+        {
+            // Remote desktop tabs are keyboard owners. Activating the tab must
+            // release stale Workspace input fields even before the user clicks
+            // inside the remote framebuffer.
+            self.focus_remote_desktop_keyboard(window, cx);
+        } else {
+            self.focus_active_pane(window, cx);
         }
     }
 

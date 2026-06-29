@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "VNC 미리보기",
     "provider_missing": "원격 데스크톱 제공자를 사용할 수 없습니다.",
     "session_missing": "원격 데스크톱 세션을 사용할 수 없습니다.",
+    "force_recover": "복구",
     "reconnect": "다시 연결",
     "disconnect": "연결 끊기"
   }

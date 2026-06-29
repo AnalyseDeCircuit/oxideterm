@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "Prévia VNC",
     "provider_missing": "O provedor de área de trabalho remota está indisponível.",
     "session_missing": "A sessão de área de trabalho remota está indisponível.",
+    "force_recover": "Recuperar",
     "reconnect": "Reconectar",
     "disconnect": "Desconectar"
   }

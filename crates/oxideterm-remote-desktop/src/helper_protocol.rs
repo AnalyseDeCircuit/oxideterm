@@ -158,6 +158,7 @@ pub enum RemoteDesktopHelperRequest {
     SynchronizeLockKeys {
         keys: RemoteDesktopLockKeys,
     },
+    RequestFrame,
     ReleaseAllInputs,
     Close,
     Reconnect,
@@ -227,6 +228,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .debug_struct("SynchronizeLockKeys")
                 .field("keys", keys)
                 .finish(),
+            Self::RequestFrame => formatter.write_str("RequestFrame"),
             Self::ReleaseAllInputs => formatter.write_str("ReleaseAllInputs"),
             Self::Close => formatter.write_str("Close"),
             Self::Reconnect => formatter.write_str("Reconnect"),
@@ -452,6 +454,17 @@ mod tests {
         let encoded = serde_json::to_string(&request).unwrap();
         let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
 
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn request_frame_round_trips_json() {
+        let request = RemoteDesktopHelperRequest::RequestFrame;
+
+        let encoded = serde_json::to_string(&request).unwrap();
+        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(encoded, r#"{"type":"requestFrame"}"#);
         assert_eq!(decoded, request);
     }
 

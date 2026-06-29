@@ -311,6 +311,11 @@ fn handle_real_vnc_request(
             // RFB has no equivalent lock-key synchronization message in the
             // baseline protocol, so this request is RDP-only.
         }
+        RemoteDesktopHelperRequest::RequestFrame => {
+            // VNC framebuffer recovery is driven by framebuffer-update
+            // requests in the reader loop; this explicit recovery request is
+            // currently an RDP helper capability.
+        }
         RemoteDesktopHelperRequest::ReleaseAllInputs if !read_only => {
             if input_state.pointer.buttons != 0 {
                 input_state.pointer.buttons = 0;

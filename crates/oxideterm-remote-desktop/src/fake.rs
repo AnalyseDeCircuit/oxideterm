@@ -108,6 +108,15 @@ impl RemoteDesktopFakeBackend {
                     reason: Some("Fake remote desktop helper closed.".to_string()),
                 }]
             }
+            RemoteDesktopHelperRequest::RequestFrame => {
+                if self.status == RemoteDesktopSessionStatus::Connected {
+                    vec![RemoteDesktopHelperEvent::Frame {
+                        frame: self.synthetic_frame(),
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
             RemoteDesktopHelperRequest::MouseMove { .. }
             | RemoteDesktopHelperRequest::MouseButton { .. }
             | RemoteDesktopHelperRequest::Wheel { .. }

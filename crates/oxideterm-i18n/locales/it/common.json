@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "Anteprima VNC",
     "provider_missing": "Il provider desktop remoto non è disponibile.",
     "session_missing": "La sessione desktop remoto non è disponibile.",
+    "force_recover": "Ripristina",
     "reconnect": "Riconnetti",
     "disconnect": "Disconnetti"
   }

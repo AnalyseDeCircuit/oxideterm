@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "Vista previa VNC",
     "provider_missing": "El proveedor de escritorio remoto no está disponible.",
     "session_missing": "La sesión de escritorio remoto no está disponible.",
+    "force_recover": "Recuperar",
     "reconnect": "Reconectar",
     "disconnect": "Desconectar"
   }

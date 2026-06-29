@@ -47,10 +47,15 @@ const REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
 const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER: f32 = 100.0;
 const REMOTE_DESKTOP_SCROLL_PIXEL_STEP: f32 = 120.0;
+const REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD: usize = 24;
 
 #[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
     FrameReady {
+        tab_id: TabId,
+        generation: u64,
+    },
+    FrameRecoveryNeeded {
         tab_id: TabId,
         generation: u64,
     },
@@ -87,9 +92,20 @@ impl RemoteDesktopWorkerWake {
 struct RemoteDesktopFrameDeliverySlot {
     frames: Arc<Mutex<VecDeque<RemoteDesktopHelperEvent>>>,
     queued: Arc<AtomicBool>,
+    recovery_requested: Arc<AtomicBool>,
+    supports_frame_recovery: bool,
 }
 
 impl RemoteDesktopFrameDeliverySlot {
+    fn new(supports_frame_recovery: bool) -> Self {
+        Self {
+            frames: Arc::default(),
+            queued: Arc::default(),
+            recovery_requested: Arc::default(),
+            supports_frame_recovery,
+        }
+    }
+
     fn push(
         &self,
         tab_id: TabId,
@@ -98,11 +114,37 @@ impl RemoteDesktopFrameDeliverySlot {
         delivery_tx: &mpsc::Sender<RemoteDesktopWorkerDelivery>,
         worker_wake: &RemoteDesktopWorkerWake,
     ) {
+        let mut needs_recovery = false;
         {
             let Ok(mut frames) = self.frames.lock() else {
                 return;
             };
+            if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
+                self.recovery_requested.store(false, Ordering::Release);
+            } else if self.recovery_requested.load(Ordering::Acquire) {
+                return;
+            }
             push_remote_desktop_frame_event(&mut frames, event);
+            if self.supports_frame_recovery
+                && frames.len() > REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD
+                && !self.recovery_requested.swap(true, Ordering::AcqRel)
+            {
+                // Dirty rectangles are relative to an existing backing frame.
+                // Once the UI is this far behind, ask the helper for a fresh
+                // full frame instead of applying a long stale delta chain.
+                frames.clear();
+                self.queued.store(false, Ordering::Release);
+                needs_recovery = true;
+            }
+        }
+
+        if needs_recovery {
+            send_remote_desktop_worker_delivery(
+                delivery_tx,
+                worker_wake,
+                RemoteDesktopWorkerDelivery::FrameRecoveryNeeded { tab_id, generation },
+            );
+            return;
         }
 
         // A single queued marker is enough because the slot preserves ordered
@@ -293,7 +335,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let tab_id = self.alloc_tab_id();
-        let frame_slot = RemoteDesktopFrameDeliverySlot::default();
+        let frame_slot =
+            RemoteDesktopFrameDeliverySlot::new(profile.protocol == RemoteDesktopProtocol::Rdp);
         let session = RemoteDesktopSession::new(profile, provider, password, frame_slot);
 
         if let Some(previous_tab_id) = self.main_window_tabs.active_tab_id {
@@ -311,7 +354,7 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
+        self.focus_remote_desktop_keyboard(window, cx);
         self.reveal_active_tab(window);
         self.schedule_remote_desktop_initial_layout_probe(tab_id, cx);
         cx.notify();
@@ -584,6 +627,14 @@ impl WorkspaceApp {
                         changed = true;
                     }
                 }
+                RemoteDesktopWorkerDelivery::FrameRecoveryNeeded { tab_id, generation } => {
+                    if self.remote_desktop_worker_generation_matches(tab_id, generation) {
+                        self.send_remote_desktop_request(
+                            tab_id,
+                            RemoteDesktopHelperRequest::RequestFrame,
+                        );
+                    }
+                }
                 RemoteDesktopWorkerDelivery::Event {
                     tab_id,
                     generation,
@@ -664,7 +715,11 @@ impl WorkspaceApp {
         }
     }
 
-    fn focus_remote_desktop_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn focus_remote_desktop_keyboard(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // The remote surface stops root mouse propagation, so it must run the
         // same blur path that an outside workspace click would normally run.
         self.blur_text_inputs(cx);
@@ -816,6 +871,30 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(self.tokens.spacing.one))
                     .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("remote_desktop.force_recover"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::Wrench,
+                            12.0,
+                            rgb(theme.text_muted),
+                        )),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Secondary,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: !remote_desktop_force_recover_enabled(status),
+                            },
+                            height: Some(24.0),
+                            padding_x: Some(8.0),
+                            font_size: Some(self.tokens.metrics.ui_text_xs),
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.force_recover_remote_desktop(tab_id, cx);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(self.workspace_toolbar_action_button(
                         self.i18n.t("remote_desktop.reconnect"),
                         Some(Self::render_lucide_icon(
                             LucideIcon::RefreshCw,
@@ -869,6 +948,18 @@ impl WorkspaceApp {
                     )),
             )
             .into_any_element()
+    }
+
+    fn force_recover_remote_desktop(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+        self.release_remote_desktop_inputs_for_tab(tab_id);
+        let has_live_worker = self
+            .remote_desktop_sessions
+            .get(&tab_id)
+            .is_some_and(|session| session.request_tx.is_some());
+        if has_live_worker {
+            self.send_remote_desktop_request(tab_id, RemoteDesktopHelperRequest::RequestFrame);
+        }
+        self.restart_remote_desktop_worker(tab_id, cx);
     }
 
     fn send_remote_desktop_request(&mut self, tab_id: TabId, request: RemoteDesktopHelperRequest) {
@@ -935,7 +1026,8 @@ impl WorkspaceApp {
             let _ = old_request_tx.send(RemoteDesktopHelperRequest::Close);
         }
 
-        let frame_slot = RemoteDesktopFrameDeliverySlot::default();
+        let frame_slot =
+            RemoteDesktopFrameDeliverySlot::new(profile.protocol == RemoteDesktopProtocol::Rdp);
         let worker_wake = RemoteDesktopWorkerWake::default();
         let request_tx = self.spawn_remote_desktop_worker(
             tab_id,
@@ -1684,6 +1776,21 @@ fn remote_desktop_reconnect_mode(
         | RemoteDesktopSessionStatus::Failed => Some(RemoteDesktopReconnectMode::RestartHelper),
         RemoteDesktopSessionStatus::Connecting | RemoteDesktopSessionStatus::Reconnecting => None,
     }
+}
+
+fn remote_desktop_force_recover_enabled(status: RemoteDesktopSessionStatus) -> bool {
+    // A session can be operationally stuck even while it still reports
+    // connected or connecting. Keep the hard recovery action reachable for
+    // every visible session state.
+    matches!(
+        status,
+        RemoteDesktopSessionStatus::Idle
+            | RemoteDesktopSessionStatus::Connecting
+            | RemoteDesktopSessionStatus::Connected
+            | RemoteDesktopSessionStatus::Reconnecting
+            | RemoteDesktopSessionStatus::Disconnected
+            | RemoteDesktopSessionStatus::Failed
+    )
 }
 
 fn remote_desktop_mouse_button_from_gpui(
@@ -2516,6 +2623,81 @@ fn connect_request(
 mod tests {
     use super::*;
 
+    fn test_frame_update_at(x: u32) -> RemoteDesktopHelperEvent {
+        RemoteDesktopHelperEvent::FrameUpdate {
+            update: oxideterm_remote_desktop::RemoteDesktopFrameUpdate::new(
+                RemoteDesktopSize {
+                    width: 128,
+                    height: 1,
+                },
+                oxideterm_remote_desktop::RemoteDesktopRect::new(x, 0, 1, 1),
+                oxideterm_remote_desktop::RemoteDesktopFrameFormat::Rgba8,
+                vec![x as u8, 0, 0, 0xff],
+            ),
+        }
+    }
+
+    #[test]
+    fn rdp_frame_slot_requests_full_frame_when_dirty_backlog_overflows() {
+        let slot = RemoteDesktopFrameDeliverySlot::new(true);
+        let wake = RemoteDesktopWorkerWake::default();
+        let (delivery_tx, delivery_rx) = mpsc::channel();
+        let tab_id = TabId(7);
+        let generation = 3;
+
+        for index in 0..=REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD {
+            slot.push(
+                tab_id,
+                generation,
+                test_frame_update_at((index as u32) * 2),
+                &delivery_tx,
+                &wake,
+            );
+        }
+
+        assert!(matches!(
+            delivery_rx.try_recv(),
+            Ok(RemoteDesktopWorkerDelivery::FrameReady { .. })
+        ));
+        assert!(matches!(
+            delivery_rx.try_recv(),
+            Ok(RemoteDesktopWorkerDelivery::FrameRecoveryNeeded {
+                tab_id: recovered_tab,
+                generation: recovered_generation,
+            }) if recovered_tab == tab_id && recovered_generation == generation
+        ));
+        assert!(slot.take().is_none());
+    }
+
+    #[test]
+    fn vnc_frame_slot_preserves_dirty_backlog_without_rdp_recovery_request() {
+        let slot = RemoteDesktopFrameDeliverySlot::new(false);
+        let wake = RemoteDesktopWorkerWake::default();
+        let (delivery_tx, delivery_rx) = mpsc::channel();
+        let tab_id = TabId(8);
+        let generation = 4;
+
+        for index in 0..=REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD {
+            slot.push(
+                tab_id,
+                generation,
+                test_frame_update_at((index as u32) * 2),
+                &delivery_tx,
+                &wake,
+            );
+        }
+
+        assert!(matches!(
+            delivery_rx.try_recv(),
+            Ok(RemoteDesktopWorkerDelivery::FrameReady { .. })
+        ));
+        assert!(matches!(
+            delivery_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(slot.take().is_some());
+    }
+
     #[test]
     fn reconnect_mode_restarts_helper_after_terminal_states() {
         assert_eq!(
@@ -2546,6 +2728,20 @@ mod tests {
             remote_desktop_reconnect_mode(RemoteDesktopSessionStatus::Reconnecting),
             None
         );
+    }
+
+    #[test]
+    fn force_recover_stays_available_for_connected_and_inflight_sessions() {
+        for status in [
+            RemoteDesktopSessionStatus::Idle,
+            RemoteDesktopSessionStatus::Connecting,
+            RemoteDesktopSessionStatus::Connected,
+            RemoteDesktopSessionStatus::Reconnecting,
+            RemoteDesktopSessionStatus::Disconnected,
+            RemoteDesktopSessionStatus::Failed,
+        ] {
+            assert!(remote_desktop_force_recover_enabled(status));
+        }
     }
 
     #[test]

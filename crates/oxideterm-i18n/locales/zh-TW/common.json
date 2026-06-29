@@ -1001,6 +1001,7 @@
     "vnc_preview_title": "VNC 預覽",
     "provider_missing": "遠端桌面提供器無法使用。",
     "session_missing": "遠端桌面工作階段無法使用。",
+    "force_recover": "恢復",
     "reconnect": "重新連線",
     "disconnect": "中斷連線"
   }
