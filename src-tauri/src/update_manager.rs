@@ -18,6 +18,8 @@ use reqwest::{NoProxy, Proxy, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "windows")]
+use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -720,9 +722,13 @@ async fn run_update_task(
 
     ensure_task_not_cancelled(runtime_state.clone(), &persisted.status.task_id).await?;
 
-    update
-        .install(&package_bytes)
-        .map_err(|err| UpdateError::Install(format!("install failed: {err}")))?;
+    install_update_package(
+        &update,
+        &package_bytes,
+        &version_dir,
+        &persisted.download_url,
+    )
+    .await?;
 
     ensure_task_not_cancelled(runtime_state.clone(), &persisted.status.task_id).await?;
 
@@ -748,6 +754,163 @@ async fn run_update_task(
 
     clear_active_task_if_needed(runtime_state, &persisted.status.task_id).await;
     Ok(())
+}
+
+async fn install_update_package(
+    update: &Update,
+    package_bytes: &[u8],
+    version_dir: &Path,
+    download_url: &str,
+) -> Result<(), UpdateError> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = update;
+        let retained_package_path =
+            version_dir.join(retained_windows_package_name(download_url, package_bytes));
+        // The package was already signature-verified above. Keep a real
+        // installer file so UAC and manual retry both have a stable target.
+        tokio::fs::write(&retained_package_path, package_bytes)
+            .await
+            .map_err(|err| {
+                UpdateError::State(format!("retain Windows update package failed: {err}"))
+            })?;
+        return launch_windows_update_installer_elevated(&retained_package_path);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (version_dir, download_url);
+        update
+            .install(package_bytes)
+            .map_err(|err| UpdateError::Install(format!("install failed: {err}")))
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn retained_windows_package_name(download_url: &str, package_bytes: &[u8]) -> String {
+    let url_file_name = download_url
+        .rsplit('/')
+        .next()
+        .and_then(|segment| segment.split(['?', '#']).next())
+        .filter(|segment| !segment.trim().is_empty())
+        .map(sanitize_path_segment);
+
+    match url_file_name {
+        Some(name) if windows_installer_extension(&name).is_some() => name,
+        _ => format!(
+            "update-package{}",
+            inferred_windows_installer_extension(package_bytes)
+        ),
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_installer_extension(file_name: &str) -> Option<&'static str> {
+    let lower = file_name.to_ascii_lowercase();
+    if lower.ends_with(".msi") {
+        Some(".msi")
+    } else if lower.ends_with(".exe") {
+        Some(".exe")
+    } else if lower.ends_with(".zip") {
+        Some(".zip")
+    } else {
+        None
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn inferred_windows_installer_extension(package_bytes: &[u8]) -> &'static str {
+    if package_bytes.starts_with(b"MZ") {
+        ".exe"
+    } else if package_bytes.starts_with(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+        ".msi"
+    } else if package_bytes.starts_with(b"PK") {
+        ".zip"
+    } else {
+        ".exe"
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn powershell_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_start_process_script(file_path: &str, arguments: &[String]) -> String {
+    let mut script = format!(
+        "Start-Process -FilePath {}",
+        powershell_single_quoted(file_path)
+    );
+    if !arguments.is_empty() {
+        let quoted_arguments = arguments
+            .iter()
+            .map(|argument| powershell_single_quoted(argument))
+            .collect::<Vec<_>>()
+            .join(", ");
+        script.push_str(&format!(" -ArgumentList @({quoted_arguments})"));
+    }
+    script.push_str(" -Verb RunAs");
+    script
+}
+
+#[cfg(target_os = "windows")]
+fn launch_windows_update_installer_elevated(
+    retained_package_path: &Path,
+) -> Result<(), UpdateError> {
+    let retained_package = retained_package_path.to_string_lossy().to_string();
+    let script = match windows_installer_extension(&retained_package) {
+        Some(".msi") => windows_start_process_script(
+            "msiexec.exe",
+            &[
+                "/i".to_string(),
+                retained_package.clone(),
+                "/promptrestart".to_string(),
+            ],
+        ),
+        Some(".exe") => windows_start_process_script(&retained_package, &[]),
+        _ => {
+            reveal_windows_update_package(retained_package_path);
+            return Err(UpdateError::Install(format!(
+                "unsupported Windows update package; update package retained at {}",
+                retained_package_path.display()
+            )));
+        }
+    };
+
+    let status = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .status()
+        .map_err(|err| {
+            reveal_windows_update_package(retained_package_path);
+            UpdateError::Install(format!(
+                "launch Windows installer with elevation failed: {err}; update package retained at {}",
+                retained_package_path.display()
+            ))
+        })?;
+
+    if !status.success() {
+        reveal_windows_update_package(retained_package_path);
+        return Err(UpdateError::Install(format!(
+            "launch Windows installer with elevation was cancelled or failed; update package retained at {}",
+            retained_package_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_windows_update_package(retained_package_path: &Path) {
+    let _ = Command::new("explorer.exe")
+        .arg(format!("/select,{}", retained_package_path.display()))
+        .spawn();
 }
 
 // ── Download with retries + resume ──────────────────────────
@@ -1488,5 +1651,58 @@ mod tests {
         assert_eq!(compute_retry_delay(8), 12_000);
         assert_eq!(parse_content_range_total("bytes 10-19/42"), Some(42));
         assert_eq!(parse_content_range_total("bytes 10-19/*"), None);
+    }
+
+    #[test]
+    fn retained_windows_package_name_preserves_installer_file_name() {
+        assert_eq!(
+            retained_windows_package_name(
+                "https://example.test/download/OxideTerm_1.0.0_windows_x64-setup.exe?token=1",
+                b"MZ"
+            ),
+            "OxideTerm_1.0.0_windows_x64-setup.exe"
+        );
+    }
+
+    #[test]
+    fn retained_windows_package_name_uses_magic_extension_when_url_has_no_extension() {
+        assert_eq!(
+            retained_windows_package_name("https://example.test/download/latest", b"MZpayload"),
+            "update-package.exe"
+        );
+        assert_eq!(
+            retained_windows_package_name(
+                "https://example.test/download/latest",
+                &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1],
+            ),
+            "update-package.msi"
+        );
+        assert_eq!(
+            retained_windows_package_name("https://example.test/download/latest", b"PKpayload"),
+            "update-package.zip"
+        );
+    }
+
+    #[test]
+    fn windows_start_process_script_uses_runas_and_quotes_arguments() {
+        assert_eq!(
+            powershell_single_quoted("C:/Temp/Oxide'Term Setup.exe"),
+            "'C:/Temp/Oxide''Term Setup.exe'"
+        );
+        assert_eq!(
+            windows_start_process_script(
+                "msiexec.exe",
+                &[
+                    "/i".to_string(),
+                    "C:/Temp/OxideTerm Setup.msi".to_string(),
+                    "/promptrestart".to_string(),
+                ],
+            ),
+            "Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', 'C:/Temp/OxideTerm Setup.msi', '/promptrestart') -Verb RunAs"
+        );
+        assert_eq!(
+            windows_start_process_script("C:/Temp/OxideTerm Setup.exe", &[]),
+            "Start-Process -FilePath 'C:/Temp/OxideTerm Setup.exe' -Verb RunAs"
+        );
     }
 }
