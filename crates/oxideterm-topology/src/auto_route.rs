@@ -376,6 +376,7 @@ mod tests {
             username: "root".to_string(),
             auth: SavedAuth::Agent,
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         });
 
         let topology = AutoRouteNetworkTopology::build_from_connections(&[jump, target]);
@@ -394,6 +395,7 @@ mod tests {
             username: "alice".to_string(),
             auth: SavedAuth::Agent,
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         });
 
         let topology = AutoRouteNetworkTopology::build_from_connections(&[target]);

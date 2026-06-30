@@ -26,6 +26,7 @@ pub fn ssh_config_from_saved_connection(
             &conn.upstream_proxy,
         ),
         agent_forwarding: conn.options.agent_forwarding,
+        legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
@@ -45,6 +46,7 @@ pub fn proxy_chain_config_from_saved_connection(
                 username: hop.username.clone(),
                 auth: auth_method_from_saved_auth(store, &hop.auth)?,
                 agent_forwarding: hop.agent_forwarding,
+                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,

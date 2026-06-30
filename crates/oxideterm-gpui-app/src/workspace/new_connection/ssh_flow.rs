@@ -514,6 +514,7 @@ impl WorkspaceApp {
                         username: config.username,
                         auth: config.auth,
                         agent_forwarding: config.agent_forwarding,
+                        legacy_ssh_compatibility: config.legacy_ssh_compatibility,
                         strict_host_key_checking: true,
                         trust_host_key: None,
                         expected_host_key_fingerprint: None,
@@ -1894,6 +1895,7 @@ impl WorkspaceApp {
             username: username.clone(),
             auth,
             agent_forwarding: form.agent_forwarding,
+            legacy_ssh_compatibility: form.legacy_ssh_compatibility,
             proxy_chain,
             upstream_proxy,
             strict_host_key_checking: true,
@@ -2807,6 +2809,7 @@ fn proxy_chain_from_form(
             username: hop.username.trim().to_string(),
             auth: auth_method_from_proxy_hop(hop),
             agent_forwarding: hop.agent_forwarding,
+            legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             strict_host_key_checking: true,
             trust_host_key: None,
             expected_host_key_fingerprint: None,
@@ -2918,6 +2921,7 @@ fn form_from_runtime_config(
         group: default_group,
         post_connect_command: config.post_connect_command.clone().unwrap_or_default(),
         agent_forwarding: config.agent_forwarding,
+        legacy_ssh_compatibility: config.legacy_ssh_compatibility,
         save_password: auth_fields.save_password,
         ..NewConnectionForm::default()
     };
@@ -2966,6 +2970,7 @@ fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewConnectionPr
         password: auth_fields.password,
         passphrase: auth_fields.passphrase,
         agent_forwarding: config.agent_forwarding,
+        legacy_ssh_compatibility: config.legacy_ssh_compatibility,
     }
 }
 
@@ -3082,6 +3087,7 @@ mod runtime_save_tests {
             username: "ops".to_string(),
             auth: AuthMethod::password_secret(Zeroizing::new("jump-secret".to_string())),
             agent_forwarding: true,
+            legacy_ssh_compatibility: true,
             strict_host_key_checking: true,
             trust_host_key: None,
             expected_host_key_fingerprint: None,
@@ -3090,6 +3096,7 @@ mod runtime_save_tests {
         assert_eq!(hop.auth_tab, SshAuthTab::Password);
         assert_eq!(hop.password, "jump-secret");
         assert!(hop.agent_forwarding);
+        assert!(hop.legacy_ssh_compatibility);
     }
 
     #[test]
@@ -3103,6 +3110,7 @@ mod runtime_save_tests {
                 Some(Zeroizing::new("key-secret".to_string())),
             ),
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             strict_host_key_checking: true,
             trust_host_key: None,
             expected_host_key_fingerprint: None,

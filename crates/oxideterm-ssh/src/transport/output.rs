@@ -207,13 +207,22 @@ mod tests {
 
     #[test]
     fn ssh_client_config_matches_tauri_transport_defaults() {
-        let config = ssh_client_config();
+        let config = ssh_client_config(false);
 
         assert_eq!(config.inactivity_timeout, None);
         assert_eq!(config.keepalive_interval, Some(Duration::from_secs(30)));
         assert_eq!(config.keepalive_max, 3);
         assert_eq!(config.window_size, 32 * 1024 * 1024);
         assert_eq!(config.maximum_packet_size, 256 * 1024);
+    }
+
+    #[test]
+    fn ssh_client_config_enables_legacy_algorithms_only_when_requested() {
+        let modern = ssh_client_config(false);
+        let legacy = ssh_client_config(true);
+
+        assert!(!modern.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
+        assert!(legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
     }
 
     #[test]
@@ -225,6 +234,7 @@ mod tests {
                 username: "root".to_string(),
                 auth: AuthMethod::Agent,
                 agent_forwarding: false,
+                legacy_ssh_compatibility: false,
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,

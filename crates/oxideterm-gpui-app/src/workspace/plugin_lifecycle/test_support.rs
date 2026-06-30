@@ -309,6 +309,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             color: None,
             tags: Vec::new(),
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             post_connect_command: None,
         })
         .unwrap();

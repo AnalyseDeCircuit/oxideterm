@@ -34,6 +34,8 @@ pub struct SshConfig {
     pub expected_host_key_fingerprint: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
     #[serde(default, skip)]
     pub x11_forwarding: Option<X11SshRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,10 +62,25 @@ impl SshConfig {
         let proxy_key = self.proxy_chain.as_ref().map_or_else(String::new, |chain| {
             chain
                 .iter()
-                .map(|hop| format!("{}@{}:{}", hop.username, hop.host, hop.port))
+                .map(|hop| {
+                    let legacy_suffix = if hop.legacy_ssh_compatibility {
+                        ":legacy"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "{}@{}:{}{}",
+                        hop.username, hop.host, hop.port, legacy_suffix
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(">")
         });
+        let legacy_key = if self.legacy_ssh_compatibility {
+            "|legacy_ssh=true"
+        } else {
+            ""
+        };
         let upstream_proxy_key = self
             .upstream_proxy
             .as_ref()
@@ -74,8 +91,8 @@ impl SshConfig {
                 )
             });
         format!(
-            "{}@{}:{}|{}{}",
-            self.username, self.host, self.port, proxy_key, upstream_proxy_key
+            "{}@{}:{}|{}{}{}",
+            self.username, self.host, self.port, proxy_key, upstream_proxy_key, legacy_key
         )
     }
 }
@@ -89,6 +106,8 @@ pub struct ProxyHopConfig {
     pub auth: AuthMethod,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
     #[serde(default = "default_proxy_strict_host_key_checking")]
     pub strict_host_key_checking: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,6 +267,7 @@ impl Default for SshConfig {
             trust_host_key: None,
             expected_host_key_fingerprint: None,
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             x11_forwarding: None,
             post_connect_command: None,
         }
@@ -294,6 +314,7 @@ mod tests {
                 username: "ops".to_string(),
                 auth: AuthMethod::Agent,
                 agent_forwarding: false,
+                legacy_ssh_compatibility: false,
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,
@@ -304,6 +325,7 @@ mod tests {
                 username: "root".to_string(),
                 auth: AuthMethod::Agent,
                 agent_forwarding: true,
+                legacy_ssh_compatibility: true,
                 strict_host_key_checking: true,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,
@@ -312,7 +334,7 @@ mod tests {
 
         assert_eq!(
             config.connection_key(),
-            "app@target:22|ops@jump-a:2222>root@jump-b:22"
+            "app@target:22|ops@jump-a:2222>root@jump-b:22:legacy"
         );
     }
 

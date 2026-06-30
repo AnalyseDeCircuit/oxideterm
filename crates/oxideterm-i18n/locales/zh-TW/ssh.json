@@ -17,6 +17,8 @@
       "create_groups_hint": "在設定中建立群組",
       "agent_forwarding": "啟用 SSH 代理轉發",
       "agent_forwarding_hint": "僅在受信任的伺服器上啟用。惡意伺服器可能利用你本機的 SSH Agent 驗證到其他主機。",
+      "legacy_ssh_compatibility": "相容舊版 SSH 伺服器",
+      "legacy_ssh_compatibility_hint": "預設關閉。僅針對此連線啟用較舊演算法，例如 SHA-1 DH、CBC 加密與 SHA-1 MAC。",
       "save_connection": "儲存連線以供日後使用",
       "save_connection_hint": "首次使用預設關閉，之後會記住你的選擇。",
       "post_connect_command": "連線後執行",

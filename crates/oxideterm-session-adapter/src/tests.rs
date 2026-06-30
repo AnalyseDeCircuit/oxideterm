@@ -58,6 +58,7 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
         username: "ops".to_string(),
         auth: SavedAuth::Agent,
         agent_forwarding: true,
+        legacy_ssh_compatibility: true,
     }];
 
     let settings = PersistedSettings::default();
@@ -70,6 +71,7 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
     assert_eq!(chain[0].port, 2222);
     assert_eq!(chain[0].username, "ops");
     assert!(chain[0].agent_forwarding);
+    assert!(chain[0].legacy_ssh_compatibility);
     let _ = std::fs::remove_file(path);
 }
 

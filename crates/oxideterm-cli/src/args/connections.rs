@@ -149,6 +149,8 @@ pub struct ConnectionDirectArgs {
     pub passphrase_env: Option<String>,
     #[arg(long, help = "Enable or disable SSH agent forwarding")]
     pub agent_forwarding: Option<bool>,
+    #[arg(long, help = "Enable older SSH algorithms for this connection only")]
+    pub legacy_ssh_compatibility: Option<bool>,
     #[arg(long, help = "Command to run after connecting")]
     pub post_connect_command: Option<String>,
 }

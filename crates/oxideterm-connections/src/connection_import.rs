@@ -647,6 +647,7 @@ fn imported_proxy_hop_to_saved(hop: &ImportedProxyHopDraft) -> SavedProxyHop {
         username: hop.username.clone(),
         auth: imported_auth_to_saved(hop.auth_type, hop.key_path.as_ref(), hop.cert_path.as_ref()),
         agent_forwarding: hop.agent_forwarding,
+        legacy_ssh_compatibility: false,
     }
 }
 

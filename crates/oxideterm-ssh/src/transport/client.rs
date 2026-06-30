@@ -216,7 +216,11 @@ impl SshTransportClient {
             let auth_banners = handler.auth_banners();
             let mut target = tokio::time::timeout(
                 Duration::from_secs(self.config.timeout_secs),
-                client::connect_stream(Arc::new(ssh_client_config()), stream, handler),
+                client::connect_stream(
+                    Arc::new(ssh_client_config(self.config.legacy_ssh_compatibility)),
+                    stream,
+                    handler,
+                ),
             )
             .await
             .map_err(|_| SshTransportError::Timeout)?
@@ -319,7 +323,7 @@ impl SshTransportClient {
         )
         .await?;
 
-        let client_config = ssh_client_config();
+        let client_config = ssh_client_config(config.legacy_ssh_compatibility);
         let handler = NativeClientHandler::new(
             config.host.clone(),
             config.port,
@@ -425,7 +429,11 @@ impl SshTransportClient {
         .await?;
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
-            client::connect_stream(Arc::new(ssh_client_config()), stream, proxy_hop_handler(hop)),
+            client::connect_stream(
+                Arc::new(ssh_client_config(hop.legacy_ssh_compatibility)),
+                stream,
+                proxy_hop_handler(hop),
+            ),
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?
@@ -449,7 +457,7 @@ impl SshTransportClient {
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
-                Arc::new(ssh_client_config()),
+                Arc::new(ssh_client_config(hop.legacy_ssh_compatibility)),
                 stream,
                 proxy_hop_handler(hop),
             ),
@@ -493,7 +501,11 @@ impl SshTransportClient {
         let auth_banners = handler.auth_banners();
         let mut handle = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
-            client::connect_stream(Arc::new(ssh_client_config()), stream, handler),
+            client::connect_stream(
+                Arc::new(ssh_client_config(self.config.legacy_ssh_compatibility)),
+                stream,
+                handler,
+            ),
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?

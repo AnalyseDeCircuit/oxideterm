@@ -500,6 +500,7 @@ fn write_connection_secret(
             color: connection.color,
             tags: connection.tags,
             agent_forwarding: connection.options.agent_forwarding,
+            legacy_ssh_compatibility: connection.options.legacy_ssh_compatibility,
             post_connect_command,
         })
         .map_err(|error| runtime_error(error, json))?;

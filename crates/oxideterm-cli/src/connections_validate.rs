@@ -360,6 +360,7 @@ mod tests {
             color: None,
             tags: vec!["primary".to_string()],
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             post_connect_command: None,
         }
     }

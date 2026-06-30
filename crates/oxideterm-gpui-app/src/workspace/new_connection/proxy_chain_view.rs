@@ -811,6 +811,17 @@ impl WorkspaceApp {
                                 }
                             },
                             cx,
+                        ))
+                        .child(self.render_connection_checkbox(
+                            self.i18n.t("ssh.form.legacy_ssh_compatibility"),
+                            jump_form.legacy_ssh_compatibility,
+                            |form| {
+                                if let Some(jump_form) = form.jump_server_form.as_mut() {
+                                    jump_form.legacy_ssh_compatibility =
+                                        !jump_form.legacy_ssh_compatibility;
+                                }
+                            },
+                            cx,
                         )),
                 )
                 .child(

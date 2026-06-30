@@ -17,6 +17,8 @@
       "create_groups_hint": "在设置中创建分组",
       "agent_forwarding": "启用 SSH Agent 转发",
       "agent_forwarding_hint": "仅在受信任的服务器上启用。恶意服务器可能利用你本地的 SSH Agent 认证到其他主机。",
+      "legacy_ssh_compatibility": "兼容旧版 SSH 服务器",
+      "legacy_ssh_compatibility_hint": "默认关闭。仅为此连接启用较旧算法，例如 SHA-1 DH、CBC 加密和 SHA-1 MAC。",
       "save_connection": "保存连接以便将来使用",
       "save_connection_hint": "首次使用默认关闭，之后将记住您的选择。",
       "post_connect_command": "连接后执行",

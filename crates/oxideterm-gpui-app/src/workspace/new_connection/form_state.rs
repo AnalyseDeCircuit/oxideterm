@@ -210,6 +210,7 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) agent_forwarding: bool,
+    pub(in crate::workspace) legacy_ssh_compatibility: bool,
 }
 
 impl fmt::Debug for NewConnectionProxyHop {
@@ -227,6 +228,7 @@ impl fmt::Debug for NewConnectionProxyHop {
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
             .field("agent_forwarding", &self.agent_forwarding)
+            .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
             .finish()
     }
 }
@@ -245,6 +247,7 @@ impl NewConnectionProxyHop {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         }
     }
 
@@ -273,6 +276,7 @@ impl NewConnectionProxyHop {
         self.cert_path = connection.cert_path.clone().unwrap_or_default();
         self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
         self.agent_forwarding = connection.agent_forwarding;
+        self.legacy_ssh_compatibility = connection.legacy_ssh_compatibility;
     }
 }
 
@@ -313,6 +317,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) upstream_proxy_remote_dns: bool,
     pub(in crate::workspace) upstream_proxy_no_proxy: String,
     pub(in crate::workspace) agent_forwarding: bool,
+    pub(in crate::workspace) legacy_ssh_compatibility: bool,
     pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) save_connection: bool,
     pub(in crate::workspace) field_focused: bool,
@@ -390,6 +395,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("upstream_proxy_remote_dns", &self.upstream_proxy_remote_dns)
             .field("upstream_proxy_no_proxy", &self.upstream_proxy_no_proxy)
             .field("agent_forwarding", &self.agent_forwarding)
+            .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
             .field("agent_available", &self.agent_available)
             .field("save_connection", &self.save_connection)
             .field("field_focused", &self.field_focused)
@@ -462,6 +468,7 @@ impl Default for NewConnectionForm {
             upstream_proxy_remote_dns: true,
             upstream_proxy_no_proxy: String::new(),
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             agent_available: None,
             save_connection: false,
             field_focused: true,
@@ -1490,6 +1497,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             agent_forwarding: true,
+            legacy_ssh_compatibility: true,
             post_connect_command: None,
         };
         let mut hop = NewConnectionProxyHop::new();
@@ -1508,5 +1516,6 @@ mod tests {
         assert!(hop.password.is_empty());
         assert!(hop.passphrase.is_empty());
         assert!(hop.agent_forwarding);
+        assert!(hop.legacy_ssh_compatibility);
     }
 }

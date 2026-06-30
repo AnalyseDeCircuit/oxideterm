@@ -54,6 +54,7 @@ mod tests {
                 username: "jump".to_string(),
                 auth: SavedAuth::Agent,
                 agent_forwarding: false,
+                legacy_ssh_compatibility: false,
             }],
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             options: ConnectionOptions {
@@ -62,6 +63,7 @@ mod tests {
                 jump_host: None,
                 term_type: Some("xterm-256color".to_string()),
                 agent_forwarding: true,
+                legacy_ssh_compatibility: false,
                 post_connect_command: None,
             },
             created_at: Utc::now(),

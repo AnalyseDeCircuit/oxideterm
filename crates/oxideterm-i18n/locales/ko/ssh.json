@@ -68,6 +68,8 @@
       "proxy_chain_kbi_unsupported": "프록시 체인 연결은 2FA / keyboard-interactive 인증을 지원하지 않습니다.",
       "agent_detected": "SSH Agent 감지됨",
       "agent_forwarding_hint": "신뢰할 수 있는 서버에서만 활성화하세요. 악성 서버가 로컬 SSH Agent를 사용해 다른 호스트에 인증할 수 있습니다.",
+      "legacy_ssh_compatibility": "레거시 SSH 서버와 호환",
+      "legacy_ssh_compatibility_hint": "기본값은 꺼짐입니다. 이 연결에서만 SHA-1 DH, CBC 암호, SHA-1 MAC 같은 오래된 알고리즘을 활성화합니다.",
       "agent_hint": "SSH Agent가 실행 중이고 필요한 키가 로드되어 있는지 확인하세요.",
       "agent_not_detected": "SSH Agent가 감지되지 않음",
       "authentication": "인증 방법",

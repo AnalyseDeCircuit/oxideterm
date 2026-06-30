@@ -68,6 +68,8 @@
       "proxy_chain_kbi_unsupported": "Les connexions par chaîne de relais ne prennent pas en charge la 2FA / l'authentification keyboard-interactive.",
       "agent_detected": "SSH Agent détecté",
       "agent_forwarding_hint": "À activer uniquement sur des serveurs de confiance. Un serveur malveillant peut utiliser votre SSH Agent local pour s’authentifier auprès d’autres hôtes.",
+      "legacy_ssh_compatibility": "Compatible avec les anciens serveurs SSH",
+      "legacy_ssh_compatibility_hint": "Désactivé par défaut. Active les anciens algorithmes comme SHA-1 DH, les chiffrements CBC et les MAC SHA-1 uniquement pour cette connexion.",
       "agent_hint": "Vérifiez que votre SSH Agent est en cours d’exécution et que les clés requises sont chargées.",
       "agent_not_detected": "SSH Agent non détecté",
       "authentication": "Méthode d’authentification",

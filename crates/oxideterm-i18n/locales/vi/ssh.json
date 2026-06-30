@@ -68,6 +68,8 @@
       "proxy_chain_kbi_unsupported": "Kết nối qua chuỗi proxy không hỗ trợ 2FA / xác thực keyboard-interactive.",
       "agent_detected": "Đã phát hiện SSH Agent",
       "agent_forwarding_hint": "Chỉ bật trên máy chủ đáng tin cậy. Máy chủ độc hại có thể dùng SSH Agent cục bộ của bạn để xác thực tới máy chủ khác.",
+      "legacy_ssh_compatibility": "Tương thích với máy chủ SSH cũ",
+      "legacy_ssh_compatibility_hint": "Mặc định tắt. Chỉ bật các thuật toán cũ như SHA-1 DH, mã hóa CBC và MAC SHA-1 cho kết nối này.",
       "agent_hint": "Đảm bảo SSH Agent đang chạy và đã tải các khóa cần thiết.",
       "agent_not_detected": "Không phát hiện SSH Agent",
       "authentication": "Phương thức xác thực",

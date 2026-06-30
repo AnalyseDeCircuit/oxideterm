@@ -332,6 +332,7 @@ mod tests {
                 cert_path: String::new(),
                 passphrase: String::new(),
                 agent_forwarding: true,
+                legacy_ssh_compatibility: true,
             });
 
         let request = save_request_from_form(&form, None).unwrap();
@@ -342,6 +343,7 @@ mod tests {
         assert_eq!(hop.port, 2222);
         assert_eq!(hop.username, "ops");
         assert!(hop.agent_forwarding);
+        assert!(hop.legacy_ssh_compatibility);
         match &hop.auth {
             SavedAuth::Password {
                 keychain_id: None,
@@ -370,6 +372,7 @@ mod tests {
                 cert_path: String::new(),
                 passphrase: String::new(),
                 agent_forwarding: false,
+                legacy_ssh_compatibility: false,
             });
 
         let request = save_request_from_form(&form, None).unwrap();

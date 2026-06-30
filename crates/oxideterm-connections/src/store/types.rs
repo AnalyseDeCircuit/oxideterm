@@ -117,6 +117,8 @@ pub struct ConnectionOptions {
     pub term_type: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
 }
@@ -130,6 +132,8 @@ pub struct SavedProxyHop {
     pub auth: SavedAuth,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default)]
+    pub legacy_ssh_compatibility: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -233,6 +237,7 @@ pub struct ProxyHopInfo {
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
     pub agent_forwarding: bool,
+    pub legacy_ssh_compatibility: bool,
 }
 
 impl From<&SavedProxyHop> for ProxyHopInfo {
@@ -247,6 +252,7 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             managed_key_id: hop.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
             agent_forwarding: hop.agent_forwarding,
+            legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
         }
     }
 }
@@ -337,6 +343,7 @@ pub struct ConnectionInfo {
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    pub legacy_ssh_compatibility: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
 }
@@ -397,6 +404,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             color: conn.color.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
+            legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
             post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         }
     }
@@ -907,6 +915,7 @@ pub struct SaveConnectionRequest {
     pub color: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    pub legacy_ssh_compatibility: bool,
     pub post_connect_command: Option<String>,
 }
 

@@ -68,6 +68,8 @@
       "proxy_chain_kbi_unsupported": "プロキシチェーン接続では 2FA / keyboard-interactive 認証はサポートされていません。",
       "agent_detected": "SSH Agent を検出しました",
       "agent_forwarding_hint": "信頼できるサーバーでのみ有効にしてください。悪意のあるサーバーがローカルの SSH Agent を使って他のホストへ認証する可能性があります。",
+      "legacy_ssh_compatibility": "古い SSH サーバーと互換",
+      "legacy_ssh_compatibility_hint": "既定ではオフです。この接続に限り、SHA-1 DH、CBC 暗号、SHA-1 MAC などの古いアルゴリズムを有効にします。",
       "agent_hint": "SSH Agent が実行中で、必要な鍵が読み込まれていることを確認してください。",
       "agent_not_detected": "SSH Agent が検出されません",
       "authentication": "認証方式",

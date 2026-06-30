@@ -293,6 +293,7 @@ fn build_saved_connection_from_sync_payload(
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         options: ConnectionOptions {
             agent_forwarding: payload.agent_forwarding,
+            legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
             post_connect_command: payload.post_connect_command.clone(),
             ..Default::default()
         },
@@ -528,6 +529,7 @@ fn build_synced_proxy_chain(
                     .flatten()
                     .unwrap_or_else(|| saved_auth_from_proxy_hop_info(hop)),
                 agent_forwarding: hop.agent_forwarding,
+                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             }
         })
         .collect()

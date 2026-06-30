@@ -68,6 +68,8 @@
       "proxy_chain_kbi_unsupported": "Proxy-Kettenverbindungen unterstützen keine 2FA / Keyboard-Interactive-Authentifizierung.",
       "agent_detected": "SSH-Agent erkannt",
       "agent_forwarding_hint": "Nur auf vertrauenswürdigen Servern aktivieren. Ein bösartiger Server kann Ihren lokalen SSH-Agent für die Authentifizierung bei anderen Hosts verwenden.",
+      "legacy_ssh_compatibility": "Mit alten SSH-Servern kompatibel",
+      "legacy_ssh_compatibility_hint": "Standardmäßig deaktiviert. Aktiviert ältere Algorithmen wie SHA-1 DH, CBC-Chiffren und SHA-1-MACs nur für diese Verbindung.",
       "agent_hint": "Stellen Sie sicher, dass Ihr SSH-Agent läuft und die erforderlichen Schlüssel geladen hat.",
       "agent_not_detected": "SSH-Agent nicht erkannt",
       "authentication": "Authentifizierungsmethode",

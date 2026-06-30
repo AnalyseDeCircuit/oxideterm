@@ -1,12 +1,18 @@
-fn ssh_client_config() -> client::Config {
-    client::Config {
+fn ssh_client_config(legacy_ssh_compatibility: bool) -> client::Config {
+    let mut config = client::Config {
         inactivity_timeout: None,
         keepalive_interval: Some(Duration::from_secs(30)),
         keepalive_max: 3,
         window_size: 32 * 1024 * 1024,
         maximum_packet_size: 256 * 1024,
         ..client::Config::default()
+    };
+    if legacy_ssh_compatibility {
+        // This is a per-connection opt-in so the default SSH security posture
+        // never offers SHA-1 DH, CBC ciphers, or SHA-1 MACs automatically.
+        config.preferred = russh::Preferred::legacy_compatibility();
     }
+    config
 }
 
 async fn open_direct_tcpip_stream(
@@ -74,6 +80,7 @@ async fn authenticate_proxy_hop(
         trust_host_key: hop.trust_host_key,
         expected_host_key_fingerprint: hop.expected_host_key_fingerprint.clone(),
         agent_forwarding: hop.agent_forwarding,
+        legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
         ..SshConfig::default()
     };
     authenticate_with_options(

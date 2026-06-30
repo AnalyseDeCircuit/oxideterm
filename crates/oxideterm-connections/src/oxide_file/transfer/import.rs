@@ -576,6 +576,7 @@ fn import_proxy_hop(
             import_options,
         )?,
         agent_forwarding: false,
+        legacy_ssh_compatibility: false,
     })
 }
 
@@ -893,6 +894,7 @@ fn merge_options(
         existing.term_type = imported.term_type;
     }
     existing.agent_forwarding |= imported.agent_forwarding;
+    existing.legacy_ssh_compatibility |= imported.legacy_ssh_compatibility;
     existing.post_connect_command = imported.post_connect_command.or(existing.post_connect_command);
     if imported_has_proxy_chain {
         existing.jump_host = None;

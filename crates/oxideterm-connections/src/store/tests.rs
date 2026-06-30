@@ -28,6 +28,7 @@ mod tests {
             color: None,
             tags: Vec::new(),
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             post_connect_command: None,
         }
     }
@@ -557,12 +558,14 @@ mod tests {
                 plaintext_password: Some(SecretString::from("jump-secret")),
             },
             agent_forwarding: true,
+            legacy_ssh_compatibility: true,
         }];
 
         store.upsert(req).unwrap();
 
         let hop = &store.get("conn-1").unwrap().proxy_chain[0];
         assert!(hop.agent_forwarding);
+        assert!(hop.legacy_ssh_compatibility);
         match &hop.auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
@@ -637,6 +640,7 @@ mod tests {
                 plaintext_password: Some(SecretString::from("jump-secret")),
             },
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         }];
         store.upsert(req).unwrap();
 
@@ -926,6 +930,7 @@ mod tests {
                 plaintext_passphrase: Some(SecretString::from("jump-key-secret")),
             },
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         }];
         store.upsert(req).unwrap();
         let previous_keychain_id = match &store.get("conn-1").unwrap().proxy_chain[0].auth {
@@ -948,6 +953,7 @@ mod tests {
                 plaintext_passphrase: None,
             },
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         }];
         store.upsert(update).unwrap();
 
@@ -978,6 +984,7 @@ mod tests {
                 plaintext_passphrase: Some(SecretString::from("jump-key-secret")),
             },
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
         }];
         store.upsert(req).unwrap();
         let existing_hop = store.get("conn-1").unwrap().proxy_chain[0].clone();

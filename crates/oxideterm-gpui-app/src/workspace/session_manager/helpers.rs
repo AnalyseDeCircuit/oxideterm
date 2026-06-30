@@ -458,6 +458,7 @@ fn connection_draft_from_form(form: &NewConnectionForm) -> ConnectionDraft {
             .map(proxy_hop_draft_from_form)
             .collect(),
         agent_forwarding: form.agent_forwarding,
+        legacy_ssh_compatibility: form.legacy_ssh_compatibility,
         post_connect_command: form.post_connect_command.clone(),
     }
 }
@@ -478,6 +479,7 @@ fn proxy_hop_draft_from_form(hop: &super::new_connection::NewConnectionProxyHop)
             ..ConnectionAuthDraft::default()
         },
         agent_forwarding: hop.agent_forwarding,
+        legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
     }
 }
 

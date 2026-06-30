@@ -29,6 +29,7 @@ pub(super) struct ConnectionSpec {
     #[serde(default)]
     proxy_chain: Option<Vec<ConnectionProxyHopSpec>>,
     agent_forwarding: Option<bool>,
+    legacy_ssh_compatibility: Option<bool>,
     post_connect_command: Option<Option<String>>,
 }
 
@@ -64,6 +65,8 @@ struct ConnectionProxyHopSpec {
     auth: ConnectionAuthSpec,
     #[serde(default)]
     agent_forwarding: bool,
+    #[serde(default)]
+    legacy_ssh_compatibility: bool,
 }
 
 pub(super) fn read_connection_spec(path: &str, json: bool) -> CliResult<ConnectionSpec> {
@@ -102,6 +105,7 @@ pub(super) fn connection_spec_from_direct_args(
         auth,
         proxy_chain: None,
         agent_forwarding: args.agent_forwarding,
+        legacy_ssh_compatibility: args.legacy_ssh_compatibility,
         post_connect_command: args.post_connect_command.map(Some),
     }))
 }
@@ -177,6 +181,11 @@ pub(super) fn connection_request_from_spec(
         agent_forwarding: spec.agent_forwarding.unwrap_or_else(|| {
             existing
                 .map(|connection| connection.options.agent_forwarding)
+                .unwrap_or(false)
+        }),
+        legacy_ssh_compatibility: spec.legacy_ssh_compatibility.unwrap_or_else(|| {
+            existing
+                .map(|connection| connection.options.legacy_ssh_compatibility)
                 .unwrap_or(false)
         }),
         post_connect_command: spec.post_connect_command.unwrap_or_else(|| {
@@ -268,6 +277,7 @@ fn saved_proxy_hop_from_spec(spec: ConnectionProxyHopSpec, json: bool) -> CliRes
         username: spec.username,
         auth: saved_auth_from_connection_spec(spec.auth, None, json)?,
         agent_forwarding: spec.agent_forwarding,
+        legacy_ssh_compatibility: spec.legacy_ssh_compatibility,
     })
 }
 
@@ -418,6 +428,7 @@ impl ConnectionDirectArgs {
             || self.passphrase_stdin
             || self.passphrase_env.is_some()
             || self.agent_forwarding.is_some()
+            || self.legacy_ssh_compatibility.is_some()
             || self.post_connect_command.is_some()
     }
 }

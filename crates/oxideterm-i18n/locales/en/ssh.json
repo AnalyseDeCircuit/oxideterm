@@ -17,6 +17,8 @@
       "create_groups_hint": "Create groups in Settings",
       "agent_forwarding": "Enable SSH Agent forwarding",
       "agent_forwarding_hint": "Enable only on trusted servers. A malicious server may use your local SSH Agent to authenticate to other hosts.",
+      "legacy_ssh_compatibility": "Compatible with legacy SSH servers",
+      "legacy_ssh_compatibility_hint": "Off by default. Enables older algorithms such as SHA-1 DH, CBC ciphers, and SHA-1 MACs only for this connection.",
       "save_connection": "Save connection for future use",
       "save_connection_hint": "Off by default the first time; your choice will be remembered after that.",
       "post_connect_command": "Run after connect",

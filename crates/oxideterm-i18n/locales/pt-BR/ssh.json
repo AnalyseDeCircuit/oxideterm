@@ -68,6 +68,8 @@
       "proxy_chain_kbi_unsupported": "Conexões por cadeia de proxy não oferecem suporte a 2FA / autenticação keyboard-interactive.",
       "agent_detected": "SSH Agent detectado",
       "agent_forwarding_hint": "Ative apenas em servidores confiáveis. Um servidor malicioso pode usar seu SSH Agent local para se autenticar em outros hosts.",
+      "legacy_ssh_compatibility": "Compatível com servidores SSH antigos",
+      "legacy_ssh_compatibility_hint": "Desativado por padrão. Habilita algoritmos antigos como SHA-1 DH, cifras CBC e MACs SHA-1 apenas para esta conexão.",
       "agent_hint": "Verifique se o SSH Agent está em execução e com as chaves necessárias carregadas.",
       "agent_not_detected": "SSH Agent não detectado",
       "authentication": "Método de autenticação",

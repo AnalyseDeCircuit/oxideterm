@@ -78,6 +78,7 @@ pub struct ProxyHopDraft {
     pub username: String,
     pub auth: ConnectionAuthDraft,
     pub agent_forwarding: bool,
+    pub legacy_ssh_compatibility: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +93,7 @@ pub struct ConnectionDraft {
     pub tags: Vec<String>,
     pub proxy_hops: Vec<ProxyHopDraft>,
     pub agent_forwarding: bool,
+    pub legacy_ssh_compatibility: bool,
     pub post_connect_command: String,
 }
 
@@ -158,6 +160,7 @@ pub fn save_request_from_draft(
         color: (!draft.color.trim().is_empty()).then(|| draft.color.trim().to_string()),
         tags: draft.tags,
         agent_forwarding: draft.agent_forwarding,
+        legacy_ssh_compatibility: draft.legacy_ssh_compatibility,
         post_connect_command: (!draft.post_connect_command.trim().is_empty())
             .then(|| draft.post_connect_command.trim().to_string()),
     })
@@ -252,6 +255,7 @@ fn saved_proxy_chain_from_drafts(hops: Vec<ProxyHopDraft>) -> Result<Vec<SavedPr
                 username: hop.username.trim().to_string(),
                 auth,
                 agent_forwarding: hop.agent_forwarding,
+                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             })
         })
         .collect()
@@ -415,8 +419,10 @@ mod tests {
                     ..ConnectionAuthDraft::default()
                 },
                 agent_forwarding: false,
+                legacy_ssh_compatibility: false,
             }],
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             post_connect_command: String::new(),
         };
 

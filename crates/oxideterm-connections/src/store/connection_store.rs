@@ -175,6 +175,7 @@ impl ConnectionStore {
         // overwrites the UI-exposed agent-forwarding bit. This keeps imported
         // Tauri config tails such as compression/term_type from being dropped.
         options.agent_forwarding = request.agent_forwarding;
+        options.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
         let auth = self.materialize_auth(request.auth, existing_auth.as_ref())?;
         let proxy_chain = self.materialize_proxy_chain(request.proxy_chain)?;
         let upstream_proxy = self.materialize_upstream_proxy_policy(
@@ -1493,6 +1494,7 @@ impl ConnectionStore {
                     username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),
                     auth: self.materialize_auth(hop.auth, None)?,
                     agent_forwarding: hop.agent_forwarding,
+                    legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
                 })
             })
             .collect()
@@ -1596,6 +1598,7 @@ impl ConnectionStore {
                 username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),
                 auth: hop_auth,
                 agent_forwarding: hop.agent_forwarding,
+                legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             });
         }
 

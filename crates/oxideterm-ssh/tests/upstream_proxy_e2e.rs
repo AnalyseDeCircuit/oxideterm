@@ -222,6 +222,7 @@ LogLevel VERBOSE
             username: self.username.clone(),
             auth: AuthMethod::key(self.client_key.display().to_string(), None),
             agent_forwarding: false,
+            legacy_ssh_compatibility: false,
             strict_host_key_checking: false,
             trust_host_key: Some(false),
             expected_host_key_fingerprint: Some(self.host_fingerprint.clone()),

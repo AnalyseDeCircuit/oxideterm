@@ -187,6 +187,31 @@ impl Preferred {
         mac: Cow::Borrowed(SAFE_HMAC_ORDER),
         compression: Cow::Borrowed(COMPRESSION_ORDER),
     };
+
+    pub fn legacy_compatibility() -> Preferred {
+        let mut kex = SAFE_KEX_ORDER.to_vec();
+        // Legacy algorithms are appended so modern servers still negotiate the
+        // stronger default choices when any overlap exists.
+        kex.extend_from_slice(&[kex::DH_GEX_SHA1, kex::DH_G14_SHA1, kex::DH_G1_SHA1]);
+
+        let mut cipher = CIPHER_ORDER.to_vec();
+        cipher.extend_from_slice(&[
+            cipher::AES_256_CBC,
+            cipher::AES_192_CBC,
+            cipher::AES_128_CBC,
+        ]);
+
+        let mut mac = SAFE_HMAC_ORDER.to_vec();
+        mac.extend_from_slice(&[mac::HMAC_SHA1_ETM, mac::HMAC_SHA1]);
+
+        Preferred {
+            kex: Cow::Owned(kex),
+            key: Preferred::DEFAULT.key,
+            cipher: Cow::Owned(cipher),
+            mac: Cow::Owned(mac),
+            compression: Cow::Borrowed(COMPRESSION_ORDER),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -211,6 +236,22 @@ mod tests {
     fn default_ciphers_include_both_openssh_gcm_variants() {
         assert!(Preferred::DEFAULT.cipher.contains(&cipher::AES_256_GCM));
         assert!(Preferred::DEFAULT.cipher.contains(&cipher::AES_128_GCM));
+    }
+
+    #[test]
+    fn legacy_compatibility_appends_older_algorithms_without_changing_default() {
+        let preferred = Preferred::legacy_compatibility();
+
+        assert!(preferred.kex.contains(&kex::DH_GEX_SHA1));
+        assert!(preferred.kex.contains(&kex::DH_G14_SHA1));
+        assert!(preferred.kex.contains(&kex::DH_G1_SHA1));
+        assert!(preferred.cipher.contains(&cipher::AES_256_CBC));
+        assert!(preferred.cipher.contains(&cipher::AES_192_CBC));
+        assert!(preferred.cipher.contains(&cipher::AES_128_CBC));
+        assert!(preferred.mac.contains(&mac::HMAC_SHA1_ETM));
+        assert!(preferred.mac.contains(&mac::HMAC_SHA1));
+        assert!(!Preferred::DEFAULT.cipher.contains(&cipher::AES_256_CBC));
+        assert!(!Preferred::DEFAULT.mac.contains(&mac::HMAC_SHA1));
     }
 }
 
