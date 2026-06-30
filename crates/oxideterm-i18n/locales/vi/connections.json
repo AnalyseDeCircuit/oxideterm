@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "Jump host này không hỗ trợ keyboard-interactive/2FA"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "Đã kết nối · {{elapsed}}",
+      "connecting": "Đang kết nối {{label}}",
+      "connecting_chain": "Đang kết nối {{current}}/{{total}}: {{label}}",
+      "failed": "Kết nối thất bại: {{label}}",
+      "reconnecting": "Đang kết nối lại {{label}}",
+      "reconnecting_chain": "Đang kết nối lại {{current}}/{{total}}: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "trao đổi khóa",
+          "host_key": "khóa host",
+          "cipher": "mã hóa",
+          "mac": "MAC",
+          "compression": "nén"
+        },
+        "summary": {
+          "key_exchange": "Máy chủ chỉ cung cấp các thuật toán trao đổi khóa chưa được bật trong chính sách bảo mật hiện tại.",
+          "host_key": "Thuật toán khóa host của máy chủ không khớp với chính sách bảo mật hiện tại.",
+          "host_key_ssh_rsa": "Máy chủ chỉ hỗ trợ khóa host ssh-rsa, vốn bị tắt theo mặc định.",
+          "cipher": "Danh sách mã hóa của máy chủ không giao nhau với chính sách hiện tại của client.",
+          "cipher_legacy": "Máy chủ chỉ cung cấp mã hóa cũ như CBC hoặc 3DES. Hãy nâng cấp máy chủ hoặc bật rõ chế độ tương thích legacy.",
+          "mac": "Danh sách MAC của máy chủ không giao nhau với chính sách hiện tại của client. Hãy nâng cấp máy chủ hoặc bật chính sách MAC tương thích.",
+          "compression": "Chế độ nén của máy chủ không giao nhau với chính sách client."
+        },
+        "client_offered": "Client cung cấp: {{algorithms}}",
+        "server_offered": "Máy chủ cung cấp: {{algorithms}}",
+        "missing_match": "Thiếu điểm chung: {{reason}}",
+        "no_common": "không có thuật toán {{kind}} chung"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "Đang xác thực",
+        "host_key": "Đang kiểm tra khóa host",
+        "opening_transport": "Đang mở kênh truyền",
+        "preparing": "Đang chuẩn bị kết nối",
+        "pty": "Đang cấp phát PTY",
+        "queued": "Đã xếp hàng",
+        "ready": "Sẵn sàng",
+        "shell_ready": "Đang khởi động shell",
+        "ssh_handshake": "Bắt tay SSH"
+      },
+      "target_unknown": "đích"
     }
   }
 }

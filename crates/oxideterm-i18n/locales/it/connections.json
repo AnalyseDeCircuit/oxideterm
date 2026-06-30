@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "Questo jump host non supporta keyboard-interactive/2FA"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "Connesso · {{elapsed}}",
+      "connecting": "Connessione a {{label}}",
+      "connecting_chain": "Connessione {{current}}/{{total}}: {{label}}",
+      "failed": "Connessione non riuscita: {{label}}",
+      "reconnecting": "Riconnessione a {{label}}",
+      "reconnecting_chain": "Riconnessione {{current}}/{{total}}: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "scambio chiavi",
+          "host_key": "chiave host",
+          "cipher": "cifratura",
+          "mac": "MAC",
+          "compression": "compressione"
+        },
+        "summary": {
+          "key_exchange": "Il server offre solo algoritmi di scambio chiavi non abilitati dalla politica di sicurezza attuale.",
+          "host_key": "Gli algoritmi di chiave host del server non corrispondono alla politica di sicurezza attuale.",
+          "host_key_ssh_rsa": "Il server supporta solo chiavi host ssh-rsa, disabilitate per impostazione predefinita.",
+          "cipher": "La lista delle cifrature del server non si sovrappone alla politica attuale del client.",
+          "cipher_legacy": "Il server offre solo cifrature legacy come CBC o 3DES. Aggiorna il server o abilita esplicitamente una modalità di compatibilità legacy.",
+          "mac": "La lista MAC del server non si sovrappone alla politica attuale del client. Aggiorna il server o abilita una politica MAC compatibile.",
+          "compression": "Le modalità di compressione del server non si sovrappongono alla politica del client."
+        },
+        "client_offered": "Client offerti: {{algorithms}}",
+        "server_offered": "Server offerti: {{algorithms}}",
+        "missing_match": "Corrispondenza mancante: {{reason}}",
+        "no_common": "nessun algoritmo {{kind}} comune"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "Autenticazione",
+        "host_key": "Verifica chiave host",
+        "opening_transport": "Apertura trasporto",
+        "preparing": "Preparazione connessione",
+        "pty": "Allocazione PTY",
+        "queued": "In coda",
+        "ready": "Pronto",
+        "shell_ready": "Avvio shell",
+        "ssh_handshake": "Handshake SSH"
+      },
+      "target_unknown": "destinazione"
     }
   }
 }

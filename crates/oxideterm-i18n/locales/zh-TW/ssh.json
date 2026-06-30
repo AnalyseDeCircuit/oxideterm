@@ -178,8 +178,31 @@
       "reconnecting": "正在重新連線 {{label}}",
       "connecting_chain": "正在連線 {{current}}/{{total}}: {{label}}",
       "reconnecting_chain": "正在重新連線 {{current}}/{{total}}: {{label}}",
+      "failed": "連線失敗：{{label}}",
       "connected": "已連線 · {{elapsed}}",
       "target_unknown": "目標",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "金鑰交換",
+          "host_key": "主機金鑰",
+          "cipher": "加密演算法",
+          "mac": "MAC",
+          "compression": "壓縮"
+        },
+        "summary": {
+          "key_exchange": "伺服器只提供目前安全策略未啟用的金鑰交換演算法。",
+          "host_key": "伺服器主機金鑰演算法與目前安全策略不相符。",
+          "host_key_ssh_rsa": "伺服器只支援 ssh-rsa 主機金鑰，而該演算法預設已停用。",
+          "cipher": "伺服器加密演算法清單與目前用戶端策略沒有交集。",
+          "cipher_legacy": "伺服器只提供 CBC 或 3DES 等舊版加密演算法。請升級伺服器，或明確啟用舊版相容模式。",
+          "mac": "伺服器 MAC 清單與目前用戶端策略沒有交集。請升級伺服器，或啟用相容的 MAC 策略。",
+          "compression": "伺服器壓縮模式與用戶端策略沒有交集。"
+        },
+        "client_offered": "用戶端提供：{{algorithms}}",
+        "server_offered": "伺服器提供：{{algorithms}}",
+        "missing_match": "缺少交集：{{reason}}",
+        "no_common": "沒有共同的{{kind}}演算法"
+      },
       "stage": {
         "queued": "已排入佇列",
         "preparing": "準備連線",

@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "Cet hôte relais ne prend pas en charge keyboard-interactive/2FA"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "Connecté · {{elapsed}}",
+      "connecting": "Connexion à {{label}}",
+      "connecting_chain": "Connexion {{current}}/{{total}} : {{label}}",
+      "failed": "Échec de la connexion : {{label}}",
+      "reconnecting": "Reconnexion à {{label}}",
+      "reconnecting_chain": "Reconnexion {{current}}/{{total}} : {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "échange de clés",
+          "host_key": "clé d'hôte",
+          "cipher": "chiffrement",
+          "mac": "MAC",
+          "compression": "compression"
+        },
+        "summary": {
+          "key_exchange": "Le serveur ne propose que des algorithmes d'échange de clés non activés par la politique de sécurité actuelle.",
+          "host_key": "Les algorithmes de clé d'hôte du serveur ne correspondent pas à la politique de sécurité actuelle.",
+          "host_key_ssh_rsa": "Le serveur ne prend en charge que les clés d'hôte ssh-rsa, désactivées par défaut.",
+          "cipher": "La liste de chiffrements du serveur n'a aucun recouvrement avec la politique actuelle du client.",
+          "cipher_legacy": "Le serveur ne propose que d'anciens chiffrements comme CBC ou 3DES. Mettez le serveur à jour ou activez explicitement un mode de compatibilité ancien.",
+          "mac": "La liste MAC du serveur n'a aucun recouvrement avec la politique actuelle du client. Mettez le serveur à jour ou activez une politique MAC compatible.",
+          "compression": "Les modes de compression du serveur ne recouvrent pas la politique du client."
+        },
+        "client_offered": "Client proposé : {{algorithms}}",
+        "server_offered": "Serveur proposé : {{algorithms}}",
+        "missing_match": "Correspondance manquante : {{reason}}",
+        "no_common": "aucun algorithme {{kind}} commun"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "Authentification",
+        "host_key": "Vérification de la clé d'hôte",
+        "opening_transport": "Ouverture du transport",
+        "preparing": "Préparation de la connexion",
+        "pty": "Allocation du PTY",
+        "queued": "En file d'attente",
+        "ready": "Prêt",
+        "shell_ready": "Démarrage du shell",
+        "ssh_handshake": "Négociation SSH"
+      },
+      "target_unknown": "cible"
     }
   }
 }

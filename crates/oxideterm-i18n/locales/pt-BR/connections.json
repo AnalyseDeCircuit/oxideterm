@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "Este jump host não oferece suporte a keyboard-interactive/2FA"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "Conectado · {{elapsed}}",
+      "connecting": "Conectando {{label}}",
+      "connecting_chain": "Conectando {{current}}/{{total}}: {{label}}",
+      "failed": "Falha na conexão: {{label}}",
+      "reconnecting": "Reconectando {{label}}",
+      "reconnecting_chain": "Reconectando {{current}}/{{total}}: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "troca de chaves",
+          "host_key": "chave do host",
+          "cipher": "cifra",
+          "mac": "MAC",
+          "compression": "compressão"
+        },
+        "summary": {
+          "key_exchange": "O servidor ofereceu apenas algoritmos de troca de chaves que não estão habilitados pela política de segurança atual.",
+          "host_key": "Os algoritmos de chave do host do servidor não correspondem à política de segurança atual.",
+          "host_key_ssh_rsa": "O servidor oferece suporte apenas a chaves de host ssh-rsa, que são desabilitadas por padrão.",
+          "cipher": "A lista de cifras do servidor não tem interseção com a política atual do cliente.",
+          "cipher_legacy": "O servidor ofereceu apenas cifras antigas como CBC ou 3DES. Atualize o servidor ou habilite explicitamente um modo de compatibilidade legado.",
+          "mac": "A lista de MAC do servidor não tem interseção com a política atual do cliente. Atualize o servidor ou habilite uma política MAC compatível.",
+          "compression": "Os modos de compressão do servidor não coincidem com a política do cliente."
+        },
+        "client_offered": "Cliente ofereceu: {{algorithms}}",
+        "server_offered": "Servidor ofereceu: {{algorithms}}",
+        "missing_match": "Sem correspondência: {{reason}}",
+        "no_common": "nenhum algoritmo de {{kind}} em comum"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "Autenticando",
+        "host_key": "Verificando chave do host",
+        "opening_transport": "Abrindo transporte",
+        "preparing": "Preparando conexão",
+        "pty": "Alocando PTY",
+        "queued": "Na fila",
+        "ready": "Pronto",
+        "shell_ready": "Iniciando shell",
+        "ssh_handshake": "Handshake SSH"
+      },
+      "target_unknown": "destino"
     }
   }
 }

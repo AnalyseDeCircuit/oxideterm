@@ -178,8 +178,31 @@
       "reconnecting": "正在重连 {{label}}",
       "connecting_chain": "正在连接 {{current}}/{{total}}: {{label}}",
       "reconnecting_chain": "正在重连 {{current}}/{{total}}: {{label}}",
+      "failed": "连接失败：{{label}}",
       "connected": "已连接 · {{elapsed}}",
       "target_unknown": "目标",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "密钥交换",
+          "host_key": "主机密钥",
+          "cipher": "加密算法",
+          "mac": "MAC",
+          "compression": "压缩"
+        },
+        "summary": {
+          "key_exchange": "服务器只提供当前安全策略未启用的密钥交换算法。",
+          "host_key": "服务器主机密钥算法与当前安全策略不匹配。",
+          "host_key_ssh_rsa": "服务器只支持 ssh-rsa 主机密钥，而该算法默认已禁用。",
+          "cipher": "服务器加密算法列表与当前客户端策略没有交集。",
+          "cipher_legacy": "服务器只提供 CBC 或 3DES 等旧版加密算法。请升级服务端，或显式启用旧版兼容模式。",
+          "mac": "服务器 MAC 列表与当前客户端策略没有交集。请升级服务端，或启用兼容的 MAC 策略。",
+          "compression": "服务器压缩模式与客户端策略没有交集。"
+        },
+        "client_offered": "客户端提供：{{algorithms}}",
+        "server_offered": "服务端提供：{{algorithms}}",
+        "missing_match": "缺少交集：{{reason}}",
+        "no_common": "没有共同的{{kind}}算法"
+      },
       "stage": {
         "queued": "已排队",
         "preparing": "准备连接",

@@ -178,8 +178,31 @@
       "reconnecting": "Reconnecting {{label}}",
       "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
       "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
+      "failed": "Connection failed: {{label}}",
       "connected": "Connected · {{elapsed}}",
       "target_unknown": "target",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "key exchange",
+          "host_key": "host key",
+          "cipher": "cipher",
+          "mac": "MAC",
+          "compression": "compression"
+        },
+        "summary": {
+          "key_exchange": "The server only offered key exchange algorithms that are not enabled by the current security policy.",
+          "host_key": "The server host key algorithms do not match the current security policy.",
+          "host_key_ssh_rsa": "The server only supports ssh-rsa host keys, which are disabled by default.",
+          "cipher": "The server cipher list has no overlap with the current client policy.",
+          "cipher_legacy": "The server only offered legacy ciphers such as CBC or 3DES. Upgrade the server or enable a legacy compatibility mode.",
+          "mac": "The server MAC list has no overlap with the current client policy. Upgrade the server or enable a compatible MAC policy.",
+          "compression": "The server compression modes do not overlap with the client policy."
+        },
+        "client_offered": "Client offered: {{algorithms}}",
+        "server_offered": "Server offered: {{algorithms}}",
+        "missing_match": "Missing match: {{reason}}",
+        "no_common": "no common {{kind}} algorithm"
+      },
       "stage": {
         "queued": "Queued",
         "preparing": "Preparing connection",

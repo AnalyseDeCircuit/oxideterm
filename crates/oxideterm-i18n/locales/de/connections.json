@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "Dieser Jump-Host unterstützt Keyboard-Interactive/2FA nicht"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "Verbunden · {{elapsed}}",
+      "connecting": "Verbinde {{label}}",
+      "connecting_chain": "Verbinde {{current}}/{{total}}: {{label}}",
+      "failed": "Verbindung fehlgeschlagen: {{label}}",
+      "reconnecting": "Verbinde {{label}} erneut",
+      "reconnecting_chain": "Verbinde {{current}}/{{total}} erneut: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "Schlüsselaustausch",
+          "host_key": "Hostschlüssel",
+          "cipher": "Verschlüsselung",
+          "mac": "MAC",
+          "compression": "Komprimierung"
+        },
+        "summary": {
+          "key_exchange": "Der Server bietet nur Schlüsselaustausch-Algorithmen an, die in der aktuellen Sicherheitsrichtlinie nicht aktiviert sind.",
+          "host_key": "Die Hostschlüssel-Algorithmen des Servers passen nicht zur aktuellen Sicherheitsrichtlinie.",
+          "host_key_ssh_rsa": "Der Server unterstützt nur ssh-rsa-Hostschlüssel, die standardmäßig deaktiviert sind.",
+          "cipher": "Die Verschlüsselungsliste des Servers überschneidet sich nicht mit der aktuellen Client-Richtlinie.",
+          "cipher_legacy": "Der Server bietet nur alte Verschlüsselungen wie CBC oder 3DES an. Aktualisieren Sie den Server oder aktivieren Sie ausdrücklich einen Legacy-Kompatibilitätsmodus.",
+          "mac": "Die MAC-Liste des Servers überschneidet sich nicht mit der aktuellen Client-Richtlinie. Aktualisieren Sie den Server oder aktivieren Sie eine kompatible MAC-Richtlinie.",
+          "compression": "Die Komprimierungsmodi des Servers überschneiden sich nicht mit der Client-Richtlinie."
+        },
+        "client_offered": "Client angeboten: {{algorithms}}",
+        "server_offered": "Server angeboten: {{algorithms}}",
+        "missing_match": "Fehlende Übereinstimmung: {{reason}}",
+        "no_common": "kein gemeinsamer {{kind}}-Algorithmus"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "Authentifizierung",
+        "host_key": "Hostschlüssel wird geprüft",
+        "opening_transport": "Transport wird geöffnet",
+        "preparing": "Verbindung wird vorbereitet",
+        "pty": "PTY wird zugewiesen",
+        "queued": "In Warteschlange",
+        "ready": "Bereit",
+        "shell_ready": "Shell wird gestartet",
+        "ssh_handshake": "SSH-Handshake"
+      },
+      "target_unknown": "Ziel"
     }
   }
 }

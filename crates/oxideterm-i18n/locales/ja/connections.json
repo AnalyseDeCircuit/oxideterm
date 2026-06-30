@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "このジャンプホストは keyboard-interactive/2FA をサポートしていません"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "接続済み · {{elapsed}}",
+      "connecting": "{{label}} に接続中",
+      "connecting_chain": "{{current}}/{{total}} に接続中: {{label}}",
+      "failed": "接続に失敗しました: {{label}}",
+      "reconnecting": "{{label}} に再接続中",
+      "reconnecting_chain": "{{current}}/{{total}} に再接続中: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "鍵交換",
+          "host_key": "ホスト鍵",
+          "cipher": "暗号",
+          "mac": "MAC",
+          "compression": "圧縮"
+        },
+        "summary": {
+          "key_exchange": "サーバーは現在のセキュリティポリシーで有効になっていない鍵交換アルゴリズムのみを提示しました。",
+          "host_key": "サーバーのホスト鍵アルゴリズムが現在のセキュリティポリシーと一致しません。",
+          "host_key_ssh_rsa": "サーバーは ssh-rsa ホスト鍵のみをサポートしていますが、これは既定で無効です。",
+          "cipher": "サーバーの暗号リストは現在のクライアントポリシーと共通部分がありません。",
+          "cipher_legacy": "サーバーは CBC や 3DES などの古い暗号のみを提示しました。サーバーを更新するか、明示的にレガシー互換モードを有効にしてください。",
+          "mac": "サーバーの MAC リストは現在のクライアントポリシーと共通部分がありません。サーバーを更新するか、互換性のある MAC ポリシーを有効にしてください。",
+          "compression": "サーバーの圧縮モードはクライアントポリシーと共通部分がありません。"
+        },
+        "client_offered": "クライアント提示: {{algorithms}}",
+        "server_offered": "サーバー提示: {{algorithms}}",
+        "missing_match": "一致なし: {{reason}}",
+        "no_common": "共通の{{kind}}アルゴリズムがありません"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "認証中",
+        "host_key": "ホスト鍵を確認中",
+        "opening_transport": "トランスポートを開いています",
+        "preparing": "接続を準備中",
+        "pty": "PTY を割り当て中",
+        "queued": "キュー済み",
+        "ready": "準備完了",
+        "shell_ready": "シェルを開始中",
+        "ssh_handshake": "SSH ハンドシェイク"
+      },
+      "target_unknown": "ターゲット"
     }
   }
 }

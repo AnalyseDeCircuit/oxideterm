@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "이 점프 호스트는 keyboard-interactive/2FA를 지원하지 않습니다"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "연결됨 · {{elapsed}}",
+      "connecting": "{{label}} 연결 중",
+      "connecting_chain": "{{current}}/{{total}} 연결 중: {{label}}",
+      "failed": "연결 실패: {{label}}",
+      "reconnecting": "{{label}} 재연결 중",
+      "reconnecting_chain": "{{current}}/{{total}} 재연결 중: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "키 교환",
+          "host_key": "호스트 키",
+          "cipher": "암호화",
+          "mac": "MAC",
+          "compression": "압축"
+        },
+        "summary": {
+          "key_exchange": "서버가 현재 보안 정책에서 활성화되지 않은 키 교환 알고리즘만 제공했습니다.",
+          "host_key": "서버 호스트 키 알고리즘이 현재 보안 정책과 일치하지 않습니다.",
+          "host_key_ssh_rsa": "서버가 기본적으로 비활성화된 ssh-rsa 호스트 키만 지원합니다.",
+          "cipher": "서버 암호화 목록이 현재 클라이언트 정책과 겹치지 않습니다.",
+          "cipher_legacy": "서버가 CBC 또는 3DES 같은 레거시 암호화만 제공했습니다. 서버를 업그레이드하거나 레거시 호환 모드를 명시적으로 활성화하세요.",
+          "mac": "서버 MAC 목록이 현재 클라이언트 정책과 겹치지 않습니다. 서버를 업그레이드하거나 호환되는 MAC 정책을 활성화하세요.",
+          "compression": "서버 압축 모드가 클라이언트 정책과 겹치지 않습니다."
+        },
+        "client_offered": "클라이언트 제공: {{algorithms}}",
+        "server_offered": "서버 제공: {{algorithms}}",
+        "missing_match": "일치 없음: {{reason}}",
+        "no_common": "공통 {{kind}} 알고리즘 없음"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "인증 중",
+        "host_key": "호스트 키 확인 중",
+        "opening_transport": "전송 채널 여는 중",
+        "preparing": "연결 준비 중",
+        "pty": "PTY 할당 중",
+        "queued": "대기 중",
+        "ready": "준비됨",
+        "shell_ready": "셸 시작 중",
+        "ssh_handshake": "SSH 핸드셰이크"
+      },
+      "target_unknown": "대상"
     }
   }
 }

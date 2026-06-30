@@ -90,23 +90,46 @@
       "proxy_hop_kbi_unsupported": "Este host intermedio no admite keyboard-interactive/2FA"
     },
     "trace": {
-      "connected": "Connected · {{elapsed}}",
-      "connecting": "Connecting {{label}}",
-      "connecting_chain": "Connecting {{current}}/{{total}}: {{label}}",
-      "reconnecting": "Reconnecting {{label}}",
-      "reconnecting_chain": "Reconnecting {{current}}/{{total}}: {{label}}",
-      "stage": {
-        "authentication": "Authenticating",
-        "host_key": "Checking host key",
-        "opening_transport": "Opening transport",
-        "preparing": "Preparing connection",
-        "pty": "Allocating PTY",
-        "queued": "Queued",
-        "ready": "Ready",
-        "shell_ready": "Starting shell",
-        "ssh_handshake": "SSH handshake"
+      "connected": "Conectado · {{elapsed}}",
+      "connecting": "Conectando {{label}}",
+      "connecting_chain": "Conectando {{current}}/{{total}}: {{label}}",
+      "failed": "Conexión fallida: {{label}}",
+      "reconnecting": "Reconectando {{label}}",
+      "reconnecting_chain": "Reconectando {{current}}/{{total}}: {{label}}",
+      "diagnostics": {
+        "kind": {
+          "key_exchange": "intercambio de claves",
+          "host_key": "clave de host",
+          "cipher": "cifrado",
+          "mac": "MAC",
+          "compression": "compresión"
+        },
+        "summary": {
+          "key_exchange": "El servidor solo ofreció algoritmos de intercambio de claves que no están habilitados por la política de seguridad actual.",
+          "host_key": "Los algoritmos de clave de host del servidor no coinciden con la política de seguridad actual.",
+          "host_key_ssh_rsa": "El servidor solo admite claves de host ssh-rsa, que están deshabilitadas de forma predeterminada.",
+          "cipher": "La lista de cifrados del servidor no tiene intersección con la política actual del cliente.",
+          "cipher_legacy": "El servidor solo ofreció cifrados antiguos como CBC o 3DES. Actualiza el servidor o habilita explícitamente un modo de compatibilidad heredado.",
+          "mac": "La lista de MAC del servidor no tiene intersección con la política actual del cliente. Actualiza el servidor o habilita una política MAC compatible.",
+          "compression": "Los modos de compresión del servidor no coinciden con la política del cliente."
+        },
+        "client_offered": "Cliente ofreció: {{algorithms}}",
+        "server_offered": "Servidor ofreció: {{algorithms}}",
+        "missing_match": "Sin coincidencia: {{reason}}",
+        "no_common": "no hay algoritmo de {{kind}} común"
       },
-      "target_unknown": "target"
+      "stage": {
+        "authentication": "Autenticando",
+        "host_key": "Verificando clave de host",
+        "opening_transport": "Abriendo transporte",
+        "preparing": "Preparando conexión",
+        "pty": "Asignando PTY",
+        "queued": "En cola",
+        "ready": "Listo",
+        "shell_ready": "Iniciando shell",
+        "ssh_handshake": "Handshake SSH"
+      },
+      "target_unknown": "destino"
     }
   }
 }

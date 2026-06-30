@@ -642,6 +642,47 @@ impl WorkspaceApp {
         text
     }
 
+    fn ssh_algorithm_diagnostic_parts(&self, error: &str) -> Option<(String, String)> {
+        let diagnostic = parse_ssh_algorithm_negotiation_error(error)?;
+        let kind_label = self.i18n.t(diagnostic.kind.label_key());
+        let summary_key = diagnostic.kind.summary_key(&diagnostic.server_algorithms);
+        let summary = self
+            .i18n
+            .t(summary_key)
+            .replace("{{kind}}", &kind_label);
+        let no_common = self
+            .i18n
+            .t("connections.trace.diagnostics.no_common")
+            .replace("{{kind}}", &kind_label);
+        let detail = [
+            self.i18n_with(
+                "connections.trace.diagnostics.client_offered",
+                &[(
+                    "algorithms",
+                    format_algorithm_list(&diagnostic.client_algorithms),
+                )],
+            ),
+            self.i18n_with(
+                "connections.trace.diagnostics.server_offered",
+                &[(
+                    "algorithms",
+                    format_algorithm_list(&diagnostic.server_algorithms),
+                )],
+            ),
+            self.i18n_with(
+                "connections.trace.diagnostics.missing_match",
+                &[("reason", no_common)],
+            ),
+        ]
+        .join("\n");
+        Some((summary, detail))
+    }
+
+    fn ssh_algorithm_diagnostic_message(&self, error: &str) -> Option<String> {
+        let (summary, detail) = self.ssh_algorithm_diagnostic_parts(error)?;
+        Some(format!("{summary}\n{detail}"))
+    }
+
     fn connection_failure_notice_for_node(
         &self,
         node_id: &NodeId,
@@ -665,6 +706,9 @@ impl WorkspaceApp {
                 .position(|candidate| candidate == node_id)
         {
             let total = run.node_ids.len();
+            let description = self
+                .ssh_algorithm_diagnostic_message(error)
+                .unwrap_or_else(|| error.to_string());
             return Some((
                 self.i18n.t("ssh.errors.chain_failed_title"),
                 Some(self.i18n_with(
@@ -672,7 +716,7 @@ impl WorkspaceApp {
                     &[
                         ("position", (position + 1).to_string()),
                         ("total", total.to_string()),
-                        ("error", error.to_string()),
+                        ("error", description),
                     ],
                 )),
             ));
@@ -680,7 +724,10 @@ impl WorkspaceApp {
 
         Some((
             self.i18n.t("ssh.errors.generic_title"),
-            Some(error.to_string()),
+            Some(
+                self.ssh_algorithm_diagnostic_message(error)
+                    .unwrap_or_else(|| error.to_string()),
+            ),
         ))
     }
 
@@ -1420,6 +1467,123 @@ fn auth_without_runtime_secret(auth: &AuthMethod) -> bool {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SshAlgorithmDiagnosticKind {
+    KeyExchange,
+    HostKey,
+    Cipher,
+    Mac,
+    Compression,
+}
+
+impl SshAlgorithmDiagnosticKind {
+    fn label_key(self) -> &'static str {
+        match self {
+            Self::KeyExchange => "connections.trace.diagnostics.kind.key_exchange",
+            Self::HostKey => "connections.trace.diagnostics.kind.host_key",
+            Self::Cipher => "connections.trace.diagnostics.kind.cipher",
+            Self::Mac => "connections.trace.diagnostics.kind.mac",
+            Self::Compression => "connections.trace.diagnostics.kind.compression",
+        }
+    }
+
+    fn summary_key(self, server_algorithms: &[String]) -> &'static str {
+        match self {
+            Self::KeyExchange => "connections.trace.diagnostics.summary.key_exchange",
+            Self::HostKey if server_only_offers_ssh_rsa(server_algorithms) => {
+                "connections.trace.diagnostics.summary.host_key_ssh_rsa"
+            }
+            Self::HostKey => "connections.trace.diagnostics.summary.host_key",
+            Self::Cipher if server_offers_legacy_cipher(server_algorithms) => {
+                "connections.trace.diagnostics.summary.cipher_legacy"
+            }
+            Self::Cipher => "connections.trace.diagnostics.summary.cipher",
+            Self::Mac => "connections.trace.diagnostics.summary.mac",
+            Self::Compression => "connections.trace.diagnostics.summary.compression",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SshAlgorithmNegotiationDiagnostic {
+    kind: SshAlgorithmDiagnosticKind,
+    client_algorithms: Vec<String>,
+    server_algorithms: Vec<String>,
+}
+
+fn parse_ssh_algorithm_negotiation_error(
+    error: &str,
+) -> Option<SshAlgorithmNegotiationDiagnostic> {
+    // The transport layer exposes algorithm lists through this stable display
+    // shape until connection trace events carry structured diagnostic payloads.
+    let prefix = "SSH algorithm negotiation failed: no common ";
+    let after_prefix = error.split_once(prefix)?.1;
+    let (kind_text, after_kind) = after_prefix.split_once(" algorithm. Client offered: ")?;
+    let kind = match kind_text {
+        "key exchange" => SshAlgorithmDiagnosticKind::KeyExchange,
+        "host key" => SshAlgorithmDiagnosticKind::HostKey,
+        "cipher" => SshAlgorithmDiagnosticKind::Cipher,
+        "MAC" => SshAlgorithmDiagnosticKind::Mac,
+        "compression" => SshAlgorithmDiagnosticKind::Compression,
+        _ => return None,
+    };
+    let (client_text, server_text) = after_kind.split_once("; server offered: ")?;
+    Some(SshAlgorithmNegotiationDiagnostic {
+        kind,
+        client_algorithms: parse_debug_algorithm_list(client_text),
+        server_algorithms: parse_debug_algorithm_list(server_text),
+    })
+}
+
+fn parse_debug_algorithm_list(list: &str) -> Vec<String> {
+    let mut algorithms = Vec::new();
+    let mut current = String::new();
+    let mut in_string = false;
+    let mut escaping = false;
+    for ch in list.chars() {
+        if in_string {
+            if escaping {
+                current.push(ch);
+                escaping = false;
+            } else if ch == '\\' {
+                escaping = true;
+            } else if ch == '"' {
+                algorithms.push(current.clone());
+                current.clear();
+                in_string = false;
+            } else {
+                current.push(ch);
+            }
+        } else if ch == '"' {
+            in_string = true;
+        }
+    }
+    algorithms
+}
+
+fn format_algorithm_list(algorithms: &[String]) -> String {
+    if algorithms.is_empty() {
+        "-".to_string()
+    } else {
+        algorithms.join(", ")
+    }
+}
+
+fn server_only_offers_ssh_rsa(algorithms: &[String]) -> bool {
+    !algorithms.is_empty()
+        && algorithms
+            .iter()
+            .all(|algorithm| algorithm == "ssh-rsa" || algorithm == "ssh-rsa-cert-v01@openssh.com")
+}
+
+fn server_offers_legacy_cipher(algorithms: &[String]) -> bool {
+    algorithms.iter().any(|algorithm| {
+        algorithm.contains("-cbc")
+            || algorithm.contains("3des")
+            || algorithm.contains("arcfour")
+    })
+}
+
 #[cfg(test)]
 mod helper_tests {
     use super::*;
@@ -1477,6 +1641,46 @@ mod helper_tests {
         assert_eq!(
             connection_trace_failure_stage(Some("known_hosts entry mismatch")),
             ConnectionTraceStage::HostKey
+        );
+    }
+
+    #[test]
+    fn parses_algorithm_negotiation_lists_from_transport_error() {
+        let diagnostic = parse_ssh_algorithm_negotiation_error(
+            "SSH algorithm negotiation failed: no common key exchange algorithm. Client offered: [\"curve25519-sha256\", \"diffie-hellman-group14-sha256\"]; server offered: [\"diffie-hellman-group1-sha1\"]",
+        )
+        .expect("algorithm diagnostic should parse");
+
+        assert_eq!(diagnostic.kind, SshAlgorithmDiagnosticKind::KeyExchange);
+        assert_eq!(
+            diagnostic.client_algorithms,
+            ["curve25519-sha256", "diffie-hellman-group14-sha256"]
+        );
+        assert_eq!(
+            diagnostic.server_algorithms,
+            ["diffie-hellman-group1-sha1"]
+        );
+    }
+
+    #[test]
+    fn classifies_ssh_rsa_host_key_as_specific_legacy_case() {
+        let algorithms = vec!["ssh-rsa".to_string()];
+
+        assert!(server_only_offers_ssh_rsa(&algorithms));
+        assert_eq!(
+            SshAlgorithmDiagnosticKind::HostKey.summary_key(&algorithms),
+            "connections.trace.diagnostics.summary.host_key_ssh_rsa"
+        );
+    }
+
+    #[test]
+    fn classifies_cbc_cipher_as_legacy_case() {
+        let algorithms = vec!["aes128-cbc".to_string(), "3des-cbc".to_string()];
+
+        assert!(server_offers_legacy_cipher(&algorithms));
+        assert_eq!(
+            SshAlgorithmDiagnosticKind::Cipher.summary_key(&algorithms),
+            "connections.trace.diagnostics.summary.cipher_legacy"
         );
     }
 }

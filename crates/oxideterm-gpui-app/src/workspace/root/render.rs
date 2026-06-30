@@ -1320,11 +1320,12 @@ impl WorkspaceApp {
                 let workspace = workspace.clone();
                 ToastView {
                     title: self.connection_trace_title(event),
-                    description: None,
+                    description: self.connection_trace_description(event),
                     status_text: Some(self.connection_trace_status_text(event)),
                     progress: Some(event.progress),
                     variant: match event.status {
                         ConnectionTraceStatus::Ready => ToastVariant::Success,
+                        ConnectionTraceStatus::Failed => ToastVariant::Error,
                         _ => ToastVariant::Default,
                     },
                     close: Some(
@@ -1349,6 +1350,7 @@ impl WorkspaceApp {
         const DISPLAY_DELAY: Duration = Duration::from_millis(1200);
         const UPDATE_COALESCE: Duration = Duration::from_millis(300);
         const SUCCESS_DISMISS: Duration = Duration::from_millis(1800);
+        const FAILURE_DISMISS: Duration = Duration::from_secs(16);
 
         let mut changed = false;
         while let Ok(event) = self.connection_trace_rx.try_recv() {
@@ -1423,7 +1425,26 @@ impl WorkspaceApp {
                     }
                     changed = true;
                 }
-                ConnectionTraceStatus::Failed | ConnectionTraceStatus::Cancelled => {
+                ConnectionTraceStatus::Failed => {
+                    // Failures are the moment users need the trace most, so
+                    // show the final event immediately even if the delayed
+                    // running toast never became visible.
+                    trace.visible = true;
+                    trace.latest = event.clone();
+                    trace.displayed = Some(event);
+                    trace.expires_at = Some(now + FAILURE_DISMISS);
+                    let attempt_id = attempt_id.clone();
+                    cx.spawn(async move |weak, cx| {
+                        Timer::after(FAILURE_DISMISS).await;
+                        let _ = weak.update(cx, |workspace, cx| {
+                            workspace.connection_trace_toasts.remove(&attempt_id);
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                    changed = true;
+                }
+                ConnectionTraceStatus::Cancelled => {
                     self.connection_trace_toasts.remove(&attempt_id);
                     changed = true;
                 }
@@ -1478,6 +1499,12 @@ impl WorkspaceApp {
             .step_index
             .zip(event.total_steps)
             .filter(|(_, total)| *total > 1);
+        if event.status == ConnectionTraceStatus::Failed {
+            return self
+                .i18n
+                .t("connections.trace.failed")
+                .replace("{{label}}", &label);
+        }
         match (event.mode, chain_title) {
             (ConnectionTraceMode::Reconnect, Some((current, total))) => self
                 .i18n
@@ -1502,12 +1529,29 @@ impl WorkspaceApp {
         }
     }
 
+    fn connection_trace_description(&self, event: &ConnectionTraceEvent) -> Option<String> {
+        if event.status != ConnectionTraceStatus::Failed {
+            return None;
+        }
+        event
+            .detail
+            .as_deref()
+            .and_then(|detail| self.ssh_algorithm_diagnostic_parts(detail).map(|(summary, _)| summary))
+    }
+
     fn connection_trace_status_text(&self, event: &ConnectionTraceEvent) -> String {
         if event.status == ConnectionTraceStatus::Ready {
             return self
                 .i18n
                 .t("connections.trace.connected")
                 .replace("{{elapsed}}", &format_connection_trace_elapsed(event.elapsed_ms));
+        }
+        if event.status == ConnectionTraceStatus::Failed {
+            if let Some(detail) = event.detail.as_deref()
+                && let Some((_, diagnostic_detail)) = self.ssh_algorithm_diagnostic_parts(detail)
+            {
+                return diagnostic_detail;
+            }
         }
         event
             .detail
