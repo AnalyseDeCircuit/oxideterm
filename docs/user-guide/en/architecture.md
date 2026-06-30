@@ -2,7 +2,7 @@
 
 > **Version**: Native user-guide architecture draft
 > **Last updated**: 2026-06-19
-> **Workspace version**: Cargo workspace `2.0.0-gpui-preview.10`
+> **Workspace version**: Cargo workspace `2.0.0-gpui-preview.11`
 > **Reference style**: based on the Tauri architecture documents, rewritten for the Rust/GPUI native app.
 
 This document describes the OxideTerm Native system architecture, design decisions, and core components. It follows the same architectural writing style as the Tauri reference: start with principles, show the whole system, separate data and control paths, then describe each subsystem and its lifecycle.

@@ -2,7 +2,7 @@
 
 > **版本**: Native 用户指南架构草案
 > **上次更新**: 2026-06-19
-> **工作区版本**: Cargo workspace `2.0.0-gpui-preview.10`
+> **工作区版本**: Cargo workspace `2.0.0-gpui-preview.11`
 > **参考写法**: 参考 Tauri 架构文档的组织方式，并按 Rust/GPUI Native 应用重写。
 
 本文档描述 OxideTerm Native 的系统架构、设计决策和核心组件。写法遵循 Tauri 参考文档的结构：先说明设计理念，再给出整体架构图，随后按通信平面、分层、核心组件和生命周期展开。
