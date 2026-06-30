@@ -9,8 +9,8 @@ use std::{
 
 use gpui::{Context, Window};
 use oxideterm_connections::{
-    SaveConnectionRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
-    SavedUpstreamProxyProtocol, first_available_default_key_path,
+    RawTcpProfile, SaveConnectionRequest, SaveRawTcpProfileRequest, SaveSerialProfileRequest,
+    SaveTelnetProfileRequest, SavedUpstreamProxyProtocol, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
@@ -48,7 +48,10 @@ use oxideterm_session_adapter::{
     managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
     ssh_config_from_saved_connection,
 };
-use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
+use oxideterm_terminal::{
+    RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpSessionConfig, RawTcpTlsConfig,
+    RawTcpTlsVerification, SerialSessionConfig, TelnetSessionConfig,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
@@ -164,6 +167,7 @@ impl WorkspaceApp {
         });
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -201,6 +205,53 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn open_raw_tcp_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_new_connection_form(window, cx);
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.transport = NewConnectionTransport::RawTcp;
+            form.port = super::form_state::RAW_TCP_DEFAULT_PORT_TEXT.to_string();
+            form.focused_field = super::form_state::NewConnectionField::Host;
+            form.field_focused = false;
+        }
+    }
+
+    pub(in crate::workspace) fn open_raw_tcp_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .raw_tcp_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+
+        self.prepare_modal_interaction_boundary();
+        self.new_connection_form = Some(form_from_raw_tcp_profile(
+            &profile,
+            self.i18n.t("ssh.form.ungrouped"),
+        ));
+        self.drill_down_parent_node_id = None;
+        self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = Some(id.to_string());
+        self.duplicating_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
+        self.close_new_connection_select();
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_drill_down_form(
         &mut self,
         parent_node_id: NodeId,
@@ -234,6 +285,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -368,6 +420,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -424,6 +477,7 @@ impl WorkspaceApp {
         self.new_connection_form = None;
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -484,6 +538,23 @@ impl WorkspaceApp {
             )
         {
             self.submit_telnet_connection_form(action, window, cx);
+            return;
+        }
+        if self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| form.transport == NewConnectionTransport::RawTcp)
+            && self.drill_down_parent_node_id.is_none()
+            && matches!(
+                new_connection_form_mode(
+                    self.editing_saved_connection_id.as_deref(),
+                    self.duplicating_saved_connection_id.as_deref(),
+                    self.saved_connection_prompt_action,
+                ),
+                NewConnectionFormMode::NewConnection
+            )
+        {
+            self.submit_raw_tcp_connection_form(action, window, cx);
             return;
         }
         if self
@@ -891,6 +962,143 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn submit_raw_tcp_connection_form(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let host = form.host.trim().to_string();
+        let port = form
+            .port
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port > 0);
+        if host.is_empty() {
+            form.error = Some(self.i18n.t("modals.new_connection.raw_tcp_host_required"));
+            cx.notify();
+            return;
+        }
+        let Some(port) = port else {
+            form.error = Some(self.i18n.t("modals.new_connection.raw_tcp_invalid_port"));
+            cx.notify();
+            return;
+        };
+        let line_ending = form.raw_tcp_line_ending.clone();
+        let display_mode = form.raw_tcp_display_mode.clone();
+        let send_mode = form.raw_tcp_send_mode.clone();
+        let tls_mode = form.raw_tcp_tls_mode.clone();
+        let tls_verification = form.raw_tcp_tls_verification.clone();
+        let tls_server_name = form.raw_tcp_tls_server_name.trim().to_string();
+        let tls_server_name = (!tls_server_name.is_empty()).then_some(tls_server_name);
+        let editing_profile_id = self.editing_raw_tcp_profile_id.clone();
+
+        let should_save_profile = action != NewConnectionSubmitAction::Connect;
+        let mut save_request = should_save_profile.then(|| {
+            raw_tcp_save_request_from_form(
+                form,
+                editing_profile_id.clone(),
+                &host,
+                port,
+                tls_server_name.clone(),
+                &self.i18n,
+            )
+        });
+        let config = raw_tcp_session_config_from_form(
+            host,
+            port,
+            line_ending,
+            display_mode,
+            send_mode,
+            tls_mode,
+            tls_verification,
+            tls_server_name,
+        );
+        form.pending = true;
+        form.error = None;
+
+        if action == NewConnectionSubmitAction::Save {
+            let request =
+                save_request.expect("Raw TCP save action must build a Raw TCP profile request");
+            match self.connection_store.upsert_raw_tcp_profile(request) {
+                Ok(_) => {
+                    if editing_profile_id.is_some() {
+                        self.session_manager.status =
+                            Some(self.i18n.t("sessionManager.edit_properties.save"));
+                    }
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                    self.new_connection_form = None;
+                    self.editing_raw_tcp_profile_id = None;
+                    self.close_new_connection_select();
+                    self.focus_active_pane(window, cx);
+                }
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.raw_tcp_save_failed")
+                        ));
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        if action == NewConnectionSubmitAction::SaveAndConnect {
+            let request = save_request
+                .take()
+                .expect("Raw TCP save-and-open action must build a Raw TCP profile request");
+            match self.connection_store.upsert_raw_tcp_profile(request) {
+                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.raw_tcp_save_failed")
+                        ));
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
+        // Raw TCP follows the local-terminal transport boundary: no SSH node,
+        // no saved SSH auth, and no host-tool side effects.
+        match self.create_raw_tcp_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                if let Some(request) = save_request {
+                    match self.connection_store.upsert_raw_tcp_profile(request) {
+                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                        Err(error) => {
+                            self.session_manager.status = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.raw_tcp_save_failed")
+                            ));
+                        }
+                    }
+                }
+                self.new_connection_form = None;
+                self.editing_raw_tcp_profile_id = None;
+                self.close_new_connection_select();
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(error.to_string());
+                }
+            }
+        }
+        cx.notify();
+    }
+
     fn submit_remote_desktop_connection_form(
         &mut self,
         window: &mut Window,
@@ -1091,6 +1299,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = Some(action);
         self.close_new_connection_select();
@@ -1113,6 +1322,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -1194,6 +1404,7 @@ impl WorkspaceApp {
                         self.sync_saved_connection_node_title(&id);
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
+                        self.editing_raw_tcp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.session_manager.status =
@@ -1242,6 +1453,7 @@ impl WorkspaceApp {
                     Ok(_) => {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
+                        self.editing_raw_tcp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.session_manager.status =
@@ -2791,6 +3003,108 @@ mod runtime_save_tests {
         assert_eq!(home.config.host, "100.118.61.75");
         assert_eq!(prod.title, "Production");
     }
+
+    #[test]
+    fn raw_tcp_form_config_maps_protocol_options_to_terminal_runtime() {
+        let config = raw_tcp_session_config_from_form(
+            "device.local".to_string(),
+            443,
+            oxideterm_connections::RawTcpLineEnding::Lf,
+            oxideterm_connections::RawTcpDisplayMode::Mixed,
+            oxideterm_connections::RawTcpSendMode::Hex,
+            oxideterm_connections::RawTcpTlsMode::Enabled,
+            oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates,
+            Some("device-tls.local".to_string()),
+        );
+
+        assert_eq!(config.host, "device.local");
+        assert_eq!(config.port, 443);
+        assert_eq!(config.line_ending, RawTcpLineEnding::Lf);
+        assert_eq!(config.display_mode, RawTcpDisplayMode::Mixed);
+        assert_eq!(config.send_mode, RawTcpSendMode::Hex);
+        assert!(config.tls.enabled);
+        assert_eq!(
+            config.tls.verification,
+            RawTcpTlsVerification::AllowInvalidCertificates
+        );
+        assert_eq!(config.tls.server_name.as_deref(), Some("device-tls.local"));
+    }
+
+    #[test]
+    fn raw_tcp_profile_editor_form_preserves_saved_options() {
+        let now = chrono::Utc::now();
+        let profile = RawTcpProfile {
+            id: "raw-tcp-1".to_string(),
+            name: "Lab console".to_string(),
+            group: Some("Lab".to_string()),
+            host: "device.local".to_string(),
+            port: 443,
+            line_ending: oxideterm_connections::RawTcpLineEnding::None,
+            display_mode: oxideterm_connections::RawTcpDisplayMode::Mixed,
+            send_mode: oxideterm_connections::RawTcpSendMode::Hex,
+            tls_mode: oxideterm_connections::RawTcpTlsMode::Enabled,
+            tls_verification:
+                oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates,
+            tls_server_name: Some("device-tls.local".to_string()),
+            connect_on_open: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        };
+
+        let form = form_from_raw_tcp_profile(&profile, "Ungrouped".to_string());
+
+        assert_eq!(form.transport, NewConnectionTransport::RawTcp);
+        assert_eq!(form.raw_tcp_profile_name, "Lab console");
+        assert_eq!(form.host, "device.local");
+        assert_eq!(form.port, "443");
+        assert_eq!(form.group, "Lab");
+        assert_eq!(form.raw_tcp_line_ending, profile.line_ending);
+        assert_eq!(form.raw_tcp_display_mode, profile.display_mode);
+        assert_eq!(form.raw_tcp_send_mode, profile.send_mode);
+        assert_eq!(form.raw_tcp_tls_mode, profile.tls_mode);
+        assert_eq!(form.raw_tcp_tls_verification, profile.tls_verification);
+        assert_eq!(form.raw_tcp_tls_server_name, "device-tls.local");
+    }
+
+    #[test]
+    fn raw_tcp_save_request_maps_form_options() {
+        let form = NewConnectionForm {
+            raw_tcp_profile_name: "Lab console".to_string(),
+            group: "Lab".to_string(),
+            raw_tcp_line_ending: oxideterm_connections::RawTcpLineEnding::Lf,
+            raw_tcp_display_mode: oxideterm_connections::RawTcpDisplayMode::Mixed,
+            raw_tcp_send_mode: oxideterm_connections::RawTcpSendMode::Hex,
+            raw_tcp_tls_mode: oxideterm_connections::RawTcpTlsMode::Enabled,
+            raw_tcp_tls_verification:
+                oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates,
+            ..NewConnectionForm::default()
+        };
+
+        let request = raw_tcp_save_request_from_form(
+            &form,
+            Some("raw-tcp-1".to_string()),
+            "device.local",
+            443,
+            Some("device-tls.local".to_string()),
+            &oxideterm_i18n::I18n::default(),
+        );
+
+        assert_eq!(request.id.as_deref(), Some("raw-tcp-1"));
+        assert_eq!(request.name, "Lab console");
+        assert_eq!(request.group.as_deref(), Some("Lab"));
+        assert_eq!(request.host, "device.local");
+        assert_eq!(request.port, 443);
+        assert_eq!(request.line_ending, Some(form.raw_tcp_line_ending));
+        assert_eq!(request.display_mode, Some(form.raw_tcp_display_mode));
+        assert_eq!(request.send_mode, Some(form.raw_tcp_send_mode));
+        assert_eq!(request.tls_mode, Some(form.raw_tcp_tls_mode));
+        assert_eq!(
+            request.tls_verification,
+            Some(form.raw_tcp_tls_verification)
+        );
+        assert_eq!(request.tls_server_name.as_deref(), Some("device-tls.local"));
+    }
 }
 
 fn serial_profile_name_or_port(name: &str, port_path: &str) -> String {
@@ -2808,6 +3122,128 @@ fn telnet_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String 
         format!("{}:{}", host.trim(), port)
     } else {
         name.to_string()
+    }
+}
+
+fn raw_tcp_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!("{}:{}", host.trim(), port)
+    } else {
+        name.to_string()
+    }
+}
+
+fn raw_tcp_save_request_from_form(
+    form: &NewConnectionForm,
+    profile_id: Option<String>,
+    host: &str,
+    port: u16,
+    tls_server_name: Option<String>,
+    i18n: &oxideterm_i18n::I18n,
+) -> SaveRawTcpProfileRequest {
+    SaveRawTcpProfileRequest {
+        id: profile_id,
+        name: raw_tcp_profile_name_or_endpoint(&form.raw_tcp_profile_name, host, port),
+        group: serial_profile_group_from_form(&form.group, i18n),
+        host: host.to_string(),
+        port,
+        line_ending: Some(form.raw_tcp_line_ending.clone()),
+        display_mode: Some(form.raw_tcp_display_mode.clone()),
+        send_mode: Some(form.raw_tcp_send_mode.clone()),
+        tls_mode: Some(form.raw_tcp_tls_mode.clone()),
+        tls_verification: Some(form.raw_tcp_tls_verification.clone()),
+        tls_server_name,
+        connect_on_open: None,
+    }
+}
+
+fn form_from_raw_tcp_profile(
+    profile: &RawTcpProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // Raw TCP profiles are edited through the shared connection modal, but they
+    // must stay outside the SSH saved-connection edit path.
+    NewConnectionForm {
+        transport: NewConnectionTransport::RawTcp,
+        host: profile.host.clone(),
+        port: profile.port.to_string(),
+        group: profile.group.clone().unwrap_or(ungrouped_label),
+        raw_tcp_profile_name: profile.name.clone(),
+        raw_tcp_line_ending: profile.line_ending.clone(),
+        raw_tcp_display_mode: profile.display_mode.clone(),
+        raw_tcp_send_mode: profile.send_mode.clone(),
+        raw_tcp_tls_mode: profile.tls_mode.clone(),
+        raw_tcp_tls_verification: profile.tls_verification.clone(),
+        raw_tcp_tls_server_name: profile.tls_server_name.clone().unwrap_or_default(),
+        focused_field: super::form_state::NewConnectionField::RawTcpProfileName,
+        field_focused: true,
+        save_connection: true,
+        agent_available: detect_ssh_agent_available(),
+        ..NewConnectionForm::default()
+    }
+}
+
+fn raw_tcp_session_config_from_form(
+    host: String,
+    port: u16,
+    line_ending: oxideterm_connections::RawTcpLineEnding,
+    display_mode: oxideterm_connections::RawTcpDisplayMode,
+    send_mode: oxideterm_connections::RawTcpSendMode,
+    tls_mode: oxideterm_connections::RawTcpTlsMode,
+    tls_verification: oxideterm_connections::RawTcpTlsVerification,
+    tls_server_name: Option<String>,
+) -> RawTcpSessionConfig {
+    RawTcpSessionConfig {
+        host,
+        port,
+        line_ending: terminal_raw_tcp_line_ending(&line_ending),
+        display_mode: terminal_raw_tcp_display_mode(&display_mode),
+        send_mode: terminal_raw_tcp_send_mode(&send_mode),
+        tls: RawTcpTlsConfig {
+            enabled: matches!(tls_mode, oxideterm_connections::RawTcpTlsMode::Enabled),
+            verification: terminal_raw_tcp_tls_verification(&tls_verification),
+            server_name: tls_server_name,
+        },
+    }
+}
+
+fn terminal_raw_tcp_line_ending(
+    line_ending: &oxideterm_connections::RawTcpLineEnding,
+) -> RawTcpLineEnding {
+    match line_ending {
+        oxideterm_connections::RawTcpLineEnding::Lf => RawTcpLineEnding::Lf,
+        oxideterm_connections::RawTcpLineEnding::CrLf => RawTcpLineEnding::CrLf,
+        oxideterm_connections::RawTcpLineEnding::Cr => RawTcpLineEnding::Cr,
+        oxideterm_connections::RawTcpLineEnding::None => RawTcpLineEnding::None,
+    }
+}
+
+fn terminal_raw_tcp_display_mode(
+    display_mode: &oxideterm_connections::RawTcpDisplayMode,
+) -> RawTcpDisplayMode {
+    match display_mode {
+        oxideterm_connections::RawTcpDisplayMode::Text => RawTcpDisplayMode::Text,
+        oxideterm_connections::RawTcpDisplayMode::Hex => RawTcpDisplayMode::Hex,
+        oxideterm_connections::RawTcpDisplayMode::Mixed => RawTcpDisplayMode::Mixed,
+    }
+}
+
+fn terminal_raw_tcp_send_mode(send_mode: &oxideterm_connections::RawTcpSendMode) -> RawTcpSendMode {
+    match send_mode {
+        oxideterm_connections::RawTcpSendMode::Text => RawTcpSendMode::Text,
+        oxideterm_connections::RawTcpSendMode::Hex => RawTcpSendMode::Hex,
+    }
+}
+
+fn terminal_raw_tcp_tls_verification(
+    verification: &oxideterm_connections::RawTcpTlsVerification,
+) -> RawTcpTlsVerification {
+    match verification {
+        oxideterm_connections::RawTcpTlsVerification::System => RawTcpTlsVerification::System,
+        oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates => {
+            RawTcpTlsVerification::AllowInvalidCertificates
+        }
     }
 }
 

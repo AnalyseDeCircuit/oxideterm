@@ -107,6 +107,7 @@
     "cmd_open_cloud_sync": "Abrir sincronização na nuvem",
     "cmd_open_serial_terminal": "Abrir terminal serial",
     "cmd_open_telnet_terminal": "Abrir terminal Telnet",
+    "cmd_open_raw_tcp_terminal": "Abrir terminal Raw TCP",
     "cmd_open_rdp_preview": "Abrir prévia RDP",
     "cmd_open_vnc_preview": "Abrir prévia VNC"
   },
@@ -329,6 +330,7 @@
         "sync_forwards": "Sincronizar encaminhamentos salvos",
         "sync_quick_commands": "Sincronizar comandos rápidos",
         "sync_serial_profiles": "Sincronizar perfis seriais",
+        "sync_raw_tcp_profiles": "Sincronizar perfis Raw TCP",
         "sync_app_settings": "Sincronizar configurações do aplicativo",
         "include_local_terminal_env_vars": "Incluir variáveis de ambiente do terminal local",
         "sync_plugin_settings": "Sincronizar configurações de plugin",
@@ -369,6 +371,7 @@
         "forwards_detail": "Regras de encaminhamento de porta salvas são incluídas com os metadados da conexão proprietária.",
         "quick_commands_detail": "Definições de comandos rápidos são incluídas.",
         "serial_profiles_detail": "Perfis de conexão serial são incluídos.",
+        "raw_tcp_profiles_detail": "Perfis de conexão Raw TCP são incluídos.",
         "app_settings_sections_detail": "Seções selecionadas: {{sections}}",
         "app_settings_disabled_detail": "As configurações do aplicativo estão excluídas do escopo de sincronização atual.",
         "plugin_settings_all_detail": "Todas as configurações de plugins sincronizáveis são incluídas.",
@@ -391,13 +394,13 @@
       },
       "backup": {
         "description": "Backup de reversão Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{pluginSettingsCount}} configurações de plugin, {{size}}, {{sensitiveCredentials}} credenciais sensíveis"
+        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{rawTcpProfiles}} perfis Raw TCP, {{pluginSettingsCount}} configurações de plugin, {{size}}, {{sensitiveCredentials}} credenciais sensíveis"
       },
       "history": {
         "action_upload": "Enviar",
         "action_pull": "Baixar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{pluginSettingsCount}} configurações de plugin, {{sensitiveCredentials}} credenciais sensíveis"
+        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{rawTcpProfiles}} perfis Raw TCP, {{pluginSettingsCount}} configurações de plugin, {{sensitiveCredentials}} credenciais sensíveis"
       },
       "errors": {
         "operation_in_progress": "Outra operação de sincronização na nuvem já está em execução.",
@@ -538,6 +541,7 @@
         "total_forwards": "Encaminhamentos",
         "quick_commands_label": "Comandos rápidos",
         "serial_profiles_label": "Perfis seriais",
+        "raw_tcp_profiles_label": "Perfis Raw TCP",
         "will_import": "Será importado",
         "will_merge": "Serão mesclados",
         "will_replace": "Serão substituídos",
@@ -556,6 +560,7 @@
         "toggle_forwards": "Importar encaminhamentos salvos ({{count}})",
         "toggle_quick_commands": "Importar comandos rápidos ({{count}})",
         "toggle_serial_profiles": "Importar perfis seriais ({{count}})",
+        "toggle_raw_tcp_profiles": "Importar perfis Raw TCP ({{count}})",
         "section_field_count": "{{count}} campos",
         "section_general": "Geral",
         "section_terminal_appearance": "Aparência do terminal",
@@ -718,6 +723,12 @@
         "parity": "Paridade",
         "flow_control": "Controle de fluxo",
         "connect_on_open": "Conectar ao abrir",
+        "line_ending": "Fim de linha",
+        "display_mode": "Modo de exibição",
+        "send_mode": "Modo de envio",
+        "tls_mode": "Modo TLS",
+        "tls_verification": "Verificação TLS",
+        "tls_server_name": "Nome do servidor TLS",
         "setting_field": "Campo de configuração"
       },
       "tabs": {

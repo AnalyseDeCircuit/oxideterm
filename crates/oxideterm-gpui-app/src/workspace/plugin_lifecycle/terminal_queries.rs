@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use super::{TabKind, TerminalSessionId, WorkspaceApp};
 use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
+use oxideterm_terminal::RawTcpSessionConfig;
 
 // Terminal read APIs project pane state into the plugin contract. Keeping search
 // and scroll-buffer code here prevents lifecycle from owning terminal query rules.
@@ -67,6 +68,9 @@ pub(super) fn native_plugin_active_terminal_target(
     let Some(session_id) = workspace.active_terminal_session_id() else {
         return Value::Null;
     };
+    if let Some(config) = workspace.raw_tcp_terminal_configs.get(&session_id) {
+        return native_plugin_raw_tcp_terminal_target(session_id, config);
+    }
     let terminal_type = workspace
         .active_tab()
         .map(|tab| {
@@ -118,6 +122,36 @@ pub(super) fn native_plugin_active_terminal_target(
     })
 }
 
+fn native_plugin_raw_tcp_terminal_target(
+    session_id: TerminalSessionId,
+    config: &RawTcpSessionConfig,
+) -> Value {
+    // Raw TCP panes are local transports, but plugins need the transport kind
+    // to avoid treating socket sessions as shell-backed local terminals.
+    json!({
+        "sessionId": session_id.0.to_string(),
+        "terminalType": "raw_tcp",
+        "terminalTransport": "raw_tcp",
+        "nodeId": null,
+        "connectionId": null,
+        "connectionState": "active",
+        "label": format!("TCP {}", config.endpoint_label()),
+        "transport": {
+            "type": "raw_tcp",
+            "host": config.host,
+            "port": config.port,
+            "lineEnding": format!("{:?}", config.line_ending).to_lowercase(),
+            "displayMode": format!("{:?}", config.display_mode).to_lowercase(),
+            "sendMode": format!("{:?}", config.send_mode).to_lowercase(),
+            "tls": {
+                "enabled": config.tls.enabled,
+                "verification": format!("{:?}", config.tls.verification).to_lowercase(),
+                "serverName": config.tls.server_name,
+            },
+        },
+    })
+}
+
 fn native_plugin_terminal_state_label(state: &Value) -> Value {
     if let Some(state) = state.as_str() {
         return json!(state);
@@ -126,4 +160,49 @@ fn native_plugin_terminal_state_label(state: &Value) -> Value {
         return json!("error");
     }
     Value::Null
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxideterm_terminal::{
+        RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpTlsConfig, RawTcpTlsVerification,
+    };
+
+    #[test]
+    fn raw_tcp_active_target_exposes_transport_metadata() {
+        let target = native_plugin_raw_tcp_terminal_target(
+            TerminalSessionId(42),
+            &RawTcpSessionConfig {
+                host: "example.test".to_string(),
+                port: 4242,
+                line_ending: RawTcpLineEnding::CrLf,
+                display_mode: RawTcpDisplayMode::Mixed,
+                send_mode: RawTcpSendMode::Hex,
+                tls: RawTcpTlsConfig {
+                    enabled: true,
+                    verification: RawTcpTlsVerification::AllowInvalidCertificates,
+                    server_name: Some("socket.example.test".to_string()),
+                },
+            },
+        );
+
+        assert_eq!(target["terminalType"], "raw_tcp");
+        assert_eq!(target["terminalTransport"], "raw_tcp");
+        assert_eq!(target["label"], "TCP example.test:4242");
+        assert_eq!(target["transport"]["host"], "example.test");
+        assert_eq!(target["transport"]["port"], 4242);
+        assert_eq!(target["transport"]["lineEnding"], "crlf");
+        assert_eq!(target["transport"]["displayMode"], "mixed");
+        assert_eq!(target["transport"]["sendMode"], "hex");
+        assert_eq!(target["transport"]["tls"]["enabled"], true);
+        assert_eq!(
+            target["transport"]["tls"]["verification"],
+            "allowinvalidcertificates"
+        );
+        assert_eq!(
+            target["transport"]["tls"]["serverName"],
+            "socket.example.test"
+        );
+    }
 }

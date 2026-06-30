@@ -114,6 +114,9 @@ impl WorkspaceApp {
         if preview.serial_profiles_count > 0 {
             children.push(self.render_oxide_import_serial_profiles(&preview, cx));
         }
+        if preview.raw_tcp_profiles_count > 0 {
+            children.push(self.render_oxide_import_raw_tcp_profiles(&preview, cx));
+        }
         if preview.plugin_settings_count > 0 {
             children.push(self.render_oxide_import_plugins(&preview, cx));
         }
@@ -804,6 +807,33 @@ impl WorkspaceApp {
             cx.listener(|this, _event, _window, cx| {
                 if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
                     dialog.import_serial_profiles = !dialog.import_serial_profiles;
+                }
+                cx.notify();
+                cx.stop_propagation();
+            }),
+            cx,
+        )])
+    }
+
+    fn render_oxide_import_raw_tcp_profiles(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_raw_tcp_profiles);
+        self.render_oxide_import_preview_subcard(vec![self.render_oxide_option_row(
+            self.i18n
+                .t("modals.import.section_raw_tcp_profiles")
+                .replace("{{count}}", &preview.raw_tcp_profiles_count.to_string()),
+            self.i18n.t("modals.import.toggle_raw_tcp_profiles"),
+            checked,
+            cx.listener(|this, _event, _window, cx| {
+                if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
+                    dialog.import_raw_tcp_profiles = !dialog.import_raw_tcp_profiles;
                 }
                 cx.notify();
                 cx.stop_propagation();

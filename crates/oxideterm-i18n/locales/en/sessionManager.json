@@ -164,6 +164,15 @@
       "delete_failed": "Failed to delete Telnet profile",
       "confirm_delete": "Delete Telnet profile \"{{name}}\"?"
     },
+    "raw_tcp_profiles": {
+      "title": "Raw TCP Profiles",
+      "count": "{{count}} profile(s)",
+      "open": "Open",
+      "delete": "Delete",
+      "open_failed": "Failed to open Raw TCP profile",
+      "delete_failed": "Failed to delete Raw TCP profile",
+      "confirm_delete": "Delete Raw TCP profile \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Privilege credentials",
       "description": "Store separate sudo/su prompt credentials. Secrets stay in the system keychain and are only read after you click the terminal helper.",

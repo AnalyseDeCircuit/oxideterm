@@ -49,6 +49,7 @@
       "copy": "Copy",
       "copy_title": "Copy command output",
       "copy_command": "Copy command",
+      "reconnect_transport": "Reconnect",
       "send_to_ai": "Send to OxideSens",
       "fill_command_bar": "Fill command bar",
       "find": "Find...",

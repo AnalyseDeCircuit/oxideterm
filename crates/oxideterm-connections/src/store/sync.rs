@@ -7,6 +7,10 @@ impl ConnectionStore {
         build_serial_profiles_sync_snapshot(&self.data)
     }
 
+    pub fn export_raw_tcp_profiles_snapshot(&self) -> Result<RawTcpProfilesSyncSnapshot> {
+        build_raw_tcp_profiles_sync_snapshot(&self.data)
+    }
+
     pub fn local_sync_metadata(&self) -> Result<LocalSyncMetadata> {
         let snapshot = self.export_saved_connections_snapshot()?;
         let saved_connections_updated_at = snapshot
@@ -197,6 +201,35 @@ impl ConnectionStore {
         }
         Ok(applied)
     }
+
+    pub fn apply_raw_tcp_profiles_snapshot(
+        &mut self,
+        snapshot: RawTcpProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        let mut applied = 0usize;
+        for profile in snapshot.records {
+            profile.validate()?;
+            if let Some(existing) = self
+                .data
+                .raw_tcp_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.raw_tcp_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        if applied > 0 {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
 }
 
 fn build_saved_connection_from_sync_payload(
@@ -289,6 +322,25 @@ fn build_serial_profiles_sync_snapshot(
     )?;
 
     Ok(SerialProfilesSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+    })
+}
+
+fn build_raw_tcp_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<RawTcpProfilesSyncSnapshot> {
+    let mut records = data.raw_tcp_profiles.clone();
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(
+        &records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok(RawTcpProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,

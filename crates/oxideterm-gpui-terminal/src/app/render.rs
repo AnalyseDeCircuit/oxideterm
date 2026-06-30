@@ -29,7 +29,7 @@ const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 17.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 18.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
 
@@ -292,6 +292,11 @@ impl TerminalPane {
             .command_selection_labels
             .fill_command_bar
             .clone();
+        let reconnect_transport_label = self
+            .preferences
+            .command_selection_labels
+            .reconnect_transport
+            .clone();
         let find_label = self.preferences.command_selection_labels.find.clone();
         let select_command_label = self
             .preferences
@@ -356,6 +361,17 @@ impl TerminalPane {
                     },
                     cx,
                 ))
+                .when(self.is_raw_tcp_transport(), |content| {
+                    content.child(self.render_terminal_context_menu_item(
+                        reconnect_transport_label,
+                        !self.can_reconnect_raw_tcp(),
+                        |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.reconnect_raw_tcp(cx);
+                        },
+                        cx,
+                    ))
+                })
                 .child(context_menu_separator(tokens))
                 .child(self.render_terminal_context_menu_item(
                     send_to_ai_label,

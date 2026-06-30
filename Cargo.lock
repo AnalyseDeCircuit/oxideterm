@@ -7760,6 +7760,7 @@ dependencies = [
  "anyhow",
  "crossbeam-channel",
  "libc",
+ "native-tls",
  "oxideterm-modem-transfer",
  "oxideterm-ssh",
  "oxideterm-terminal-encoding",
@@ -7768,6 +7769,7 @@ dependencies = [
  "polling",
  "serialport",
  "tokio",
+ "tokio-native-tls",
  "tracing",
  "windows 0.61.3",
 ]

@@ -35,6 +35,8 @@ pub struct CloudSyncHistorySummary {
     #[serde(default)]
     pub serial_profiles: usize,
     #[serde(default)]
+    pub raw_tcp_profiles: usize,
+    #[serde(default)]
     pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub plugin_settings_count: usize,
@@ -65,6 +67,8 @@ pub struct CloudSyncRollbackBackupMetadata {
     pub quick_commands: usize,
     #[serde(default)]
     pub serial_profiles: usize,
+    #[serde(default)]
+    pub raw_tcp_profiles: usize,
     #[serde(default)]
     pub sensitive_credentials: usize,
 }

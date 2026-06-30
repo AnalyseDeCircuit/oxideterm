@@ -148,6 +148,8 @@ impl WorkspaceApp {
                 | NewConnectionField::Group
                 | NewConnectionField::Color
                 | NewConnectionField::TelnetProfileName
+                | NewConnectionField::RawTcpProfileName
+                | NewConnectionField::RawTcpTlsServerName
                 | NewConnectionField::JumpHost
                 | NewConnectionField::JumpUsername
                 | NewConnectionField::UpstreamProxyHost

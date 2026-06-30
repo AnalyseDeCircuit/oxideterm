@@ -107,6 +107,7 @@
     "cmd_open_cloud_sync": "Cloud-Sync öffnen",
     "cmd_open_serial_terminal": "Serielles Terminal öffnen",
     "cmd_open_telnet_terminal": "Telnet-Terminal öffnen",
+    "cmd_open_raw_tcp_terminal": "Raw-TCP-Terminal öffnen",
     "cmd_open_rdp_preview": "RDP-Vorschau öffnen",
     "cmd_open_vnc_preview": "VNC-Vorschau öffnen"
   },
@@ -329,6 +330,7 @@
         "sync_forwards": "Gespeicherte Weiterleitungen synchronisieren",
         "sync_quick_commands": "Schnellbefehle synchronisieren",
         "sync_serial_profiles": "Serielle Profile synchronisieren",
+        "sync_raw_tcp_profiles": "Raw-TCP-Profile synchronisieren",
         "sync_app_settings": "Anwendungseinstellungen synchronisieren",
         "include_local_terminal_env_vars": "Umgebungsvariablen des lokalen Terminals einschließen",
         "sync_plugin_settings": "Plugin-Einstellungen synchronisieren",
@@ -369,6 +371,7 @@
         "forwards_detail": "Gespeicherte Portweiterleitungen werden zusammen mit den Metadaten der zugehörigen Verbindung synchronisiert.",
         "quick_commands_detail": "Definitionen für Schnellbefehle sind enthalten.",
         "serial_profiles_detail": "Serielle Verbindungsprofile sind enthalten.",
+        "raw_tcp_profiles_detail": "Raw-TCP-Verbindungsprofile sind enthalten.",
         "app_settings_sections_detail": "Ausgewählte Bereiche: {{sections}}",
         "app_settings_disabled_detail": "Anwendungseinstellungen sind im aktuellen Synchronisierungsumfang ausgeschlossen.",
         "plugin_settings_all_detail": "Alle synchronisierbaren Plugin-Einstellungen sind enthalten.",
@@ -391,13 +394,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync Rollback-Sicherung",
-        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{size}}, {{sensitiveCredentials}} sensible Anmeldedaten"
+        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{rawTcpProfiles}} Raw-TCP-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{size}}, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "history": {
         "action_upload": "Hochladen",
         "action_pull": "Abrufen",
         "action_restore": "Wiederherstellen",
-        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{sensitiveCredentials}} sensible Anmeldedaten"
+        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{rawTcpProfiles}} Raw-TCP-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "errors": {
         "operation_in_progress": "Ein anderer Cloud-Sync-Vorgang wird bereits ausgeführt.",
@@ -538,6 +541,7 @@
         "total_forwards": "Weiterleitungen",
         "quick_commands_label": "Schnellbefehle",
         "serial_profiles_label": "Serielle Profile",
+        "raw_tcp_profiles_label": "Raw-TCP-Profile",
         "will_import": "Wird importiert",
         "will_merge": "Wird zusammengeführt",
         "will_replace": "Wird ersetzt",
@@ -556,6 +560,7 @@
         "toggle_forwards": "Gespeicherte Weiterleitungen importieren ({{count}})",
         "toggle_quick_commands": "Schnellbefehle importieren ({{count}})",
         "toggle_serial_profiles": "Serielle Profile importieren ({{count}})",
+        "toggle_raw_tcp_profiles": "Raw-TCP-Profile importieren ({{count}})",
         "section_field_count": "{{count}} Felder",
         "section_general": "Allgemein",
         "section_terminal_appearance": "Terminal-Darstellung",
@@ -718,6 +723,12 @@
         "parity": "Parität",
         "flow_control": "Flusskontrolle",
         "connect_on_open": "Beim Öffnen verbinden",
+        "line_ending": "Zeilenende",
+        "display_mode": "Anzeigemodus",
+        "send_mode": "Sendemodus",
+        "tls_mode": "TLS-Modus",
+        "tls_verification": "TLS-Prüfung",
+        "tls_server_name": "TLS-Servername",
         "setting_field": "Einstellungsfeld"
       },
       "tabs": {

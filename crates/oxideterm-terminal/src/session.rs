@@ -14,7 +14,7 @@ use alacritty_terminal::{
     term::{Config, Term},
     vte::ansi::{self, Handler, Processor},
 };
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use crossbeam_channel::{Receiver, unbounded};
 use oxideterm_modem_transfer::{ModemConsumer, ModemConsumerEvent, ModemTransfer};
 use oxideterm_ssh::{
@@ -147,6 +147,7 @@ include!("session/ssh_config.rs");
 include!("session/ssh_pty.rs");
 include!("session/telnet.rs");
 include!("session/serial.rs");
+include!("session/raw_tcp.rs");
 
 #[cfg(test)]
 mod tests {

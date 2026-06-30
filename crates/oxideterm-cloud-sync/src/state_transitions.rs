@@ -43,6 +43,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        raw_tcp_profiles: manifest
+            .sections
+            .raw_tcp_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         sensitive_credentials: manifest
             .sections
             .sensitive_credentials
@@ -314,6 +320,7 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
+            raw_tcp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([(
                 "appearance".to_string(),
@@ -337,6 +344,7 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            raw_tcp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         };
         let outcome = UploadOutcome {
@@ -409,6 +417,7 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
+            raw_tcp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([(
                 "appearance".to_string(),
@@ -429,6 +438,7 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            raw_tcp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         };
         let outcome = ApplyStructuredPreviewOutcome {
@@ -438,6 +448,7 @@ mod tests {
                 forwards: None,
                 quick_commands_applied: 0,
                 serial_profiles_applied: 0,
+                raw_tcp_profiles_applied: 0,
                 app_settings_applied: 0,
                 plugin_settings_applied: 0,
             },
@@ -450,6 +461,7 @@ mod tests {
                 forwards: false,
                 quick_commands: false,
                 serial_profiles: false,
+                raw_tcp_profiles: false,
                 sensitive_credentials: false,
                 app_settings_sections: Vec::new(),
                 plugin_ids: Vec::new(),
@@ -502,6 +514,7 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            raw_tcp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         };
         let metadata = RemoteMetadata {

@@ -164,6 +164,15 @@
       "delete_failed": "Không xóa được hồ sơ Telnet",
       "confirm_delete": "Xóa hồ sơ Telnet \"{{name}}\"?"
     },
+    "raw_tcp_profiles": {
+      "title": "Hồ sơ Raw TCP",
+      "count": "{{count}} hồ sơ",
+      "open": "Mở",
+      "delete": "Xóa",
+      "open_failed": "Không mở được hồ sơ Raw TCP",
+      "delete_failed": "Không xóa được hồ sơ Raw TCP",
+      "confirm_delete": "Xóa hồ sơ Raw TCP \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Thông tin xác thực đặc quyền",
       "description": "Lưu riêng thông tin xác thực cho lời nhắc sudo/su. Bí mật nằm trong keychain hệ thống và chỉ được đọc sau khi bạn bấm nút hỗ trợ terminal.",

@@ -3,6 +3,7 @@ enum SessionManagerDisplayItem {
     Connection(ConnectionInfo),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
+    RawTcp(RawTcpProfile),
 }
 
 impl SessionManagerDisplayItem {
@@ -11,6 +12,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.id,
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
+            Self::RawTcp(profile) => &profile.id,
         }
     }
 
@@ -19,6 +21,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.name,
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
+            Self::RawTcp(profile) => &profile.name,
         }
     }
 
@@ -27,6 +30,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.group.as_deref(),
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
+            Self::RawTcp(profile) => profile.group.as_deref(),
         }
     }
 
@@ -35,6 +39,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.last_used_at.clone(),
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
+            Self::RawTcp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
         }
     }
 
@@ -43,6 +48,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.host,
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
+            Self::RawTcp(profile) => &profile.host,
         }
     }
 
@@ -51,13 +57,14 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => u32::from(connection.port),
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
+            Self::RawTcp(profile) => u32::from(profile.port),
         }
     }
 
     fn username(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.username,
-            Self::Serial(_) | Self::Telnet(_) => "",
+            Self::Serial(_) | Self::Telnet(_) | Self::RawTcp(_) => "",
         }
     }
 
@@ -66,6 +73,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => auth_label(connection.auth_type).to_lowercase(),
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
+            Self::RawTcp(_) => "raw tcp".to_string(),
         }
     }
 
@@ -76,6 +84,14 @@ impl SessionManagerDisplayItem {
             }
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Telnet(profile) => format!("{}:{}", profile.host, profile.port),
+            Self::RawTcp(profile) => {
+                let endpoint = format!("{}:{}", profile.host, profile.port);
+                if matches!(profile.tls_mode, oxideterm_connections::RawTcpTlsMode::Enabled) {
+                    format!("{endpoint} · TLS")
+                } else {
+                    endpoint
+                }
+            }
         }
     }
 
@@ -104,6 +120,19 @@ impl SessionManagerDisplayItem {
                 profile.port,
                 profile.group.as_deref().unwrap_or_default()
             ),
+            Self::RawTcp(profile) => format!(
+                "{}\n{}\n{}\n{}\n{}\n{}",
+                profile.name,
+                profile.host,
+                profile.port,
+                profile.group.as_deref().unwrap_or_default(),
+                profile.tls_server_name.as_deref().unwrap_or_default(),
+                if matches!(profile.tls_mode, oxideterm_connections::RawTcpTlsMode::Enabled) {
+                    "tls"
+                } else {
+                    "tcp"
+                }
+            ),
         }
     }
 
@@ -112,6 +141,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(_) => LucideIcon::Server,
             Self::Serial(_) => LucideIcon::Radio,
             Self::Telnet(_) => LucideIcon::Terminal,
+            Self::RawTcp(_) => LucideIcon::Cable,
         }
     }
 }
@@ -137,6 +167,13 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::Telnet),
+            )
+            .chain(
+                self.connection_store
+                    .raw_tcp_profiles()
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::RawTcp),
             )
             .filter(|item| {
                 query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
@@ -786,6 +823,7 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| rgba(0x0ea5e933)),
             SessionManagerDisplayItem::Serial(_) => rgba(0xf59e0b33),
             SessionManagerDisplayItem::Telnet(_) => rgba(0x22c55e33),
+            SessionManagerDisplayItem::RawTcp(_) => rgba(0xf9731633),
         };
         let fg = match item {
             SessionManagerDisplayItem::Connection(connection) => connection
@@ -796,6 +834,7 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| rgb(0x7dd3fc)),
             SessionManagerDisplayItem::Serial(_) => rgb(0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => rgb(0x86efac),
+            SessionManagerDisplayItem::RawTcp(_) => rgb(0xfb923c),
         };
         div()
             .w(px(40.0))
@@ -954,6 +993,51 @@ impl WorkspaceApp {
                         cx,
                     ))
             }
+            SessionManagerDisplayItem::RawTcp(profile) => {
+                let open_id = profile.id.clone();
+                let edit_id = profile.id.clone();
+                let delete_id = profile.id.clone();
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        12.0,
+                        rgb(0x4ade80),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_raw_tcp_profile(&open_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        12.0,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_raw_tcp_profile_editor(&edit_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Trash2,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        12.0,
+                        rgb(0xf87171),
+                        has_background,
+                        move |this, _event, _window, cx| {
+                            this.request_delete_raw_tcp_profile(&delete_id, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
         }
     }
 
@@ -1022,6 +1106,9 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Telnet(profile) => {
                 self.open_saved_telnet_profile(&profile.id, window, cx)
+            }
+            SessionManagerDisplayItem::RawTcp(profile) => {
+                self.open_saved_raw_tcp_profile(&profile.id, window, cx)
             }
         }
     }

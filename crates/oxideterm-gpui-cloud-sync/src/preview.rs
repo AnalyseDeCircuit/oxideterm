@@ -13,8 +13,8 @@ use oxideterm_cloud_sync::{
     state::CloudSyncPersistedState,
 };
 use oxideterm_connections::{
-    ConnectionInfo, SavedConnectionsSyncSnapshot, SerialProfile, SerialProfilesSyncSnapshot,
-    oxide_file::AppSettingsSectionPreview,
+    ConnectionInfo, RawTcpProfile, RawTcpProfilesSyncSnapshot, SavedConnectionsSyncSnapshot,
+    SerialProfile, SerialProfilesSyncSnapshot, oxide_file::AppSettingsSectionPreview,
 };
 use oxideterm_forwarding::{PersistedForwardDto, SavedForwardsSyncSnapshot};
 use oxideterm_quick_commands::{QuickCommand, QuickCommandsSnapshot};
@@ -62,6 +62,7 @@ pub struct CloudSyncPreviewSummary {
     pub forwards: usize,
     pub quick_commands: usize,
     pub serial_profiles: usize,
+    pub raw_tcp_profiles: usize,
     pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub app_settings_sections: Vec<CloudSyncAppSettingsSection>,
@@ -211,6 +212,7 @@ pub struct CloudSyncLocalFieldDiffSnapshot {
     pub forwards: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands: Option<QuickCommandsSnapshot>,
     pub serial_profiles: Option<SerialProfilesSyncSnapshot>,
+    pub raw_tcp_profiles: Option<RawTcpProfilesSyncSnapshot>,
     pub app_settings_sections: Vec<AppSettingsSectionPreview>,
 }
 
@@ -439,6 +441,13 @@ pub fn cloud_sync_coverage_model(raw_scope: &RawSyncScope) -> Vec<CloudSyncCover
             ),
         },
         CloudSyncCoverageItem {
+            label_key: "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
+            status: coverage_status_from_bool(scope.sync_raw_tcp_profiles),
+            detail: CloudSyncCoverageDetail::Static(
+                "plugin.cloud_sync.coverage.raw_tcp_profiles_detail",
+            ),
+        },
+        CloudSyncCoverageItem {
             label_key: "plugin.cloud_sync.settings.sync_app_settings",
             status: app_settings_status,
             detail: CloudSyncCoverageDetail::AppSettingsSections(scope.app_settings_sections),
@@ -497,6 +506,12 @@ pub fn cloud_sync_preview_impact_items(
         "plugin.cloud_sync.preview.serial_profiles_label",
         summary.serial_profiles,
         selection.import_serial_profiles,
+    );
+    push_preview_impact(
+        &mut items,
+        "plugin.cloud_sync.preview.raw_tcp_profiles_label",
+        summary.raw_tcp_profiles,
+        selection.import_raw_tcp_profiles,
     );
     push_preview_impact(
         &mut items,
@@ -601,6 +616,16 @@ pub fn cloud_sync_upload_diff_items(
     );
     push_section_diff(
         &mut items,
+        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_raw_tcp_profiles"),
+        scope.sync_raw_tcp_profiles,
+        current.raw_tcp_profiles.as_deref(),
+        baseline.and_then(|state| state.raw_tcp_profiles.as_deref()),
+        remote.and_then(|sections| sections.raw_tcp_profiles.as_deref()),
+        remote_known,
+        Some(snapshot.raw_tcp_profiles_record_count),
+    );
+    push_section_diff(
+        &mut items,
         CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_sensitive_credentials"),
         scope.sync_sensitive_credentials,
         current.sensitive_credentials.as_deref(),
@@ -670,6 +695,19 @@ pub fn cloud_sync_apply_diff_items(
         Some(
             preview
                 .serial_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len()),
+        ),
+    );
+    push_apply_section_diff(
+        &mut items,
+        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_raw_tcp_profiles"),
+        selection.import_raw_tcp_profiles,
+        remote.raw_tcp_profiles.as_deref(),
+        local.raw_tcp_profiles.as_deref(),
+        Some(
+            preview
+                .raw_tcp_profiles_snapshot
                 .as_ref()
                 .map_or(0, |snapshot| snapshot.records.len()),
         ),
@@ -788,6 +826,17 @@ pub fn cloud_sync_apply_field_diff_items(
             &selection.conflict_strategy,
         );
     }
+    if selection.import_raw_tcp_profiles
+        && let Some(remote) = preview.raw_tcp_profiles_snapshot.as_ref()
+    {
+        push_raw_tcp_profile_field_diffs(
+            &mut items,
+            remote,
+            preview.base_raw_tcp_profiles_snapshot.as_ref(),
+            local.raw_tcp_profiles.as_ref(),
+            &selection.conflict_strategy,
+        );
+    }
     if selection.import_app_settings {
         push_app_settings_field_diffs(&mut items, preview, selection, local);
     }
@@ -841,6 +890,15 @@ pub fn cloud_sync_upload_field_diff_items(
         push_upload_serial_profile_field_diffs(
             &mut items,
             remote_preview.serial_profiles_snapshot.as_ref(),
+            local,
+        );
+    }
+    if scope.sync_raw_tcp_profiles
+        && let Some(local) = local.raw_tcp_profiles.as_ref()
+    {
+        push_upload_raw_tcp_profile_field_diffs(
+            &mut items,
+            remote_preview.raw_tcp_profiles_snapshot.as_ref(),
             local,
         );
     }
@@ -1363,6 +1421,114 @@ fn push_serial_profile_field_diffs(
         push_non_empty_field_diff(
             items,
             "plugin.cloud_sync.settings.sync_serial_profiles",
+            remote_profile.id.clone(),
+            remote_profile.name.clone(),
+            status,
+            fields,
+        );
+    }
+}
+
+fn push_upload_raw_tcp_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&RawTcpProfilesSyncSnapshot>,
+    local: &RawTcpProfilesSyncSnapshot,
+) {
+    let remote_profiles = remote
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen_ids = BTreeSet::new();
+    for local_profile in &local.records {
+        seen_ids.insert(local_profile.id.as_str());
+        let remote_profile = remote_profiles.get(local_profile.id.as_str()).copied();
+        let fields = remote_profile
+            .map(|remote_profile| raw_tcp_profile_changed_fields(remote_profile, local_profile))
+            .unwrap_or_else(|| raw_tcp_profile_summary_fields(local_profile));
+        let status = if remote_profile.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
+            local_profile.id.clone(),
+            local_profile.name.clone(),
+            status,
+            fields,
+        );
+    }
+    for (id, remote_profile) in remote_profiles {
+        if seen_ids.contains(id) {
+            continue;
+        }
+        items.push(field_diff_item_with_key(
+            "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
+            remote_profile.id.clone(),
+            remote_profile.name.clone(),
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
+fn push_raw_tcp_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &RawTcpProfilesSyncSnapshot,
+    base: Option<&RawTcpProfilesSyncSnapshot>,
+    local: Option<&RawTcpProfilesSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    let base_profiles = base
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let local_profiles = local
+        .into_iter()
+        .flat_map(|snapshot| snapshot.records.iter())
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    for remote_profile in &remote.records {
+        let local_profile = local_profiles.get(remote_profile.id.as_str()).copied();
+        let base_profile = base_profiles.get(remote_profile.id.as_str()).copied();
+        let effective_remote = local_profile
+            .and_then(|local_profile| {
+                base_profile.and_then(|base_profile| {
+                    merge_structured_model_fields(
+                        base_profile,
+                        local_profile,
+                        remote_profile,
+                        conflict_strategy,
+                    )
+                    .ok()
+                    .flatten()
+                })
+            })
+            .unwrap_or_else(|| remote_profile.clone());
+        let fields = match (base_profile, local_profile) {
+            (Some(base_profile), Some(local_profile)) => raw_tcp_profile_merge_fields(
+                base_profile,
+                local_profile,
+                remote_profile,
+                &effective_remote,
+                conflict_strategy,
+            ),
+            (_, Some(local_profile)) => {
+                raw_tcp_profile_changed_fields(local_profile, &effective_remote)
+            }
+            _ => raw_tcp_profile_summary_fields(remote_profile),
+        };
+        let status = if local_profile.is_some() {
+            CloudSyncFieldDiffStatus::Modified
+        } else {
+            CloudSyncFieldDiffStatus::Added
+        };
+        push_non_empty_field_diff(
+            items,
+            "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
             remote_profile.id.clone(),
             remote_profile.name.clone(),
             status,
@@ -2201,6 +2367,210 @@ fn serial_profile_summary_fields(value: &SerialProfile) -> Vec<CloudSyncFieldDif
     ]
 }
 
+fn raw_tcp_profile_changed_fields(
+    before: &RawTcpProfile,
+    after: &RawTcpProfile,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(before.name.clone()),
+        Some(after.name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        before.group.clone(),
+        after.group.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.host",
+        Some(before.host.clone()),
+        Some(after.host.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.port",
+        Some(before.port.to_string()),
+        Some(after.port.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.line_ending",
+        Some(format!("{:?}", before.line_ending)),
+        Some(format!("{:?}", after.line_ending)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.display_mode",
+        Some(format!("{:?}", before.display_mode)),
+        Some(format!("{:?}", after.display_mode)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.send_mode",
+        Some(format!("{:?}", before.send_mode)),
+        Some(format!("{:?}", after.send_mode)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tls_mode",
+        Some(format!("{:?}", before.tls_mode)),
+        Some(format!("{:?}", after.tls_mode)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tls_verification",
+        Some(format!("{:?}", before.tls_verification)),
+        Some(format!("{:?}", after.tls_verification)),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tls_server_name",
+        before.tls_server_name.clone(),
+        after.tls_server_name.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.connect_on_open",
+        Some(before.connect_on_open.to_string()),
+        Some(after.connect_on_open.to_string()),
+    );
+    fields
+}
+
+fn raw_tcp_profile_merge_fields(
+    base: &RawTcpProfile,
+    local: &RawTcpProfile,
+    remote: &RawTcpProfile,
+    effective: &RawTcpProfile,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(base.name.clone()),
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+        Some(effective.name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        base.group.clone(),
+        local.group.clone(),
+        remote.group.clone(),
+        effective.group.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.host",
+        Some(base.host.clone()),
+        Some(local.host.clone()),
+        Some(remote.host.clone()),
+        Some(effective.host.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.port",
+        Some(base.port.to_string()),
+        Some(local.port.to_string()),
+        Some(remote.port.to_string()),
+        Some(effective.port.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.line_ending",
+        Some(format!("{:?}", base.line_ending)),
+        Some(format!("{:?}", local.line_ending)),
+        Some(format!("{:?}", remote.line_ending)),
+        Some(format!("{:?}", effective.line_ending)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.display_mode",
+        Some(format!("{:?}", base.display_mode)),
+        Some(format!("{:?}", local.display_mode)),
+        Some(format!("{:?}", remote.display_mode)),
+        Some(format!("{:?}", effective.display_mode)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.send_mode",
+        Some(format!("{:?}", base.send_mode)),
+        Some(format!("{:?}", local.send_mode)),
+        Some(format!("{:?}", remote.send_mode)),
+        Some(format!("{:?}", effective.send_mode)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tls_mode",
+        Some(format!("{:?}", base.tls_mode)),
+        Some(format!("{:?}", local.tls_mode)),
+        Some(format!("{:?}", remote.tls_mode)),
+        Some(format!("{:?}", effective.tls_mode)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tls_verification",
+        Some(format!("{:?}", base.tls_verification)),
+        Some(format!("{:?}", local.tls_verification)),
+        Some(format!("{:?}", remote.tls_verification)),
+        Some(format!("{:?}", effective.tls_verification)),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.tls_server_name",
+        base.tls_server_name.clone(),
+        local.tls_server_name.clone(),
+        remote.tls_server_name.clone(),
+        effective.tls_server_name.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.connect_on_open",
+        Some(base.connect_on_open.to_string()),
+        Some(local.connect_on_open.to_string()),
+        Some(remote.connect_on_open.to_string()),
+        Some(effective.connect_on_open.to_string()),
+        conflict_strategy,
+    );
+    fields
+}
+
+fn raw_tcp_profile_summary_fields(value: &RawTcpProfile) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.host",
+            None,
+            Some(value.host.clone()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.port",
+            None,
+            Some(value.port.to_string()),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.tls_mode",
+            None,
+            Some(format!("{:?}", value.tls_mode)),
+        ),
+    ]
+}
+
 fn forward_item_name(value: &PersistedForwardDto) -> String {
     format!(
         "{} {}:{} -> {}:{}",
@@ -2587,6 +2957,7 @@ pub fn cloud_sync_preview_fact_rows(
     ]];
     if summary.quick_commands > 0
         || summary.serial_profiles > 0
+        || summary.raw_tcp_profiles > 0
         || summary.sensitive_credentials > 0
     {
         rows.push(vec![
@@ -2597,6 +2968,10 @@ pub fn cloud_sync_preview_fact_rows(
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.serial_profiles_label",
                 value: CloudSyncPreviewFactValue::Count(summary.serial_profiles),
+            },
+            CloudSyncPreviewFactSpec {
+                label_key: "plugin.cloud_sync.preview.raw_tcp_profiles_label",
+                value: CloudSyncPreviewFactValue::Count(summary.raw_tcp_profiles),
             },
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.sensitive_credentials_label",
@@ -2675,6 +3050,11 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                     .as_ref()
                     .map(|snapshot| snapshot.records.len())
                     .unwrap_or(0),
+                raw_tcp_profiles: preview
+                    .raw_tcp_profiles_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.records.len())
+                    .unwrap_or(0),
                 sensitive_credentials: preview
                     .sensitive_credentials_preview
                     .as_ref()
@@ -2708,6 +3088,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: 0,
+            raw_tcp_profiles: preview.metadata.raw_tcp_profiles_count.unwrap_or(0),
             sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
             has_app_settings: preview.preview.has_app_settings,
             app_settings_sections: preview
@@ -2910,6 +3291,8 @@ mod tests {
             selected_quick_command_ids: Default::default(),
             import_serial_profiles: false,
             selected_serial_profile_ids: Default::default(),
+            import_raw_tcp_profiles: false,
+            selected_raw_tcp_profile_ids: Default::default(),
             import_sensitive_credentials: false,
             import_app_settings: true,
             selected_app_settings_sections: ["general".to_string()].into_iter().collect(),
@@ -3041,10 +3424,12 @@ mod tests {
                 .expect("remote quick commands"),
             ),
             serial_profiles_snapshot: None,
+            raw_tcp_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_raw_tcp_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: Default::default(),
@@ -3060,6 +3445,8 @@ mod tests {
             selected_quick_command_ids: Default::default(),
             import_serial_profiles: false,
             selected_serial_profile_ids: Default::default(),
+            import_raw_tcp_profiles: false,
+            selected_raw_tcp_profile_ids: Default::default(),
             import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: Default::default(),
@@ -3117,6 +3504,7 @@ mod tests {
                 .expect("remote quick commands"),
             ),
             serial_profiles_snapshot: None,
+            raw_tcp_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: Some(
@@ -3129,6 +3517,7 @@ mod tests {
                 .expect("base quick commands"),
             ),
             base_serial_profiles_snapshot: None,
+            base_raw_tcp_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: Default::default(),
@@ -3144,6 +3533,8 @@ mod tests {
             selected_quick_command_ids: Default::default(),
             import_serial_profiles: false,
             selected_serial_profile_ids: Default::default(),
+            import_raw_tcp_profiles: false,
+            selected_raw_tcp_profile_ids: Default::default(),
             import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: Default::default(),
@@ -3202,10 +3593,12 @@ mod tests {
                 .expect("remote quick commands"),
             ),
             serial_profiles_snapshot: None,
+            raw_tcp_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_raw_tcp_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: Default::default(),
@@ -3251,6 +3644,7 @@ mod tests {
             forwards_record_count: 1,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
+            raw_tcp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         }
     }

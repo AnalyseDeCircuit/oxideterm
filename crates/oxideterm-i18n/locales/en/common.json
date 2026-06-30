@@ -107,6 +107,7 @@
     "session_ssh_terminal": "SSH Terminal",
     "cmd_open_serial_terminal": "Open Serial Terminal",
     "cmd_open_telnet_terminal": "Open Telnet Terminal",
+    "cmd_open_raw_tcp_terminal": "Open Raw TCP Terminal",
     "cmd_open_rdp_preview": "Open RDP Preview",
     "cmd_open_vnc_preview": "Open VNC Preview"
   },
@@ -321,6 +322,7 @@
         "sync_forwards": "Sync saved forwards",
         "sync_quick_commands": "Sync quick commands",
         "sync_serial_profiles": "Sync serial profiles",
+        "sync_raw_tcp_profiles": "Sync Raw TCP profiles",
         "sync_app_settings": "Sync application settings",
         "include_local_terminal_env_vars": "Include local terminal environment variables",
         "sync_plugin_settings": "Sync plugin settings",
@@ -361,6 +363,7 @@
         "forwards_detail": "Saved port forwarding rules are included with their owner connection metadata.",
         "quick_commands_detail": "Quick command definitions are included.",
         "serial_profiles_detail": "Serial connection profiles are included.",
+        "raw_tcp_profiles_detail": "Raw TCP connection profiles are included.",
         "app_settings_sections_detail": "Selected sections: {{sections}}",
         "app_settings_disabled_detail": "Application settings are excluded by the current sync scope.",
         "plugin_settings_all_detail": "All syncable plugin settings are included.",
@@ -383,13 +386,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync rollback backup",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{rawTcpProfiles}} Raw TCP profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
       },
       "history": {
         "action_upload": "Upload",
         "action_pull": "Pull",
         "action_restore": "Restore",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{rawTcpProfiles}} Raw TCP profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
       },
       "errors": {
         "operation_in_progress": "Another cloud sync operation is already running.",
@@ -530,6 +533,7 @@
         "total_forwards": "Forwards",
         "quick_commands_label": "Quick Commands",
         "serial_profiles_label": "Serial Profiles",
+        "raw_tcp_profiles_label": "Raw TCP Profiles",
         "will_import": "Will import",
         "will_merge": "Will merge",
         "will_replace": "Will replace",
@@ -548,6 +552,7 @@
         "toggle_forwards": "Import saved forwards ({{count}})",
         "toggle_quick_commands": "Import quick commands ({{count}})",
         "toggle_serial_profiles": "Import serial profiles ({{count}})",
+        "toggle_raw_tcp_profiles": "Import Raw TCP profiles ({{count}})",
         "section_field_count": "{{count}} fields",
         "section_general": "General",
         "section_terminal_appearance": "Terminal Appearance",
@@ -710,6 +715,12 @@
         "parity": "Parity",
         "flow_control": "Flow control",
         "connect_on_open": "Connect on open",
+        "line_ending": "Line ending",
+        "display_mode": "Display mode",
+        "send_mode": "Send mode",
+        "tls_mode": "TLS mode",
+        "tls_verification": "TLS verification",
+        "tls_server_name": "TLS server name",
         "setting_field": "Setting field"
       },
       "tabs": {

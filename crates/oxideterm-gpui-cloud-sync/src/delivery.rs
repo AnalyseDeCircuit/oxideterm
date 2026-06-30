@@ -718,6 +718,11 @@ fn filter_structured_preview_for_selection(
             .records
             .retain(|profile| selection.selected_serial_profile_ids.contains(&profile.id));
     }
+    if let Some(snapshot) = preview.raw_tcp_profiles_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|profile| selection.selected_raw_tcp_profile_ids.contains(&profile.id));
+    }
 }
 
 fn read_apply_sync_password(
@@ -1064,6 +1069,7 @@ fn create_cloud_sync_rollback_backup(
             forwards: preview.total_forwards,
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: 0,
+            raw_tcp_profiles: metadata.raw_tcp_profiles_count.unwrap_or(0),
             sensitive_credentials: metadata.portable_secret_count.unwrap_or(0),
         }),
     }))

@@ -13,6 +13,7 @@
       "copy": "Sao chép",
       "copy_title": "Sao chép đầu ra lệnh",
       "copy_command": "Sao chép lệnh",
+      "reconnect_transport": "Kết nối lại",
       "send_to_ai": "Gửi tới OxideSens",
       "fill_command_bar": "Điền vào thanh lệnh",
       "find": "Tìm...",

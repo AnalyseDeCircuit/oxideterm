@@ -9,6 +9,7 @@ alacritty_terminal.workspace = true
 anyhow.workspace = true
 crossbeam-channel.workspace = true
 libc.workspace = true
+native-tls = "0.2"
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-terminal-encoding = { path = "../oxideterm-terminal-encoding" }
@@ -17,6 +18,7 @@ oxideterm-trzsz = { path = "../oxideterm-trzsz" }
 polling.workspace = true
 serialport.workspace = true
 tokio.workspace = true
+tokio-native-tls = "0.3"
 tracing.workspace = true
 
 [target.'cfg(windows)'.dependencies]

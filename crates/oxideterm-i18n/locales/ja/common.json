@@ -107,6 +107,7 @@
     "cmd_open_cloud_sync": "クラウド同期を開く",
     "cmd_open_serial_terminal": "シリアルターミナルを開く",
     "cmd_open_telnet_terminal": "Telnet ターミナルを開く",
+    "cmd_open_raw_tcp_terminal": "Raw TCP ターミナルを開く",
     "cmd_open_rdp_preview": "RDP プレビューを開く",
     "cmd_open_vnc_preview": "VNC プレビューを開く"
   },
@@ -329,6 +330,7 @@
         "sync_forwards": "保存済みフォワードを同期",
         "sync_quick_commands": "クイックコマンドを同期",
         "sync_serial_profiles": "シリアルプロファイルを同期",
+        "sync_raw_tcp_profiles": "Raw TCP プロファイルを同期",
         "sync_app_settings": "アプリ設定を同期",
         "include_local_terminal_env_vars": "ローカル端末の環境変数を含める",
         "sync_plugin_settings": "プラグイン設定を同期",
@@ -369,6 +371,7 @@
         "forwards_detail": "保存済みポート転送ルールが所有元接続のメタデータと一緒に含まれます。",
         "quick_commands_detail": "クイックコマンド定義が含まれます。",
         "serial_profiles_detail": "シリアル接続プロファイルが含まれます。",
+        "raw_tcp_profiles_detail": "Raw TCP 接続プロファイルが含まれます。",
         "app_settings_sections_detail": "選択済みセクション: {{sections}}",
         "app_settings_disabled_detail": "現在の同期範囲ではアプリケーション設定は除外されています。",
         "plugin_settings_all_detail": "同期可能なすべてのプラグイン設定が含まれます。",
@@ -391,13 +394,13 @@
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{rawTcpProfiles}} 件の Raw TCP プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "history": {
         "action_upload": "アップロード",
         "action_pull": "プル",
         "action_restore": "復元",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{sensitiveCredentials}} 件の機密資格情報"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{rawTcpProfiles}} 件の Raw TCP プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "errors": {
         "operation_in_progress": "別のクラウド同期操作が実行中です。しばらくしてから再試行してください。",
@@ -538,6 +541,7 @@
         "total_forwards": "フォワード数",
         "quick_commands_label": "クイックコマンド",
         "serial_profiles_label": "シリアルプロファイル",
+        "raw_tcp_profiles_label": "Raw TCP プロファイル",
         "will_import": "インポート対象",
         "will_merge": "マージ対象",
         "will_replace": "置換対象",
@@ -556,6 +560,7 @@
         "toggle_forwards": "保存済みフォワードをインポート ({{count}})",
         "toggle_quick_commands": "クイックコマンドをインポート ({{count}})",
         "toggle_serial_profiles": "シリアルプロファイルをインポート ({{count}})",
+        "toggle_raw_tcp_profiles": "Raw TCP プロファイルをインポート ({{count}})",
         "section_field_count": "{{count}} 項目",
         "section_general": "一般",
         "section_terminal_appearance": "ターミナル表示",
@@ -718,6 +723,12 @@
         "parity": "パリティ",
         "flow_control": "フロー制御",
         "connect_on_open": "開いたら接続",
+        "line_ending": "改行コード",
+        "display_mode": "表示モード",
+        "send_mode": "送信モード",
+        "tls_mode": "TLS モード",
+        "tls_verification": "TLS 検証",
+        "tls_server_name": "TLS サーバー名",
         "setting_field": "設定フィールド"
       },
       "tabs": {

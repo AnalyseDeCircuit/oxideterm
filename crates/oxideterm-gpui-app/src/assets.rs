@@ -22,6 +22,7 @@ pub(crate) enum LucideIcon {
     BookOpen,
     Bot,
     Brain,
+    Cable,
     Check,
     CheckCircle,
     CheckSquare,
@@ -143,6 +144,7 @@ impl LucideIcon {
             Self::BookOpen => "lucide/book-open.svg",
             Self::Bot => "lucide/bot.svg",
             Self::Brain => "lucide/brain.svg",
+            Self::Cable => "lucide/cable.svg",
             Self::Check => "lucide/check.svg",
             Self::CheckCircle => "lucide/check-circle.svg",
             Self::CheckSquare => "lucide/check-square.svg",
@@ -268,6 +270,7 @@ impl AssetSource for NativeAssets {
             "lucide/book-open.svg" => BOOK_OPEN,
             "lucide/bot.svg" => BOT,
             "lucide/brain.svg" => BRAIN,
+            "lucide/cable.svg" => CABLE,
             "lucide/check.svg" => CHECK,
             "lucide/check-circle.svg" => CHECK_CIRCLE,
             "lucide/check-square.svg" => CHECK_SQUARE,
@@ -400,6 +403,7 @@ impl AssetSource for NativeAssets {
                 "book-open.svg",
                 "bot.svg",
                 "brain.svg",
+                "cable.svg",
                 "check.svg",
                 "check-circle.svg",
                 "check-square.svg",
@@ -531,6 +535,7 @@ const ARROW_UP_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24"
 const BELL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>"#;
 const BOOK_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>"#;
 const BOT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>"#;
+const CABLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z"/><path d="M17 21v-2"/><path d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"/><path d="M21 21v-2"/><path d="M3 5V3"/><path d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z"/><path d="M7 5V3"/></svg>"#;
 const CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>"#;
 const CHECK_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>"#;
 const CHECK_SQUARE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><rect width="18" height="18" x="3" y="3" rx="2"/></svg>"#;

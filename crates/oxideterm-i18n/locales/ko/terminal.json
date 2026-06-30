@@ -13,6 +13,7 @@
       "copy": "복사",
       "copy_title": "명령 출력 복사",
       "copy_command": "명령 복사",
+      "reconnect_transport": "다시 연결",
       "send_to_ai": "OxideSens로 보내기",
       "fill_command_bar": "명령 표시줄 채우기",
       "find": "찾기...",

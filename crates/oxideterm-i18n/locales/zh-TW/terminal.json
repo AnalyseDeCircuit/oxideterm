@@ -13,6 +13,7 @@
       "copy": "複製",
       "copy_title": "複製命令輸出",
       "copy_command": "複製命令",
+      "reconnect_transport": "重新連線",
       "send_to_ai": "傳送到 OxideSens",
       "fill_command_bar": "填入命令欄",
       "find": "尋找...",

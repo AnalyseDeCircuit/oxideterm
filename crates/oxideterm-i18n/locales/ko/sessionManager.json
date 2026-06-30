@@ -164,6 +164,15 @@
       "delete_failed": "Telnet 프로필을 삭제하지 못했습니다",
       "confirm_delete": "Telnet 프로필 \"{{name}}\"을 삭제할까요?"
     },
+    "raw_tcp_profiles": {
+      "title": "Raw TCP 프로필",
+      "count": "프로필 {{count}}개",
+      "open": "열기",
+      "delete": "삭제",
+      "open_failed": "Raw TCP 프로필을 열지 못했습니다",
+      "delete_failed": "Raw TCP 프로필을 삭제하지 못했습니다",
+      "confirm_delete": "Raw TCP 프로필 \"{{name}}\"을 삭제할까요?"
+    },
     "privilege_credentials": {
       "title": "권한 자격 증명",
       "description": "sudo/su 프롬프트용 자격 증명을 별도로 저장합니다. 비밀 값은 시스템 키체인에 남아 있으며 터미널 도우미를 클릭한 후에만 읽습니다.",

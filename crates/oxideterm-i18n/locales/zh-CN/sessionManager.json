@@ -164,6 +164,15 @@
       "delete_failed": "删除 Telnet 配置失败",
       "confirm_delete": "删除 Telnet 配置“{{name}}”？"
     },
+    "raw_tcp_profiles": {
+      "title": "Raw TCP 配置",
+      "count": "{{count}} 个配置",
+      "open": "打开",
+      "delete": "删除",
+      "open_failed": "打开 Raw TCP 配置失败",
+      "delete_failed": "删除 Raw TCP 配置失败",
+      "confirm_delete": "删除 Raw TCP 配置“{{name}}”？"
+    },
     "privilege_credentials": {
       "title": "提权凭据",
       "description": "为 sudo/su 提示单独保存凭据。密码保存在系统钥匙串中，只有点击终端辅助按钮时才会读取。",

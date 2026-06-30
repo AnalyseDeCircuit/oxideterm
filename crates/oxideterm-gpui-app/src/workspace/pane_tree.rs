@@ -45,8 +45,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         // Serial sessions report port failures through the same terminal event;
-        // keep those panes visible so users can inspect the error text.
-        if self.serial_terminal_configs.contains_key(&session_id) {
+        // keep local transport panes visible so users can inspect the error
+        // text and reconnect without recreating the whole tab.
+        if self.serial_terminal_configs.contains_key(&session_id)
+            || self.raw_tcp_terminal_configs.contains_key(&session_id)
+        {
             return;
         }
         if self.pending_auto_close_terminal_sessions.insert(session_id) {
@@ -81,7 +84,9 @@ impl WorkspaceApp {
     ) {
         let session_ids: Vec<_> = self.pending_auto_close_terminal_sessions.drain().collect();
         for session_id in session_ids {
-            if self.serial_terminal_configs.contains_key(&session_id) {
+            if self.serial_terminal_configs.contains_key(&session_id)
+                || self.raw_tcp_terminal_configs.contains_key(&session_id)
+            {
                 continue;
             }
             self.close_terminal_session(session_id, window, cx);
@@ -182,6 +187,7 @@ impl WorkspaceApp {
             .and_then(|root_pane| root_pane.session_id_for_pane(active_pane_id))
         {
             self.serial_terminal_configs.remove(&session_id);
+            self.raw_tcp_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
 
@@ -235,6 +241,7 @@ impl WorkspaceApp {
             .filter(|session_id| *session_id != active_session_id)
         {
             self.serial_terminal_configs.remove(&session_id);
+            self.raw_tcp_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids

@@ -84,6 +84,30 @@ fn ai_opened_local_terminal_target(target: &AiOrchestratorTarget) -> AiOrchestra
     }
 }
 
+fn ai_raw_tcp_terminal_label(config: &RawTcpSessionConfig) -> String {
+    let scheme = if config.tls.enabled { "TLS" } else { "TCP" };
+    format!("{scheme} {}", config.endpoint_label())
+}
+
+fn ai_raw_tcp_terminal_metadata(config: &RawTcpSessionConfig) -> serde_json::Value {
+    // Keep the AI target schema explicit so local socket sessions do not inherit
+    // shell-oriented behavior from ordinary local terminals.
+    serde_json::json!({
+        "terminalType": "raw_tcp",
+        "terminalTransport": "raw_tcp",
+        "host": config.host,
+        "port": config.port,
+        "lineEnding": format!("{:?}", config.line_ending).to_lowercase(),
+        "displayMode": format!("{:?}", config.display_mode).to_lowercase(),
+        "sendMode": format!("{:?}", config.send_mode).to_lowercase(),
+        "tls": {
+            "enabled": config.tls.enabled,
+            "verification": format!("{:?}", config.tls.verification).to_lowercase(),
+            "serverName": config.tls.server_name,
+        },
+    })
+}
+
 fn ai_ide_workspace_target_for_node(
     node_id: &NodeId,
     node: &WorkspaceSshNode,
@@ -320,10 +344,14 @@ impl WorkspaceApp {
                 let Some(pane) = self.panes.get(&pane_id) else {
                     continue;
                 };
+                let raw_tcp_config = self.raw_tcp_terminal_configs.get(&session_id);
                 let serial_config = self.serial_terminal_configs.get(&session_id);
+                let is_raw_tcp_terminal = raw_tcp_config.is_some();
                 let is_serial_terminal = serial_config.is_some();
                 let is_local_terminal = tab.kind == TabKind::LocalTerminal;
-                let terminal_type = if is_serial_terminal {
+                let terminal_type = if is_raw_tcp_terminal {
+                    "raw_tcp"
+                } else if is_serial_terminal {
                     "serial"
                 } else if is_local_terminal {
                     "local_terminal"
@@ -344,14 +372,18 @@ impl WorkspaceApp {
                         pane.lifecycle().is_running(),
                     )
                 };
-                let label = if let Some(config) = serial_config {
+                let label = if let Some(config) = raw_tcp_config {
+                    ai_raw_tcp_terminal_label(config)
+                } else if let Some(config) = serial_config {
                     format!("Serial {}", config.port_path)
                 } else if is_local_terminal {
                     format!("Local terminal {}", tab.title)
                 } else {
                     format!("SSH terminal {}", ai_short_id(&session_id.0.to_string()))
                 };
-                let metadata = if let Some(config) = serial_config {
+                let metadata = if let Some(config) = raw_tcp_config {
+                    ai_raw_tcp_terminal_metadata(config)
+                } else if let Some(config) = serial_config {
                     serde_json::json!({
                         "terminalType": terminal_type,
                         "terminalTransport": "serial",
@@ -2162,5 +2194,66 @@ impl WorkspaceApp {
                 .with_next_actions(next_actions),
             duration_ms,
         )
+    }
+}
+
+#[cfg(test)]
+mod raw_tcp_snapshot_tests {
+    use super::*;
+    use oxideterm_terminal::{
+        RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpSessionConfig, RawTcpTlsConfig,
+        RawTcpTlsVerification,
+    };
+
+    #[test]
+    fn raw_tcp_target_metadata_identifies_local_socket_transport() {
+        let config = RawTcpSessionConfig {
+            host: "socket.internal".to_string(),
+            port: 9000,
+            line_ending: RawTcpLineEnding::Lf,
+            display_mode: RawTcpDisplayMode::Text,
+            send_mode: RawTcpSendMode::Text,
+            tls: RawTcpTlsConfig {
+                enabled: false,
+                verification: RawTcpTlsVerification::System,
+                server_name: None,
+            },
+        };
+
+        let metadata = ai_raw_tcp_terminal_metadata(&config);
+
+        assert_eq!(ai_raw_tcp_terminal_label(&config), "TCP socket.internal:9000");
+        assert_eq!(metadata["terminalType"], "raw_tcp");
+        assert_eq!(metadata["terminalTransport"], "raw_tcp");
+        assert_eq!(metadata["host"], "socket.internal");
+        assert_eq!(metadata["port"], 9000);
+        assert_eq!(metadata["lineEnding"], "lf");
+        assert_eq!(metadata["displayMode"], "text");
+        assert_eq!(metadata["sendMode"], "text");
+        assert_eq!(metadata["tls"]["enabled"], false);
+        assert_eq!(metadata["tls"]["verification"], "system");
+        assert!(metadata["tls"]["serverName"].is_null());
+    }
+
+    #[test]
+    fn raw_tcp_label_marks_tls_sessions() {
+        let config = RawTcpSessionConfig {
+            host: "secure.internal".to_string(),
+            port: 443,
+            line_ending: RawTcpLineEnding::None,
+            display_mode: RawTcpDisplayMode::Mixed,
+            send_mode: RawTcpSendMode::Hex,
+            tls: RawTcpTlsConfig {
+                enabled: true,
+                verification: RawTcpTlsVerification::AllowInvalidCertificates,
+                server_name: Some("secure.internal".to_string()),
+            },
+        };
+
+        let metadata = ai_raw_tcp_terminal_metadata(&config);
+
+        assert_eq!(ai_raw_tcp_terminal_label(&config), "TLS secure.internal:443");
+        assert_eq!(metadata["tls"]["enabled"], true);
+        assert_eq!(metadata["tls"]["serverName"], "secure.internal");
     }
 }

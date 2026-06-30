@@ -164,6 +164,15 @@
       "delete_failed": "刪除 Telnet 設定檔失敗",
       "confirm_delete": "刪除 Telnet 設定檔「{{name}}」？"
     },
+    "raw_tcp_profiles": {
+      "title": "Raw TCP 設定檔",
+      "count": "{{count}} 個設定檔",
+      "open": "開啟",
+      "delete": "刪除",
+      "open_failed": "開啟 Raw TCP 設定檔失敗",
+      "delete_failed": "刪除 Raw TCP 設定檔失敗",
+      "confirm_delete": "刪除 Raw TCP 設定檔「{{name}}」？"
+    },
     "privilege_credentials": {
       "title": "提權憑證",
       "description": "為 sudo/su 提示單獨儲存憑證。密碼保存在系統鑰匙圈中，只有點擊終端輔助按鈕時才會讀取。",

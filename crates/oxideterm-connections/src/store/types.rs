@@ -473,6 +473,213 @@ pub struct SaveTelnetProfileRequest {
     pub connect_on_open: Option<bool>,
 }
 
+/// Controls which bytes are appended when Enter is pressed in text send mode.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawTcpLineEnding {
+    Lf,
+    CrLf,
+    Cr,
+    None,
+}
+
+impl Default for RawTcpLineEnding {
+    fn default() -> Self {
+        // CRLF is the safest default for interactive network protocols such as
+        // HTTP, SMTP, and many device consoles.
+        Self::CrLf
+    }
+}
+
+/// Describes how received Raw TCP bytes should be rendered to the terminal UI.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawTcpDisplayMode {
+    Text,
+    Hex,
+    Mixed,
+}
+
+impl Default for RawTcpDisplayMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+/// Describes how typed Raw TCP input should be interpreted before writing.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawTcpSendMode {
+    Text,
+    Hex,
+}
+
+impl Default for RawTcpSendMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+/// Stores whether a Raw TCP profile upgrades the socket with TLS.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawTcpTlsMode {
+    Disabled,
+    Enabled,
+}
+
+impl Default for RawTcpTlsMode {
+    fn default() -> Self {
+        Self::Disabled
+    }
+}
+
+/// Stores certificate verification policy for TLS Raw TCP profiles.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawTcpTlsVerification {
+    System,
+    AllowInvalidCertificates,
+}
+
+impl Default for RawTcpTlsVerification {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RawTcpProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "is_raw_tcp_default_line_ending")]
+    pub line_ending: RawTcpLineEnding,
+    #[serde(default, skip_serializing_if = "is_raw_tcp_default_display_mode")]
+    pub display_mode: RawTcpDisplayMode,
+    #[serde(default, skip_serializing_if = "is_raw_tcp_default_send_mode")]
+    pub send_mode: RawTcpSendMode,
+    #[serde(default, skip_serializing_if = "is_raw_tcp_tls_disabled")]
+    pub tls_mode: RawTcpTlsMode,
+    #[serde(default, skip_serializing_if = "is_raw_tcp_default_tls_verification")]
+    pub tls_verification: RawTcpTlsVerification,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub connect_on_open: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SaveRawTcpProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub host: String,
+    pub port: u16,
+    pub line_ending: Option<RawTcpLineEnding>,
+    pub display_mode: Option<RawTcpDisplayMode>,
+    pub send_mode: Option<RawTcpSendMode>,
+    pub tls_mode: Option<RawTcpTlsMode>,
+    pub tls_verification: Option<RawTcpTlsVerification>,
+    pub tls_server_name: Option<String>,
+    pub connect_on_open: Option<bool>,
+}
+
+/// Controls which bytes are appended when Enter sends a Raw UDP text datagram.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawUdpLineEnding {
+    Lf,
+    CrLf,
+    Cr,
+    None,
+}
+
+impl Default for RawUdpLineEnding {
+    fn default() -> Self {
+        // UDP datagrams are packet-shaped already, so avoid adding bytes unless
+        // the user chooses protocol-specific line endings.
+        Self::None
+    }
+}
+
+/// Describes how received Raw UDP datagrams should be rendered to the terminal UI.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawUdpDisplayMode {
+    Text,
+    Hex,
+    Mixed,
+}
+
+impl Default for RawUdpDisplayMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+/// Describes how typed Raw UDP input should be interpreted before sending.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawUdpSendMode {
+    Text,
+    Hex,
+}
+
+impl Default for RawUdpSendMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RawUdpProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub remote_host: String,
+    pub remote_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_bind_host: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub local_bind_port: u16,
+    #[serde(default, skip_serializing_if = "is_raw_udp_default_line_ending")]
+    pub line_ending: RawUdpLineEnding,
+    #[serde(default, skip_serializing_if = "is_raw_udp_default_display_mode")]
+    pub display_mode: RawUdpDisplayMode,
+    #[serde(default, skip_serializing_if = "is_raw_udp_default_send_mode")]
+    pub send_mode: RawUdpSendMode,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub connect_on_open: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SaveRawUdpProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub remote_host: String,
+    pub remote_port: u16,
+    pub local_bind_host: Option<String>,
+    pub local_bind_port: Option<u16>,
+    pub line_ending: Option<RawUdpLineEnding>,
+    pub display_mode: Option<RawUdpDisplayMode>,
+    pub send_mode: Option<RawUdpSendMode>,
+    pub connect_on_open: Option<bool>,
+}
+
 impl SerialProfile {
     pub fn new(name: impl Into<String>, port_path: impl Into<String>) -> Self {
         let now = Utc::now();
@@ -546,8 +753,139 @@ impl TelnetProfile {
     }
 }
 
+impl RawTcpProfile {
+    pub fn new(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            host: host.into(),
+            port,
+            line_ending: RawTcpLineEnding::default(),
+            display_mode: RawTcpDisplayMode::default(),
+            send_mode: RawTcpSendMode::default(),
+            tls_mode: RawTcpTlsMode::default(),
+            tls_verification: RawTcpTlsVerification::default(),
+            tls_server_name: None,
+            connect_on_open: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Raw TCP profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Raw TCP profile name is required");
+        }
+        if self.host.trim().is_empty() {
+            bail!("Raw TCP host is required");
+        }
+        if self.port == 0 {
+            bail!("Raw TCP port must be greater than zero");
+        }
+        if self
+            .tls_server_name
+            .as_deref()
+            .is_some_and(|server_name| server_name.trim().is_empty())
+        {
+            bail!("Raw TCP TLS server name must not be empty");
+        }
+        Ok(())
+    }
+}
+
+impl RawUdpProfile {
+    pub fn new(
+        name: impl Into<String>,
+        remote_host: impl Into<String>,
+        remote_port: u16,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            remote_host: remote_host.into(),
+            remote_port,
+            local_bind_host: None,
+            local_bind_port: 0,
+            line_ending: RawUdpLineEnding::default(),
+            display_mode: RawUdpDisplayMode::default(),
+            send_mode: RawUdpSendMode::default(),
+            connect_on_open: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Raw UDP profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Raw UDP profile name is required");
+        }
+        if self.remote_host.trim().is_empty() {
+            bail!("Raw UDP remote host is required");
+        }
+        if self.remote_port == 0 {
+            bail!("Raw UDP remote port must be greater than zero");
+        }
+        if self
+            .local_bind_host
+            .as_deref()
+            .is_some_and(|host| host.trim().is_empty())
+        {
+            bail!("Raw UDP local bind host must not be empty");
+        }
+        Ok(())
+    }
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn is_zero_u16(value: &u16) -> bool {
+    *value == 0
+}
+
+fn is_raw_tcp_default_line_ending(value: &RawTcpLineEnding) -> bool {
+    *value == RawTcpLineEnding::default()
+}
+
+fn is_raw_tcp_default_display_mode(value: &RawTcpDisplayMode) -> bool {
+    *value == RawTcpDisplayMode::default()
+}
+
+fn is_raw_tcp_default_send_mode(value: &RawTcpSendMode) -> bool {
+    *value == RawTcpSendMode::default()
+}
+
+fn is_raw_tcp_tls_disabled(value: &RawTcpTlsMode) -> bool {
+    *value == RawTcpTlsMode::Disabled
+}
+
+fn is_raw_tcp_default_tls_verification(value: &RawTcpTlsVerification) -> bool {
+    *value == RawTcpTlsVerification::default()
+}
+
+fn is_raw_udp_default_line_ending(value: &RawUdpLineEnding) -> bool {
+    *value == RawUdpLineEnding::default()
+}
+
+fn is_raw_udp_default_display_mode(value: &RawUdpDisplayMode) -> bool {
+    *value == RawUdpDisplayMode::default()
+}
+
+fn is_raw_udp_default_send_mode(value: &RawUdpSendMode) -> bool {
+    *value == RawUdpSendMode::default()
 }
 
 #[derive(Clone, Debug)]
@@ -586,6 +924,10 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telnet_profiles: Vec<TelnetProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_tcp_profiles: Vec<RawTcpProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_udp_profiles: Vec<RawUdpProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
 }
 
@@ -600,6 +942,8 @@ impl Default for ConnectionStoreData {
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
             telnet_profiles: Vec::new(),
+            raw_tcp_profiles: Vec::new(),
+            raw_udp_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
         }
     }
@@ -612,6 +956,24 @@ pub struct SerialProfilesSyncSnapshot {
     pub exported_at: String,
     #[serde(default)]
     pub records: Vec<SerialProfile>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawTcpProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<RawTcpProfile>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawUdpProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<RawUdpProfile>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

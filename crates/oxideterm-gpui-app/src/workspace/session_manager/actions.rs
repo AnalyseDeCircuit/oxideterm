@@ -71,7 +71,17 @@ impl WorkspaceApp {
                 })
             })
             .count();
-        connection_count + serial_count + telnet_count
+        let raw_tcp_count = self
+            .connection_store
+            .raw_tcp_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
+        connection_count + serial_count + telnet_count + raw_tcp_count
     }
 
     fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -90,6 +100,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.telnet_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.raw_tcp_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -276,6 +291,22 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn request_delete_raw_tcp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(profile) = self
+            .connection_store
+            .raw_tcp_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+        else {
+            return;
+        };
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::RawTcpProfile {
+            id: id.to_string(),
+            name: profile.name.clone(),
+        });
+        cx.notify();
+    }
+
     fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let ids = self
             .session_manager
@@ -311,6 +342,9 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::TelnetProfile { id, .. } => {
                 self.delete_telnet_profile(&id, cx)
             }
+            SessionManagerDeleteConfirm::RawTcpProfile { id, .. } => {
+                self.delete_raw_tcp_profile(&id, cx)
+            }
             SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
         }
     }
@@ -336,6 +370,27 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn delete_raw_tcp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.connection_store.delete_raw_tcp_profile(id) {
+            Ok(true) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.raw_tcp_profiles.delete"));
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Ok(false) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.raw_tcp_profiles.delete_failed"));
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.raw_tcp_profiles.delete_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
     fn delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
         match self.connection_store.delete_telnet_profile(id) {
             Ok(true) => {
@@ -349,6 +404,37 @@ impl WorkspaceApp {
                 self.session_manager.status = Some(format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.telnet_profiles.delete_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_saved_raw_tcp_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .raw_tcp_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let config = terminal_raw_tcp_config_from_profile(&profile);
+        match self.create_raw_tcp_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                let _ = self.connection_store.mark_raw_tcp_profile_used(id);
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.raw_tcp_profiles.open_failed")
                 ));
             }
         }
@@ -608,4 +694,82 @@ fn close_session_menu_state(session_manager: &mut SessionManagerState) -> bool {
     session_manager.sort_menu_open = false;
     session_manager.show_batch_move = false;
     changed
+}
+
+fn terminal_raw_tcp_config_from_profile(
+    profile: &oxideterm_connections::RawTcpProfile,
+) -> oxideterm_terminal::RawTcpSessionConfig {
+    // Raw TCP uses parallel persisted/runtime enums so the store can stay free
+    // of terminal implementation dependencies.
+    oxideterm_terminal::RawTcpSessionConfig {
+        host: profile.host.clone(),
+        port: profile.port,
+        line_ending: terminal_raw_tcp_line_ending(&profile.line_ending),
+        display_mode: terminal_raw_tcp_display_mode(&profile.display_mode),
+        send_mode: terminal_raw_tcp_send_mode(&profile.send_mode),
+        tls: terminal_raw_tcp_tls_config(profile),
+    }
+}
+
+fn terminal_raw_tcp_line_ending(
+    line_ending: &oxideterm_connections::RawTcpLineEnding,
+) -> oxideterm_terminal::RawTcpLineEnding {
+    match line_ending {
+        oxideterm_connections::RawTcpLineEnding::Lf => oxideterm_terminal::RawTcpLineEnding::Lf,
+        oxideterm_connections::RawTcpLineEnding::CrLf => oxideterm_terminal::RawTcpLineEnding::CrLf,
+        oxideterm_connections::RawTcpLineEnding::Cr => oxideterm_terminal::RawTcpLineEnding::Cr,
+        oxideterm_connections::RawTcpLineEnding::None => oxideterm_terminal::RawTcpLineEnding::None,
+    }
+}
+
+fn terminal_raw_tcp_display_mode(
+    display_mode: &oxideterm_connections::RawTcpDisplayMode,
+) -> oxideterm_terminal::RawTcpDisplayMode {
+    match display_mode {
+        oxideterm_connections::RawTcpDisplayMode::Text => {
+            oxideterm_terminal::RawTcpDisplayMode::Text
+        }
+        oxideterm_connections::RawTcpDisplayMode::Hex => oxideterm_terminal::RawTcpDisplayMode::Hex,
+        oxideterm_connections::RawTcpDisplayMode::Mixed => {
+            oxideterm_terminal::RawTcpDisplayMode::Mixed
+        }
+    }
+}
+
+fn terminal_raw_tcp_send_mode(
+    send_mode: &oxideterm_connections::RawTcpSendMode,
+) -> oxideterm_terminal::RawTcpSendMode {
+    match send_mode {
+        oxideterm_connections::RawTcpSendMode::Text => oxideterm_terminal::RawTcpSendMode::Text,
+        oxideterm_connections::RawTcpSendMode::Hex => oxideterm_terminal::RawTcpSendMode::Hex,
+    }
+}
+
+fn terminal_raw_tcp_tls_config(
+    profile: &oxideterm_connections::RawTcpProfile,
+) -> oxideterm_terminal::RawTcpTlsConfig {
+    if !matches!(
+        profile.tls_mode,
+        oxideterm_connections::RawTcpTlsMode::Enabled
+    ) {
+        return oxideterm_terminal::RawTcpTlsConfig::disabled();
+    }
+    oxideterm_terminal::RawTcpTlsConfig {
+        enabled: true,
+        verification: terminal_raw_tcp_tls_verification(&profile.tls_verification),
+        server_name: profile.tls_server_name.clone(),
+    }
+}
+
+fn terminal_raw_tcp_tls_verification(
+    verification: &oxideterm_connections::RawTcpTlsVerification,
+) -> oxideterm_terminal::RawTcpTlsVerification {
+    match verification {
+        oxideterm_connections::RawTcpTlsVerification::System => {
+            oxideterm_terminal::RawTcpTlsVerification::System
+        }
+        oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates => {
+            oxideterm_terminal::RawTcpTlsVerification::AllowInvalidCertificates
+        }
+    }
 }

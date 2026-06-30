@@ -4,8 +4,10 @@ mod tests {
     use std::fs;
 
     use crate::{
-        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SaveSerialProfileRequest,
-        SavedUpstreamProxyProtocol, SerialFlowControl,
+        PrivilegeCredentialKind, RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode,
+        RawTcpTlsMode, RawTcpTlsVerification, SavePrivilegeCredentialRequest,
+        SaveRawTcpProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
+        SerialFlowControl,
     };
     use russh::keys::ssh_key::LineEnding;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
@@ -233,6 +235,82 @@ mod tests {
         assert_eq!(skipped.imported_serial_profiles, 0);
         assert_eq!(skipped.skipped_serial_profiles, 1);
         assert!(skipped_target.serial_profiles().is_empty());
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_raw_tcp_profiles() {
+        let mut source = temp_store("raw-tcp-profile-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let profile = source
+            .upsert_raw_tcp_profile(SaveRawTcpProfileRequest {
+                id: Some("raw-tcp-1".to_string()),
+                name: "Lab socket".to_string(),
+                group: Some("Lab".to_string()),
+                host: "device.local".to_string(),
+                port: 9000,
+                line_ending: Some(RawTcpLineEnding::Cr),
+                display_mode: Some(RawTcpDisplayMode::Mixed),
+                send_mode: Some(RawTcpSendMode::Hex),
+                tls_mode: Some(RawTcpTlsMode::Enabled),
+                tls_verification: Some(RawTcpTlsVerification::AllowInvalidCertificates),
+                tls_server_name: Some("lab.example.com".to_string()),
+                connect_on_open: Some(true),
+            })
+            .unwrap();
+        let raw_tcp_profiles_json = serde_json::to_string_pretty(
+            &source.export_raw_tcp_profiles_snapshot().unwrap(),
+        )
+        .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                raw_tcp_profiles_json: Some(raw_tcp_profiles_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.raw_tcp_profiles_count, Some(1));
+
+        let preview = preview_oxide_import(
+            &temp_store("raw-tcp-profile-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.raw_tcp_profiles_count, 1);
+
+        let mut target = temp_store("raw-tcp-profile-target");
+        let imported = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(imported.imported_raw_tcp_profiles, 1);
+        assert_eq!(target.raw_tcp_profiles(), &[profile]);
+
+        let mut skipped_target = temp_store("raw-tcp-profile-skip-target");
+        let skipped = apply_oxide_import_with_options(
+            &mut skipped_target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                import_raw_tcp_profiles: false,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(skipped.imported_raw_tcp_profiles, 0);
+        assert_eq!(skipped.skipped_raw_tcp_profiles, 1);
+        assert!(skipped_target.raw_tcp_profiles().is_empty());
     }
 
     #[test]

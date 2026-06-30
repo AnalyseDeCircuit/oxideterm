@@ -463,6 +463,14 @@ impl WorkspaceApp {
             profile.id.hash(&mut hasher);
             profile.updated_at.to_rfc3339().hash(&mut hasher);
         }
+        self.connection_store
+            .raw_tcp_profiles()
+            .len()
+            .hash(&mut hasher);
+        for profile in self.connection_store.raw_tcp_profiles() {
+            profile.id.hash(&mut hasher);
+            profile.updated_at.to_rfc3339().hash(&mut hasher);
+        }
         let saved_forwards = self.forwarding_registry.list_all_saved_forwards();
         saved_forwards.len().hash(&mut hasher);
         for forward in saved_forwards {
@@ -530,6 +538,10 @@ impl WorkspaceApp {
                 .ok(),
             quick_commands,
             serial_profiles: self.connection_store.export_serial_profiles_snapshot().ok(),
+            raw_tcp_profiles: self
+                .connection_store
+                .export_raw_tcp_profiles_snapshot()
+                .ok(),
             app_settings_sections,
         }
     }
@@ -1694,6 +1706,10 @@ impl WorkspaceApp {
                 CloudSyncUploadSelectionAction::ToggleSerialProfiles,
             ),
             (
+                "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
+                CloudSyncUploadSelectionAction::ToggleRawTcpProfiles,
+            ),
+            (
                 "plugin.cloud_sync.settings.sync_sensitive_credentials",
                 CloudSyncUploadSelectionAction::ToggleSensitiveCredentials,
             ),
@@ -1746,6 +1762,9 @@ impl WorkspaceApp {
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.sync_serial_profiles || !selection.serial_profile_item_ids.is_empty()
             }
+            CloudSyncUploadSelectionAction::ToggleRawTcpProfiles => {
+                selection.sync_raw_tcp_profiles || !selection.raw_tcp_profile_item_ids.is_empty()
+            }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 selection.sync_sensitive_credentials
             }
@@ -1770,6 +1789,9 @@ impl WorkspaceApp {
             }
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.serial_profile_item_ids.len()
+            }
+            CloudSyncUploadSelectionAction::ToggleRawTcpProfiles => {
+                selection.raw_tcp_profile_item_ids.len()
             }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 return self.cloud_sync_upload_sensitive_summary(selection);
@@ -2163,6 +2185,9 @@ impl WorkspaceApp {
             "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
                 CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
             ),
+            "plugin.cloud_sync.settings.sync_raw_tcp_profiles" => Some(
+                CloudSyncPreviewSelectionAction::ToggleRawTcpProfileItem(item.item_key.clone()),
+            ),
             "plugin.cloud_sync.settings.sync_app_settings" => Some(
                 CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),
             ),
@@ -2187,6 +2212,9 @@ impl WorkspaceApp {
             }
             CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(id) => {
                 selection.selected_serial_profile_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleRawTcpProfileItem(id) => {
+                selection.selected_raw_tcp_profile_ids.contains(id)
             }
             CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(id) => {
                 selection.selected_app_settings_sections.contains(id)
@@ -2269,6 +2297,9 @@ impl WorkspaceApp {
             ),
             "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
                 CloudSyncUploadSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_raw_tcp_profiles" => Some(
+                CloudSyncUploadSelectionAction::ToggleRawTcpProfileItem(item.item_key.clone()),
             ),
             "plugin.cloud_sync.settings.sync_app_settings" => Some(
                 CloudSyncUploadSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),
@@ -2762,6 +2793,7 @@ impl WorkspaceApp {
                 forwards,
                 quick_commands,
                 serial_profiles,
+                raw_tcp_profiles,
                 sensitive_credentials,
                 plugin_settings_count,
                 size,
@@ -2772,6 +2804,7 @@ impl WorkspaceApp {
                     ("forwards", forwards.to_string()),
                     ("quickCommands", quick_commands.to_string()),
                     ("serialProfiles", serial_profiles.to_string()),
+                    ("rawTcpProfiles", raw_tcp_profiles.to_string()),
                     ("sensitiveCredentials", sensitive_credentials.to_string()),
                     ("pluginSettingsCount", plugin_settings_count.to_string()),
                     ("size", size),
@@ -3050,6 +3083,7 @@ impl WorkspaceApp {
                 ("forwards", entry.summary.forwards.to_string()),
                 ("quickCommands", entry.summary.quick_commands.to_string()),
                 ("serialProfiles", entry.summary.serial_profiles.to_string()),
+                ("rawTcpProfiles", entry.summary.raw_tcp_profiles.to_string()),
                 (
                     "sensitiveCredentials",
                     entry.summary.sensitive_credentials.to_string(),
@@ -3475,6 +3509,12 @@ impl WorkspaceApp {
                 "plugin.cloud_sync.settings.sync_serial_profiles",
                 scope.sync_serial_profiles,
                 |scope, next| scope.sync_serial_profiles = Some(next),
+                cx,
+            ),
+            self.render_cloud_sync_scope_bool_toggle(
+                "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
+                scope.sync_raw_tcp_profiles,
+                |scope, next| scope.sync_raw_tcp_profiles = Some(next),
                 cx,
             ),
             self.render_cloud_sync_scope_bool_toggle(
@@ -5633,6 +5673,7 @@ impl WorkspaceApp {
             forwards: self.forwarding_registry.list_all_saved_forwards().len(),
             quick_commands: 0,
             serial_profiles: self.connection_store.serial_profiles().len(),
+            raw_tcp_profiles: self.connection_store.raw_tcp_profiles().len(),
             sensitive_credentials: 0,
             has_app_settings: true,
             plugin_settings_count: 0,
@@ -5742,6 +5783,7 @@ fn hash_raw_sync_scope(scope: &RawSyncScope, hasher: &mut DefaultHasher) {
     scope.sync_forwards.hash(hasher);
     scope.sync_quick_commands.hash(hasher);
     scope.sync_serial_profiles.hash(hasher);
+    scope.sync_raw_tcp_profiles.hash(hasher);
     scope.sync_sensitive_credentials.hash(hasher);
     scope.sync_app_settings.hash(hasher);
     scope.app_settings_sections.hash(hasher);
@@ -5763,6 +5805,7 @@ fn hash_structured_local_state_option(
     state.forwards.hash(hasher);
     state.quick_commands.hash(hasher);
     state.serial_profiles.hash(hasher);
+    state.raw_tcp_profiles.hash(hasher);
     state.sensitive_credentials.hash(hasher);
     state.app_settings.hash(hasher);
     state.plugin_settings.hash(hasher);
@@ -5781,6 +5824,7 @@ fn hash_structured_section_revisions_option(
     revisions.forwards.hash(hasher);
     revisions.quick_commands.hash(hasher);
     revisions.serial_profiles.hash(hasher);
+    revisions.raw_tcp_profiles.hash(hasher);
     revisions.sensitive_credentials.hash(hasher);
     revisions.app_settings.hash(hasher);
     revisions.plugin_settings.hash(hasher);

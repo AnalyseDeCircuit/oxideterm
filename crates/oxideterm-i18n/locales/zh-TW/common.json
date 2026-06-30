@@ -107,6 +107,7 @@
     "cmd_open_cloud_sync": "開啟雲端同步",
     "cmd_open_serial_terminal": "開啟序列埠終端機",
     "cmd_open_telnet_terminal": "開啟 Telnet 終端機",
+    "cmd_open_raw_tcp_terminal": "開啟 Raw TCP 終端",
     "cmd_open_rdp_preview": "開啟 RDP 預覽",
     "cmd_open_vnc_preview": "開啟 VNC 預覽"
   },
@@ -329,6 +330,7 @@
         "sync_forwards": "同步已儲存的轉送",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步序列埠設定",
+        "sync_raw_tcp_profiles": "同步 Raw TCP 設定",
         "sync_app_settings": "同步應用程式設定",
         "include_local_terminal_env_vars": "包含本機終端環境變數",
         "sync_plugin_settings": "同步外掛設定",
@@ -369,6 +371,7 @@
         "forwards_detail": "已儲存的連接埠轉送規則會連同所屬連線中繼資料一起同步。",
         "quick_commands_detail": "快捷命令定義會參與同步。",
         "serial_profiles_detail": "序列埠連線設定會參與同步。",
+        "raw_tcp_profiles_detail": "Raw TCP 連線設定會參與同步。",
         "app_settings_sections_detail": "已選取分組：{{sections}}",
         "app_settings_disabled_detail": "目前同步範圍已排除應用程式設定。",
         "plugin_settings_all_detail": "所有可同步外掛設定都會參與同步。",
@@ -391,13 +394,13 @@
       },
       "backup": {
         "description": "Oxide 雲端同步回滾備份",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{rawTcpProfiles}} 個 Raw TCP 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 個敏感憑證"
       },
       "history": {
         "action_upload": "上傳",
         "action_pull": "拉取",
         "action_restore": "還原",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{rawTcpProfiles}} 個 Raw TCP 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 個敏感憑證"
       },
       "errors": {
         "operation_in_progress": "另一個雲端同步操作正在執行，請稍後再試。",
@@ -538,6 +541,7 @@
         "total_forwards": "轉送數",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "序列埠設定",
+        "raw_tcp_profiles_label": "Raw TCP 設定",
         "will_import": "將匯入",
         "will_merge": "將合併",
         "will_replace": "將取代",
@@ -556,6 +560,7 @@
         "toggle_forwards": "匯入已儲存的轉送（{{count}}）",
         "toggle_quick_commands": "匯入快捷命令（{{count}}）",
         "toggle_serial_profiles": "匯入序列埠設定（{{count}}）",
+        "toggle_raw_tcp_profiles": "匯入 Raw TCP 設定（{{count}}）",
         "section_field_count": "{{count}} 個欄位",
         "section_general": "一般",
         "section_terminal_appearance": "終端外觀",
@@ -718,6 +723,12 @@
         "parity": "同位檢查",
         "flow_control": "流量控制",
         "connect_on_open": "開啟後連線",
+        "line_ending": "換行方式",
+        "display_mode": "顯示模式",
+        "send_mode": "傳送模式",
+        "tls_mode": "TLS 模式",
+        "tls_verification": "TLS 驗證",
+        "tls_server_name": "TLS 伺服器名稱",
         "setting_field": "設定欄位"
       },
       "tabs": {

@@ -62,6 +62,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
+        raw_tcp_profiles_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -87,6 +88,7 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json: serial_profiles_json.clone(),
+        raw_tcp_profiles_json: raw_tcp_profiles_json.clone(),
         plugin_settings,
         portable_secrets: if options.import_portable_secrets {
             portable_secrets.clone()
@@ -241,6 +243,29 @@ fn apply_oxide_import_with_options_inner(
                 serial_profiles_count.saturating_sub(result.imported_serial_profiles);
         } else {
             result.skipped_serial_profiles = serial_profiles_count;
+        }
+    }
+
+    if let Some(snapshot_json) = raw_tcp_profiles_json {
+        let raw_tcp_profiles_snapshot: RawTcpProfilesSyncSnapshot =
+            serde_json::from_str(&snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid Raw TCP profiles snapshot in .oxide payload: {error}"
+                ))
+            })?;
+        let raw_tcp_profiles_count = raw_tcp_profiles_snapshot.records.len();
+        if options.import_raw_tcp_profiles {
+            result.imported_raw_tcp_profiles = store
+                .apply_raw_tcp_profiles_snapshot(raw_tcp_profiles_snapshot)
+                .map_err(|error| {
+                    OxideFileError::InvalidFormat(format!(
+                        "Failed to import Raw TCP profiles from .oxide payload: {error}"
+                    ))
+                })?;
+            result.skipped_raw_tcp_profiles =
+                raw_tcp_profiles_count.saturating_sub(result.imported_raw_tcp_profiles);
+        } else {
+            result.skipped_raw_tcp_profiles = raw_tcp_profiles_count;
         }
     }
 

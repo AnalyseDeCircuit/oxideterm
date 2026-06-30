@@ -69,6 +69,7 @@ enum PaletteAction {
     },
     QuickConnectAlias(String),
     OpenTelnetTerminal,
+    OpenRawTcpTerminal,
     OpenSerialTerminal,
     OpenRemoteDesktopPreview(RemoteDesktopProtocol),
     OpenRemoteDesktopConnection(RemoteDesktopConnectionProfile),
@@ -483,6 +484,7 @@ impl WorkspaceApp {
                 self.open_ssh_config_alias_from_palette(alias, window, cx);
             }
             PaletteAction::OpenTelnetTerminal => self.open_telnet_connection_form(window, cx),
+            PaletteAction::OpenRawTcpTerminal => self.open_raw_tcp_connection_form(window, cx),
             PaletteAction::OpenSerialTerminal => self.open_serial_connection_form(window, cx),
             PaletteAction::OpenRemoteDesktopPreview(protocol) => {
                 self.open_remote_desktop_preview_tab(protocol, window, cx);
@@ -747,6 +749,7 @@ impl WorkspaceApp {
         });
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -771,6 +774,7 @@ impl WorkspaceApp {
                     );
                     self.drill_down_parent_node_id = None;
                     self.editing_saved_connection_id = None;
+                    self.editing_raw_tcp_profile_id = None;
                     self.duplicating_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
                     self.close_new_connection_select();
@@ -2353,6 +2357,13 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             action: PaletteAction::OpenTelnetTerminal,
         },
         CommandSpec {
+            id: "cmd:open_raw_tcp_terminal",
+            label_key: Cow::Borrowed("command_palette.cmd_open_raw_tcp_terminal"),
+            icon: LucideIcon::Cable,
+            shortcut_action: None,
+            action: PaletteAction::OpenRawTcpTerminal,
+        },
+        CommandSpec {
             id: "cmd:open_serial_terminal",
             label_key: Cow::Borrowed("command_palette.cmd_open_serial_terminal"),
             icon: LucideIcon::Radio,
@@ -2862,6 +2873,16 @@ mod tests {
             .expect("native Telnet terminal command");
 
         assert!(matches!(spec.action, PaletteAction::OpenTelnetTerminal));
+    }
+
+    #[test]
+    fn command_palette_specs_include_native_raw_tcp_terminal_command() {
+        let spec = command_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:open_raw_tcp_terminal")
+            .expect("native Raw TCP terminal command");
+
+        assert!(matches!(spec.action, PaletteAction::OpenRawTcpTerminal));
     }
 
     #[test]

@@ -107,6 +107,7 @@
     "session_ssh_terminal": "SSH 终端",
     "cmd_open_serial_terminal": "打开串口终端",
     "cmd_open_telnet_terminal": "打开 Telnet 终端",
+    "cmd_open_raw_tcp_terminal": "打开 Raw TCP 终端",
     "cmd_open_rdp_preview": "打开 RDP 预览",
     "cmd_open_vnc_preview": "打开 VNC 预览"
   },
@@ -321,6 +322,7 @@
         "sync_forwards": "同步已保存的转发",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步串口配置",
+        "sync_raw_tcp_profiles": "同步 Raw TCP 配置",
         "sync_app_settings": "同步应用设置",
         "include_local_terminal_env_vars": "包含本地终端环境变量",
         "sync_plugin_settings": "同步插件设置",
@@ -361,6 +363,7 @@
         "forwards_detail": "已保存的端口转发规则会连同所属连接元数据一起同步。",
         "quick_commands_detail": "快捷命令定义会参与同步。",
         "serial_profiles_detail": "串口连接配置会参与同步。",
+        "raw_tcp_profiles_detail": "Raw TCP 连接配置会参与同步。",
         "app_settings_sections_detail": "已选择分组：{{sections}}",
         "app_settings_disabled_detail": "当前同步范围已排除应用设置。",
         "plugin_settings_all_detail": "所有可同步插件设置都会参与同步。",
@@ -383,13 +386,13 @@
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{rawTcpProfiles}} 个 Raw TCP 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上传",
         "action_pull": "拉取",
         "action_restore": "恢复",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{rawTcpProfiles}} 个 Raw TCP 配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
         "operation_in_progress": "另一个云同步操作正在运行，请稍后再试。",
@@ -530,6 +533,7 @@
         "total_forwards": "转发数",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "串口配置",
+        "raw_tcp_profiles_label": "Raw TCP 配置",
         "will_import": "将导入",
         "will_merge": "将合并",
         "will_replace": "将替换",
@@ -548,6 +552,7 @@
         "toggle_forwards": "导入已保存的转发（{{count}}）",
         "toggle_quick_commands": "导入快捷命令（{{count}}）",
         "toggle_serial_profiles": "导入串口配置（{{count}}）",
+        "toggle_raw_tcp_profiles": "导入 Raw TCP 配置（{{count}}）",
         "section_field_count": "{{count}} 个字段",
         "section_general": "常规",
         "section_terminal_appearance": "终端外观",
@@ -710,6 +715,12 @@
         "parity": "校验位",
         "flow_control": "流控",
         "connect_on_open": "打开后连接",
+        "line_ending": "换行方式",
+        "display_mode": "显示模式",
+        "send_mode": "发送模式",
+        "tls_mode": "TLS 模式",
+        "tls_verification": "TLS 验证",
+        "tls_server_name": "TLS 服务器名称",
         "setting_field": "设置字段"
       },
       "tabs": {

@@ -214,6 +214,14 @@ impl WorkspaceApp {
                     .replace("{{count}}", &count.to_string()),
             ));
         }
+        if let Some(count) = metadata.raw_tcp_profiles_count.filter(|count| *count > 0) {
+            rows.push((
+                self.i18n.t("modals.import.contains_raw_tcp_profiles"),
+                self.i18n
+                    .t("modals.import.raw_tcp_profiles_count")
+                    .replace("{{count}}", &count.to_string()),
+            ));
+        }
         if let Some(count) = metadata.plugin_settings_count.filter(|count| *count > 0) {
             rows.push(("插件偏好设置:".to_string(), format!("{count} 项")));
         }

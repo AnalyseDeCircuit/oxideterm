@@ -107,6 +107,7 @@
     "cmd_open_cloud_sync": "Ouvrir la synchronisation cloud",
     "cmd_open_serial_terminal": "Ouvrir un terminal série",
     "cmd_open_telnet_terminal": "Ouvrir un terminal Telnet",
+    "cmd_open_raw_tcp_terminal": "Ouvrir un terminal Raw TCP",
     "cmd_open_rdp_preview": "Ouvrir l’aperçu RDP",
     "cmd_open_vnc_preview": "Ouvrir l’aperçu VNC"
   },
@@ -329,6 +330,7 @@
         "sync_forwards": "Synchroniser les redirections enregistrées",
         "sync_quick_commands": "Synchroniser les commandes rapides",
         "sync_serial_profiles": "Synchroniser les profils série",
+        "sync_raw_tcp_profiles": "Synchroniser les profils Raw TCP",
         "sync_app_settings": "Synchroniser les paramètres de l’application",
         "include_local_terminal_env_vars": "Inclure les variables d’environnement du terminal local",
         "sync_plugin_settings": "Synchroniser les paramètres de plugin",
@@ -369,6 +371,7 @@
         "forwards_detail": "Les règles de redirection enregistrées sont incluses avec les métadonnées de leur connexion propriétaire.",
         "quick_commands_detail": "Les définitions de commandes rapides sont incluses.",
         "serial_profiles_detail": "Les profils de connexion série sont inclus.",
+        "raw_tcp_profiles_detail": "Les profils de connexion Raw TCP sont inclus.",
         "app_settings_sections_detail": "Sections sélectionnées : {{sections}}",
         "app_settings_disabled_detail": "Les paramètres de l'application sont exclus du périmètre de synchronisation actuel.",
         "plugin_settings_all_detail": "Tous les paramètres de plugins synchronisables sont inclus.",
@@ -391,13 +394,13 @@
       },
       "backup": {
         "description": "Sauvegarde de restauration Oxide Cloud Sync",
-        "summary_line": "{{connections}} connexions, {{forwards}} redirections, {{quickCommands}} commandes rapides, {{serialProfiles}} profils série, {{pluginSettingsCount}} paramètres de plugin, {{size}}, {{sensitiveCredentials}} identifiants sensibles"
+        "summary_line": "{{connections}} connexions, {{forwards}} redirections, {{quickCommands}} commandes rapides, {{serialProfiles}} profils série, {{rawTcpProfiles}} profils Raw TCP, {{pluginSettingsCount}} paramètres de plugin, {{size}}, {{sensitiveCredentials}} identifiants sensibles"
       },
       "history": {
         "action_upload": "Envoi",
         "action_pull": "Récupération",
         "action_restore": "Restauration",
-        "summary_line": "{{connections}} connexions, {{forwards}} redirections, {{quickCommands}} commandes rapides, {{serialProfiles}} profils série, {{pluginSettingsCount}} paramètres de plugin, {{sensitiveCredentials}} identifiants sensibles"
+        "summary_line": "{{connections}} connexions, {{forwards}} redirections, {{quickCommands}} commandes rapides, {{serialProfiles}} profils série, {{rawTcpProfiles}} profils Raw TCP, {{pluginSettingsCount}} paramètres de plugin, {{sensitiveCredentials}} identifiants sensibles"
       },
       "errors": {
         "operation_in_progress": "Une autre opération Cloud Sync est déjà en cours.",
@@ -538,6 +541,7 @@
         "total_forwards": "Redirections",
         "quick_commands_label": "Commandes rapides",
         "serial_profiles_label": "Profils série",
+        "raw_tcp_profiles_label": "Profils Raw TCP",
         "will_import": "Sera importé",
         "will_merge": "Sera fusionné",
         "will_replace": "Sera remplacé",
@@ -556,6 +560,7 @@
         "toggle_forwards": "Importer les redirections enregistrées ({{count}})",
         "toggle_quick_commands": "Importer les commandes rapides ({{count}})",
         "toggle_serial_profiles": "Importer les profils série ({{count}})",
+        "toggle_raw_tcp_profiles": "Importer les profils Raw TCP ({{count}})",
         "section_field_count": "{{count}} champs",
         "section_general": "Général",
         "section_terminal_appearance": "Apparence du terminal",
@@ -718,6 +723,12 @@
         "parity": "Parité",
         "flow_control": "Contrôle de flux",
         "connect_on_open": "Connecter à l’ouverture",
+        "line_ending": "Fin de ligne",
+        "display_mode": "Mode d’affichage",
+        "send_mode": "Mode d’envoi",
+        "tls_mode": "Mode TLS",
+        "tls_verification": "Vérification TLS",
+        "tls_server_name": "Nom du serveur TLS",
         "setting_field": "Champ de réglage"
       },
       "tabs": {

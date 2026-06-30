@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
 use oxideterm_connections::{
-    ApplySavedConnectionsSyncOutcome, ConnectionStore, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, oxide_file::EncryptedPluginSetting,
+    ApplySavedConnectionsSyncOutcome, ConnectionStore, RawTcpProfilesSyncSnapshot,
+    SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
+    oxide_file::EncryptedPluginSetting,
 };
 use oxideterm_forwarding::{
     ApplySavedForwardsSyncSnapshotResult, ForwardingRegistry, SavedForwardsSyncSnapshot,
@@ -31,6 +32,7 @@ pub struct CloudSyncLocalSnapshot {
     pub forwards_record_count: usize,
     pub quick_commands_record_count: usize,
     pub serial_profiles_record_count: usize,
+    pub raw_tcp_profiles_record_count: usize,
     pub sensitive_credentials_record_count: usize,
 }
 
@@ -41,6 +43,7 @@ pub struct CloudSyncApplyOutcome {
     pub forwards: Option<ApplySavedForwardsSyncSnapshotResult>,
     pub quick_commands_applied: usize,
     pub serial_profiles_applied: usize,
+    pub raw_tcp_profiles_applied: usize,
     pub app_settings_applied: usize,
     pub plugin_settings_applied: usize,
 }
@@ -67,6 +70,7 @@ pub fn build_local_snapshot(
         serde_json::from_str(&quick_commands_json)
             .context("failed to decode quick commands snapshot")?;
     let serial_profiles_snapshot = connection_store.export_serial_profiles_snapshot()?;
+    let raw_tcp_profiles_snapshot = connection_store.export_raw_tcp_profiles_snapshot()?;
     let app_settings_section_revisions =
         build_app_settings_section_revision_map(settings_store, &scope)?;
     let plugin_settings_revisions =
@@ -84,6 +88,7 @@ pub fn build_local_snapshot(
         saved_forwards_revision: Some(forwards_snapshot.revision.clone()),
         quick_commands_revision: Some(tauri_simple_stable_hash(&quick_commands_json)?),
         serial_profiles_revision: Some(serial_profiles_snapshot.revision.clone()),
+        raw_tcp_profiles_revision: Some(raw_tcp_profiles_snapshot.revision.clone()),
         sensitive_credentials_revision: Some(sensitive_credentials_revision),
         settings_revision: Some(tauri_simple_stable_hash(&syncable_settings_payload)?),
         app_settings_section_revisions,
@@ -101,6 +106,7 @@ pub fn build_local_snapshot(
         forwards_record_count: forwards_snapshot.records.len(),
         quick_commands_record_count: quick_commands_snapshot.commands.len(),
         serial_profiles_record_count: serial_profiles_snapshot.records.len(),
+        raw_tcp_profiles_record_count: raw_tcp_profiles_snapshot.records.len(),
         sensitive_credentials_record_count: connections_snapshot.records.len(),
     })
 }
@@ -114,6 +120,7 @@ pub fn apply_structured_snapshots(
     forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     quick_commands_snapshot_json: Option<String>,
     serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    raw_tcp_profiles_snapshot: Option<RawTcpProfilesSyncSnapshot>,
     app_settings_snapshots: BTreeMap<String, String>,
     plugin_settings_snapshot: Vec<EncryptedPluginSetting>,
     conflict_strategy: SavedConnectionsConflictStrategy,
@@ -170,6 +177,12 @@ pub fn apply_structured_snapshots(
         0
     };
 
+    let raw_tcp_profiles_applied = if let Some(snapshot) = raw_tcp_profiles_snapshot {
+        connection_store.apply_raw_tcp_profiles_snapshot(snapshot)?
+    } else {
+        0
+    };
+
     let mut app_settings_applied = 0usize;
     for (section_id, snapshot_json) in app_settings_snapshots {
         let selected = HashSet::from([section_id]);
@@ -191,6 +204,7 @@ pub fn apply_structured_snapshots(
         forwards,
         quick_commands_applied,
         serial_profiles_applied,
+        raw_tcp_profiles_applied,
         app_settings_applied,
         plugin_settings_applied,
     })

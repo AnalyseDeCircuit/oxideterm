@@ -19,6 +19,13 @@ impl WorkspaceApp {
             NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,
             NewConnectionSelect::SerialParity => SelectAnchorId::NewConnectionSerialParity,
             NewConnectionSelect::SerialFlowControl => SelectAnchorId::NewConnectionSerialFlowControl,
+            NewConnectionSelect::RawTcpLineEnding => SelectAnchorId::NewConnectionRawTcpLineEnding,
+            NewConnectionSelect::RawTcpDisplayMode => SelectAnchorId::NewConnectionRawTcpDisplayMode,
+            NewConnectionSelect::RawTcpSendMode => SelectAnchorId::NewConnectionRawTcpSendMode,
+            NewConnectionSelect::RawTcpTlsMode => SelectAnchorId::NewConnectionRawTcpTlsMode,
+            NewConnectionSelect::RawTcpTlsVerification => {
+                SelectAnchorId::NewConnectionRawTcpTlsVerification
+            }
         }
     }
 
@@ -87,6 +94,16 @@ impl WorkspaceApp {
             .remove(&SelectAnchorId::NewConnectionSerialParity);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionSerialFlowControl);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawTcpLineEnding);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawTcpDisplayMode);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawTcpSendMode);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawTcpTlsMode);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawTcpTlsVerification);
     }
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -471,7 +488,12 @@ impl WorkspaceApp {
                 | NewConnectionSelect::SerialDataBits
                 | NewConnectionSelect::SerialStopBits
                 | NewConnectionSelect::SerialParity
-                | NewConnectionSelect::SerialFlowControl => return,
+                | NewConnectionSelect::SerialFlowControl
+                | NewConnectionSelect::RawTcpLineEnding
+                | NewConnectionSelect::RawTcpDisplayMode
+                | NewConnectionSelect::RawTcpSendMode
+                | NewConnectionSelect::RawTcpTlsMode
+                | NewConnectionSelect::RawTcpTlsVerification => return,
             }
             form.field_focused = false;
             form.selected_field = None;
@@ -992,6 +1014,12 @@ impl WorkspaceApp {
                 LucideIcon::Network,
             ),
             (
+                NewConnectionTransport::RawTcp,
+                self.i18n.t("modals.new_connection.transport_raw_tcp"),
+                NewConnectionField::Host,
+                LucideIcon::Cable,
+            ),
+            (
                 NewConnectionTransport::Serial,
                 self.i18n.t("modals.new_connection.transport_serial"),
                 NewConnectionField::SerialPortPath,
@@ -1162,6 +1190,154 @@ impl WorkspaceApp {
                             cx,
                         ))
                 },
+            )
+            .into_any_element()
+    }
+
+    fn render_raw_tcp_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return div().into_any_element();
+        };
+        let raw_tcp_port_invalid = !form.port.trim().is_empty()
+            && !form.port.trim().parse::<u16>().is_ok_and(|port| port > 0);
+        let tls_enabled = matches!(
+            form.raw_tcp_tls_mode,
+            oxideterm_connections::RawTcpTlsMode::Enabled
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(
+                div()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(rgba(
+                        (self.tokens.ui.bg << 8) | TAURI_SERIAL_PANEL_BG_ALPHA,
+                    ))
+                    .p(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.new_connection.raw_tcp_section_title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(self.tokens.spacing.one))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("modals.new_connection.raw_tcp_connect_hint")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(self.tokens.metrics.form_host_port_gap))
+                    .child(div().flex_1().child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.raw_tcp_host"),
+                        &form.host,
+                        self.i18n.t("modals.new_connection.raw_tcp_host_placeholder"),
+                        NewConnectionField::Host,
+                        false,
+                        cx,
+                    )))
+                    .child(
+                        div()
+                            .w(px(self.tokens.metrics.form_port_width))
+                            .child(self.render_connection_field(
+                                self.i18n.t("modals.new_connection.raw_tcp_port"),
+                                &form.port,
+                                self.i18n.t("modals.new_connection.raw_tcp_port_placeholder"),
+                                NewConnectionField::Port,
+                                false,
+                                cx,
+                            )),
+                    ),
+            )
+            .when(raw_tcp_port_invalid, |section| {
+                section.child(self.render_connection_hint_with_color(
+                    self.i18n.t("modals.new_connection.raw_tcp_invalid_port"),
+                    self.tokens.ui.error,
+                ))
+            })
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(3)
+                    .gap(px(TAURI_SERIAL_GRID_GAP))
+                    .child(self.render_raw_tcp_line_ending_select(
+                        form.raw_tcp_line_ending.clone(),
+                        cx,
+                    ))
+                    .child(self.render_raw_tcp_display_mode_select(
+                        form.raw_tcp_display_mode.clone(),
+                        cx,
+                    ))
+                    .child(self.render_raw_tcp_send_mode_select(
+                        form.raw_tcp_send_mode.clone(),
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap(px(TAURI_SERIAL_GRID_GAP))
+                    .child(self.render_raw_tcp_tls_mode_select(
+                        form.raw_tcp_tls_mode.clone(),
+                        cx,
+                    ))
+                    .child(self.render_raw_tcp_tls_verification_select(
+                        form.raw_tcp_tls_verification.clone(),
+                        !tls_enabled,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.two))
+                    .child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.raw_tcp_tls_server_name"),
+                        &form.raw_tcp_tls_server_name,
+                        self.i18n
+                            .t("modals.new_connection.raw_tcp_tls_server_name_placeholder"),
+                        NewConnectionField::RawTcpTlsServerName,
+                        false,
+                        cx,
+                    ))
+                    .child(self.render_connection_hint(
+                        if tls_enabled {
+                            self.i18n
+                                .t("modals.new_connection.raw_tcp_tls_server_name_hint")
+                        } else {
+                            self.i18n
+                                .t("modals.new_connection.raw_tcp_tls_server_name_disabled_hint")
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .p(px(self.tokens.spacing.three))
+                    .child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.raw_tcp_profile_name"),
+                        &form.raw_tcp_profile_name,
+                        self.i18n
+                            .t("modals.new_connection.raw_tcp_profile_name_placeholder"),
+                        NewConnectionField::RawTcpProfileName,
+                        false,
+                        cx,
+                    )),
             )
             .into_any_element()
     }
@@ -1589,6 +1765,103 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn render_raw_tcp_line_ending_select(
+        &self,
+        selected: oxideterm_connections::RawTcpLineEnding,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_tcp_line_ending"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawTcpLineEnding,
+                self.raw_tcp_line_ending_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn render_raw_tcp_display_mode_select(
+        &self,
+        selected: oxideterm_connections::RawTcpDisplayMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_tcp_display_mode"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawTcpDisplayMode,
+                self.raw_tcp_display_mode_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn render_raw_tcp_send_mode_select(
+        &self,
+        selected: oxideterm_connections::RawTcpSendMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_tcp_send_mode"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawTcpSendMode,
+                self.raw_tcp_send_mode_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn render_raw_tcp_tls_mode_select(
+        &self,
+        selected: oxideterm_connections::RawTcpTlsMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_tcp_tls"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawTcpTlsMode,
+                self.raw_tcp_tls_mode_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn render_raw_tcp_tls_verification_select(
+        &self,
+        selected: oxideterm_connections::RawTcpTlsVerification,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n
+                .t("modals.new_connection.raw_tcp_tls_verification"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawTcpTlsVerification,
+                self.raw_tcp_tls_verification_label(&selected),
+                false,
+                disabled,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
     fn upstream_proxy_policy_label(&self, policy: NewConnectionUpstreamProxyPolicy) -> String {
         let key = match policy {
             NewConnectionUpstreamProxyPolicy::UseGlobal => "modals.upstream_proxy.use_global",
@@ -1758,6 +2031,84 @@ impl WorkspaceApp {
         }
     }
 
+    fn raw_tcp_line_ending_label(
+        &self,
+        line_ending: &oxideterm_connections::RawTcpLineEnding,
+    ) -> String {
+        let key = match line_ending {
+            oxideterm_connections::RawTcpLineEnding::Lf => {
+                "modals.new_connection.raw_tcp_line_ending_lf"
+            }
+            oxideterm_connections::RawTcpLineEnding::CrLf => {
+                "modals.new_connection.raw_tcp_line_ending_crlf"
+            }
+            oxideterm_connections::RawTcpLineEnding::Cr => {
+                "modals.new_connection.raw_tcp_line_ending_cr"
+            }
+            oxideterm_connections::RawTcpLineEnding::None => {
+                "modals.new_connection.raw_tcp_line_ending_none"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn raw_tcp_display_mode_label(
+        &self,
+        display_mode: &oxideterm_connections::RawTcpDisplayMode,
+    ) -> String {
+        let key = match display_mode {
+            oxideterm_connections::RawTcpDisplayMode::Text => {
+                "modals.new_connection.raw_tcp_display_text"
+            }
+            oxideterm_connections::RawTcpDisplayMode::Hex => {
+                "modals.new_connection.raw_tcp_display_hex"
+            }
+            oxideterm_connections::RawTcpDisplayMode::Mixed => {
+                "modals.new_connection.raw_tcp_display_mixed"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn raw_tcp_send_mode_label(&self, send_mode: &oxideterm_connections::RawTcpSendMode) -> String {
+        let key = match send_mode {
+            oxideterm_connections::RawTcpSendMode::Text => {
+                "modals.new_connection.raw_tcp_send_text"
+            }
+            oxideterm_connections::RawTcpSendMode::Hex => {
+                "modals.new_connection.raw_tcp_send_hex"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn raw_tcp_tls_mode_label(&self, mode: &oxideterm_connections::RawTcpTlsMode) -> String {
+        let key = match mode {
+            oxideterm_connections::RawTcpTlsMode::Disabled => {
+                "modals.new_connection.raw_tcp_tls_disabled"
+            }
+            oxideterm_connections::RawTcpTlsMode::Enabled => {
+                "modals.new_connection.raw_tcp_tls_enabled"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn raw_tcp_tls_verification_label(
+        &self,
+        verification: &oxideterm_connections::RawTcpTlsVerification,
+    ) -> String {
+        let key = match verification {
+            oxideterm_connections::RawTcpTlsVerification::System => {
+                "modals.new_connection.raw_tcp_tls_verify_system"
+            }
+            oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates => {
+                "modals.new_connection.raw_tcp_tls_verify_allow_invalid"
+            }
+        };
+        self.i18n.t(key)
+    }
+
     fn set_new_connection_serial_port(&mut self, port_path: String, cx: &mut Context<Self>) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.serial_port_path = port_path;
@@ -1815,6 +2166,86 @@ impl WorkspaceApp {
     ) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.serial_flow_control = flow;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_tcp_line_ending(
+        &mut self,
+        line_ending: oxideterm_connections::RawTcpLineEnding,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_tcp_line_ending = line_ending;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_tcp_display_mode(
+        &mut self,
+        display_mode: oxideterm_connections::RawTcpDisplayMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_tcp_display_mode = display_mode;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_tcp_send_mode(
+        &mut self,
+        send_mode: oxideterm_connections::RawTcpSendMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_tcp_send_mode = send_mode;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_tcp_tls_mode(
+        &mut self,
+        tls_mode: oxideterm_connections::RawTcpTlsMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_tcp_tls_mode = tls_mode;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_tcp_tls_verification(
+        &mut self,
+        verification: oxideterm_connections::RawTcpTlsVerification,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_tcp_tls_verification = verification;
             form.field_focused = false;
             clear_connection_selection(form);
             form.error = None;

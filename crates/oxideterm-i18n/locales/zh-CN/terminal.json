@@ -49,6 +49,7 @@
       "copy": "复制",
       "copy_title": "复制命令输出",
       "copy_command": "复制命令",
+      "reconnect_transport": "重新连接",
       "send_to_ai": "发送到 OxideSens",
       "fill_command_bar": "填入命令栏",
       "find": "查找...",

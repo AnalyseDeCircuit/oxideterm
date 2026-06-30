@@ -164,6 +164,15 @@
       "delete_failed": "Falha ao excluir perfil Telnet",
       "confirm_delete": "Excluir perfil Telnet \"{{name}}\"?"
     },
+    "raw_tcp_profiles": {
+      "title": "Perfis Raw TCP",
+      "count": "{{count}} perfil(is)",
+      "open": "Abrir",
+      "delete": "Excluir",
+      "open_failed": "Falha ao abrir perfil Raw TCP",
+      "delete_failed": "Falha ao excluir perfil Raw TCP",
+      "confirm_delete": "Excluir perfil Raw TCP \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Credenciais de privilégio",
       "description": "Armazena credenciais separadas para prompts sudo/su. Os segredos ficam no chaveiro do sistema e só são lidos depois de clicar no auxiliar do terminal.",

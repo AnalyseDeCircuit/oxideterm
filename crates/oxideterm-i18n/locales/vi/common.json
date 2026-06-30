@@ -107,6 +107,7 @@
     "cmd_open_cloud_sync": "Mở đồng bộ đám mây",
     "cmd_open_serial_terminal": "Mở terminal serial",
     "cmd_open_telnet_terminal": "Mở terminal Telnet",
+    "cmd_open_raw_tcp_terminal": "Mở terminal Raw TCP",
     "cmd_open_rdp_preview": "Mở bản xem trước RDP",
     "cmd_open_vnc_preview": "Mở bản xem trước VNC"
   },
@@ -329,6 +330,7 @@
         "sync_forwards": "Đồng bộ chuyển tiếp đã lưu",
         "sync_quick_commands": "Đồng bộ lệnh nhanh",
         "sync_serial_profiles": "Đồng bộ hồ sơ serial",
+        "sync_raw_tcp_profiles": "Đồng bộ hồ sơ Raw TCP",
         "sync_app_settings": "Đồng bộ cài đặt ứng dụng",
         "include_local_terminal_env_vars": "Bao gồm biến môi trường terminal cục bộ",
         "sync_plugin_settings": "Đồng bộ cài đặt plugin",
@@ -369,6 +371,7 @@
         "forwards_detail": "Quy tắc chuyển tiếp cổng đã lưu được đưa vào cùng siêu dữ liệu kết nối sở hữu.",
         "quick_commands_detail": "Định nghĩa lệnh nhanh được đưa vào.",
         "serial_profiles_detail": "Hồ sơ kết nối serial được đưa vào.",
+        "raw_tcp_profiles_detail": "Hồ sơ kết nối Raw TCP được đưa vào.",
         "app_settings_sections_detail": "Phần đã chọn: {{sections}}",
         "app_settings_disabled_detail": "Cài đặt ứng dụng bị loại trừ khỏi phạm vi đồng bộ hiện tại.",
         "plugin_settings_all_detail": "Tất cả cài đặt plugin có thể đồng bộ đều được đưa vào.",
@@ -391,13 +394,13 @@
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{rawTcpProfiles}} hồ sơ Raw TCP, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "history": {
         "action_upload": "Tải lên",
         "action_pull": "Tải xuống",
         "action_restore": "Khôi phục",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{rawTcpProfiles}} hồ sơ Raw TCP, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "errors": {
         "operation_in_progress": "Một thao tác đồng bộ đám mây khác đang chạy.",
@@ -538,6 +541,7 @@
         "total_forwards": "Chuyển tiếp",
         "quick_commands_label": "Lệnh nhanh",
         "serial_profiles_label": "Hồ sơ serial",
+        "raw_tcp_profiles_label": "Hồ sơ Raw TCP",
         "will_import": "Sẽ nhập",
         "will_merge": "Sẽ được gộp",
         "will_replace": "Sẽ được thay thế",
@@ -556,6 +560,7 @@
         "toggle_forwards": "Nhập chuyển tiếp đã lưu ({{count}})",
         "toggle_quick_commands": "Nhập lệnh nhanh ({{count}})",
         "toggle_serial_profiles": "Nhập hồ sơ serial ({{count}})",
+        "toggle_raw_tcp_profiles": "Nhập hồ sơ Raw TCP ({{count}})",
         "section_field_count": "{{count}} trường",
         "section_general": "Chung",
         "section_terminal_appearance": "Giao diện terminal",
@@ -718,6 +723,12 @@
         "parity": "Chẵn lẻ",
         "flow_control": "Điều khiển luồng",
         "connect_on_open": "Kết nối khi mở",
+        "line_ending": "Kết thúc dòng",
+        "display_mode": "Chế độ hiển thị",
+        "send_mode": "Chế độ gửi",
+        "tls_mode": "Chế độ TLS",
+        "tls_verification": "Xác minh TLS",
+        "tls_server_name": "Tên máy chủ TLS",
         "setting_field": "Trường cài đặt"
       },
       "tabs": {

@@ -56,11 +56,12 @@ pub use oxideterm_terminal_encoding::{
 pub use oxideterm_trzsz::{TrzszTransferDirection, TrzszTransferPolicy, TrzszTransferSelection};
 pub use process::{TerminalLifecycle, TerminalProcessInfo};
 pub use session::{
-    SerialError, SerialErrorCode, SerialFlowControl, SerialParity, SerialPortInfo,
-    SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetSessionConfig, TerminalDrainBudget,
-    TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor, TerminalResize,
-    TerminalSession, TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
-    serial_list_ports,
+    RawTcpDisplayMode, RawTcpLineEnding, RawTcpRuntimeOptions, RawTcpSendMode, RawTcpSessionConfig,
+    RawTcpTlsConfig, RawTcpTlsVerification, SerialError, SerialErrorCode, SerialFlowControl,
+    SerialParity, SerialPortInfo, SerialSessionConfig, SshPtySession, SshSessionConfig,
+    TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,
+    TerminalOutputProcessor, TerminalResize, TerminalSession, TerminalSessionBackend,
+    TerminalSessionKind, TerminalSessionStatus, serial_list_ports,
 };
 pub use shell_integration::{
     ShellIntegrationEvent, ShellIntegrationEventKind, ShellIntegrationLifecycleState,

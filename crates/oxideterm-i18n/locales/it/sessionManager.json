@@ -164,6 +164,15 @@
       "delete_failed": "Impossibile eliminare il profilo Telnet",
       "confirm_delete": "Eliminare il profilo Telnet \"{{name}}\"?"
     },
+    "raw_tcp_profiles": {
+      "title": "Profili Raw TCP",
+      "count": "{{count}} profilo/i",
+      "open": "Apri",
+      "delete": "Elimina",
+      "open_failed": "Impossibile aprire il profilo Raw TCP",
+      "delete_failed": "Impossibile eliminare il profilo Raw TCP",
+      "confirm_delete": "Eliminare il profilo Raw TCP \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Credenziali privilegiate",
       "description": "Salva credenziali separate per prompt sudo/su. I segreti restano nel portachiavi di sistema e vengono letti solo dopo il clic sull’assistente del terminale.",

@@ -2342,6 +2342,8 @@ fn new_connection_field_value(
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
+        NewConnectionField::RawTcpProfileName => &form.raw_tcp_profile_name,
+        NewConnectionField::RawTcpTlsServerName => &form.raw_tcp_tls_server_name,
         NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
         NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
         NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
@@ -2379,6 +2381,8 @@ fn connection_field_value_mut(
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
+        NewConnectionField::RawTcpProfileName => &mut form.raw_tcp_profile_name,
+        NewConnectionField::RawTcpTlsServerName => &mut form.raw_tcp_tls_server_name,
         NewConnectionField::JumpHost => {
             &mut form
                 .jump_server_form

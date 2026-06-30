@@ -164,6 +164,15 @@
       "delete_failed": "Telnet プロファイルを削除できませんでした",
       "confirm_delete": "Telnet プロファイル「{{name}}」を削除しますか？"
     },
+    "raw_tcp_profiles": {
+      "title": "Raw TCP プロファイル",
+      "count": "{{count}} 件のプロファイル",
+      "open": "開く",
+      "delete": "削除",
+      "open_failed": "Raw TCP プロファイルを開けませんでした",
+      "delete_failed": "Raw TCP プロファイルを削除できませんでした",
+      "confirm_delete": "Raw TCP プロファイル「{{name}}」を削除しますか？"
+    },
     "privilege_credentials": {
       "title": "権限昇格用認証情報",
       "description": "sudo/su プロンプト用の認証情報を別に保存します。シークレットはシステムキーチェーンに保存され、ターミナル補助ボタンをクリックした時だけ読み込まれます。",

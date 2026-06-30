@@ -279,6 +279,16 @@ impl WorkspaceApp {
                     ),
             );
         }
+        if dialog.include_raw_tcp_profiles {
+            items.push(
+                self.i18n
+                    .t("export.content_summary_raw_tcp_profiles")
+                    .replace(
+                        "{{count}}",
+                        &self.connection_store.raw_tcp_profiles().len().to_string(),
+                    ),
+            );
+        }
         if dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty() {
             let labels = OXIDE_APP_SETTINGS_SECTIONS
                 .iter()
