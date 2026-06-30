@@ -132,6 +132,7 @@
         "key": "SSH 密钥",
         "managed_key": "托管密钥",
         "certificate": "证书",
+        "keyboard_interactive": "键盘交互",
         "agent": "Agent",
         "password_warning": "密码认证需要密码，但拓扑中不会保存密码。请改用密钥或 Agent 认证。"
       },

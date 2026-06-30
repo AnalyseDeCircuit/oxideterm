@@ -38,6 +38,7 @@ pub enum AutoRouteTopologyAuthType {
     Key,
     ManagedKey,
     Certificate,
+    KeyboardInteractive,
     Agent,
 }
 
@@ -48,6 +49,7 @@ impl AutoRouteTopologyAuthType {
             Self::Key => "sessionManager.auto_route.auth.key",
             Self::ManagedKey => "sessionManager.auto_route.auth.managed_key",
             Self::Certificate => "sessionManager.auto_route.auth.certificate",
+            Self::KeyboardInteractive => "sessionManager.auto_route.auth.keyboard_interactive",
             Self::Agent => "sessionManager.auto_route.auth.agent",
         }
     }
@@ -58,6 +60,7 @@ impl AutoRouteTopologyAuthType {
             Self::Key => "key",
             Self::ManagedKey => "managed_key",
             Self::Certificate => "certificate",
+            Self::KeyboardInteractive => "keyboard_interactive",
             Self::Agent => "agent",
         }
     }
@@ -343,6 +346,7 @@ fn topology_auth_type(auth: &SavedAuth) -> AutoRouteTopologyAuthType {
         SavedAuth::Key { .. } => AutoRouteTopologyAuthType::Key,
         SavedAuth::ManagedKey { .. } => AutoRouteTopologyAuthType::ManagedKey,
         SavedAuth::Certificate { .. } => AutoRouteTopologyAuthType::Certificate,
+        SavedAuth::KeyboardInteractive => AutoRouteTopologyAuthType::KeyboardInteractive,
         SavedAuth::Agent => AutoRouteTopologyAuthType::Agent,
     }
 }

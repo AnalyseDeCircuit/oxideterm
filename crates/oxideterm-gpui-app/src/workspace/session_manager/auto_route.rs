@@ -264,9 +264,11 @@ impl WorkspaceApp {
                 }
             }
             TopologyAuthType::Agent => AuthMethod::Agent,
-            TopologyAuthType::ManagedKey | TopologyAuthType::Certificate => {
+            TopologyAuthType::ManagedKey
+            | TopologyAuthType::Certificate
+            | TopologyAuthType::KeyboardInteractive => {
                 // Managed keys need the encrypted key resolver; until that slice lands,
-                // topology drill-down must not guess a filesystem key path.
+                // topology drill-down must not guess a filesystem key path or prompt flow.
                 return Err(self
                     .i18n
                     .t("sessionManager.auto_route.errors.unsupported_auth")

@@ -132,6 +132,7 @@
         "key": "SSH 金鑰",
         "managed_key": "託管金鑰",
         "certificate": "憑證",
+        "keyboard_interactive": "鍵盤互動",
         "agent": "Agent",
         "password_warning": "密碼認證需要密碼，但拓撲中不會儲存密碼。請改用金鑰或 Agent 認證。"
       },

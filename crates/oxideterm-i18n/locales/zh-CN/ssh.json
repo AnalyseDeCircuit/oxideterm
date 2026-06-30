@@ -60,7 +60,7 @@
       "proxy_jump_saved_connection_custom": "自定义连接",
       "proxy_jump_saved_connection_empty": "暂无可用的已保存连接",
       "proxy_jump_saved_connection_hint": "选择已保存连接会填充这个跳板机，但不会显示已保存的密码或口令。",
-      "proxy_jump_kbi_hint": "跳板机不支持 Keyboard-interactive 认证。",
+      "proxy_jump_kbi_hint": "使用 Keyboard-interactive 的跳板机会在连接时弹出交互提示。",
       "proxy_jump_auth": "认证",
       "proxy_jump_key_path": "私钥",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

@@ -465,6 +465,7 @@ fn saved_auth_from_connection_info(payload: &ConnectionInfo) -> SavedAuth {
             passphrase_keychain_id: None,
             plaintext_passphrase: None,
         },
+        AuthType::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         AuthType::Agent => SavedAuth::Agent,
     }
 }
@@ -493,6 +494,7 @@ fn saved_auth_from_proxy_hop_info(hop: &ProxyHopInfo) -> SavedAuth {
             passphrase_keychain_id: None,
             plaintext_passphrase: None,
         },
+        AuthType::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         AuthType::Agent => SavedAuth::Agent,
     }
 }

@@ -217,6 +217,7 @@ fn count_auth_preflight(
         match auth.auth_type() {
             AuthType::Password => result.connections_with_passwords += 1,
             AuthType::Agent => result.connections_with_agent += 1,
+            AuthType::KeyboardInteractive => {}
             AuthType::Key | AuthType::ManagedKey | AuthType::Certificate => {
                 result.connections_with_keys += 1
             }
@@ -513,6 +514,7 @@ fn export_auth(
                 }),
             })
         }
+        SavedAuth::KeyboardInteractive => Ok(EncryptedAuth::KeyboardInteractive),
         SavedAuth::Agent => Ok(EncryptedAuth::Agent),
     }
 }

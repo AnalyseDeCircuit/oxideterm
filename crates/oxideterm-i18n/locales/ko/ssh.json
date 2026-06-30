@@ -45,7 +45,7 @@
       "proxy_jump_port": "포트",
       "proxy_jump_username": "사용자 이름 *",
       "proxy_jump_username_placeholder": "root",
-      "proxy_jump_kbi_hint": "점프 서버에서는 keyboard-interactive 인증을 지원하지 않습니다.",
+      "proxy_jump_kbi_hint": "Keyboard-interactive 점프 서버는 연결 중에 대화형 프롬프트를 표시합니다.",
       "proxy_jump_auth": "인증",
       "proxy_jump_key_path": "개인 키",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

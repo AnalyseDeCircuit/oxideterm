@@ -68,7 +68,7 @@ fn migrate_legacy_auth_credentials(
                 Ok(false)
             }
         }
-        SavedAuth::Agent => Ok(false),
+        SavedAuth::KeyboardInteractive | SavedAuth::Agent => Ok(false),
     }
 }
 

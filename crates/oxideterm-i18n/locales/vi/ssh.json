@@ -45,7 +45,7 @@
       "proxy_jump_port": "Cổng",
       "proxy_jump_username": "Tên người dùng *",
       "proxy_jump_username_placeholder": "root",
-      "proxy_jump_kbi_hint": "Máy chủ nhảy chưa hỗ trợ xác thực keyboard-interactive.",
+      "proxy_jump_kbi_hint": "Jump server dùng keyboard-interactive sẽ hỏi các prompt khi kết nối.",
       "proxy_jump_auth": "Xác thực",
       "proxy_jump_key_path": "Khóa riêng",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

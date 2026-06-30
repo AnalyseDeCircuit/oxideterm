@@ -363,7 +363,6 @@ impl WorkspaceApp {
                                     self.render_auth_tabs(
                                         form.auth_tab,
                                         edit_properties_mode,
-                                        !form.proxy_hops.is_empty(),
                                         cx,
                                     )
                                 })

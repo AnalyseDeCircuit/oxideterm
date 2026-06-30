@@ -132,6 +132,7 @@
         "key": "SSH Key",
         "managed_key": "Managed Key",
         "certificate": "Certificate",
+        "keyboard_interactive": "키보드 대화형",
         "agent": "Agent",
         "password_warning": "Password authentication requires a password, which is not stored in topology. Use key or Agent authentication instead."
       },

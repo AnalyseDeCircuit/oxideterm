@@ -1820,24 +1820,6 @@ impl WorkspaceApp {
             cx.notify();
             return None;
         }
-        if !form.proxy_hops.is_empty() && form.auth_tab == SshAuthTab::TwoFactor {
-            form.error = Some(self.i18n.t("ssh.form.proxy_chain_kbi_unsupported"));
-            cx.notify();
-            return None;
-        }
-        if form
-            .proxy_hops
-            .iter()
-            .any(|hop| hop.complete() && hop.auth_tab == SshAuthTab::TwoFactor)
-        {
-            form.error = Some(
-                self.i18n
-                    .t("sessionManager.toast.proxy_hop_kbi_unsupported"),
-            );
-            cx.notify();
-            return None;
-        }
-
         let auth = match form.auth_tab {
             SshAuthTab::Password => {
                 // UI inputs own plain String drafts; crossing into SSH auth moves a
@@ -2816,9 +2798,6 @@ fn proxy_chain_from_form(
 
     let mut chain = Vec::new();
     for hop in form.proxy_hops.iter().filter(|hop| hop.complete()) {
-        if hop.auth_tab == SshAuthTab::TwoFactor {
-            return Err("Proxy hop does not support keyboard-interactive/2FA".to_string());
-        }
         if hop.auth_tab == SshAuthTab::ManagedKey && hop.managed_key_id.trim().is_empty() {
             return Err("Proxy hop managed key is required".to_string());
         }

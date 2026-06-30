@@ -14,6 +14,7 @@ pub enum AuthType {
     Key,
     ManagedKey,
     Certificate,
+    KeyboardInteractive,
     Agent,
 }
 
@@ -24,6 +25,7 @@ impl AuthType {
             Self::Key => "key",
             Self::ManagedKey => "managed_key",
             Self::Certificate => "certificate",
+            Self::KeyboardInteractive => "keyboard_interactive",
             Self::Agent => "agent",
         }
     }
@@ -64,6 +66,8 @@ pub enum SavedAuth {
         #[serde(default, rename = "passphrase", skip_serializing)]
         plaintext_passphrase: Option<SecretString>,
     },
+    // Keyboard-interactive carries no persisted secret; prompts are collected during connect.
+    KeyboardInteractive,
     Agent,
 }
 
@@ -74,6 +78,7 @@ impl SavedAuth {
             Self::Key { .. } => AuthType::Key,
             Self::ManagedKey { .. } => AuthType::ManagedKey,
             Self::Certificate { .. } => AuthType::Certificate,
+            Self::KeyboardInteractive => AuthType::KeyboardInteractive,
             Self::Agent => AuthType::Agent,
         }
     }

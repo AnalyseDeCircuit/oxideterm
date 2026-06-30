@@ -193,7 +193,8 @@ pub fn saved_auth_from_draft(draft: ConnectionAuthDraft) -> SavedAuth {
             passphrase_keychain_id: None,
             plaintext_passphrase: (!draft.passphrase.is_empty()).then_some(draft.passphrase),
         },
-        ConnectionAuthDraftKind::Agent | ConnectionAuthDraftKind::TwoFactor => SavedAuth::Agent,
+        ConnectionAuthDraftKind::TwoFactor => SavedAuth::KeyboardInteractive,
+        ConnectionAuthDraftKind::Agent => SavedAuth::Agent,
     }
 }
 
@@ -243,9 +244,8 @@ fn saved_auth_from_draft_for_update(
 
 fn saved_proxy_chain_from_drafts(hops: Vec<ProxyHopDraft>) -> Result<Vec<SavedProxyHop>> {
     hops.into_iter()
-        .enumerate()
-        .map(|(index, hop)| {
-            let auth = saved_proxy_hop_auth_from_draft(hop.auth, index + 1)?;
+        .map(|hop| {
+            let auth = saved_proxy_hop_auth_from_draft(hop.auth)?;
             Ok(SavedProxyHop {
                 host: hop.host.trim().to_string(),
                 port: hop.port.trim().parse::<u16>().unwrap_or(22),
@@ -257,13 +257,7 @@ fn saved_proxy_chain_from_drafts(hops: Vec<ProxyHopDraft>) -> Result<Vec<SavedPr
         .collect()
 }
 
-fn saved_proxy_hop_auth_from_draft(
-    mut auth: ConnectionAuthDraft,
-    hop_index: usize,
-) -> Result<SavedAuth> {
-    if auth.kind == ConnectionAuthDraftKind::TwoFactor {
-        anyhow::bail!("Proxy hop {hop_index} does not support keyboard-interactive/2FA");
-    }
+fn saved_proxy_hop_auth_from_draft(mut auth: ConnectionAuthDraft) -> Result<SavedAuth> {
     if auth.kind == ConnectionAuthDraftKind::DefaultKey {
         let has_passphrase = !auth.passphrase.is_empty();
         return Ok(SavedAuth::Key {
@@ -399,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn proxy_hop_two_factor_is_rejected_instead_of_saved_as_agent() {
+    fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
         let draft = ConnectionDraft {
             name: "Home".to_string(),
             host: "target.example.com".to_string(),
@@ -426,12 +420,12 @@ mod tests {
             post_connect_command: String::new(),
         };
 
-        let error = save_request_from_draft(draft, None, None).unwrap_err();
+        let request = save_request_from_draft(draft, None, None).unwrap();
 
-        assert_eq!(
-            error.to_string(),
-            "Proxy hop 1 does not support keyboard-interactive/2FA"
-        );
+        assert!(matches!(
+            request.proxy_chain[0].auth,
+            SavedAuth::KeyboardInteractive
+        ));
     }
 
     #[test]

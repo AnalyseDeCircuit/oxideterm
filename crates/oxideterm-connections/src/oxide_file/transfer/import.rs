@@ -403,6 +403,7 @@ fn count_sensitive_credentials_for_auth(
                 counts.restored_key_passphrases += 1;
             }
         }
+        EncryptedAuth::KeyboardInteractive => {}
         EncryptedAuth::Agent => {}
     }
 }
@@ -675,6 +676,7 @@ fn import_auth(
             passphrase_keychain_id: None,
             plaintext_passphrase: passphrase.map(SecretString::from),
         },
+        EncryptedAuth::KeyboardInteractive => SavedAuth::KeyboardInteractive,
         EncryptedAuth::Agent => SavedAuth::Agent,
     })
 }

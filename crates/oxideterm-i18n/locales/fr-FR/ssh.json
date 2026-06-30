@@ -45,7 +45,7 @@
       "proxy_jump_port": "Port",
       "proxy_jump_username": "Nom d'utilisateur *",
       "proxy_jump_username_placeholder": "root",
-      "proxy_jump_kbi_hint": "Les serveurs relais ne prennent pas en charge l'authentification keyboard-interactive.",
+      "proxy_jump_kbi_hint": "Les serveurs relais en keyboard-interactive demanderont leurs invites pendant la connexion.",
       "proxy_jump_auth": "Authentification",
       "proxy_jump_key_path": "Clé privée",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

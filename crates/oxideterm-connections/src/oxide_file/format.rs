@@ -451,6 +451,7 @@ pub enum EncryptedAuth {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         managed_key: Option<EncryptedManagedKeyMetadata>,
     },
+    KeyboardInteractive,
     Agent,
 }
 
@@ -494,6 +495,7 @@ impl fmt::Debug for EncryptedAuth {
                 )
                 .field("managed_key", managed_key)
                 .finish(),
+            Self::KeyboardInteractive => f.write_str("KeyboardInteractive"),
             Self::Agent => f.write_str("Agent"),
         }
     }

@@ -45,7 +45,7 @@
       "proxy_jump_port": "ポート",
       "proxy_jump_username": "ユーザー名 *",
       "proxy_jump_username_placeholder": "root",
-      "proxy_jump_kbi_hint": "ジャンプサーバーでは keyboard-interactive 認証はサポートされていません。",
+      "proxy_jump_kbi_hint": "Keyboard-interactive のジャンプサーバーは接続中に対話プロンプトを表示します。",
       "proxy_jump_auth": "認証",
       "proxy_jump_key_path": "秘密鍵",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

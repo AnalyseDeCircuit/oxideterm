@@ -60,6 +60,8 @@ pub fn auth_method_from_saved_auth(
                 .and_then(|_| store.get_saved_auth_passphrase(auth).ok().flatten())
                 .map(SecretString::into_zeroizing),
         ),
+        // Keyboard-interactive prompts are collected by the runtime prompt handler.
+        SavedAuth::KeyboardInteractive => AuthMethod::KeyboardInteractive,
         SavedAuth::Agent => AuthMethod::Agent,
     })
 }

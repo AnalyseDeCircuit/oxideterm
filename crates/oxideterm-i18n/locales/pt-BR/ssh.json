@@ -45,7 +45,7 @@
       "proxy_jump_port": "Port",
       "proxy_jump_username": "Usuário *",
       "proxy_jump_username_placeholder": "root",
-      "proxy_jump_kbi_hint": "A autenticação keyboard-interactive não é compatível com servidores de salto.",
+      "proxy_jump_kbi_hint": "Jump servers com keyboard-interactive pedirão respostas durante a conexão.",
       "proxy_jump_auth": "Autenticação",
       "proxy_jump_key_path": "Chave privada",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

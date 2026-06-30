@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn proxy_hop_two_factor_is_rejected_instead_of_saved_as_agent() {
+    fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
         let mut form = NewConnectionForm {
             auth_tab: SshAuthTab::Agent,
             ..base_form()
@@ -372,12 +372,12 @@ mod tests {
                 agent_forwarding: false,
             });
 
-        let error = save_request_from_form(&form, None).unwrap_err();
+        let request = save_request_from_form(&form, None).unwrap();
 
-        assert_eq!(
-            error.to_string(),
-            "Proxy hop 1 does not support keyboard-interactive/2FA"
-        );
+        assert!(matches!(
+            request.proxy_chain[0].auth,
+            oxideterm_connections::SavedAuth::KeyboardInteractive
+        ));
     }
 
     #[test]

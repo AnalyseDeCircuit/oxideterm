@@ -814,7 +814,6 @@ impl WorkspaceApp {
         &self,
         active_tab: SshAuthTab,
         edit_properties_mode: bool,
-        kbi_disabled_for_proxy_chain: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tabs: Vec<(SshAuthTab, &str)> = if edit_properties_mode {
@@ -881,16 +880,14 @@ impl WorkspaceApp {
         let row = if edit_properties_mode {
             let mut row = segmented_tabs(&self.tokens);
             for (tab, key) in tabs {
-                let disabled = tab == SshAuthTab::TwoFactor && kbi_disabled_for_proxy_chain;
-                row = row.child(build_tab(self, tab, key, active_tab, disabled, cx));
+                row = row.child(build_tab(self, tab, key, active_tab, false, cx));
             }
             row.into_any_element()
         } else {
             let mut first_row = self.render_auth_tab_row();
             let mut second_row = self.render_auth_tab_row();
             for (index, (tab, key)) in tabs.into_iter().enumerate() {
-                let disabled = tab == SshAuthTab::TwoFactor && kbi_disabled_for_proxy_chain;
-                let item = build_tab(self, tab, key, active_tab, disabled, cx);
+                let item = build_tab(self, tab, key, active_tab, false, cx);
                 if index < 3 {
                     first_row = first_row.child(item);
                 } else {
@@ -906,21 +903,7 @@ impl WorkspaceApp {
                 .child(second_row)
                 .into_any_element()
         };
-        let field = form_field(&self.tokens, self.i18n.t("ssh.form.authentication"), row);
-        if kbi_disabled_for_proxy_chain {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(self.tokens.spacing.two))
-                .child(field)
-                .child(self.render_connection_hint_with_color(
-                    self.i18n.t("sessionManager.toast.proxy_hop_kbi_unsupported"),
-                    self.tokens.ui.warning,
-                ))
-                .into_any_element()
-        } else {
-            field
-        }
+        form_field(&self.tokens, self.i18n.t("ssh.form.authentication"), row)
     }
 
     fn render_auth_tab_row(&self) -> Div {

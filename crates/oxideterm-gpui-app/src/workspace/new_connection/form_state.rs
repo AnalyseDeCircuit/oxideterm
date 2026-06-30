@@ -262,6 +262,7 @@ impl NewConnectionProxyHop {
             AuthType::Key => SshAuthTab::SshKey,
             AuthType::ManagedKey => SshAuthTab::ManagedKey,
             AuthType::Certificate => SshAuthTab::Certificate,
+            AuthType::KeyboardInteractive => SshAuthTab::TwoFactor,
             AuthType::Agent => SshAuthTab::Agent,
         };
         // ConnectionInfo is metadata-only. Keep keychain-backed passwords and

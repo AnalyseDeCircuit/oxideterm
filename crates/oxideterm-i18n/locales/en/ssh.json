@@ -60,7 +60,7 @@
       "proxy_jump_saved_connection_custom": "Custom connection",
       "proxy_jump_saved_connection_empty": "No saved connections available",
       "proxy_jump_saved_connection_hint": "Selecting a saved connection fills this jump server without exposing saved passwords or passphrases.",
-      "proxy_jump_kbi_hint": "Keyboard-interactive authentication is not supported for jump servers.",
+      "proxy_jump_kbi_hint": "Keyboard-interactive jump servers will ask for their prompts during connection.",
       "proxy_jump_auth": "Authentication",
       "proxy_jump_key_path": "Private Key",
       "proxy_jump_key_path_placeholder": "~/.ssh/id_ed25519",

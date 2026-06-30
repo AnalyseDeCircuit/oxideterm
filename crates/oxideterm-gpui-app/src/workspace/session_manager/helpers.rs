@@ -4,6 +4,7 @@ fn auth_label(auth_type: AuthType) -> String {
         AuthType::Key => "Key",
         AuthType::ManagedKey => "Managed Key",
         AuthType::Certificate => "Certificate",
+        AuthType::KeyboardInteractive => "Keyboard Interactive",
         AuthType::Agent => "Agent",
     }
     .to_string()
@@ -295,6 +296,15 @@ pub(super) fn form_from_saved_connection(
             String::new(),
             String::new(),
             passphrase_keychain_id.is_some() || plaintext_passphrase.is_some(),
+        ),
+        SavedAuth::KeyboardInteractive => (
+            SshAuthTab::TwoFactor,
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            false,
         ),
         SavedAuth::Agent => (
             SshAuthTab::Agent,

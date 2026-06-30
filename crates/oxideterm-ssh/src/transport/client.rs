@@ -433,7 +433,13 @@ impl SshTransportClient {
         .map_err(|_| SshTransportError::Timeout)?
         .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
 
-        authenticate_proxy_hop(&mut handle, hop, self.managed_key_resolver.as_ref()).await?;
+        authenticate_proxy_hop(
+            &mut handle,
+            hop,
+            self.prompt_handler.as_deref(),
+            self.managed_key_resolver.as_ref(),
+        )
+        .await?;
         Ok(handle)
     }
 
@@ -459,7 +465,13 @@ impl SshTransportClient {
             ))
         })?;
 
-        authenticate_proxy_hop(&mut handle, hop, self.managed_key_resolver.as_ref()).await?;
+        authenticate_proxy_hop(
+            &mut handle,
+            hop,
+            self.prompt_handler.as_deref(),
+            self.managed_key_resolver.as_ref(),
+        )
+        .await?;
         Ok(handle)
     }
 
