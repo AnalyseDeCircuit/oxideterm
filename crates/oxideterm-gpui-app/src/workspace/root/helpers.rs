@@ -1319,6 +1319,9 @@ fn connection_trace_failure_stage(error: Option<&str>) -> ConnectionTraceStage {
     {
         return ConnectionTraceStage::Preparing;
     }
+    if error.contains("algorithm negotiation failed") {
+        return ConnectionTraceStage::SshHandshake;
+    }
 
     match classify_message(&error) {
         BackendErrorClass::Disconnected
@@ -1434,6 +1437,12 @@ mod helper_tests {
         assert_eq!(
             connection_trace_failure_stage(Some("Connection failed: network unreachable")),
             ConnectionTraceStage::OpeningTransport
+        );
+        assert_eq!(
+            connection_trace_failure_stage(Some(
+                "SSH algorithm negotiation failed: no common key exchange algorithm"
+            )),
+            ConnectionTraceStage::SshHandshake
         );
     }
 

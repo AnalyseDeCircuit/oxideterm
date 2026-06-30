@@ -221,9 +221,7 @@ impl SshTransportClient {
             .await
             .map_err(|_| SshTransportError::Timeout)?
             .map_err(|error| {
-                SshTransportError::ConnectionFailed(format!(
-                    "failed to connect child node via parent tunnel: {error}"
-                ))
+                error.with_context("failed to connect child node via parent tunnel")
             })?;
             authenticate(
                 &mut target,
@@ -339,7 +337,7 @@ impl SshTransportClient {
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?
-        .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+        .map_err(SshTransportError::from)?;
 
         authenticate(
             &mut handle,
@@ -431,7 +429,7 @@ impl SshTransportClient {
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?
-        .map_err(|error| SshTransportError::ConnectionFailed(error.to_string()))?;
+        .map_err(SshTransportError::from)?;
 
         authenticate_proxy_hop(
             &mut handle,
@@ -459,8 +457,8 @@ impl SshTransportClient {
         .await
         .map_err(|_| SshTransportError::Timeout)?
         .map_err(|error| {
-            SshTransportError::ConnectionFailed(format!(
-                "failed to connect via proxy stream to {}:{}: {error}",
+            error.with_context(format!(
+                "failed to connect via proxy stream to {}:{}",
                 hop.host, hop.port
             ))
         })?;
@@ -500,9 +498,7 @@ impl SshTransportClient {
         .await
         .map_err(|_| SshTransportError::Timeout)?
         .map_err(|error| {
-            SshTransportError::ConnectionFailed(format!(
-                "failed to connect to target via proxy stream: {error}"
-            ))
+            error.with_context("failed to connect to target via proxy stream")
         })?;
 
         authenticate(

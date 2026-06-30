@@ -131,6 +131,7 @@ const KEX_EXTENSION_NAMES: &[kex::Name] = &[
 const CIPHER_ORDER: &[cipher::Name] = &[
     cipher::CHACHA20_POLY1305,
     cipher::AES_256_GCM,
+    cipher::AES_128_GCM,
     cipher::AES_256_CTR,
     cipher::AES_192_CTR,
     cipher::AES_128_CTR,
@@ -204,6 +205,12 @@ mod tests {
         assert!(!Preferred::DEFAULT.kex.contains(&kex::DH_GEX_SHA1));
         assert!(!Preferred::DEFAULT.kex.contains(&kex::DH_G14_SHA1));
         assert!(!Preferred::DEFAULT.kex.contains(&kex::DH_G1_SHA1));
+    }
+
+    #[test]
+    fn default_ciphers_include_both_openssh_gcm_variants() {
+        assert!(Preferred::DEFAULT.cipher.contains(&cipher::AES_256_GCM));
+        assert!(Preferred::DEFAULT.cipher.contains(&cipher::AES_128_GCM));
     }
 }
 

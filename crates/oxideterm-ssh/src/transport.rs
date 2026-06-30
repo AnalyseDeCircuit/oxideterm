@@ -171,6 +171,14 @@ pub enum SshTransportError {
     Timeout,
     #[error("SSH connection failed: {0}")]
     ConnectionFailed(String),
+    #[error(
+        "SSH algorithm negotiation failed: no common {kind} algorithm. Client offered: {client_algorithms:?}; server offered: {server_algorithms:?}"
+    )]
+    AlgorithmNegotiationFailed {
+        kind: SshAlgorithmKind,
+        client_algorithms: Vec<String>,
+        server_algorithms: Vec<String>,
+    },
     #[error("SSH authentication failed: {0}")]
     AuthenticationFailed(String),
     #[error("SSH authentication method is not implemented in native yet: {0}")]
@@ -201,9 +209,65 @@ pub enum SshTransportError {
 pub type ManagedKeyResolver =
     Arc<dyn Fn(&str) -> Result<Zeroizing<String>, SshTransportError> + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SshAlgorithmKind {
+    KeyExchange,
+    HostKey,
+    Cipher,
+    Mac,
+    Compression,
+}
+
+impl std::fmt::Display for SshAlgorithmKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::KeyExchange => "key exchange",
+            Self::HostKey => "host key",
+            Self::Cipher => "cipher",
+            Self::Mac => "MAC",
+            Self::Compression => "compression",
+        })
+    }
+}
+
 impl From<russh::Error> for SshTransportError {
     fn from(error: russh::Error) -> Self {
-        Self::ConnectionFailed(error.to_string())
+        match error {
+            russh::Error::NoCommonAlgo { kind, ours, theirs } => {
+                // Keep both sides' advertised lists structured so the UI can
+                // explain the exact negotiation gap instead of showing a flat
+                // "connection failed" string.
+                Self::AlgorithmNegotiationFailed {
+                    kind: SshAlgorithmKind::from(kind),
+                    client_algorithms: ours,
+                    server_algorithms: theirs,
+                }
+            }
+            error => Self::ConnectionFailed(error.to_string()),
+        }
+    }
+}
+
+impl SshTransportError {
+    pub(crate) fn with_context(self, context: impl Into<String>) -> Self {
+        match self {
+            Self::ConnectionFailed(message) => {
+                Self::ConnectionFailed(format!("{}: {message}", context.into()))
+            }
+            error => error,
+        }
+    }
+}
+
+impl From<russh::AlgorithmKind> for SshAlgorithmKind {
+    fn from(kind: russh::AlgorithmKind) -> Self {
+        match kind {
+            russh::AlgorithmKind::Kex => Self::KeyExchange,
+            russh::AlgorithmKind::Key => Self::HostKey,
+            russh::AlgorithmKind::Cipher => Self::Cipher,
+            russh::AlgorithmKind::Compression => Self::Compression,
+            russh::AlgorithmKind::Mac => Self::Mac,
+        }
     }
 }
 
@@ -508,6 +572,77 @@ mod transport_lost_tests {
         drop(guard);
 
         assert_eq!(handle.info().ref_count, 0);
+    }
+}
+
+#[cfg(test)]
+mod transport_error_tests {
+    use super::{SshAlgorithmKind, SshTransportError};
+
+    #[test]
+    fn no_common_kex_error_keeps_algorithm_lists_structured() {
+        let error = SshTransportError::from(russh::Error::NoCommonAlgo {
+            kind: russh::AlgorithmKind::Kex,
+            ours: vec!["curve25519-sha256".to_string()],
+            theirs: vec!["diffie-hellman-group1-sha1".to_string()],
+        });
+
+        match error {
+            SshTransportError::AlgorithmNegotiationFailed {
+                kind,
+                client_algorithms,
+                server_algorithms,
+            } => {
+                assert_eq!(kind, SshAlgorithmKind::KeyExchange);
+                assert_eq!(client_algorithms, ["curve25519-sha256"]);
+                assert_eq!(server_algorithms, ["diffie-hellman-group1-sha1"]);
+            }
+            other => panic!("unexpected error mapping: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_common_mac_error_keeps_display_actionable() {
+        let error = SshTransportError::from(russh::Error::NoCommonAlgo {
+            kind: russh::AlgorithmKind::Mac,
+            ours: vec!["hmac-sha2-256-etm@openssh.com".to_string()],
+            theirs: vec!["umac-64-etm@openssh.com".to_string()],
+        });
+
+        let message = error.to_string();
+
+        assert!(message.contains("no common MAC algorithm"));
+        assert!(message.contains("hmac-sha2-256-etm@openssh.com"));
+        assert!(message.contains("umac-64-etm@openssh.com"));
+    }
+
+    #[test]
+    fn contextual_prefix_keeps_negotiation_errors_structured() {
+        let error = SshTransportError::from(russh::Error::NoCommonAlgo {
+            kind: russh::AlgorithmKind::Cipher,
+            ours: vec!["aes256-gcm@openssh.com".to_string()],
+            theirs: vec!["aes128-cbc".to_string()],
+        })
+        .with_context("proxy stream");
+
+        assert!(matches!(
+            error,
+            SshTransportError::AlgorithmNegotiationFailed {
+                kind: SshAlgorithmKind::Cipher,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn contextual_prefix_keeps_plain_connection_errors_actionable() {
+        let error =
+            SshTransportError::ConnectionFailed("unexpected eof".to_string()).with_context("proxy");
+
+        assert_eq!(
+            error.to_string(),
+            "SSH connection failed: proxy: unexpected eof"
+        );
     }
 }
 
