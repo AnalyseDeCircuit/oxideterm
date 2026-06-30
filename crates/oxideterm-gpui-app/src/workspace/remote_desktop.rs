@@ -2293,9 +2293,6 @@ fn development_remote_desktop_helper_command(command: &str) -> Option<ResolvedRe
         "-p".to_string(),
         command.to_string(),
     ];
-    if command == "oxideterm-rdp-helper" && development_legacy_rdp_feature_available() {
-        prefix_args.extend(["--features".to_string(), "legacy-freerdp".to_string()]);
-    }
     prefix_args.push("--".to_string());
 
     // Debug app runs should execute the current helper source, not a stale
@@ -2313,10 +2310,6 @@ fn fresh_development_helper_binary(
     workspace_root: &Path,
     command: &str,
 ) -> Option<ResolvedRemoteDesktopHelper> {
-    if command == "oxideterm-rdp-helper" && development_legacy_rdp_feature_available() {
-        return None;
-    }
-
     let candidate = workspace_root
         .join("target")
         .join("debug")
@@ -2370,14 +2363,6 @@ fn path_modified_after(path: &Path, cutoff: SystemTime) -> bool {
         }
     }
     false
-}
-
-fn development_legacy_rdp_feature_available() -> bool {
-    std::process::Command::new("pkg-config")
-        .args(["--exists", "freerdp-client2 >= 2.4"])
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
 }
 
 fn bundled_remote_desktop_helper_candidates(command: &str) -> Vec<PathBuf> {

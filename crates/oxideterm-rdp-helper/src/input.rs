@@ -57,7 +57,6 @@ pub(crate) struct RdpKeyboardInputMapper {
 }
 
 impl RdpKeyboardInputMapper {
-    #[cfg_attr(not(any(feature = "legacy-freerdp", test)), allow(dead_code))]
     pub(crate) fn release_all_operations(&mut self) -> Vec<RdpInputOperation> {
         let mut operations = Vec::new();
         for scancode in self.pressed_scancodes.drain() {

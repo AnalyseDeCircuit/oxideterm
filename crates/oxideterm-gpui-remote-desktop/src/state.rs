@@ -320,7 +320,7 @@ fn convert_framebuffer_bytes_to_gpui_bgra(bytes: &mut [u8], format: RemoteDeskto
             }
         }
         RemoteDesktopFrameFormat::Bgra8 => {
-            // FreeRDP and VNC-style desktop buffers often use the fourth byte
+            // Some desktop buffers use the fourth byte
             // as unused padding rather than alpha. Remote desktop framebuffers
             // are opaque, so make that explicit before uploading to GPUI.
             for pixel in bytes.chunks_exact_mut(4) {
