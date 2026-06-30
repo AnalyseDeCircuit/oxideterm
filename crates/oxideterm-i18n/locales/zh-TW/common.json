@@ -837,7 +837,7 @@
     "start_exploring": "開始探索",
     "project_intro": "OxideTerm 是一款基於 Rust 打造的現代跨平台 SSH 終端用戶端。整合多工連線、SFTP 檔案管理、智能連接埠轉發、AI 輔助終端與命令列伴侶工具 — 安全、高效、可擴展。",
     "highlight_performance": "Rust 高效能",
-    "highlight_performance_desc": "非同步 I/O、WebGL 算繪、零複製二進位協定。",
+    "highlight_performance_desc": "非同步 I/O、GPUI 原生算繪、零複製二進位協定。",
     "highlight_security_arch": "安全優先",
     "highlight_security_arch_desc": "系統鑰匙圈、ChaCha20 加密、純 Rust SSH 協定堆疊。",
     "highlight_crossplatform": "跨平台",
