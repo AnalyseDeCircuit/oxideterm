@@ -1070,6 +1070,7 @@ fn create_cloud_sync_rollback_backup(
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: 0,
             raw_tcp_profiles: metadata.raw_tcp_profiles_count.unwrap_or(0),
+            raw_udp_profiles: metadata.raw_udp_profiles_count.unwrap_or(0),
             sensitive_credentials: metadata.portable_secret_count.unwrap_or(0),
         }),
     }))

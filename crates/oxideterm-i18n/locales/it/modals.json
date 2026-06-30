@@ -193,7 +193,13 @@
       "section_raw_tcp_profiles": "Profili Raw TCP ({{count}})",
       "toggle_raw_tcp_profiles": "Importa profili di connessione Raw TCP",
       "imported_raw_tcp_profiles": "Importati {{count}} profilo/i Raw TCP.",
-      "skipped_raw_tcp_profiles": "Profili Raw TCP saltati"
+      "skipped_raw_tcp_profiles": "Profili Raw TCP saltati",
+      "contains_raw_udp_profiles": "Profili Raw UDP:",
+      "raw_udp_profiles_count": "{{count}} profilo/i",
+      "section_raw_udp_profiles": "Profili Raw UDP ({{count}})",
+      "toggle_raw_udp_profiles": "Importa profili di connessione Raw UDP",
+      "imported_raw_udp_profiles": "Importati {{count}} profilo/i Raw UDP.",
+      "skipped_raw_udp_profiles": "Profili Raw UDP saltati"
     },
     "reconnect": {
       "title": "Riconnetti Sessione",
@@ -457,7 +463,37 @@
       "serial_profile_name_placeholder": "Console laboratorio",
       "serial_save_failed": "Impossibile salvare il profilo seriale",
       "serial_invalid_baud_rate": "Il baud rate deve essere maggiore di zero",
-      "serial_port_required": "Seleziona o inserisci il percorso di una porta seriale"
+      "serial_port_required": "Seleziona o inserisci il percorso di una porta seriale",
+      "transport_raw_udp": "Raw UDP",
+      "raw_udp_description": "Invia e ricevi datagrammi UDP come terminale locale.",
+      "raw_udp_section_title": "Terminale Raw UDP",
+      "raw_udp_connect_hint": "Invia ogni riga inserita come un singolo datagramma UDP. Le risposte remote vengono mostrate come datagrammi ricevuti.",
+      "raw_udp_host": "Host remoto",
+      "raw_udp_host_placeholder": "192.168.1.100 o device.local",
+      "raw_udp_port": "Porta remota",
+      "raw_udp_port_placeholder": "Inserisci una porta UDP",
+      "raw_udp_invalid_port": "La porta deve essere compresa tra 1 e 65535",
+      "raw_udp_host_required": "Inserisci un host remoto Raw UDP",
+      "raw_udp_profile_name": "Nome profilo",
+      "raw_udp_profile_name_placeholder": "Socket datagramma dispositivo",
+      "raw_udp_save_failed": "Salvataggio profilo Raw UDP fallito",
+      "raw_udp_local_bind_host": "Host di bind locale",
+      "raw_udp_local_bind_host_placeholder": "Lascia vuoto per qualsiasi indirizzo locale",
+      "raw_udp_local_bind_port": "Porta di bind locale",
+      "raw_udp_local_bind_port_placeholder": "0 per una porta temporanea",
+      "raw_udp_invalid_local_bind_port": "La porta di bind locale deve essere compresa tra 0 e 65535",
+      "raw_udp_line_ending": "Fine riga",
+      "raw_udp_line_ending_lf": "LF",
+      "raw_udp_line_ending_crlf": "CRLF",
+      "raw_udp_line_ending_cr": "CR",
+      "raw_udp_line_ending_none": "Nessuna",
+      "raw_udp_display_mode": "Visualizzazione",
+      "raw_udp_display_text": "Testo",
+      "raw_udp_display_hex": "Esadecimale",
+      "raw_udp_display_mixed": "Esadecimale + testo",
+      "raw_udp_send_mode": "Invia come",
+      "raw_udp_send_text": "Testo",
+      "raw_udp_send_hex": "Byte esadecimali"
     },
     "managed_key": {
       "selector": {
@@ -776,6 +812,9 @@
     "include_raw_tcp_profiles": "Includi profili Raw TCP",
     "include_raw_tcp_profiles_description": "Esporta i profili di connessione Raw TCP salvati ({{count}} profilo/i).",
     "content_summary_serial_profiles": "Profili seriali: {{count}} profilo/i",
-    "content_summary_raw_tcp_profiles": "Profili Raw TCP: {{count}} profilo/i"
+    "content_summary_raw_tcp_profiles": "Profili Raw TCP: {{count}} profilo/i",
+    "include_raw_udp_profiles": "Includi profili Raw UDP",
+    "include_raw_udp_profiles_description": "Esporta i profili di connessione Raw UDP salvati ({{count}} profilo/i).",
+    "content_summary_raw_udp_profiles": "Profili Raw UDP: {{count}} profilo/i"
   }
 }

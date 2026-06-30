@@ -5,8 +5,9 @@ mod tests {
 
     use crate::{
         PrivilegeCredentialKind, RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode,
-        RawTcpTlsMode, RawTcpTlsVerification, SavePrivilegeCredentialRequest,
-        SaveRawTcpProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
+        RawTcpTlsMode, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding,
+        RawUdpSendMode, SavePrivilegeCredentialRequest, SaveRawTcpProfileRequest,
+        SaveRawUdpProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
         SerialFlowControl,
     };
     use russh::keys::ssh_key::LineEnding;
@@ -311,6 +312,159 @@ mod tests {
         assert_eq!(skipped.imported_raw_tcp_profiles, 0);
         assert_eq!(skipped.skipped_raw_tcp_profiles, 1);
         assert!(skipped_target.raw_tcp_profiles().is_empty());
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_raw_udp_profiles() {
+        let mut source = temp_store("raw-udp-profile-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let profile = source
+            .upsert_raw_udp_profile(SaveRawUdpProfileRequest {
+                id: Some("raw-udp-1".to_string()),
+                name: "Lab datagrams".to_string(),
+                group: Some("Lab".to_string()),
+                remote_host: "device.local".to_string(),
+                remote_port: 9001,
+                local_bind_host: Some("0.0.0.0".to_string()),
+                local_bind_port: Some(0),
+                line_ending: Some(RawUdpLineEnding::CrLf),
+                display_mode: Some(RawUdpDisplayMode::Mixed),
+                send_mode: Some(RawUdpSendMode::Hex),
+                connect_on_open: Some(true),
+            })
+            .unwrap();
+        let raw_udp_profiles_json = serde_json::to_string_pretty(
+            &source.export_raw_udp_profiles_snapshot().unwrap(),
+        )
+        .unwrap();
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                raw_udp_profiles_json: Some(raw_udp_profiles_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.raw_udp_profiles_count, Some(1));
+
+        let preview = preview_oxide_import(
+            &temp_store("raw-udp-profile-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.raw_udp_profiles_count, 1);
+
+        let mut target = temp_store("raw-udp-profile-target");
+        let imported = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(imported.imported_raw_udp_profiles, 1);
+        assert_eq!(target.raw_udp_profiles(), &[profile]);
+
+        let mut skipped_target = temp_store("raw-udp-profile-skip-target");
+        let skipped = apply_oxide_import_with_options(
+            &mut skipped_target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                import_raw_udp_profiles: false,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(skipped.imported_raw_udp_profiles, 0);
+        assert_eq!(skipped.skipped_raw_udp_profiles, 1);
+        assert!(skipped_target.raw_udp_profiles().is_empty());
+    }
+
+    #[test]
+    fn raw_udp_profile_import_conflict_uses_same_id_endpoint_timestamp() {
+        fn source_with_raw_udp_profile(
+            store_name: &str,
+            remote_host: &str,
+            remote_port: u16,
+        ) -> ConnectionStore {
+            let mut store = temp_store(store_name);
+            store
+                .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+                .unwrap();
+            store
+                .upsert_raw_udp_profile(SaveRawUdpProfileRequest {
+                    id: Some("raw-udp-conflict".to_string()),
+                    name: "Datagram sink".to_string(),
+                    remote_host: remote_host.to_string(),
+                    remote_port,
+                    ..SaveRawUdpProfileRequest::default()
+                })
+                .unwrap();
+            store
+        }
+
+        fn export_raw_udp_profiles(source: &ConnectionStore) -> Vec<u8> {
+            let raw_udp_profiles_json = serde_json::to_string_pretty(
+                &source.export_raw_udp_profiles_snapshot().unwrap(),
+            )
+            .unwrap();
+            export_connections_to_oxide(
+                source,
+                &["conn-1".to_string()],
+                "secret!",
+                OxideExportOptions {
+                    raw_udp_profiles_json: Some(raw_udp_profiles_json),
+                    ..OxideExportOptions::default()
+                },
+            )
+            .unwrap()
+        }
+
+        let older_source = source_with_raw_udp_profile("raw-udp-conflict-old", "old.example", 9000);
+        let older_bytes = export_raw_udp_profiles(&older_source);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let mut newer_target =
+            source_with_raw_udp_profile("raw-udp-conflict-newer-target", "current.example", 9001);
+
+        let skipped = apply_oxide_import(
+            &mut newer_target,
+            &older_bytes,
+            "secret!",
+            ImportConflictStrategy::Replace,
+        )
+        .unwrap();
+        assert_eq!(skipped.imported_raw_udp_profiles, 0);
+        assert_eq!(skipped.skipped_raw_udp_profiles, 1);
+        assert_eq!(newer_target.raw_udp_profiles()[0].remote_host, "current.example");
+        assert_eq!(newer_target.raw_udp_profiles()[0].remote_port, 9001);
+
+        let mut older_target =
+            source_with_raw_udp_profile("raw-udp-conflict-older-target", "stale.example", 9002);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let newer_source =
+            source_with_raw_udp_profile("raw-udp-conflict-new-source", "incoming.example", 9003);
+        let newer_bytes = export_raw_udp_profiles(&newer_source);
+
+        let replaced = apply_oxide_import(
+            &mut older_target,
+            &newer_bytes,
+            "secret!",
+            ImportConflictStrategy::Replace,
+        )
+        .unwrap();
+        assert_eq!(replaced.imported_raw_udp_profiles, 1);
+        assert_eq!(replaced.skipped_raw_udp_profiles, 0);
+        assert_eq!(older_target.raw_udp_profiles()[0].remote_host, "incoming.example");
+        assert_eq!(older_target.raw_udp_profiles()[0].remote_port, 9003);
     }
 
     #[test]

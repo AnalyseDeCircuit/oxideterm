@@ -3,7 +3,7 @@ use gpui::{
     AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId,
     InspectorElementId, InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent,
     ParentElement, Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div, px, rgb,
-    rgba,
+    rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -12,6 +12,7 @@ use crate::button::tauri_focus_visible_ring;
 const TAURI_SELECT_TRIGGER_BG_ALPHA: u32 = 0x80;
 const TAURI_INLINE_SELECT_SELECTED_BG_ALPHA: u32 = 0x1f;
 const TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA: u32 = 0x26;
+const SELECT_CHEVRON_DOWN_PATH: &str = "lucide/chevron-down.svg";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct SelectTriggerChromeSpec {
@@ -118,6 +119,9 @@ pub enum SelectAnchorId {
     NewConnectionRawTcpSendMode,
     NewConnectionRawTcpTlsMode,
     NewConnectionRawTcpTlsVerification,
+    NewConnectionRawUdpLineEnding,
+    NewConnectionRawUdpDisplayMode,
+    NewConnectionRawUdpSendMode,
     SettingsConnectionImportSource,
     SettingsConnectionImportDuplicateStrategy,
     CloudSyncBackend,
@@ -215,6 +219,9 @@ impl SelectAnchorId {
                 | Self::NewConnectionRawTcpSendMode
                 | Self::NewConnectionRawTcpTlsMode
                 | Self::NewConnectionRawTcpTlsVerification
+                | Self::NewConnectionRawUdpLineEnding
+                | Self::NewConnectionRawUdpDisplayMode
+                | Self::NewConnectionRawUdpSendMode
         )
     }
 
@@ -490,9 +497,21 @@ fn select_trigger_chrome(
             trigger.child(
                 div()
                     .ml(px(tokens.spacing.two))
+                    .size(px(tokens.metrics.ui_select_check_size))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .text_color(rgb(tokens.ui.text_muted))
                     .opacity(0.5)
-                    .child("⌄"),
+                    // Use the shared Lucide asset instead of a font glyph so
+                    // select affordances render consistently across locales.
+                    .child(
+                        svg()
+                            .path(SELECT_CHEVRON_DOWN_PATH)
+                            .size(px(tokens.metrics.ui_select_check_size))
+                            .text_color(rgb(tokens.ui.text_muted)),
+                    ),
             )
         })
 }
@@ -750,6 +769,9 @@ mod tests {
         assert!(SelectAnchorId::NewConnectionUpstreamProxyAuth.is_new_connection_select_trigger());
         assert!(SelectAnchorId::NewConnectionSerialPort.is_new_connection_select_trigger());
         assert!(SelectAnchorId::NewConnectionRawTcpTlsMode.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionRawUdpLineEnding.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionRawUdpDisplayMode.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionRawUdpSendMode.is_new_connection_select_trigger());
 
         assert!(!SelectAnchorId::SettingsLanguage.is_new_connection_select_trigger());
         assert!(!SelectAnchorId::AiModelSelector.is_new_connection_select_trigger());

@@ -72,6 +72,7 @@ fn preview_oxide_import_inner(
         quick_commands_json,
         serial_profiles_json,
         raw_tcp_profiles_json,
+        raw_udp_profiles_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -95,6 +96,7 @@ fn preview_oxide_import_inner(
         total_forwards: connections.iter().map(|conn| conn.forwards.len()).sum(),
         serial_profiles_count: count_serial_profiles(serial_profiles_json.as_deref()),
         raw_tcp_profiles_count: count_raw_tcp_profiles(raw_tcp_profiles_json.as_deref()),
+        raw_udp_profiles_count: count_raw_udp_profiles(raw_udp_profiles_json.as_deref()),
         plugin_settings_count: plugin_settings.len(),
         portable_secret_count: portable_secrets.len(),
         plugin_settings_by_plugin: plugin_settings_by_plugin(&plugin_settings),

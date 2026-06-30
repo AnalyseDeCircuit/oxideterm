@@ -81,7 +81,17 @@ impl WorkspaceApp {
                 })
             })
             .count();
-        connection_count + serial_count + telnet_count + raw_tcp_count
+        let raw_udp_count = self
+            .connection_store
+            .raw_udp_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
+        connection_count + serial_count + telnet_count + raw_tcp_count + raw_udp_count
     }
 
     fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -105,6 +115,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.raw_tcp_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.raw_udp_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -307,6 +322,22 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    fn request_delete_raw_udp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(profile) = self
+            .connection_store
+            .raw_udp_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+        else {
+            return;
+        };
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::RawUdpProfile {
+            id: id.to_string(),
+            name: profile.name.clone(),
+        });
+        cx.notify();
+    }
+
     fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let ids = self
             .session_manager
@@ -344,6 +375,9 @@ impl WorkspaceApp {
             }
             SessionManagerDeleteConfirm::RawTcpProfile { id, .. } => {
                 self.delete_raw_tcp_profile(&id, cx)
+            }
+            SessionManagerDeleteConfirm::RawUdpProfile { id, .. } => {
+                self.delete_raw_udp_profile(&id, cx)
             }
             SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
         }
@@ -385,6 +419,27 @@ impl WorkspaceApp {
                 self.session_manager.status = Some(format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.raw_tcp_profiles.delete_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn delete_raw_udp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.connection_store.delete_raw_udp_profile(id) {
+            Ok(true) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.raw_udp_profiles.delete"));
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Ok(false) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.raw_udp_profiles.delete_failed"));
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.raw_udp_profiles.delete_failed")
                 ));
             }
         }
@@ -435,6 +490,37 @@ impl WorkspaceApp {
                 self.session_manager.status = Some(format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.raw_tcp_profiles.open_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_saved_raw_udp_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .raw_udp_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        let config = terminal_raw_udp_config_from_profile(&profile);
+        match self.create_raw_udp_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                let _ = self.connection_store.mark_raw_udp_profile_used(id);
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.raw_udp_profiles.open_failed")
                 ));
             }
         }
@@ -711,6 +797,22 @@ fn terminal_raw_tcp_config_from_profile(
     }
 }
 
+fn terminal_raw_udp_config_from_profile(
+    profile: &oxideterm_connections::RawUdpProfile,
+) -> oxideterm_terminal::RawUdpSessionConfig {
+    // Raw UDP uses a bind/connect lifecycle, so persisted local bind settings
+    // are carried into the runtime config rather than inferred in the UI.
+    oxideterm_terminal::RawUdpSessionConfig {
+        remote_host: profile.remote_host.clone(),
+        remote_port: profile.remote_port,
+        local_bind_host: profile.local_bind_host.clone(),
+        local_bind_port: profile.local_bind_port,
+        line_ending: terminal_raw_udp_line_ending(&profile.line_ending),
+        display_mode: terminal_raw_udp_display_mode(&profile.display_mode),
+        send_mode: terminal_raw_udp_send_mode(&profile.send_mode),
+    }
+}
+
 fn terminal_raw_tcp_line_ending(
     line_ending: &oxideterm_connections::RawTcpLineEnding,
 ) -> oxideterm_terminal::RawTcpLineEnding {
@@ -742,6 +844,44 @@ fn terminal_raw_tcp_send_mode(
     match send_mode {
         oxideterm_connections::RawTcpSendMode::Text => oxideterm_terminal::RawTcpSendMode::Text,
         oxideterm_connections::RawTcpSendMode::Hex => oxideterm_terminal::RawTcpSendMode::Hex,
+    }
+}
+
+fn terminal_raw_udp_line_ending(
+    line_ending: &oxideterm_connections::RawUdpLineEnding,
+) -> oxideterm_terminal::RawUdpLineEnding {
+    match line_ending {
+        oxideterm_connections::RawUdpLineEnding::Lf => oxideterm_terminal::RawUdpLineEnding::Lf,
+        oxideterm_connections::RawUdpLineEnding::CrLf => {
+            oxideterm_terminal::RawUdpLineEnding::CrLf
+        }
+        oxideterm_connections::RawUdpLineEnding::Cr => oxideterm_terminal::RawUdpLineEnding::Cr,
+        oxideterm_connections::RawUdpLineEnding::None => {
+            oxideterm_terminal::RawUdpLineEnding::None
+        }
+    }
+}
+
+fn terminal_raw_udp_display_mode(
+    display_mode: &oxideterm_connections::RawUdpDisplayMode,
+) -> oxideterm_terminal::RawUdpDisplayMode {
+    match display_mode {
+        oxideterm_connections::RawUdpDisplayMode::Text => {
+            oxideterm_terminal::RawUdpDisplayMode::Text
+        }
+        oxideterm_connections::RawUdpDisplayMode::Hex => oxideterm_terminal::RawUdpDisplayMode::Hex,
+        oxideterm_connections::RawUdpDisplayMode::Mixed => {
+            oxideterm_terminal::RawUdpDisplayMode::Mixed
+        }
+    }
+}
+
+fn terminal_raw_udp_send_mode(
+    send_mode: &oxideterm_connections::RawUdpSendMode,
+) -> oxideterm_terminal::RawUdpSendMode {
+    match send_mode {
+        oxideterm_connections::RawUdpSendMode::Text => oxideterm_terminal::RawUdpSendMode::Text,
+        oxideterm_connections::RawUdpSendMode::Hex => oxideterm_terminal::RawUdpSendMode::Hex,
     }
 }
 

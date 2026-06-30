@@ -423,6 +423,84 @@ impl WorkspaceApp {
                     );
                 }
             }
+            NewConnectionSelect::RawUdpLineEnding => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.raw_udp_line_ending.clone())
+                    .unwrap_or_default();
+                for line_ending in [
+                    oxideterm_connections::RawUdpLineEnding::Lf,
+                    oxideterm_connections::RawUdpLineEnding::CrLf,
+                    oxideterm_connections::RawUdpLineEnding::Cr,
+                    oxideterm_connections::RawUdpLineEnding::None,
+                ] {
+                    let label = self.raw_udp_line_ending_label(&line_ending);
+                    let option = line_ending.clone();
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, line_ending == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_raw_udp_line_ending(option.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::RawUdpDisplayMode => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.raw_udp_display_mode.clone())
+                    .unwrap_or_default();
+                for display_mode in [
+                    oxideterm_connections::RawUdpDisplayMode::Text,
+                    oxideterm_connections::RawUdpDisplayMode::Hex,
+                    oxideterm_connections::RawUdpDisplayMode::Mixed,
+                ] {
+                    let label = self.raw_udp_display_mode_label(&display_mode);
+                    let option = display_mode.clone();
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, display_mode == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_raw_udp_display_mode(option.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
+            NewConnectionSelect::RawUdpSendMode => {
+                let selected = self
+                    .new_connection_form
+                    .as_ref()
+                    .map(|form| form.raw_udp_send_mode.clone())
+                    .unwrap_or_default();
+                for send_mode in [
+                    oxideterm_connections::RawUdpSendMode::Text,
+                    oxideterm_connections::RawUdpSendMode::Hex,
+                ] {
+                    let label = self.raw_udp_send_mode_label(&send_mode);
+                    let option = send_mode.clone();
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, send_mode == selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_raw_udp_send_mode(option.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
             NewConnectionSelect::RawTcpTlsMode => {
                 let selected = self
                     .new_connection_form

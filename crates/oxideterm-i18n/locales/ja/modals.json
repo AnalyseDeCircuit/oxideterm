@@ -193,7 +193,13 @@
       "section_raw_tcp_profiles": "Raw TCP プロファイル（{{count}} 件）",
       "toggle_raw_tcp_profiles": "Raw TCP 接続プロファイルをインポート",
       "imported_raw_tcp_profiles": "{{count}} 件の Raw TCP プロファイルをインポートしました。",
-      "skipped_raw_tcp_profiles": "Raw TCP プロファイルをスキップ"
+      "skipped_raw_tcp_profiles": "Raw TCP プロファイルをスキップ",
+      "contains_raw_udp_profiles": "Raw UDP プロファイル:",
+      "raw_udp_profiles_count": "{{count}} 件のプロファイル",
+      "section_raw_udp_profiles": "Raw UDP プロファイル（{{count}} 件）",
+      "toggle_raw_udp_profiles": "Raw UDP 接続プロファイルをインポート",
+      "imported_raw_udp_profiles": "{{count}} 件の Raw UDP プロファイルをインポートしました。",
+      "skipped_raw_udp_profiles": "Raw UDP プロファイルをスキップ"
     },
     "reconnect": {
       "title": "セッションに再接続",
@@ -457,7 +463,37 @@
       "serial_profile_name_placeholder": "ラボコンソール",
       "serial_save_failed": "シリアルプロファイルの保存に失敗しました",
       "serial_invalid_baud_rate": "ボーレートは 0 より大きい必要があります",
-      "serial_port_required": "シリアルポートパスを選択または入力してください"
+      "serial_port_required": "シリアルポートパスを選択または入力してください",
+      "transport_raw_udp": "Raw UDP",
+      "raw_udp_description": "UDP データグラムをローカルターミナルとして送受信します。",
+      "raw_udp_section_title": "Raw UDP ターミナル",
+      "raw_udp_connect_hint": "送信した各行を 1 つの UDP データグラムとして送ります。リモートからの返信は受信データグラムとして表示されます。",
+      "raw_udp_host": "リモートホスト",
+      "raw_udp_host_placeholder": "192.168.1.100 または device.local",
+      "raw_udp_port": "リモートポート",
+      "raw_udp_port_placeholder": "UDP ポートを入力",
+      "raw_udp_invalid_port": "ポートは 1 から 65535 の範囲で指定してください",
+      "raw_udp_host_required": "Raw UDP のリモートホストを入力してください",
+      "raw_udp_profile_name": "プロファイル名",
+      "raw_udp_profile_name_placeholder": "デバイスデータグラムソケット",
+      "raw_udp_save_failed": "Raw UDP プロファイルの保存に失敗しました",
+      "raw_udp_local_bind_host": "ローカルバインドホスト",
+      "raw_udp_local_bind_host_placeholder": "任意のローカルアドレスにする場合は空欄",
+      "raw_udp_local_bind_port": "ローカルバインドポート",
+      "raw_udp_local_bind_port_placeholder": "一時ポートは 0",
+      "raw_udp_invalid_local_bind_port": "ローカルバインドポートは 0 から 65535 の範囲で指定してください",
+      "raw_udp_line_ending": "改行コード",
+      "raw_udp_line_ending_lf": "LF",
+      "raw_udp_line_ending_crlf": "CRLF",
+      "raw_udp_line_ending_cr": "CR",
+      "raw_udp_line_ending_none": "なし",
+      "raw_udp_display_mode": "表示",
+      "raw_udp_display_text": "テキスト",
+      "raw_udp_display_hex": "16 進",
+      "raw_udp_display_mixed": "16 進 + テキスト",
+      "raw_udp_send_mode": "送信形式",
+      "raw_udp_send_text": "テキスト",
+      "raw_udp_send_hex": "16 進バイト"
     },
     "managed_key": {
       "selector": {
@@ -776,6 +812,9 @@
     "include_raw_tcp_profiles": "Raw TCP プロファイルを含める",
     "include_raw_tcp_profiles_description": "保存済み Raw TCP 接続プロファイルをエクスポートします（{{count}} 件）。",
     "content_summary_serial_profiles": "シリアルプロファイル: {{count}} 件",
-    "content_summary_raw_tcp_profiles": "Raw TCP プロファイル: {{count}} 件"
+    "content_summary_raw_tcp_profiles": "Raw TCP プロファイル: {{count}} 件",
+    "include_raw_udp_profiles": "Raw UDP プロファイルを含める",
+    "include_raw_udp_profiles_description": "保存済み Raw UDP 接続プロファイルをエクスポートします（{{count}} 件）。",
+    "content_summary_raw_udp_profiles": "Raw UDP プロファイル: {{count}} 件"
   }
 }

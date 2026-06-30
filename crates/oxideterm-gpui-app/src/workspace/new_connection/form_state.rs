@@ -2,7 +2,8 @@ use std::fmt;
 
 use oxideterm_connections::{
     AuthType, ConnectionInfo, PrivilegeCredentialKind, RawTcpDisplayMode, RawTcpLineEnding,
-    RawTcpSendMode, RawTcpTlsMode, RawTcpTlsVerification, SavedUpstreamProxyProtocol,
+    RawTcpSendMode, RawTcpTlsMode, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding,
+    RawUdpSendMode, SavedUpstreamProxyProtocol,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,6 +20,7 @@ pub(in crate::workspace) enum SshAuthTab {
 pub(in crate::workspace) const SSH_DEFAULT_PORT_TEXT: &str = "22";
 pub(in crate::workspace) const TELNET_DEFAULT_PORT_TEXT: &str = "23";
 pub(in crate::workspace) const RAW_TCP_DEFAULT_PORT_TEXT: &str = "";
+pub(in crate::workspace) const RAW_UDP_DEFAULT_PORT_TEXT: &str = "";
 pub(in crate::workspace) const RDP_DEFAULT_PORT_TEXT: &str = "3389";
 pub(in crate::workspace) const VNC_DEFAULT_PORT_TEXT: &str = "5900";
 
@@ -27,6 +29,7 @@ pub(in crate::workspace) enum NewConnectionTransport {
     Ssh,
     Telnet,
     RawTcp,
+    RawUdp,
     Serial,
     Rdp,
     Vnc,
@@ -98,6 +101,9 @@ pub(in crate::workspace) enum NewConnectionSelect {
     RawTcpSendMode,
     RawTcpTlsMode,
     RawTcpTlsVerification,
+    RawUdpLineEnding,
+    RawUdpDisplayMode,
+    RawUdpSendMode,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -146,6 +152,9 @@ pub(in crate::workspace) enum NewConnectionField {
     TelnetProfileName,
     RawTcpProfileName,
     RawTcpTlsServerName,
+    RawUdpProfileName,
+    RawUdpLocalBindHost,
+    RawUdpLocalBindPort,
 }
 
 #[derive(Clone)]
@@ -327,6 +336,12 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) raw_tcp_tls_mode: RawTcpTlsMode,
     pub(in crate::workspace) raw_tcp_tls_verification: RawTcpTlsVerification,
     pub(in crate::workspace) raw_tcp_tls_server_name: String,
+    pub(in crate::workspace) raw_udp_profile_name: String,
+    pub(in crate::workspace) raw_udp_local_bind_host: String,
+    pub(in crate::workspace) raw_udp_local_bind_port: String,
+    pub(in crate::workspace) raw_udp_line_ending: RawUdpLineEnding,
+    pub(in crate::workspace) raw_udp_display_mode: RawUdpDisplayMode,
+    pub(in crate::workspace) raw_udp_send_mode: RawUdpSendMode,
 }
 
 impl fmt::Debug for NewConnectionForm {
@@ -398,6 +413,12 @@ impl fmt::Debug for NewConnectionForm {
             .field("raw_tcp_tls_mode", &self.raw_tcp_tls_mode)
             .field("raw_tcp_tls_verification", &self.raw_tcp_tls_verification)
             .field("raw_tcp_tls_server_name", &self.raw_tcp_tls_server_name)
+            .field("raw_udp_profile_name", &self.raw_udp_profile_name)
+            .field("raw_udp_local_bind_host", &self.raw_udp_local_bind_host)
+            .field("raw_udp_local_bind_port", &self.raw_udp_local_bind_port)
+            .field("raw_udp_line_ending", &self.raw_udp_line_ending)
+            .field("raw_udp_display_mode", &self.raw_udp_display_mode)
+            .field("raw_udp_send_mode", &self.raw_udp_send_mode)
             .finish()
     }
 }
@@ -464,6 +485,12 @@ impl Default for NewConnectionForm {
             raw_tcp_tls_mode: RawTcpTlsMode::default(),
             raw_tcp_tls_verification: RawTcpTlsVerification::default(),
             raw_tcp_tls_server_name: String::new(),
+            raw_udp_profile_name: String::new(),
+            raw_udp_local_bind_host: String::new(),
+            raw_udp_local_bind_port: "0".to_string(),
+            raw_udp_line_ending: RawUdpLineEnding::default(),
+            raw_udp_display_mode: RawUdpDisplayMode::default(),
+            raw_udp_send_mode: RawUdpSendMode::default(),
         }
     }
 }
@@ -496,6 +523,7 @@ fn default_port_for_transport(transport: NewConnectionTransport) -> Option<&'sta
         NewConnectionTransport::Ssh => Some(SSH_DEFAULT_PORT_TEXT),
         NewConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
         NewConnectionTransport::RawTcp => Some(RAW_TCP_DEFAULT_PORT_TEXT),
+        NewConnectionTransport::RawUdp => Some(RAW_UDP_DEFAULT_PORT_TEXT),
         NewConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
         NewConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
         NewConnectionTransport::Serial => None,
@@ -533,7 +561,7 @@ pub(in crate::workspace) fn apply_transport_default_username(
         {
             form.username.clear();
         }
-        NewConnectionTransport::RawTcp
+        NewConnectionTransport::RawTcp | NewConnectionTransport::RawUdp
             if matches!(
                 previous_transport,
                 NewConnectionTransport::Ssh | NewConnectionTransport::Rdp
@@ -544,7 +572,9 @@ pub(in crate::workspace) fn apply_transport_default_username(
         NewConnectionTransport::Ssh
             if matches!(
                 previous_transport,
-                NewConnectionTransport::Rdp | NewConnectionTransport::RawTcp
+                NewConnectionTransport::Rdp
+                    | NewConnectionTransport::RawTcp
+                    | NewConnectionTransport::RawUdp
             ) && (username == "Administrator" || username.is_empty()) =>
         {
             form.username = "root".to_string();
@@ -610,6 +640,27 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Port,
             NewConnectionField::RawTcpTlsServerName,
             NewConnectionField::RawTcpProfileName,
+        ];
+        let index = fields
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        let next = if forward {
+            (index + 1) % fields.len()
+        } else if index == 0 {
+            fields.len() - 1
+        } else {
+            index - 1
+        };
+        return fields[next];
+    }
+    if transport == NewConnectionTransport::RawUdp {
+        let fields = [
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::RawUdpLocalBindHost,
+            NewConnectionField::RawUdpLocalBindPort,
+            NewConnectionField::RawUdpProfileName,
         ];
         let index = fields
             .iter()
@@ -884,6 +935,9 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
         NewConnectionField::RawTcpProfileName => &mut form.raw_tcp_profile_name,
         NewConnectionField::RawTcpTlsServerName => &mut form.raw_tcp_tls_server_name,
+        NewConnectionField::RawUdpProfileName => &mut form.raw_udp_profile_name,
+        NewConnectionField::RawUdpLocalBindHost => &mut form.raw_udp_local_bind_host,
+        NewConnectionField::RawUdpLocalBindPort => &mut form.raw_udp_local_bind_port,
     }
 }
 
@@ -968,6 +1022,9 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
         NewConnectionField::RawTcpProfileName => &form.raw_tcp_profile_name,
         NewConnectionField::RawTcpTlsServerName => &form.raw_tcp_tls_server_name,
+        NewConnectionField::RawUdpProfileName => &form.raw_udp_profile_name,
+        NewConnectionField::RawUdpLocalBindHost => &form.raw_udp_local_bind_host,
+        NewConnectionField::RawUdpLocalBindPort => &form.raw_udp_local_bind_port,
     }
 }
 

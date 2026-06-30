@@ -109,7 +109,8 @@
     "cmd_open_telnet_terminal": "Apri terminale Telnet",
     "cmd_open_raw_tcp_terminal": "Apri terminale Raw TCP",
     "cmd_open_rdp_preview": "Apri anteprima RDP",
-    "cmd_open_vnc_preview": "Apri anteprima VNC"
+    "cmd_open_vnc_preview": "Apri anteprima VNC",
+    "cmd_open_raw_udp_terminal": "Apri terminale Raw UDP"
   },
   "common": {
     "enabled": "Attivato",
@@ -340,7 +341,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID client OAuth Microsoft",
         "microsoft_access_token": "Token di accesso Microsoft",
-        "google_oauth_client_id": "ID client OAuth Google"
+        "google_oauth_client_id": "ID client OAuth Google",
+        "sync_raw_udp_profiles": "Sincronizza profili Raw UDP"
       },
       "auth": {
         "bearer": "Bearer",
@@ -378,7 +380,8 @@
         "plugin_settings_selected_detail": "Plugin selezionati: {{plugins}}",
         "plugin_settings_disabled_detail": "Le impostazioni dei plugin sono escluse dall'ambito di sincronizzazione corrente.",
         "sensitive_credentials_enabled_detail": "Sono inclusi gli oggetti crittografati con credenziali sensibili.",
-        "sensitive_credentials_disabled_detail": "Password di connessione, passphrase delle chiavi, chiavi private gestite, chiavi AI e credenziali di privilegio sono escluse finché non abiliti la sincronizzazione delle credenziali sensibili."
+        "sensitive_credentials_disabled_detail": "Password di connessione, passphrase delle chiavi, chiavi private gestite, chiavi AI e credenziali di privilegio sono escluse finché non abiliti la sincronizzazione delle credenziali sensibili.",
+        "raw_udp_profiles_detail": "I profili di connessione Raw UDP sono inclusi."
       },
       "notes": {
         "upload_only": "La sincronizzazione automatica esegue solo il caricamento. Gli aggiornamenti remoti richiedono sempre la conferma dell'utente.",
@@ -394,7 +397,7 @@
       },
       "backup": {
         "description": "Backup di ripristino Oxide Cloud Sync",
-        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{rawTcpProfiles}} profili Raw TCP, {{pluginSettingsCount}} impostazioni plugin, {{size}}, {{sensitiveCredentials}} credenziali sensibili"
+        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{rawTcpProfiles}} profili Raw TCP, {{rawUdpProfiles}} profili Raw UDP, {{pluginSettingsCount}} impostazioni plugin, {{size}}, {{sensitiveCredentials}} credenziali sensibili"
       },
       "history": {
         "action_upload": "Caricamento",
@@ -584,7 +587,9 @@
         "toggle_sensitive_credentials": "Importa credenziali sensibili ({{count}})",
         "sensitive_summary_title": "Credenziali sensibili",
         "sensitive_remote_summary": "Le credenziali remote cifrate includono {{connections}} record di connessione e {{portableSecrets}} segreti portabili. I valori restano nascosti.",
-        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili."
+        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili.",
+        "raw_udp_profiles_label": "Profili Raw UDP",
+        "toggle_raw_udp_profiles": "Importa profili Raw UDP ({{count}})"
       },
       "confirm": {
         "import_title": "Importare lo snapshot remoto?",

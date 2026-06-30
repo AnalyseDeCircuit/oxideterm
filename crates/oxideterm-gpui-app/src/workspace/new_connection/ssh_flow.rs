@@ -9,8 +9,9 @@ use std::{
 
 use gpui::{Context, Window};
 use oxideterm_connections::{
-    RawTcpProfile, SaveConnectionRequest, SaveRawTcpProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedUpstreamProxyProtocol, first_available_default_key_path,
+    RawTcpProfile, RawUdpProfile, SaveConnectionRequest, SaveRawTcpProfileRequest,
+    SaveRawUdpProfileRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
+    SavedUpstreamProxyProtocol, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
@@ -50,7 +51,8 @@ use oxideterm_session_adapter::{
 };
 use oxideterm_terminal::{
     RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpSessionConfig, RawTcpTlsConfig,
-    RawTcpTlsVerification, SerialSessionConfig, TelnetSessionConfig,
+    RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpSendMode,
+    RawUdpSessionConfig, SerialSessionConfig, TelnetSessionConfig,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -168,6 +170,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -219,6 +222,20 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn open_raw_udp_connection_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_new_connection_form(window, cx);
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.transport = NewConnectionTransport::RawUdp;
+            form.port = super::form_state::RAW_UDP_DEFAULT_PORT_TEXT.to_string();
+            form.focused_field = super::form_state::NewConnectionField::Host;
+            form.field_focused = false;
+        }
+    }
+
     pub(in crate::workspace) fn open_raw_tcp_profile_editor(
         &mut self,
         id: &str,
@@ -243,6 +260,41 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_raw_tcp_profile_id = Some(id.to_string());
+        self.editing_raw_udp_profile_id = None;
+        self.duplicating_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
+        self.close_new_connection_select();
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_raw_udp_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .raw_udp_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+
+        self.prepare_modal_interaction_boundary();
+        self.new_connection_form = Some(form_from_raw_udp_profile(
+            &profile,
+            self.i18n.t("ssh.form.ungrouped"),
+        ));
+        self.drill_down_parent_node_id = None;
+        self.editing_saved_connection_id = None;
+        self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = Some(id.to_string());
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -286,6 +338,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
         self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -421,6 +474,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -478,6 +532,7 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -555,6 +610,23 @@ impl WorkspaceApp {
             )
         {
             self.submit_raw_tcp_connection_form(action, window, cx);
+            return;
+        }
+        if self
+            .new_connection_form
+            .as_ref()
+            .is_some_and(|form| form.transport == NewConnectionTransport::RawUdp)
+            && self.drill_down_parent_node_id.is_none()
+            && matches!(
+                new_connection_form_mode(
+                    self.editing_saved_connection_id.as_deref(),
+                    self.duplicating_saved_connection_id.as_deref(),
+                    self.saved_connection_prompt_action,
+                ),
+                NewConnectionFormMode::NewConnection
+            )
+        {
+            self.submit_raw_udp_connection_form(action, window, cx);
             return;
         }
         if self
@@ -1033,6 +1105,7 @@ impl WorkspaceApp {
                     self.queue_cloud_sync_dirty_refresh(cx);
                     self.new_connection_form = None;
                     self.editing_raw_tcp_profile_id = None;
+                    self.editing_raw_udp_profile_id = None;
                     self.close_new_connection_select();
                     self.focus_active_pane(window, cx);
                 }
@@ -1087,6 +1160,155 @@ impl WorkspaceApp {
                 }
                 self.new_connection_form = None;
                 self.editing_raw_tcp_profile_id = None;
+                self.editing_raw_udp_profile_id = None;
+                self.close_new_connection_select();
+            }
+            Err(error) => {
+                if let Some(form) = self.new_connection_form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(error.to_string());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn submit_raw_udp_connection_form(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.new_connection_form.as_mut() else {
+            return;
+        };
+        let remote_host = form.host.trim().to_string();
+        let remote_port = form
+            .port
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port > 0);
+        let local_bind_host = form.raw_udp_local_bind_host.trim().to_string();
+        let local_bind_host = (!local_bind_host.is_empty()).then_some(local_bind_host);
+        let local_bind_port = if form.raw_udp_local_bind_port.trim().is_empty() {
+            Some(0)
+        } else {
+            form.raw_udp_local_bind_port.trim().parse::<u16>().ok()
+        };
+        if remote_host.is_empty() {
+            form.error = Some(self.i18n.t("modals.new_connection.raw_udp_host_required"));
+            cx.notify();
+            return;
+        }
+        let Some(remote_port) = remote_port else {
+            form.error = Some(self.i18n.t("modals.new_connection.raw_udp_invalid_port"));
+            cx.notify();
+            return;
+        };
+        let Some(local_bind_port) = local_bind_port else {
+            form.error = Some(
+                self.i18n
+                    .t("modals.new_connection.raw_udp_invalid_local_bind_port"),
+            );
+            cx.notify();
+            return;
+        };
+
+        let line_ending = form.raw_udp_line_ending.clone();
+        let display_mode = form.raw_udp_display_mode.clone();
+        let send_mode = form.raw_udp_send_mode.clone();
+        let editing_profile_id = self.editing_raw_udp_profile_id.clone();
+
+        let should_save_profile = action != NewConnectionSubmitAction::Connect;
+        let mut save_request = should_save_profile.then(|| {
+            raw_udp_save_request_from_form(
+                form,
+                editing_profile_id.clone(),
+                &remote_host,
+                remote_port,
+                local_bind_host.clone(),
+                local_bind_port,
+                &self.i18n,
+            )
+        });
+        let config = raw_udp_session_config_from_form(
+            remote_host,
+            remote_port,
+            local_bind_host,
+            local_bind_port,
+            line_ending,
+            display_mode,
+            send_mode,
+        );
+        form.pending = true;
+        form.error = None;
+
+        if action == NewConnectionSubmitAction::Save {
+            let request =
+                save_request.expect("Raw UDP save action must build a Raw UDP profile request");
+            match self.connection_store.upsert_raw_udp_profile(request) {
+                Ok(_) => {
+                    if editing_profile_id.is_some() {
+                        self.session_manager.status =
+                            Some(self.i18n.t("sessionManager.edit_properties.save"));
+                    }
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                    self.new_connection_form = None;
+                    self.editing_raw_udp_profile_id = None;
+                    self.close_new_connection_select();
+                    self.focus_active_pane(window, cx);
+                }
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.raw_udp_save_failed")
+                        ));
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        if action == NewConnectionSubmitAction::SaveAndConnect {
+            let request = save_request
+                .take()
+                .expect("Raw UDP save-and-open action must build a Raw UDP profile request");
+            match self.connection_store.upsert_raw_udp_profile(request) {
+                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.raw_udp_save_failed")
+                        ));
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+
+        // Raw UDP opens as a local datagram transport, not an SSH node.
+        match self.create_raw_udp_terminal_tab(config, window, cx) {
+            Ok(_) => {
+                if let Some(request) = save_request {
+                    match self.connection_store.upsert_raw_udp_profile(request) {
+                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
+                        Err(error) => {
+                            self.session_manager.status = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.raw_udp_save_failed")
+                            ));
+                        }
+                    }
+                }
+                self.new_connection_form = None;
+                self.editing_raw_udp_profile_id = None;
                 self.close_new_connection_select();
             }
             Err(error) => {
@@ -1300,6 +1522,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = Some(action);
         self.close_new_connection_select();
@@ -1323,6 +1546,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -1405,6 +1629,7 @@ impl WorkspaceApp {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
                         self.editing_raw_tcp_profile_id = None;
+                        self.editing_raw_udp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.session_manager.status =
@@ -1454,6 +1679,7 @@ impl WorkspaceApp {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
                         self.editing_raw_tcp_profile_id = None;
+                        self.editing_raw_udp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.session_manager.status =
@@ -3105,6 +3331,94 @@ mod runtime_save_tests {
         );
         assert_eq!(request.tls_server_name.as_deref(), Some("device-tls.local"));
     }
+
+    #[test]
+    fn raw_udp_form_config_maps_datagram_options_to_terminal_runtime() {
+        let config = raw_udp_session_config_from_form(
+            "metrics.local".to_string(),
+            8125,
+            Some("127.0.0.1".to_string()),
+            0,
+            oxideterm_connections::RawUdpLineEnding::None,
+            oxideterm_connections::RawUdpDisplayMode::Mixed,
+            oxideterm_connections::RawUdpSendMode::Hex,
+        );
+
+        assert_eq!(config.remote_host, "metrics.local");
+        assert_eq!(config.remote_port, 8125);
+        assert_eq!(config.local_bind_host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(config.local_bind_port, 0);
+        assert_eq!(config.line_ending, RawUdpLineEnding::None);
+        assert_eq!(config.display_mode, RawUdpDisplayMode::Mixed);
+        assert_eq!(config.send_mode, RawUdpSendMode::Hex);
+    }
+
+    #[test]
+    fn raw_udp_profile_editor_form_preserves_saved_options() {
+        let now = chrono::Utc::now();
+        let profile = RawUdpProfile {
+            id: "raw-udp-1".to_string(),
+            name: "StatsD".to_string(),
+            group: Some("Lab".to_string()),
+            remote_host: "metrics.local".to_string(),
+            remote_port: 8125,
+            local_bind_host: Some("127.0.0.1".to_string()),
+            local_bind_port: 0,
+            line_ending: oxideterm_connections::RawUdpLineEnding::None,
+            display_mode: oxideterm_connections::RawUdpDisplayMode::Mixed,
+            send_mode: oxideterm_connections::RawUdpSendMode::Hex,
+            connect_on_open: false,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        };
+
+        let form = form_from_raw_udp_profile(&profile, "Ungrouped".to_string());
+
+        assert_eq!(form.transport, NewConnectionTransport::RawUdp);
+        assert_eq!(form.raw_udp_profile_name, "StatsD");
+        assert_eq!(form.host, "metrics.local");
+        assert_eq!(form.port, "8125");
+        assert_eq!(form.group, "Lab");
+        assert_eq!(form.raw_udp_local_bind_host, "127.0.0.1");
+        assert_eq!(form.raw_udp_local_bind_port, "0");
+        assert_eq!(form.raw_udp_line_ending, profile.line_ending);
+        assert_eq!(form.raw_udp_display_mode, profile.display_mode);
+        assert_eq!(form.raw_udp_send_mode, profile.send_mode);
+    }
+
+    #[test]
+    fn raw_udp_save_request_maps_form_options() {
+        let form = NewConnectionForm {
+            raw_udp_profile_name: "StatsD".to_string(),
+            group: "Lab".to_string(),
+            raw_udp_line_ending: oxideterm_connections::RawUdpLineEnding::None,
+            raw_udp_display_mode: oxideterm_connections::RawUdpDisplayMode::Mixed,
+            raw_udp_send_mode: oxideterm_connections::RawUdpSendMode::Hex,
+            ..NewConnectionForm::default()
+        };
+
+        let request = raw_udp_save_request_from_form(
+            &form,
+            Some("raw-udp-1".to_string()),
+            "metrics.local",
+            8125,
+            Some("127.0.0.1".to_string()),
+            0,
+            &oxideterm_i18n::I18n::default(),
+        );
+
+        assert_eq!(request.id.as_deref(), Some("raw-udp-1"));
+        assert_eq!(request.name, "StatsD");
+        assert_eq!(request.group.as_deref(), Some("Lab"));
+        assert_eq!(request.remote_host, "metrics.local");
+        assert_eq!(request.remote_port, 8125);
+        assert_eq!(request.local_bind_host.as_deref(), Some("127.0.0.1"));
+        assert_eq!(request.local_bind_port, Some(0));
+        assert_eq!(request.line_ending, Some(form.raw_udp_line_ending));
+        assert_eq!(request.display_mode, Some(form.raw_udp_display_mode));
+        assert_eq!(request.send_mode, Some(form.raw_udp_send_mode));
+    }
 }
 
 fn serial_profile_name_or_port(name: &str, port_path: &str) -> String {
@@ -3126,6 +3440,15 @@ fn telnet_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String 
 }
 
 fn raw_tcp_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!("{}:{}", host.trim(), port)
+    } else {
+        name.to_string()
+    }
+}
+
+fn raw_udp_profile_name_or_endpoint(name: &str, host: &str, port: u16) -> String {
     let name = name.trim();
     if name.is_empty() {
         format!("{}:{}", host.trim(), port)
@@ -3184,6 +3507,59 @@ fn form_from_raw_tcp_profile(
     }
 }
 
+fn raw_udp_save_request_from_form(
+    form: &NewConnectionForm,
+    profile_id: Option<String>,
+    remote_host: &str,
+    remote_port: u16,
+    local_bind_host: Option<String>,
+    local_bind_port: u16,
+    i18n: &oxideterm_i18n::I18n,
+) -> SaveRawUdpProfileRequest {
+    SaveRawUdpProfileRequest {
+        id: profile_id,
+        name: raw_udp_profile_name_or_endpoint(
+            &form.raw_udp_profile_name,
+            remote_host,
+            remote_port,
+        ),
+        group: serial_profile_group_from_form(&form.group, i18n),
+        remote_host: remote_host.to_string(),
+        remote_port,
+        local_bind_host,
+        local_bind_port: Some(local_bind_port),
+        line_ending: Some(form.raw_udp_line_ending.clone()),
+        display_mode: Some(form.raw_udp_display_mode.clone()),
+        send_mode: Some(form.raw_udp_send_mode.clone()),
+        connect_on_open: None,
+    }
+}
+
+fn form_from_raw_udp_profile(
+    profile: &RawUdpProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // Raw UDP shares the connection modal shell but stores datagram-specific
+    // settings separately from Raw TCP's stream/TLS options.
+    NewConnectionForm {
+        transport: NewConnectionTransport::RawUdp,
+        host: profile.remote_host.clone(),
+        port: profile.remote_port.to_string(),
+        group: profile.group.clone().unwrap_or(ungrouped_label),
+        raw_udp_profile_name: profile.name.clone(),
+        raw_udp_local_bind_host: profile.local_bind_host.clone().unwrap_or_default(),
+        raw_udp_local_bind_port: profile.local_bind_port.to_string(),
+        raw_udp_line_ending: profile.line_ending.clone(),
+        raw_udp_display_mode: profile.display_mode.clone(),
+        raw_udp_send_mode: profile.send_mode.clone(),
+        focused_field: super::form_state::NewConnectionField::RawUdpProfileName,
+        field_focused: true,
+        save_connection: true,
+        agent_available: detect_ssh_agent_available(),
+        ..NewConnectionForm::default()
+    }
+}
+
 fn raw_tcp_session_config_from_form(
     host: String,
     port: u16,
@@ -3205,6 +3581,26 @@ fn raw_tcp_session_config_from_form(
             verification: terminal_raw_tcp_tls_verification(&tls_verification),
             server_name: tls_server_name,
         },
+    }
+}
+
+fn raw_udp_session_config_from_form(
+    remote_host: String,
+    remote_port: u16,
+    local_bind_host: Option<String>,
+    local_bind_port: u16,
+    line_ending: oxideterm_connections::RawUdpLineEnding,
+    display_mode: oxideterm_connections::RawUdpDisplayMode,
+    send_mode: oxideterm_connections::RawUdpSendMode,
+) -> RawUdpSessionConfig {
+    RawUdpSessionConfig {
+        remote_host,
+        remote_port,
+        local_bind_host,
+        local_bind_port,
+        line_ending: terminal_raw_udp_line_ending(&line_ending),
+        display_mode: terminal_raw_udp_display_mode(&display_mode),
+        send_mode: terminal_raw_udp_send_mode(&send_mode),
     }
 }
 
@@ -3233,6 +3629,34 @@ fn terminal_raw_tcp_send_mode(send_mode: &oxideterm_connections::RawTcpSendMode)
     match send_mode {
         oxideterm_connections::RawTcpSendMode::Text => RawTcpSendMode::Text,
         oxideterm_connections::RawTcpSendMode::Hex => RawTcpSendMode::Hex,
+    }
+}
+
+fn terminal_raw_udp_line_ending(
+    line_ending: &oxideterm_connections::RawUdpLineEnding,
+) -> RawUdpLineEnding {
+    match line_ending {
+        oxideterm_connections::RawUdpLineEnding::Lf => RawUdpLineEnding::Lf,
+        oxideterm_connections::RawUdpLineEnding::CrLf => RawUdpLineEnding::CrLf,
+        oxideterm_connections::RawUdpLineEnding::Cr => RawUdpLineEnding::Cr,
+        oxideterm_connections::RawUdpLineEnding::None => RawUdpLineEnding::None,
+    }
+}
+
+fn terminal_raw_udp_display_mode(
+    display_mode: &oxideterm_connections::RawUdpDisplayMode,
+) -> RawUdpDisplayMode {
+    match display_mode {
+        oxideterm_connections::RawUdpDisplayMode::Text => RawUdpDisplayMode::Text,
+        oxideterm_connections::RawUdpDisplayMode::Hex => RawUdpDisplayMode::Hex,
+        oxideterm_connections::RawUdpDisplayMode::Mixed => RawUdpDisplayMode::Mixed,
+    }
+}
+
+fn terminal_raw_udp_send_mode(send_mode: &oxideterm_connections::RawUdpSendMode) -> RawUdpSendMode {
+    match send_mode {
+        oxideterm_connections::RawUdpSendMode::Text => RawUdpSendMode::Text,
+        oxideterm_connections::RawUdpSendMode::Hex => RawUdpSendMode::Hex,
     }
 }
 

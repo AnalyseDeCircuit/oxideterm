@@ -116,6 +116,8 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_tcp_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_udp_profiles_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_settings_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable_secret_count: Option<usize>,
@@ -135,6 +137,8 @@ pub struct EncryptedPayload {
     pub serial_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_tcp_profiles_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_udp_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -161,6 +165,10 @@ impl fmt::Debug for EncryptedPayload {
             .field(
                 "has_raw_tcp_profiles_json",
                 &self.raw_tcp_profiles_json.is_some(),
+            )
+            .field(
+                "has_raw_udp_profiles_json",
+                &self.raw_udp_profiles_json.is_some(),
             )
             .field("plugin_settings_len", &self.plugin_settings.len())
             .field("portable_secrets_len", &self.portable_secrets.len())

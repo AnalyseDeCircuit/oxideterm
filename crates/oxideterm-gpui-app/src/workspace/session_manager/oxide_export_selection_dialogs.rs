@@ -597,6 +597,25 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_oxide_option_row(
+                self.i18n.t("export.include_raw_udp_profiles"),
+                self.i18n
+                    .t("export.include_raw_udp_profiles_description")
+                    .replace(
+                        "{{count}}",
+                        &self.connection_store.raw_udp_profiles().len().to_string(),
+                    ),
+                dialog.include_raw_udp_profiles,
+                cx.listener(|this, _event, _window, cx| {
+                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
+                        dialog.include_raw_udp_profiles = !dialog.include_raw_udp_profiles;
+                    }
+                    this.refresh_oxide_export_preflight();
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+                cx,
+            ))
+            .child(self.render_oxide_option_row(
                 "包含插件偏好设置".to_string(),
                 "导出存放在 OxideTerm 本地存储中的声明式插件 settings。".to_string(),
                 dialog.include_plugin_settings,

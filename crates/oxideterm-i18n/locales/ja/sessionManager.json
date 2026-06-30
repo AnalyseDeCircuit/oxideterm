@@ -213,6 +213,15 @@
       "list_header": "保存済みセッション",
       "expand_all": "すべて展開",
       "collapse_all": "すべて折りたたむ"
+    },
+    "raw_udp_profiles": {
+      "title": "Raw UDP プロファイル",
+      "count": "{{count}} 件のプロファイル",
+      "open": "開く",
+      "delete": "削除",
+      "open_failed": "Raw UDP プロファイルを開けませんでした",
+      "delete_failed": "Raw UDP プロファイルを削除できませんでした",
+      "confirm_delete": "Raw UDP プロファイル「{{name}}」を削除しますか？"
     }
   }
 }

@@ -145,10 +145,13 @@ fn export_connections_to_oxide_inner(
         count_serial_profiles_for_export(options.serial_profiles_json.as_deref());
     let raw_tcp_profiles_count =
         count_raw_tcp_profiles_for_export(options.raw_tcp_profiles_json.as_deref());
+    let raw_udp_profiles_count =
+        count_raw_udp_profiles_for_export(options.raw_udp_profiles_json.as_deref());
     let has_extra_payload = options.app_settings_json.is_some()
         || options.quick_commands_json.is_some()
         || options.serial_profiles_json.is_some()
         || options.raw_tcp_profiles_json.is_some()
+        || options.raw_udp_profiles_json.is_some()
         || !options.plugin_settings.is_empty()
         || !options.portable_secrets.is_empty();
     let mut payload = EncryptedPayload {
@@ -158,6 +161,7 @@ fn export_connections_to_oxide_inner(
         quick_commands_json: options.quick_commands_json,
         serial_profiles_json: options.serial_profiles_json,
         raw_tcp_profiles_json: options.raw_tcp_profiles_json,
+        raw_udp_profiles_json: options.raw_udp_profiles_json,
         plugin_settings: options.plugin_settings,
         portable_secrets: options.portable_secrets,
         checksum: String::new(),
@@ -181,6 +185,7 @@ fn export_connections_to_oxide_inner(
         quick_command_categories_count: quick_command_counts.map(|counts| counts.1),
         serial_profiles_count,
         raw_tcp_profiles_count,
+        raw_udp_profiles_count,
         plugin_settings_count: (!payload.plugin_settings.is_empty())
             .then_some(payload.plugin_settings.len()),
         portable_secret_count: (!payload.portable_secrets.is_empty())
@@ -569,6 +574,11 @@ fn count_serial_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize
 }
 
 fn count_raw_tcp_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
+    let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
+    value.get("records")?.as_array().map(Vec::len)
+}
+
+fn count_raw_udp_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
     value.get("records")?.as_array().map(Vec::len)
 }

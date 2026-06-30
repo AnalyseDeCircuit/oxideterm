@@ -139,6 +139,50 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
+    pub(super) fn create_raw_udp_terminal_tab(
+        &mut self,
+        config: RawUdpSessionConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let tab_id = self.alloc_tab_id();
+        let pane_id = self.alloc_pane_id();
+        let session_id = self.alloc_session_id();
+        let preferences = self.terminal_preferences_for_tab_kind(&TabKind::LocalTerminal);
+        let title = format!("UDP {}", config.remote_endpoint_label());
+        let pane_config = config.clone();
+        let pane = cx.new(|cx| {
+            TerminalPane::new_raw_udp_with_preferences(
+                pane_config,
+                preferences,
+                window,
+                cx,
+            )
+            .expect("failed to initialize Raw UDP terminal pane")
+        });
+
+        // Raw UDP is a local datagram transport. It owns no SSH node and must
+        // stay out of SSH-only side surfaces such as SFTP and forwarding.
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
+        self.raw_udp_terminal_configs.insert(session_id, config);
+        self.refresh_native_plugin_terminal_hooks(cx);
+        self.tabs.push(Tab {
+            id: tab_id,
+            kind: TabKind::LocalTerminal,
+            title,
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
+        });
+        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = true;
+        pane.read(cx).focus(window);
+        self.reveal_active_tab(window);
+        cx.notify();
+        Ok(session_id)
+    }
+
     pub(super) fn create_serial_terminal_tab(
         &mut self,
         config: SerialSessionConfig,

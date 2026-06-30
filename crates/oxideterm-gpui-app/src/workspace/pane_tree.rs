@@ -49,6 +49,7 @@ impl WorkspaceApp {
         // text and reconnect without recreating the whole tab.
         if self.serial_terminal_configs.contains_key(&session_id)
             || self.raw_tcp_terminal_configs.contains_key(&session_id)
+            || self.raw_udp_terminal_configs.contains_key(&session_id)
         {
             return;
         }
@@ -86,6 +87,7 @@ impl WorkspaceApp {
         for session_id in session_ids {
             if self.serial_terminal_configs.contains_key(&session_id)
                 || self.raw_tcp_terminal_configs.contains_key(&session_id)
+                || self.raw_udp_terminal_configs.contains_key(&session_id)
             {
                 continue;
             }
@@ -188,6 +190,7 @@ impl WorkspaceApp {
         {
             self.serial_terminal_configs.remove(&session_id);
             self.raw_tcp_terminal_configs.remove(&session_id);
+            self.raw_udp_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
 
@@ -242,6 +245,7 @@ impl WorkspaceApp {
         {
             self.serial_terminal_configs.remove(&session_id);
             self.raw_tcp_terminal_configs.remove(&session_id);
+            self.raw_udp_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids

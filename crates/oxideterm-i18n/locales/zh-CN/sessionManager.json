@@ -213,6 +213,15 @@
       "list_header": "已保存会话",
       "expand_all": "展开全部",
       "collapse_all": "折叠全部"
+    },
+    "raw_udp_profiles": {
+      "title": "Raw UDP 配置",
+      "count": "{{count}} 个配置",
+      "open": "打开",
+      "delete": "删除",
+      "open_failed": "打开 Raw UDP 配置失败",
+      "delete_failed": "删除 Raw UDP 配置失败",
+      "confirm_delete": "删除 Raw UDP 配置“{{name}}”？"
     }
   }
 }

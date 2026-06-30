@@ -26,6 +26,11 @@ impl WorkspaceApp {
             NewConnectionSelect::RawTcpTlsVerification => {
                 SelectAnchorId::NewConnectionRawTcpTlsVerification
             }
+            NewConnectionSelect::RawUdpLineEnding => SelectAnchorId::NewConnectionRawUdpLineEnding,
+            NewConnectionSelect::RawUdpDisplayMode => {
+                SelectAnchorId::NewConnectionRawUdpDisplayMode
+            }
+            NewConnectionSelect::RawUdpSendMode => SelectAnchorId::NewConnectionRawUdpSendMode,
         }
     }
 
@@ -104,6 +109,12 @@ impl WorkspaceApp {
             .remove(&SelectAnchorId::NewConnectionRawTcpTlsMode);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionRawTcpTlsVerification);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawUdpLineEnding);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawUdpDisplayMode);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionRawUdpSendMode);
     }
 
     fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -493,7 +504,10 @@ impl WorkspaceApp {
                 | NewConnectionSelect::RawTcpDisplayMode
                 | NewConnectionSelect::RawTcpSendMode
                 | NewConnectionSelect::RawTcpTlsMode
-                | NewConnectionSelect::RawTcpTlsVerification => return,
+                | NewConnectionSelect::RawTcpTlsVerification
+                | NewConnectionSelect::RawUdpLineEnding
+                | NewConnectionSelect::RawUdpDisplayMode
+                | NewConnectionSelect::RawUdpSendMode => return,
             }
             form.field_focused = false;
             form.selected_field = None;
@@ -1020,6 +1034,12 @@ impl WorkspaceApp {
                 LucideIcon::Cable,
             ),
             (
+                NewConnectionTransport::RawUdp,
+                self.i18n.t("modals.new_connection.transport_raw_udp"),
+                NewConnectionField::Host,
+                LucideIcon::Radio,
+            ),
+            (
                 NewConnectionTransport::Serial,
                 self.i18n.t("modals.new_connection.transport_serial"),
                 NewConnectionField::SerialPortPath,
@@ -1335,6 +1355,148 @@ impl WorkspaceApp {
                         self.i18n
                             .t("modals.new_connection.raw_tcp_profile_name_placeholder"),
                         NewConnectionField::RawTcpProfileName,
+                        false,
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_raw_udp_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(form) = self.new_connection_form.as_ref() else {
+            return div().into_any_element();
+        };
+        let raw_udp_remote_port_invalid = !form.port.trim().is_empty()
+            && !form.port.trim().parse::<u16>().is_ok_and(|port| port > 0);
+        let raw_udp_local_port_invalid = !form.raw_udp_local_bind_port.trim().is_empty()
+            && form.raw_udp_local_bind_port.trim().parse::<u16>().is_err();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(
+                div()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(rgba(
+                        (self.tokens.ui.bg << 8) | TAURI_SERIAL_PANEL_BG_ALPHA,
+                    ))
+                    .p(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.new_connection.raw_udp_section_title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(self.tokens.spacing.one))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("modals.new_connection.raw_udp_connect_hint")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(self.tokens.metrics.form_host_port_gap))
+                    .child(div().flex_1().child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.raw_udp_host"),
+                        &form.host,
+                        self.i18n.t("modals.new_connection.raw_udp_host_placeholder"),
+                        NewConnectionField::Host,
+                        false,
+                        cx,
+                    )))
+                    .child(
+                        div()
+                            .w(px(self.tokens.metrics.form_port_width))
+                            .child(self.render_connection_field(
+                                self.i18n.t("modals.new_connection.raw_udp_port"),
+                                &form.port,
+                                self.i18n.t("modals.new_connection.raw_udp_port_placeholder"),
+                                NewConnectionField::Port,
+                                false,
+                                cx,
+                            )),
+                    ),
+            )
+            .when(raw_udp_remote_port_invalid, |section| {
+                section.child(self.render_connection_hint_with_color(
+                    self.i18n.t("modals.new_connection.raw_udp_invalid_port"),
+                    self.tokens.ui.error,
+                ))
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(self.tokens.metrics.form_host_port_gap))
+                    .child(div().flex_1().child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.raw_udp_local_bind_host"),
+                        &form.raw_udp_local_bind_host,
+                        self.i18n
+                            .t("modals.new_connection.raw_udp_local_bind_host_placeholder"),
+                        NewConnectionField::RawUdpLocalBindHost,
+                        false,
+                        cx,
+                    )))
+                    .child(
+                        div()
+                            .w(px(self.tokens.metrics.form_port_width))
+                            .child(self.render_connection_field(
+                                self.i18n.t("modals.new_connection.raw_udp_local_bind_port"),
+                                &form.raw_udp_local_bind_port,
+                                self.i18n
+                                    .t("modals.new_connection.raw_udp_local_bind_port_placeholder"),
+                                NewConnectionField::RawUdpLocalBindPort,
+                                false,
+                                cx,
+                            )),
+                    ),
+            )
+            .when(raw_udp_local_port_invalid, |section| {
+                section.child(self.render_connection_hint_with_color(
+                    self.i18n
+                        .t("modals.new_connection.raw_udp_invalid_local_bind_port"),
+                    self.tokens.ui.error,
+                ))
+            })
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(3)
+                    .gap(px(TAURI_SERIAL_GRID_GAP))
+                    .child(self.render_raw_udp_line_ending_select(
+                        form.raw_udp_line_ending.clone(),
+                        cx,
+                    ))
+                    .child(self.render_raw_udp_display_mode_select(
+                        form.raw_udp_display_mode.clone(),
+                        cx,
+                    ))
+                    .child(self.render_raw_udp_send_mode_select(
+                        form.raw_udp_send_mode.clone(),
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(self.tokens.radii.lg))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .p(px(self.tokens.spacing.three))
+                    .child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.raw_udp_profile_name"),
+                        &form.raw_udp_profile_name,
+                        self.i18n
+                            .t("modals.new_connection.raw_udp_profile_name_placeholder"),
+                        NewConnectionField::RawUdpProfileName,
                         false,
                         cx,
                     )),
@@ -1822,6 +1984,63 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn render_raw_udp_line_ending_select(
+        &self,
+        selected: oxideterm_connections::RawUdpLineEnding,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_udp_line_ending"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawUdpLineEnding,
+                self.raw_udp_line_ending_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn render_raw_udp_display_mode_select(
+        &self,
+        selected: oxideterm_connections::RawUdpDisplayMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_udp_display_mode"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawUdpDisplayMode,
+                self.raw_udp_display_mode_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn render_raw_udp_send_mode_select(
+        &self,
+        selected: oxideterm_connections::RawUdpSendMode,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        form_field(
+            &self.tokens,
+            self.i18n.t("modals.new_connection.raw_udp_send_mode"),
+            self.render_new_connection_select_control(
+                NewConnectionSelect::RawUdpSendMode,
+                self.raw_udp_send_mode_label(&selected),
+                false,
+                false,
+                cx,
+            ),
+        )
+        .into_any_element()
+    }
+
     fn render_raw_tcp_tls_mode_select(
         &self,
         selected: oxideterm_connections::RawTcpTlsMode,
@@ -2082,6 +2301,57 @@ impl WorkspaceApp {
         self.i18n.t(key)
     }
 
+    fn raw_udp_line_ending_label(
+        &self,
+        line_ending: &oxideterm_connections::RawUdpLineEnding,
+    ) -> String {
+        let key = match line_ending {
+            oxideterm_connections::RawUdpLineEnding::Lf => {
+                "modals.new_connection.raw_udp_line_ending_lf"
+            }
+            oxideterm_connections::RawUdpLineEnding::CrLf => {
+                "modals.new_connection.raw_udp_line_ending_crlf"
+            }
+            oxideterm_connections::RawUdpLineEnding::Cr => {
+                "modals.new_connection.raw_udp_line_ending_cr"
+            }
+            oxideterm_connections::RawUdpLineEnding::None => {
+                "modals.new_connection.raw_udp_line_ending_none"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn raw_udp_display_mode_label(
+        &self,
+        display_mode: &oxideterm_connections::RawUdpDisplayMode,
+    ) -> String {
+        let key = match display_mode {
+            oxideterm_connections::RawUdpDisplayMode::Text => {
+                "modals.new_connection.raw_udp_display_text"
+            }
+            oxideterm_connections::RawUdpDisplayMode::Hex => {
+                "modals.new_connection.raw_udp_display_hex"
+            }
+            oxideterm_connections::RawUdpDisplayMode::Mixed => {
+                "modals.new_connection.raw_udp_display_mixed"
+            }
+        };
+        self.i18n.t(key)
+    }
+
+    fn raw_udp_send_mode_label(&self, send_mode: &oxideterm_connections::RawUdpSendMode) -> String {
+        let key = match send_mode {
+            oxideterm_connections::RawUdpSendMode::Text => {
+                "modals.new_connection.raw_udp_send_text"
+            }
+            oxideterm_connections::RawUdpSendMode::Hex => {
+                "modals.new_connection.raw_udp_send_hex"
+            }
+        };
+        self.i18n.t(key)
+    }
+
     fn raw_tcp_tls_mode_label(&self, mode: &oxideterm_connections::RawTcpTlsMode) -> String {
         let key = match mode {
             oxideterm_connections::RawTcpTlsMode::Disabled => {
@@ -2214,6 +2484,54 @@ impl WorkspaceApp {
     ) {
         if let Some(form) = self.new_connection_form.as_mut() {
             form.raw_tcp_send_mode = send_mode;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_udp_line_ending(
+        &mut self,
+        line_ending: oxideterm_connections::RawUdpLineEnding,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_udp_line_ending = line_ending;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_udp_display_mode(
+        &mut self,
+        display_mode: oxideterm_connections::RawUdpDisplayMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_udp_display_mode = display_mode;
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn set_new_connection_raw_udp_send_mode(
+        &mut self,
+        send_mode: oxideterm_connections::RawUdpSendMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.raw_udp_send_mode = send_mode;
             form.field_focused = false;
             clear_connection_selection(form);
             form.error = None;

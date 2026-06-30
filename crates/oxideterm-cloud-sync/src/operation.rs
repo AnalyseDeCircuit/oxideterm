@@ -9,8 +9,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use oxideterm_connections::{
-    ConnectionStore, RawTcpProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
-    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
+    ConnectionStore, RawTcpProfilesSyncSnapshot, RawUdpProfilesSyncSnapshot,
+    SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
     oxide_file::{
         AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
@@ -35,7 +35,8 @@ use crate::{
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
     },
-    quick_commands_object_path, raw_tcp_profiles_object_path, revision_id, secret_keys,
+    quick_commands_object_path, raw_tcp_profiles_object_path, raw_udp_profiles_object_path,
+    revision_id, secret_keys,
     secrets::{CloudSyncSecretProvider, SecretReadMode, get_action_secrets},
     sensitive_credentials_object_path, serial_profiles_object_path,
     service::{
@@ -573,11 +574,13 @@ impl CloudSyncOperationService {
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
             raw_tcp_profiles_snapshot: None,
+            raw_udp_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
             base_raw_tcp_profiles_snapshot: None,
+            base_raw_udp_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: std::collections::BTreeMap::new(),
@@ -619,6 +622,12 @@ impl CloudSyncOperationService {
                 .await?;
             preview.raw_tcp_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
         }
+        if let Some(entry) = preview.manifest.sections.raw_udp_profiles.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            preview.raw_udp_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
+        }
         if let Some(previous) = previous_remote_sections {
             preview.base_connections_snapshot = read_optional_snapshot_at_revision(
                 self,
@@ -658,6 +667,14 @@ impl CloudSyncOperationService {
                 &metadata_secrets,
                 previous.raw_tcp_profiles.as_deref(),
                 raw_tcp_profiles_object_path,
+            )
+            .await?;
+            preview.base_raw_udp_profiles_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.raw_udp_profiles.as_deref(),
+                raw_udp_profiles_object_path,
             )
             .await?;
         }
@@ -894,6 +911,8 @@ impl CloudSyncOperationService {
             selection.serial_profiles && preview.serial_profiles_snapshot.is_some();
         let apply_raw_tcp_profiles =
             selection.raw_tcp_profiles && preview.raw_tcp_profiles_snapshot.is_some();
+        let apply_raw_udp_profiles =
+            selection.raw_udp_profiles && preview.raw_udp_profiles_snapshot.is_some();
         let apply_sensitive_credentials =
             selection.sensitive_credentials && preview.sensitive_credentials_entry.is_some();
         let needs_password = !app_settings_entry_ids.is_empty() || !plugin_entry_ids.is_empty();
@@ -911,6 +930,7 @@ impl CloudSyncOperationService {
             + usize::from(apply_quick_commands)
             + usize::from(apply_serial_profiles)
             + usize::from(apply_raw_tcp_profiles)
+            + usize::from(apply_raw_udp_profiles)
             + usize::from(apply_sensitive_credentials))
         .max(1);
         report_progress(progress, CloudSyncProgressStage::Importing, 0, total);
@@ -946,6 +966,11 @@ impl CloudSyncOperationService {
                 .as_ref()
                 .map(|snapshot| snapshot.records.len())
                 .unwrap_or(0),
+            raw_udp_profiles: preview
+                .raw_udp_profiles_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.records.len())
+                .unwrap_or(0),
             sensitive_credentials: preview
                 .sensitive_credentials_preview
                 .as_ref()
@@ -976,6 +1001,7 @@ impl CloudSyncOperationService {
                             import_forwards: false,
                             import_serial_profiles: false,
                             import_raw_tcp_profiles: false,
+                            import_raw_udp_profiles: false,
                             import_portable_secrets: true,
                             restore_managed_keys: true,
                             restore_managed_key_passphrases: true,
@@ -1112,6 +1138,11 @@ impl CloudSyncOperationService {
         } else {
             None
         };
+        let raw_udp_profiles_snapshot = if selection.raw_udp_profiles {
+            preview.raw_udp_profiles_snapshot
+        } else {
+            None
+        };
         let connection_conflict_strategy = match conflict_strategy {
             ConflictStrategy::Skip => SavedConnectionsConflictStrategy::Skip,
             ConflictStrategy::Replace => SavedConnectionsConflictStrategy::Replace,
@@ -1128,6 +1159,7 @@ impl CloudSyncOperationService {
             quick_commands_snapshot_json,
             serial_profiles_snapshot,
             raw_tcp_profiles_snapshot,
+            raw_udp_profiles_snapshot,
             app_settings_snapshots,
             plugin_settings_snapshot,
             connection_conflict_strategy,
@@ -1136,7 +1168,8 @@ impl CloudSyncOperationService {
             + usize::from(applied.forwards.is_some())
             + usize::from(apply_quick_commands)
             + usize::from(apply_serial_profiles)
-            + usize::from(apply_raw_tcp_profiles);
+            + usize::from(apply_raw_tcp_profiles)
+            + usize::from(apply_raw_udp_profiles);
         report_progress(
             progress,
             CloudSyncProgressStage::Importing,
@@ -1164,6 +1197,7 @@ impl CloudSyncOperationService {
             quick_commands: apply_quick_commands,
             serial_profiles: apply_serial_profiles,
             raw_tcp_profiles: apply_raw_tcp_profiles,
+            raw_udp_profiles: apply_raw_udp_profiles,
             sensitive_credentials: apply_sensitive_credentials,
             app_settings_sections: app_settings_entry_ids,
             plugin_ids: plugin_entry_ids,
@@ -1416,6 +1450,34 @@ impl CloudSyncOperationService {
             );
         }
 
+        if local_snapshot.scope.sync_raw_udp_profiles {
+            let mut snapshot = connection_store.export_raw_udp_profiles_snapshot()?;
+            filter_raw_udp_profiles_snapshot(
+                &mut snapshot,
+                item_filter.raw_udp_profile_ids.as_ref(),
+            );
+            let bytes = serde_json::to_vec(&snapshot)?;
+            let path = raw_udp_profiles_object_path(&snapshot.revision);
+            manifest.sections.raw_udp_profiles = Some(crate::StructuredObjectEntry {
+                revision: snapshot.revision.clone(),
+                path: path.clone(),
+                record_count: Some(snapshot.records.len()),
+                content_type: "application/json".to_string(),
+            });
+            objects.push(StructuredUploadObject {
+                path,
+                bytes,
+                content_type: "application/json".to_string(),
+            });
+            completed_exports += 1;
+            report_progress(
+                progress,
+                CloudSyncProgressStage::Exporting,
+                2 + completed_exports,
+                total,
+            );
+        }
+
         if local_snapshot.scope.sync_sensitive_credentials {
             let password =
                 sync_password.context("missing_sync_password: cloud sync password is required")?;
@@ -1637,6 +1699,7 @@ pub struct StructuredUploadItemFilter {
     pub quick_command_ids: Option<BTreeSet<String>>,
     pub serial_profile_ids: Option<BTreeSet<String>>,
     pub raw_tcp_profile_ids: Option<BTreeSet<String>>,
+    pub raw_udp_profile_ids: Option<BTreeSet<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1808,6 +1871,16 @@ fn merge_structured_preview_fields(
         changed |=
             merge_raw_tcp_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
     }
+    if selection.raw_udp_profiles
+        && let (Some(remote), Some(base)) = (
+            preview.raw_udp_profiles_snapshot.as_mut(),
+            preview.base_raw_udp_profiles_snapshot.as_ref(),
+        )
+    {
+        let local = connection_store.export_raw_udp_profiles_snapshot()?;
+        changed |=
+            merge_raw_udp_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
+    }
     Ok(changed)
 }
 
@@ -1944,6 +2017,45 @@ fn merge_raw_tcp_profile_records(
     remote: &mut RawTcpProfilesSyncSnapshot,
     base: &RawTcpProfilesSyncSnapshot,
     local: &RawTcpProfilesSyncSnapshot,
+    conflict_strategy: &ConflictStrategy,
+    merged_at: chrono::DateTime<Utc>,
+) -> Result<bool> {
+    let base_records = base
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let local_records = local
+        .records
+        .iter()
+        .map(|profile| (profile.id.as_str(), profile))
+        .collect::<BTreeMap<_, _>>();
+    let mut changed = false;
+    for remote_profile in &mut remote.records {
+        let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        let Some(local_profile) = local_records.get(remote_profile.id.as_str()).copied() else {
+            continue;
+        };
+        if let Some(mut merged_profile) = merge_structured_model_fields(
+            base_profile,
+            local_profile,
+            remote_profile,
+            conflict_strategy,
+        )? {
+            merged_profile.updated_at = merged_at;
+            *remote_profile = merged_profile;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+fn merge_raw_udp_profile_records(
+    remote: &mut RawUdpProfilesSyncSnapshot,
+    base: &RawUdpProfilesSyncSnapshot,
+    local: &RawUdpProfilesSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: chrono::DateTime<Utc>,
 ) -> Result<bool> {
@@ -2254,11 +2366,13 @@ pub struct StructuredPreview {
     pub quick_commands_snapshot_json: Option<String>,
     pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     pub raw_tcp_profiles_snapshot: Option<RawTcpProfilesSyncSnapshot>,
+    pub raw_udp_profiles_snapshot: Option<RawUdpProfilesSyncSnapshot>,
     pub base_connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     pub base_forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub base_quick_commands_snapshot_json: Option<String>,
     pub base_serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
     pub base_raw_tcp_profiles_snapshot: Option<RawTcpProfilesSyncSnapshot>,
+    pub base_raw_udp_profiles_snapshot: Option<RawUdpProfilesSyncSnapshot>,
     pub sensitive_credentials_entry: Option<Vec<u8>>,
     pub sensitive_credentials_preview: Option<ImportPreview>,
     pub app_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
@@ -2300,6 +2414,7 @@ impl StructuredPreview {
             quick_commands: self.quick_commands_snapshot_json.is_some(),
             serial_profiles: self.serial_profiles_snapshot.is_some(),
             raw_tcp_profiles: self.raw_tcp_profiles_snapshot.is_some(),
+            raw_udp_profiles: self.raw_udp_profiles_snapshot.is_some(),
             sensitive_credentials: self.sensitive_credentials_entry.is_some(),
             app_settings_sections: self.app_settings_entries.keys().cloned().collect(),
             plugin_ids: self.plugin_settings_entries.keys().cloned().collect(),
@@ -2368,6 +2483,17 @@ fn filter_serial_profiles_snapshot(
 
 fn filter_raw_tcp_profiles_snapshot(
     snapshot: &mut RawTcpProfilesSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .records
+            .retain(|profile| selected_ids.contains(&profile.id));
+    }
+}
+
+fn filter_raw_udp_profiles_snapshot(
+    snapshot: &mut RawUdpProfilesSyncSnapshot,
     selected_ids: Option<&BTreeSet<String>>,
 ) {
     if let Some(selected_ids) = selected_ids {
@@ -2454,6 +2580,7 @@ fn has_structured_conflict(
             || dirty_sections.quick_commands
             || dirty_sections.serial_profiles
             || dirty_sections.raw_tcp_profiles
+            || dirty_sections.raw_udp_profiles
             || dirty_sections.app_settings.values().any(|dirty| *dirty)
             || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
     };
@@ -2471,6 +2598,9 @@ fn has_structured_conflict(
         return true;
     }
     if dirty_sections.raw_tcp_profiles && remote.raw_tcp_profiles != previous.raw_tcp_profiles {
+        return true;
+    }
+    if dirty_sections.raw_udp_profiles && remote.raw_udp_profiles != previous.raw_udp_profiles {
         return true;
     }
     for (section_id, dirty) in &dirty_sections.app_settings {
@@ -2557,6 +2687,7 @@ mod tests {
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
             raw_tcp_profiles_record_count: 0,
+            raw_udp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         }
     }

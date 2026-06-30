@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use super::{TabKind, TerminalSessionId, WorkspaceApp};
 use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
-use oxideterm_terminal::RawTcpSessionConfig;
+use oxideterm_terminal::{RawTcpSessionConfig, RawUdpSessionConfig};
 
 // Terminal read APIs project pane state into the plugin contract. Keeping search
 // and scroll-buffer code here prevents lifecycle from owning terminal query rules.
@@ -70,6 +70,9 @@ pub(super) fn native_plugin_active_terminal_target(
     };
     if let Some(config) = workspace.raw_tcp_terminal_configs.get(&session_id) {
         return native_plugin_raw_tcp_terminal_target(session_id, config);
+    }
+    if let Some(config) = workspace.raw_udp_terminal_configs.get(&session_id) {
+        return native_plugin_raw_udp_terminal_target(session_id, config);
     }
     let terminal_type = workspace
         .active_tab()
@@ -152,6 +155,33 @@ fn native_plugin_raw_tcp_terminal_target(
     })
 }
 
+fn native_plugin_raw_udp_terminal_target(
+    session_id: TerminalSessionId,
+    config: &RawUdpSessionConfig,
+) -> Value {
+    // Raw UDP panes expose endpoint metadata without implying a byte-stream or
+    // SSH-backed terminal. Plugins can use this to choose datagram-safe tools.
+    json!({
+        "sessionId": session_id.0.to_string(),
+        "terminalType": "raw_udp",
+        "terminalTransport": "raw_udp",
+        "nodeId": null,
+        "connectionId": null,
+        "connectionState": "active",
+        "label": format!("UDP {}", config.remote_endpoint_label()),
+        "transport": {
+            "type": "raw_udp",
+            "remoteHost": config.remote_host,
+            "remotePort": config.remote_port,
+            "localBindHost": config.local_bind_host,
+            "localBindPort": config.local_bind_port,
+            "lineEnding": format!("{:?}", config.line_ending).to_lowercase(),
+            "displayMode": format!("{:?}", config.display_mode).to_lowercase(),
+            "sendMode": format!("{:?}", config.send_mode).to_lowercase(),
+        },
+    })
+}
+
 fn native_plugin_terminal_state_label(state: &Value) -> Value {
     if let Some(state) = state.as_str() {
         return json!(state);
@@ -166,7 +196,8 @@ fn native_plugin_terminal_state_label(state: &Value) -> Value {
 mod tests {
     use super::*;
     use oxideterm_terminal::{
-        RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpTlsConfig, RawTcpTlsVerification,
+        RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpTlsConfig,
+        RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpSendMode,
     };
 
     #[test]
@@ -204,5 +235,32 @@ mod tests {
             target["transport"]["tls"]["serverName"],
             "socket.example.test"
         );
+    }
+
+    #[test]
+    fn raw_udp_active_target_exposes_transport_metadata() {
+        let target = native_plugin_raw_udp_terminal_target(
+            TerminalSessionId(43),
+            &RawUdpSessionConfig {
+                remote_host: "udp.example.test".to_string(),
+                remote_port: 9000,
+                local_bind_host: Some("127.0.0.1".to_string()),
+                local_bind_port: 0,
+                line_ending: RawUdpLineEnding::None,
+                display_mode: RawUdpDisplayMode::Mixed,
+                send_mode: RawUdpSendMode::Hex,
+            },
+        );
+
+        assert_eq!(target["terminalType"], "raw_udp");
+        assert_eq!(target["terminalTransport"], "raw_udp");
+        assert_eq!(target["label"], "UDP udp.example.test:9000");
+        assert_eq!(target["transport"]["remoteHost"], "udp.example.test");
+        assert_eq!(target["transport"]["remotePort"], 9000);
+        assert_eq!(target["transport"]["localBindHost"], "127.0.0.1");
+        assert_eq!(target["transport"]["localBindPort"], 0);
+        assert_eq!(target["transport"]["lineEnding"], "none");
+        assert_eq!(target["transport"]["displayMode"], "mixed");
+        assert_eq!(target["transport"]["sendMode"], "hex");
     }
 }

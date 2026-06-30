@@ -193,7 +193,13 @@
       "section_raw_tcp_profiles": "Raw TCP 配置（{{count}} 个）",
       "toggle_raw_tcp_profiles": "导入 Raw TCP 连接配置",
       "imported_raw_tcp_profiles": "已导入 {{count}} 个 Raw TCP 配置。",
-      "skipped_raw_tcp_profiles": "已跳过 Raw TCP 配置"
+      "skipped_raw_tcp_profiles": "已跳过 Raw TCP 配置",
+      "contains_raw_udp_profiles": "Raw UDP 配置：",
+      "raw_udp_profiles_count": "{{count}} 个配置",
+      "section_raw_udp_profiles": "Raw UDP 配置（{{count}} 个）",
+      "toggle_raw_udp_profiles": "导入 Raw UDP 连接配置",
+      "imported_raw_udp_profiles": "已导入 {{count}} 个 Raw UDP 配置。",
+      "skipped_raw_udp_profiles": "已跳过 Raw UDP 配置"
     },
     "reconnect": {
       "title": "重新连接会话",
@@ -457,7 +463,37 @@
       "serial_profile_name_placeholder": "实验室控制台",
       "serial_save_failed": "保存串口配置失败",
       "serial_invalid_baud_rate": "波特率必须大于 0",
-      "serial_port_required": "请选择或输入串口路径"
+      "serial_port_required": "请选择或输入串口路径",
+      "transport_raw_udp": "Raw UDP",
+      "raw_udp_description": "将 UDP 数据报作为本地终端收发。",
+      "raw_udp_section_title": "Raw UDP 终端",
+      "raw_udp_connect_hint": "每次提交的输入都会作为一个 UDP 数据报发送，远端回复会按收到的数据报显示。",
+      "raw_udp_host": "远端主机",
+      "raw_udp_host_placeholder": "192.168.1.100 或 device.local",
+      "raw_udp_port": "远端端口",
+      "raw_udp_port_placeholder": "输入 UDP 端口",
+      "raw_udp_invalid_port": "端口必须在 1 到 65535 之间",
+      "raw_udp_host_required": "请输入 Raw UDP 远端主机",
+      "raw_udp_profile_name": "配置名称",
+      "raw_udp_profile_name_placeholder": "设备数据报套接字",
+      "raw_udp_save_failed": "保存 Raw UDP 配置失败",
+      "raw_udp_local_bind_host": "本地绑定主机",
+      "raw_udp_local_bind_host_placeholder": "留空表示任意本地地址",
+      "raw_udp_local_bind_port": "本地绑定端口",
+      "raw_udp_local_bind_port_placeholder": "0 表示临时端口",
+      "raw_udp_invalid_local_bind_port": "本地绑定端口必须在 0 到 65535 之间",
+      "raw_udp_line_ending": "换行符",
+      "raw_udp_line_ending_lf": "LF",
+      "raw_udp_line_ending_crlf": "CRLF",
+      "raw_udp_line_ending_cr": "CR",
+      "raw_udp_line_ending_none": "无",
+      "raw_udp_display_mode": "显示方式",
+      "raw_udp_display_text": "文本",
+      "raw_udp_display_hex": "十六进制",
+      "raw_udp_display_mixed": "十六进制 + 文本",
+      "raw_udp_send_mode": "发送方式",
+      "raw_udp_send_text": "文本",
+      "raw_udp_send_hex": "十六进制字节"
     },
     "managed_key": {
       "selector": {
@@ -763,6 +799,9 @@
     "include_raw_tcp_profiles": "包含 Raw TCP 配置",
     "include_raw_tcp_profiles_description": "导出已保存的 Raw TCP 连接配置（{{count}} 个）。",
     "content_summary_serial_profiles": "串口配置：{{count}} 个",
-    "content_summary_raw_tcp_profiles": "Raw TCP 配置：{{count}} 个"
+    "content_summary_raw_tcp_profiles": "Raw TCP 配置：{{count}} 个",
+    "include_raw_udp_profiles": "包含 Raw UDP 配置",
+    "include_raw_udp_profiles_description": "导出已保存的 Raw UDP 连接配置（{{count}} 个）。",
+    "content_summary_raw_udp_profiles": "Raw UDP 配置：{{count}} 个"
   }
 }

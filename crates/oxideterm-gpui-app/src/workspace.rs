@@ -193,8 +193,8 @@ use oxideterm_ssh::{
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
-    LocalPtyConfig, RawTcpSessionConfig, SerialSessionConfig, ShellInfo, SshSessionConfig,
-    TelnetSessionConfig, TerminalCommandMarkDetectionSource, TerminalCursorShape,
+    LocalPtyConfig, RawTcpSessionConfig, RawUdpSessionConfig, SerialSessionConfig, ShellInfo,
+    SshSessionConfig, TelnetSessionConfig, TerminalCommandMarkDetectionSource, TerminalCursorShape,
     TerminalEncoding as SessionTerminalEncoding, TerminalLifecycle, scan_shells,
 };
 use oxideterm_theme::{
@@ -664,6 +664,7 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     raw_tcp_terminal_configs: HashMap<TerminalSessionId, RawTcpSessionConfig>,
+    raw_udp_terminal_configs: HashMap<TerminalSessionId, RawUdpSessionConfig>,
     detached_local_terminals_popover_open: bool,
     terminal_cast_player: Option<TerminalCastPlayerState>,
     terminal_cast_seek_dragging: bool,
@@ -879,6 +880,7 @@ pub(crate) struct WorkspaceApp {
     drill_down_parent_node_id: Option<NodeId>,
     editing_saved_connection_id: Option<String>,
     editing_raw_tcp_profile_id: Option<String>,
+    editing_raw_udp_profile_id: Option<String>,
     duplicating_saved_connection_id: Option<String>,
     saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
     open_new_connection_select: Option<NewConnectionSelect>,

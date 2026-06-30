@@ -25,6 +25,12 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::RawTcp;
+        let raw_udp_edit_mode = self.editing_raw_udp_profile_id.is_some()
+            && !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::RawUdp;
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
         let serial_mode = !prompt_mode
@@ -42,6 +48,11 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::RawTcp;
+        let raw_udp_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::RawUdp;
         let remote_desktop_protocol = if !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
@@ -59,14 +70,15 @@ impl WorkspaceApp {
         } else {
             None
         };
-        let local_transport_mode = serial_mode || telnet_mode || raw_tcp_mode;
+        let local_transport_mode = serial_mode || telnet_mode || raw_tcp_mode || raw_udp_mode;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
         let ssh_submission_mode = !local_transport_mode && !remote_desktop_mode;
         let shows_transport_selector = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
             && !drill_down_mode
-            && !raw_tcp_edit_mode;
+            && !raw_tcp_edit_mode
+            && !raw_udp_edit_mode;
         let title = if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
@@ -234,12 +246,15 @@ impl WorkspaceApp {
                                         .when(raw_tcp_mode, |content| {
                                             content.child(self.render_raw_tcp_form_branch(cx))
                                         })
+                                        .when(raw_udp_mode, |content| {
+                                            content.child(self.render_raw_udp_form_branch(cx))
+                                        })
                                         .when_some(remote_desktop_protocol, |content, protocol| {
                                             content
                                                 .child(self.render_remote_desktop_form_branch(protocol, cx))
                                         })
                                         .when(
-                                            !serial_mode && !telnet_mode && !remote_desktop_mode,
+                                            !serial_mode && !telnet_mode && !raw_udp_mode && !remote_desktop_mode,
                                             |content| {
                                                 content
                                 .when(!prompt_mode && !drill_down_mode, |content| {

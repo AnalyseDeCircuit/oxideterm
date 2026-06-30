@@ -201,6 +201,12 @@ impl WorkspaceApp {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.raw_tcp_profiles.delete"),
             ),
+            SessionManagerDeleteConfirm::RawUdpProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.raw_udp_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.raw_udp_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::Batch { ids } => (
                 confirm_batch_delete_label(&self.i18n, ids.len()),
                 self.i18n.t("common.actions.confirm"),

@@ -18,7 +18,7 @@ use gpui::{
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
-    GraphicsOptions, LocalPtyConfig, RawTcpSessionConfig, SerialSessionConfig,
+    GraphicsOptions, LocalPtyConfig, RawTcpSessionConfig, RawUdpSessionConfig, SerialSessionConfig,
     ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig,
     TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
     TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent, TerminalDrainBudget,
@@ -125,6 +125,7 @@ impl TerminalEventEffect {
 pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
     raw_tcp_reconnect_config: Option<RawTcpSessionConfig>,
+    raw_udp_reconnect_config: Option<RawUdpSessionConfig>,
     focus_handle: FocusHandle,
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
@@ -359,6 +360,28 @@ impl TerminalPane {
         Ok(pane)
     }
 
+    pub fn new_raw_udp_with_preferences(
+        config: RawUdpSessionConfig,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Self> {
+        let reconnect_config = config.clone();
+        let terminal = Arc::new(Mutex::new(
+            TerminalSession::raw_udp_with_graphics_and_encoding(
+                config,
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                graphics_options_from_preferences(&preferences),
+                preferences.terminal_encoding,
+                preferences.scrollback_lines,
+            ),
+        ));
+        let mut pane = Self::from_session(terminal, preferences, window, cx)?;
+        pane.raw_udp_reconnect_config = Some(reconnect_config);
+        Ok(pane)
+    }
+
     pub fn new_serial_with_preferences(
         config: SerialSessionConfig,
         preferences: TerminalUiPreferences,
@@ -444,6 +467,7 @@ impl TerminalPane {
         Ok(Self {
             terminal,
             raw_tcp_reconnect_config: None,
+            raw_udp_reconnect_config: None,
             focus_handle,
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
@@ -744,8 +768,24 @@ impl TerminalPane {
         self.raw_tcp_reconnect_config.is_some()
     }
 
+    pub fn is_raw_udp_transport(&self) -> bool {
+        self.raw_udp_reconnect_config.is_some()
+    }
+
+    pub fn is_raw_socket_transport(&self) -> bool {
+        self.is_raw_tcp_transport() || self.is_raw_udp_transport()
+    }
+
     fn can_reconnect_raw_tcp(&self) -> bool {
         self.raw_tcp_reconnect_config.is_some() && self.terminal_exited
+    }
+
+    fn can_reconnect_raw_udp(&self) -> bool {
+        self.raw_udp_reconnect_config.is_some() && self.terminal_exited
+    }
+
+    fn can_reconnect_raw_socket(&self) -> bool {
+        self.can_reconnect_raw_tcp() || self.can_reconnect_raw_udp()
     }
 
     fn reconnect_raw_tcp(&mut self, cx: &mut Context<Self>) {
@@ -808,6 +848,76 @@ impl TerminalPane {
         self.clear_smooth_scroll_remainder();
         self.reset_cursor_blink();
         cx.notify();
+    }
+
+    fn reconnect_raw_udp(&mut self, cx: &mut Context<Self>) {
+        if !self.can_reconnect_raw_udp() {
+            return;
+        }
+        let Some(config) = self.raw_udp_reconnect_config.clone() else {
+            return;
+        };
+
+        let resize = self
+            .last_pty_resize
+            .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS, 0, 0));
+        self.terminal.lock().shutdown();
+
+        let mut terminal = TerminalSession::raw_udp_with_graphics_and_encoding(
+            config.clone(),
+            resize.0,
+            resize.1,
+            graphics_options_from_preferences(&self.preferences),
+            self.preferences.terminal_encoding,
+            self.preferences.scrollback_lines,
+        );
+        if resize.2 > 0 && resize.3 > 0 {
+            let _ = terminal.resize_with_cell_size(resize.0, resize.1, resize.2, resize.3);
+        }
+        let _ = terminal.set_focused(self.focused);
+        let snapshot = terminal.snapshot();
+
+        // Rebinding UDP keeps the pane identity but always creates a fresh
+        // socket, matching UDP's bind-oriented lifecycle.
+        self.terminal = Arc::new(Mutex::new(terminal));
+        self.raw_udp_reconnect_config = Some(config);
+        self.snapshot = self.stamp_snapshot(snapshot);
+        self.terminal_exited = false;
+        self.input_locked = false;
+        self.title = SharedString::from("OxideTerm");
+        self.selection = None;
+        self.pending_paste = None;
+        self.context_menu = None;
+        self.context_action_requested = None;
+        self.marked_text = None;
+        self.privilege_prompt_inline_hint = None;
+        self.privilege_prompt_submit_requested = false;
+        self.search_query = None;
+        self.selected_search_match = None;
+        self.hovered_link = None;
+        self.hovered_command_mark_id = None;
+        self.selecting = false;
+        self.last_mouse_report_point = None;
+        self.command_marks.clear();
+        self.selected_command_mark_id = None;
+        self.command_mark_id_aliases.clear();
+        self.input_tracker.reset();
+        self.privilege_prompt_tracker = PrivilegePromptTracker::default();
+        self.command_fact_ledger = CommandFactLedger::default();
+        self.last_pty_resize = Some(resize);
+        self.pending_pty_resize = None;
+        self.last_drain_budget_exhausted = false;
+        self.clear_smooth_scroll_remainder();
+        self.reset_cursor_blink();
+        cx.notify();
+    }
+
+    fn reconnect_raw_socket(&mut self, cx: &mut Context<Self>) {
+        if self.can_reconnect_raw_tcp() {
+            self.reconnect_raw_tcp(cx);
+        } else {
+            self.reconnect_raw_udp(cx);
+        }
     }
 
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {

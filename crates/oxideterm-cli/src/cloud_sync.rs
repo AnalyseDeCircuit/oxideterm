@@ -527,12 +527,13 @@ fn format_history_row(entry: &CloudSyncHistoryEntry) -> String {
     let revision = entry.remote_revision.as_deref().unwrap_or("-");
     let error = entry.error.as_deref().unwrap_or("-");
     format!(
-        "{}\t{}\t{}\tconnections={}\tforwards={}\tplugins={}\trevision={}\terror={}",
+        "{}\t{}\t{}\tconnections={}\tforwards={}\trawUdpProfiles={}\tplugins={}\trevision={}\terror={}",
         entry.timestamp,
         entry.action,
         result,
         entry.summary.connections,
         entry.summary.forwards,
+        entry.summary.raw_udp_profiles,
         entry.summary.plugin_settings_count,
         revision,
         error
@@ -585,6 +586,7 @@ mod tests {
                 quick_commands: 0,
                 serial_profiles: 0,
                 raw_tcp_profiles: 0,
+                raw_udp_profiles: 0,
                 sensitive_credentials: 0,
                 has_app_settings: true,
                 plugin_settings_count: 3,

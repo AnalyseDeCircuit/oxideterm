@@ -108,6 +108,26 @@ fn ai_raw_tcp_terminal_metadata(config: &RawTcpSessionConfig) -> serde_json::Val
     })
 }
 
+fn ai_raw_udp_terminal_label(config: &RawUdpSessionConfig) -> String {
+    format!("UDP {}", config.remote_endpoint_label())
+}
+
+fn ai_raw_udp_terminal_metadata(config: &RawUdpSessionConfig) -> serde_json::Value {
+    // UDP targets are datagram-oriented local sockets, so expose enough shape
+    // for tools to avoid stream-only assumptions.
+    serde_json::json!({
+        "terminalType": "raw_udp",
+        "terminalTransport": "raw_udp",
+        "remoteHost": config.remote_host,
+        "remotePort": config.remote_port,
+        "localBindHost": config.local_bind_host,
+        "localBindPort": config.local_bind_port,
+        "lineEnding": format!("{:?}", config.line_ending).to_lowercase(),
+        "displayMode": format!("{:?}", config.display_mode).to_lowercase(),
+        "sendMode": format!("{:?}", config.send_mode).to_lowercase(),
+    })
+}
+
 fn ai_ide_workspace_target_for_node(
     node_id: &NodeId,
     node: &WorkspaceSshNode,
@@ -345,12 +365,16 @@ impl WorkspaceApp {
                     continue;
                 };
                 let raw_tcp_config = self.raw_tcp_terminal_configs.get(&session_id);
+                let raw_udp_config = self.raw_udp_terminal_configs.get(&session_id);
                 let serial_config = self.serial_terminal_configs.get(&session_id);
                 let is_raw_tcp_terminal = raw_tcp_config.is_some();
+                let is_raw_udp_terminal = raw_udp_config.is_some();
                 let is_serial_terminal = serial_config.is_some();
                 let is_local_terminal = tab.kind == TabKind::LocalTerminal;
                 let terminal_type = if is_raw_tcp_terminal {
                     "raw_tcp"
+                } else if is_raw_udp_terminal {
+                    "raw_udp"
                 } else if is_serial_terminal {
                     "serial"
                 } else if is_local_terminal {
@@ -374,6 +398,8 @@ impl WorkspaceApp {
                 };
                 let label = if let Some(config) = raw_tcp_config {
                     ai_raw_tcp_terminal_label(config)
+                } else if let Some(config) = raw_udp_config {
+                    ai_raw_udp_terminal_label(config)
                 } else if let Some(config) = serial_config {
                     format!("Serial {}", config.port_path)
                 } else if is_local_terminal {
@@ -383,6 +409,8 @@ impl WorkspaceApp {
                 };
                 let metadata = if let Some(config) = raw_tcp_config {
                     ai_raw_tcp_terminal_metadata(config)
+                } else if let Some(config) = raw_udp_config {
+                    ai_raw_udp_terminal_metadata(config)
                 } else if let Some(config) = serial_config {
                     serde_json::json!({
                         "terminalType": terminal_type,
@@ -2202,7 +2230,8 @@ mod raw_tcp_snapshot_tests {
     use super::*;
     use oxideterm_terminal::{
         RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpSessionConfig, RawTcpTlsConfig,
-        RawTcpTlsVerification,
+        RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpSendMode,
+        RawUdpSessionConfig,
     };
 
     #[test]
@@ -2255,5 +2284,31 @@ mod raw_tcp_snapshot_tests {
         assert_eq!(ai_raw_tcp_terminal_label(&config), "TLS secure.internal:443");
         assert_eq!(metadata["tls"]["enabled"], true);
         assert_eq!(metadata["tls"]["serverName"], "secure.internal");
+    }
+
+    #[test]
+    fn raw_udp_target_metadata_identifies_local_datagram_transport() {
+        let config = RawUdpSessionConfig {
+            remote_host: "udp.internal".to_string(),
+            remote_port: 8125,
+            local_bind_host: Some("127.0.0.1".to_string()),
+            local_bind_port: 0,
+            line_ending: RawUdpLineEnding::None,
+            display_mode: RawUdpDisplayMode::Mixed,
+            send_mode: RawUdpSendMode::Hex,
+        };
+
+        let metadata = ai_raw_udp_terminal_metadata(&config);
+
+        assert_eq!(ai_raw_udp_terminal_label(&config), "UDP udp.internal:8125");
+        assert_eq!(metadata["terminalType"], "raw_udp");
+        assert_eq!(metadata["terminalTransport"], "raw_udp");
+        assert_eq!(metadata["remoteHost"], "udp.internal");
+        assert_eq!(metadata["remotePort"], 8125);
+        assert_eq!(metadata["localBindHost"], "127.0.0.1");
+        assert_eq!(metadata["localBindPort"], 0);
+        assert_eq!(metadata["lineEnding"], "none");
+        assert_eq!(metadata["displayMode"], "mixed");
+        assert_eq!(metadata["sendMode"], "hex");
     }
 }

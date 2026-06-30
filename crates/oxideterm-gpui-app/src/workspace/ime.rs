@@ -2344,6 +2344,9 @@ fn new_connection_field_value(
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
         NewConnectionField::RawTcpProfileName => &form.raw_tcp_profile_name,
         NewConnectionField::RawTcpTlsServerName => &form.raw_tcp_tls_server_name,
+        NewConnectionField::RawUdpProfileName => &form.raw_udp_profile_name,
+        NewConnectionField::RawUdpLocalBindHost => &form.raw_udp_local_bind_host,
+        NewConnectionField::RawUdpLocalBindPort => &form.raw_udp_local_bind_port,
         NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
         NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
         NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
@@ -2383,6 +2386,9 @@ fn connection_field_value_mut(
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
         NewConnectionField::RawTcpProfileName => &mut form.raw_tcp_profile_name,
         NewConnectionField::RawTcpTlsServerName => &mut form.raw_tcp_tls_server_name,
+        NewConnectionField::RawUdpProfileName => &mut form.raw_udp_profile_name,
+        NewConnectionField::RawUdpLocalBindHost => &mut form.raw_udp_local_bind_host,
+        NewConnectionField::RawUdpLocalBindPort => &mut form.raw_udp_local_bind_port,
         NewConnectionField::JumpHost => {
             &mut form
                 .jump_server_form

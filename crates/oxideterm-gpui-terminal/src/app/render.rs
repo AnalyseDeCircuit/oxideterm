@@ -361,13 +361,13 @@ impl TerminalPane {
                     },
                     cx,
                 ))
-                .when(self.is_raw_tcp_transport(), |content| {
+                .when(self.is_raw_socket_transport(), |content| {
                     content.child(self.render_terminal_context_menu_item(
                         reconnect_transport_label,
-                        !self.can_reconnect_raw_tcp(),
+                        !self.can_reconnect_raw_socket(),
                         |this, _event, _window, cx| {
                             this.dismiss_terminal_context_menu(cx);
-                            this.reconnect_raw_tcp(cx);
+                            this.reconnect_raw_socket(cx);
                         },
                         cx,
                     ))

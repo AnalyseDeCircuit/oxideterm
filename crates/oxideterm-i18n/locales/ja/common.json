@@ -109,7 +109,8 @@
     "cmd_open_telnet_terminal": "Telnet ターミナルを開く",
     "cmd_open_raw_tcp_terminal": "Raw TCP ターミナルを開く",
     "cmd_open_rdp_preview": "RDP プレビューを開く",
-    "cmd_open_vnc_preview": "VNC プレビューを開く"
+    "cmd_open_vnc_preview": "VNC プレビューを開く",
+    "cmd_open_raw_udp_terminal": "Raw UDP ターミナルを開く"
   },
   "common": {
     "enabled": "有効",
@@ -340,7 +341,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth クライアント ID",
         "microsoft_access_token": "Microsoft アクセストークン",
-        "google_oauth_client_id": "Google OAuth クライアント ID"
+        "google_oauth_client_id": "Google OAuth クライアント ID",
+        "sync_raw_udp_profiles": "Raw UDP プロファイルを同期"
       },
       "auth": {
         "bearer": "Bearer",
@@ -378,7 +380,8 @@
         "plugin_settings_selected_detail": "選択済みプラグイン: {{plugins}}",
         "plugin_settings_disabled_detail": "現在の同期範囲ではプラグイン設定は除外されています。",
         "sensitive_credentials_enabled_detail": "暗号化された機密資格情報オブジェクトが含まれます。",
-        "sensitive_credentials_disabled_detail": "接続パスワード、鍵パスフレーズ、管理対象秘密鍵、AI キー、権限昇格資格情報は、機密資格情報同期を有効にするまで除外されます。"
+        "sensitive_credentials_disabled_detail": "接続パスワード、鍵パスフレーズ、管理対象秘密鍵、AI キー、権限昇格資格情報は、機密資格情報同期を有効にするまで除外されます。",
+        "raw_udp_profiles_detail": "Raw UDP 接続プロファイルが含まれます。"
       },
       "notes": {
         "upload_only": "自動同期はアップロードのみ行います。リモートの更新は常にユーザーの確認が必要です。",
@@ -394,7 +397,7 @@
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{rawTcpProfiles}} 件の Raw TCP プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{rawTcpProfiles}} 件の Raw TCP プロファイル、{{rawUdpProfiles}} 件の Raw UDP プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "history": {
         "action_upload": "アップロード",
@@ -584,7 +587,9 @@
         "toggle_sensitive_credentials": "機密資格情報をインポート（{{count}}）",
         "sensitive_summary_title": "機密資格情報",
         "sensitive_remote_summary": "リモートの暗号化資格情報には {{connections}} 件の接続レコードと {{portableSecrets}} 件のポータブルシークレットが含まれます。値は常に非表示です。",
-        "sensitive_upload_summary": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{portableSecrets}} 件のポータブルシークレットをアップロードします。"
+        "sensitive_upload_summary": "{{passwords}} 件のパスワード、{{keyPassphrases}} 件の鍵パスフレーズ、{{managedKeys}} 件の管理鍵、{{managedKeyPassphrases}} 件の管理鍵パスフレーズ、{{portableSecrets}} 件のポータブルシークレットをアップロードします。",
+        "raw_udp_profiles_label": "Raw UDP プロファイル",
+        "toggle_raw_udp_profiles": "Raw UDP プロファイルをインポート ({{count}})"
       },
       "confirm": {
         "import_title": "リモートスナップショットをインポートしますか？",

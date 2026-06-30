@@ -5,6 +5,7 @@ pub enum TerminalSessionKind {
     Telnet,
     Serial,
     RawTcp,
+    RawUdp,
 }
 
 pub type TerminalOutputProcessor = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
@@ -56,6 +57,52 @@ pub struct RawTcpRuntimeOptions {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawUdpLineEnding {
+    Lf,
+    CrLf,
+    Cr,
+    None,
+}
+
+impl Default for RawUdpLineEnding {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawUdpDisplayMode {
+    Text,
+    Hex,
+    Mixed,
+}
+
+impl Default for RawUdpDisplayMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RawUdpSendMode {
+    Text,
+    Hex,
+}
+
+impl Default for RawUdpSendMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RawUdpRuntimeOptions {
+    pub line_ending: RawUdpLineEnding,
+    pub display_mode: RawUdpDisplayMode,
+    pub send_mode: RawUdpSendMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalResize {
     pub cols: usize,
     pub rows: usize,
@@ -103,6 +150,9 @@ pub trait TerminalSessionBackend: Send {
     fn set_output_events_enabled(&mut self, _enabled: bool) {}
     fn set_raw_tcp_runtime_options(&mut self, _options: RawTcpRuntimeOptions) -> Result<()> {
         bail!("Raw TCP runtime options are only supported by Raw TCP sessions")
+    }
+    fn set_raw_udp_runtime_options(&mut self, _options: RawUdpRuntimeOptions) -> Result<()> {
+        bail!("Raw UDP runtime options are only supported by Raw UDP sessions")
     }
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}
     fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {

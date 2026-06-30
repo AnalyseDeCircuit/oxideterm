@@ -109,7 +109,8 @@
     "cmd_open_telnet_terminal": "Open Telnet Terminal",
     "cmd_open_raw_tcp_terminal": "Open Raw TCP Terminal",
     "cmd_open_rdp_preview": "Open RDP Preview",
-    "cmd_open_vnc_preview": "Open VNC Preview"
+    "cmd_open_vnc_preview": "Open VNC Preview",
+    "cmd_open_raw_udp_terminal": "Open Raw UDP Terminal"
   },
   "shortcuts_modal": {
     "title": "Keyboard Shortcuts",
@@ -332,7 +333,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
         "microsoft_access_token": "Microsoft Access Token",
-        "google_oauth_client_id": "Google OAuth Client ID"
+        "google_oauth_client_id": "Google OAuth Client ID",
+        "sync_raw_udp_profiles": "Sync Raw UDP profiles"
       },
       "auth": {
         "bearer": "Bearer",
@@ -370,7 +372,8 @@
         "plugin_settings_selected_detail": "Selected plugins: {{plugins}}",
         "plugin_settings_disabled_detail": "Plugin settings are excluded by the current sync scope.",
         "sensitive_credentials_enabled_detail": "Encrypted sensitive credential objects are included.",
-        "sensitive_credentials_disabled_detail": "Connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded until sensitive credential sync is enabled."
+        "sensitive_credentials_disabled_detail": "Connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded until sensitive credential sync is enabled.",
+        "raw_udp_profiles_detail": "Raw UDP connection profiles are included."
       },
       "notes": {
         "upload_only": "Auto sync only uploads. Remote updates always require user confirmation.",
@@ -386,7 +389,7 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync rollback backup",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{rawTcpProfiles}} Raw TCP profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{rawTcpProfiles}} Raw TCP profiles, {{rawUdpProfiles}} Raw UDP profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
       },
       "history": {
         "action_upload": "Upload",
@@ -576,7 +579,9 @@
         "toggle_sensitive_credentials": "Import sensitive credentials ({{count}})",
         "sensitive_summary_title": "Sensitive credentials",
         "sensitive_remote_summary": "Remote encrypted credentials include {{connections}} connection record(s) and {{portableSecrets}} portable secret(s). Values stay hidden.",
-        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s)."
+        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s).",
+        "raw_udp_profiles_label": "Raw UDP Profiles",
+        "toggle_raw_udp_profiles": "Import Raw UDP profiles ({{count}})"
       },
       "confirm": {
         "import_title": "Import remote snapshot?",

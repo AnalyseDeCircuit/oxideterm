@@ -213,6 +213,15 @@
       "list_header": "Saved sessions",
       "expand_all": "Expand all",
       "collapse_all": "Collapse all"
+    },
+    "raw_udp_profiles": {
+      "title": "Raw UDP Profiles",
+      "count": "{{count}} profile(s)",
+      "open": "Open",
+      "delete": "Delete",
+      "open_failed": "Failed to open Raw UDP profile",
+      "delete_failed": "Failed to delete Raw UDP profile",
+      "confirm_delete": "Delete Raw UDP profile \"{{name}}\"?"
     }
   }
 }

@@ -109,7 +109,8 @@
     "cmd_open_telnet_terminal": "打开 Telnet 终端",
     "cmd_open_raw_tcp_terminal": "打开 Raw TCP 终端",
     "cmd_open_rdp_preview": "打开 RDP 预览",
-    "cmd_open_vnc_preview": "打开 VNC 预览"
+    "cmd_open_vnc_preview": "打开 VNC 预览",
+    "cmd_open_raw_udp_terminal": "打开 Raw UDP 终端"
   },
   "shortcuts_modal": {
     "title": "键盘快捷键",
@@ -332,7 +333,8 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
         "microsoft_access_token": "Microsoft 访问令牌",
-        "google_oauth_client_id": "Google OAuth Client ID"
+        "google_oauth_client_id": "Google OAuth Client ID",
+        "sync_raw_udp_profiles": "同步 Raw UDP 配置"
       },
       "auth": {
         "bearer": "Bearer",
@@ -370,7 +372,8 @@
         "plugin_settings_selected_detail": "已选择插件：{{plugins}}",
         "plugin_settings_disabled_detail": "当前同步范围已排除插件设置。",
         "sensitive_credentials_enabled_detail": "加密后的敏感凭据对象会参与同步。",
-        "sensitive_credentials_disabled_detail": "连接密码、密钥密码、托管私钥、AI 密钥和提权凭据会被排除，直到启用敏感凭据同步。"
+        "sensitive_credentials_disabled_detail": "连接密码、密钥密码、托管私钥、AI 密钥和提权凭据会被排除，直到启用敏感凭据同步。",
+        "raw_udp_profiles_detail": "Raw UDP 连接配置会参与同步。"
       },
       "notes": {
         "upload_only": "自动同步只会自动上传。发现远端更新后，仍然需要用户显式确认。",
@@ -386,7 +389,7 @@
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{rawTcpProfiles}} 个 Raw TCP 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{rawTcpProfiles}} 个 Raw TCP 配置，{{rawUdpProfiles}} 个 Raw UDP 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上传",
@@ -576,7 +579,9 @@
         "toggle_sensitive_credentials": "导入敏感凭据（{{count}}）",
         "sensitive_summary_title": "敏感凭据",
         "sensitive_remote_summary": "远端加密凭据包含 {{connections}} 个连接记录和 {{portableSecrets}} 个可移植密钥。具体值始终隐藏。",
-        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植密钥。"
+        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植密钥。",
+        "raw_udp_profiles_label": "Raw UDP 配置",
+        "toggle_raw_udp_profiles": "导入 Raw UDP 配置（{{count}}）"
       },
       "confirm": {
         "import_title": "确认导入远端快照？",

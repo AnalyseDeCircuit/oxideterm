@@ -28,6 +28,8 @@ pub enum CloudSyncPreviewSelectionAction {
     ToggleSerialProfileItem(String),
     ToggleRawTcpProfiles,
     ToggleRawTcpProfileItem(String),
+    ToggleRawUdpProfiles,
+    ToggleRawUdpProfileItem(String),
     ToggleSensitiveCredentials,
     ToggleAppSettings,
     ToggleAppSettingsSection(String),
@@ -86,6 +88,8 @@ pub struct CloudSyncPreviewSelection {
     pub selected_serial_profile_ids: BTreeSet<String>,
     pub import_raw_tcp_profiles: bool,
     pub selected_raw_tcp_profile_ids: BTreeSet<String>,
+    pub import_raw_udp_profiles: bool,
+    pub selected_raw_udp_profile_ids: BTreeSet<String>,
     pub import_sensitive_credentials: bool,
     pub import_app_settings: bool,
     pub selected_app_settings_sections: BTreeSet<String>,
@@ -108,6 +112,8 @@ pub enum CloudSyncUploadSelectionAction {
     ToggleSerialProfileItem(String),
     ToggleRawTcpProfiles,
     ToggleRawTcpProfileItem(String),
+    ToggleRawUdpProfiles,
+    ToggleRawUdpProfileItem(String),
     ToggleSensitiveCredentials,
     ToggleAppSettings,
     ToggleAppSettingsSection(String),
@@ -131,6 +137,9 @@ pub struct CloudSyncUploadSelection {
     pub sync_raw_tcp_profiles: bool,
     pub raw_tcp_profile_item_ids: BTreeSet<String>,
     pub selected_raw_tcp_profile_ids: Option<BTreeSet<String>>,
+    pub sync_raw_udp_profiles: bool,
+    pub raw_udp_profile_item_ids: BTreeSet<String>,
+    pub selected_raw_udp_profile_ids: Option<BTreeSet<String>>,
     pub sync_sensitive_credentials: bool,
     pub sync_app_settings: bool,
     pub selected_app_settings_sections: BTreeSet<String>,
@@ -189,6 +198,15 @@ impl CloudSyncUploadSelection {
                 .map(|profile| profile.id.clone())
                 .collect(),
             selected_raw_tcp_profile_ids: None,
+            sync_raw_udp_profiles: scope.sync_raw_udp_profiles,
+            raw_udp_profile_item_ids: local
+                .raw_udp_profiles
+                .as_ref()
+                .into_iter()
+                .flat_map(|snapshot| snapshot.records.iter())
+                .map(|profile| profile.id.clone())
+                .collect(),
+            selected_raw_udp_profile_ids: None,
             sync_sensitive_credentials: scope.sync_sensitive_credentials,
             sync_app_settings: scope.sync_app_settings,
             selected_app_settings_sections: scope.app_settings_sections.iter().cloned().collect(),
@@ -203,6 +221,7 @@ impl CloudSyncUploadSelection {
         scope.sync_quick_commands = Some(self.sync_quick_commands);
         scope.sync_serial_profiles = Some(self.sync_serial_profiles);
         scope.sync_raw_tcp_profiles = Some(self.sync_raw_tcp_profiles);
+        scope.sync_raw_udp_profiles = Some(self.sync_raw_udp_profiles);
         scope.sync_sensitive_credentials = Some(self.sync_sensitive_credentials);
         scope.sync_app_settings = Some(self.sync_app_settings);
         scope.app_settings_sections = Some(
@@ -222,6 +241,7 @@ impl CloudSyncUploadSelection {
             quick_command_ids: self.selected_quick_command_ids.clone(),
             serial_profile_ids: self.selected_serial_profile_ids.clone(),
             raw_tcp_profile_ids: self.selected_raw_tcp_profile_ids.clone(),
+            raw_udp_profile_ids: self.selected_raw_udp_profile_ids.clone(),
         }
     }
 
@@ -247,6 +267,10 @@ impl CloudSyncUploadSelection {
                 .selected_raw_tcp_profile_ids
                 .as_ref()
                 .is_none_or(|selected| selected.contains(id)),
+            CloudSyncUploadSelectionAction::ToggleRawUdpProfileItem(id) => self
+                .selected_raw_udp_profile_ids
+                .as_ref()
+                .is_none_or(|selected| selected.contains(id)),
             CloudSyncUploadSelectionAction::ToggleAppSettingsSection(id) => {
                 self.selected_app_settings_sections.contains(id)
             }
@@ -255,6 +279,7 @@ impl CloudSyncUploadSelection {
             CloudSyncUploadSelectionAction::ToggleQuickCommands => self.sync_quick_commands,
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => self.sync_serial_profiles,
             CloudSyncUploadSelectionAction::ToggleRawTcpProfiles => self.sync_raw_tcp_profiles,
+            CloudSyncUploadSelectionAction::ToggleRawUdpProfiles => self.sync_raw_udp_profiles,
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 self.sync_sensitive_credentials
             }
@@ -308,6 +333,16 @@ impl CloudSyncUploadSelection {
                 toggle_optional_set_value(
                     &mut self.selected_raw_tcp_profile_ids,
                     &self.raw_tcp_profile_item_ids,
+                    id,
+                );
+            }
+            CloudSyncUploadSelectionAction::ToggleRawUdpProfiles => {
+                self.sync_raw_udp_profiles = !self.sync_raw_udp_profiles;
+            }
+            CloudSyncUploadSelectionAction::ToggleRawUdpProfileItem(id) => {
+                toggle_optional_set_value(
+                    &mut self.selected_raw_udp_profile_ids,
+                    &self.raw_udp_profile_item_ids,
                     id,
                 );
             }
@@ -369,6 +404,7 @@ pub fn cloud_sync_legacy_import_options(
             import_forwards: selection.import_forwards,
             import_serial_profiles: selection.import_serial_profiles,
             import_raw_tcp_profiles: selection.import_raw_tcp_profiles,
+            import_raw_udp_profiles: selection.import_raw_udp_profiles,
             import_portable_secrets,
             ..OxideImportOptions::default()
         },
@@ -402,6 +438,8 @@ impl CloudSyncPreviewSelection {
             selected_serial_profile_ids: preview_serial_profile_ids(preview),
             import_raw_tcp_profiles: summary.raw_tcp_profiles > 0,
             selected_raw_tcp_profile_ids: preview_raw_tcp_profile_ids(preview),
+            import_raw_udp_profiles: summary.raw_udp_profiles > 0,
+            selected_raw_udp_profile_ids: preview_raw_udp_profile_ids(preview),
             import_sensitive_credentials: summary.sensitive_credentials > 0,
             import_app_settings: summary.has_app_settings,
             selected_app_settings_sections: summary
@@ -466,6 +504,7 @@ impl CloudSyncPreviewSelection {
             || self.effective_import_quick_commands(summary)
             || self.effective_import_serial_profiles(summary)
             || self.effective_import_raw_tcp_profiles(summary)
+            || self.effective_import_raw_udp_profiles(summary)
             || self.import_sensitive_credentials
             || self.effective_import_app_settings(summary)
             || self.effective_import_plugin_settings()
@@ -481,6 +520,8 @@ impl CloudSyncPreviewSelection {
                 && !self.selected_serial_profile_ids.is_empty(),
             raw_tcp_profiles: self.import_raw_tcp_profiles
                 && !self.selected_raw_tcp_profile_ids.is_empty(),
+            raw_udp_profiles: self.import_raw_udp_profiles
+                && !self.selected_raw_udp_profile_ids.is_empty(),
             sensitive_credentials: self.import_sensitive_credentials,
             app_settings_sections: if self.import_app_settings {
                 self.selected_app_settings_sections
@@ -515,6 +556,11 @@ impl CloudSyncPreviewSelection {
     pub fn effective_import_raw_tcp_profiles(&self, summary: &CloudSyncPreviewSummary) -> bool {
         self.import_raw_tcp_profiles
             && (summary.raw_tcp_profiles == 0 || !self.selected_raw_tcp_profile_ids.is_empty())
+    }
+
+    pub fn effective_import_raw_udp_profiles(&self, summary: &CloudSyncPreviewSummary) -> bool {
+        self.import_raw_udp_profiles
+            && (summary.raw_udp_profiles == 0 || !self.selected_raw_udp_profile_ids.is_empty())
     }
 
     pub fn selected_app_settings_hash_set(
@@ -602,6 +648,19 @@ impl CloudSyncPreviewSelection {
                 checked: self.import_raw_tcp_profiles,
                 disabled: false,
                 action: CloudSyncPreviewSelectionAction::ToggleRawTcpProfiles,
+            });
+        }
+        if summary.raw_udp_profiles > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_raw_udp_profiles",
+                    count_name: "count",
+                    count: summary.raw_udp_profiles,
+                },
+                meta: None,
+                checked: self.import_raw_udp_profiles,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleRawUdpProfiles,
             });
         }
         if summary.sensitive_credentials > 0 {
@@ -723,6 +782,12 @@ impl CloudSyncPreviewSelection {
             CloudSyncPreviewSelectionAction::ToggleRawTcpProfileItem(profile_id) => {
                 toggle_set_value(&mut self.selected_raw_tcp_profile_ids, profile_id);
             }
+            CloudSyncPreviewSelectionAction::ToggleRawUdpProfiles => {
+                self.import_raw_udp_profiles = !self.import_raw_udp_profiles;
+            }
+            CloudSyncPreviewSelectionAction::ToggleRawUdpProfileItem(profile_id) => {
+                toggle_set_value(&mut self.selected_raw_udp_profile_ids, profile_id);
+            }
             CloudSyncPreviewSelectionAction::ToggleSensitiveCredentials => {
                 self.import_sensitive_credentials = !self.import_sensitive_credentials;
             }
@@ -839,6 +904,19 @@ fn preview_raw_tcp_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<St
     }
 }
 
+fn preview_raw_udp_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String> {
+    match preview {
+        CloudSyncPendingPreview::Structured(preview) => preview
+            .raw_udp_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| snapshot.records.iter())
+            .map(|profile| profile.id.clone())
+            .collect(),
+        CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
+    }
+}
+
 pub fn structured_apply_covers_full_remote(
     manifest: &StructuredManifest,
     selection: &StructuredApplySelection,
@@ -848,6 +926,7 @@ pub fn structured_apply_covers_full_remote(
         && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
         && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
         && (manifest.sections.raw_tcp_profiles.is_none() || selection.raw_tcp_profiles)
+        && (manifest.sections.raw_udp_profiles.is_none() || selection.raw_udp_profiles)
         && (manifest.sections.sensitive_credentials.is_none() || selection.sensitive_credentials)
         && manifest
             .sections
@@ -882,6 +961,9 @@ pub fn merge_structured_remote_baseline(
     }
     if selection.raw_tcp_profiles {
         merged.raw_tcp_profiles = next.raw_tcp_profiles.clone();
+    }
+    if selection.raw_udp_profiles {
+        merged.raw_udp_profiles = next.raw_udp_profiles.clone();
     }
     if selection.sensitive_credentials {
         merged.sensitive_credentials = next.sensitive_credentials.clone();
@@ -1017,6 +1099,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        raw_udp_profiles: manifest
+            .sections
+            .raw_udp_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         sensitive_credentials: manifest
             .sections
             .sensitive_credentials
@@ -1035,6 +1123,7 @@ pub fn history_summary_from_legacy_preview(preview: &LegacyPreview) -> CloudSync
         quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
         serial_profiles: 0,
         raw_tcp_profiles: preview.metadata.raw_tcp_profiles_count.unwrap_or(0),
+        raw_udp_profiles: preview.metadata.raw_udp_profiles_count.unwrap_or(0),
         sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
         has_app_settings: preview.preview.has_app_settings,
         plugin_settings_count: preview.preview.plugin_settings_count,
@@ -1052,6 +1141,7 @@ pub fn has_cloud_sync_structured_conflict(
             || dirty.quick_commands
             || dirty.serial_profiles
             || dirty.raw_tcp_profiles
+            || dirty.raw_udp_profiles
             || dirty.sensitive_credentials
             || dirty.app_settings.values().any(|value| *value)
             || dirty.plugin_settings.values().any(|value| *value);
@@ -1070,6 +1160,9 @@ pub fn has_cloud_sync_structured_conflict(
         return true;
     }
     if dirty.raw_tcp_profiles && remote.raw_tcp_profiles != previous.raw_tcp_profiles {
+        return true;
+    }
+    if dirty.raw_udp_profiles && remote.raw_udp_profiles != previous.raw_udp_profiles {
         return true;
     }
     if dirty.sensitive_credentials && remote.sensitive_credentials != previous.sensitive_credentials
@@ -1119,6 +1212,8 @@ mod tests {
             selected_serial_profile_ids: BTreeSet::new(),
             import_raw_tcp_profiles: false,
             selected_raw_tcp_profile_ids: BTreeSet::new(),
+            import_raw_udp_profiles: false,
+            selected_raw_udp_profile_ids: BTreeSet::new(),
             import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),
@@ -1155,6 +1250,8 @@ mod tests {
             selected_serial_profile_ids: BTreeSet::new(),
             import_raw_tcp_profiles: false,
             selected_raw_tcp_profile_ids: BTreeSet::new(),
+            import_raw_udp_profiles: false,
+            selected_raw_udp_profile_ids: BTreeSet::new(),
             import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),

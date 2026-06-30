@@ -520,6 +520,7 @@ fn history_summary(
         quick_commands: 0,
         serial_profiles: 0,
         raw_tcp_profiles: 0,
+        raw_udp_profiles: 0,
         sensitive_credentials: 0,
         has_app_settings: app_settings_sections > 0,
         plugin_settings_count: plugin_settings,

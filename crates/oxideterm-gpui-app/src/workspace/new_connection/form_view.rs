@@ -150,6 +150,8 @@ impl WorkspaceApp {
                 | NewConnectionField::TelnetProfileName
                 | NewConnectionField::RawTcpProfileName
                 | NewConnectionField::RawTcpTlsServerName
+                | NewConnectionField::RawUdpProfileName
+                | NewConnectionField::RawUdpLocalBindHost
                 | NewConnectionField::JumpHost
                 | NewConnectionField::JumpUsername
                 | NewConnectionField::UpstreamProxyHost

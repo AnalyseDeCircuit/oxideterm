@@ -4,6 +4,7 @@ enum SessionManagerDisplayItem {
     Serial(SerialProfile),
     Telnet(TelnetProfile),
     RawTcp(RawTcpProfile),
+    RawUdp(RawUdpProfile),
 }
 
 impl SessionManagerDisplayItem {
@@ -13,6 +14,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
             Self::RawTcp(profile) => &profile.id,
+            Self::RawUdp(profile) => &profile.id,
         }
     }
 
@@ -22,6 +24,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
             Self::RawTcp(profile) => &profile.name,
+            Self::RawUdp(profile) => &profile.name,
         }
     }
 
@@ -31,6 +34,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
             Self::RawTcp(profile) => profile.group.as_deref(),
+            Self::RawUdp(profile) => profile.group.as_deref(),
         }
     }
 
@@ -40,6 +44,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::RawTcp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
+            Self::RawUdp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
         }
     }
 
@@ -49,6 +54,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
             Self::RawTcp(profile) => &profile.host,
+            Self::RawUdp(profile) => &profile.remote_host,
         }
     }
 
@@ -58,13 +64,14 @@ impl SessionManagerDisplayItem {
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
             Self::RawTcp(profile) => u32::from(profile.port),
+            Self::RawUdp(profile) => u32::from(profile.remote_port),
         }
     }
 
     fn username(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.username,
-            Self::Serial(_) | Self::Telnet(_) | Self::RawTcp(_) => "",
+            Self::Serial(_) | Self::Telnet(_) | Self::RawTcp(_) | Self::RawUdp(_) => "",
         }
     }
 
@@ -74,6 +81,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
             Self::RawTcp(_) => "raw tcp".to_string(),
+            Self::RawUdp(_) => "raw udp".to_string(),
         }
     }
 
@@ -88,6 +96,17 @@ impl SessionManagerDisplayItem {
                 let endpoint = format!("{}:{}", profile.host, profile.port);
                 if matches!(profile.tls_mode, oxideterm_connections::RawTcpTlsMode::Enabled) {
                     format!("{endpoint} · TLS")
+                } else {
+                    endpoint
+                }
+            }
+            Self::RawUdp(profile) => {
+                let endpoint = format!("{}:{}", profile.remote_host, profile.remote_port);
+                if let Some(bind_host) = profile.local_bind_host.as_deref() {
+                    format!(
+                        "{endpoint} · bind {}:{}",
+                        bind_host, profile.local_bind_port
+                    )
                 } else {
                     endpoint
                 }
@@ -133,6 +152,15 @@ impl SessionManagerDisplayItem {
                     "tcp"
                 }
             ),
+            Self::RawUdp(profile) => format!(
+                "{}\n{}\n{}\n{}\n{}\n{}",
+                profile.name,
+                profile.remote_host,
+                profile.remote_port,
+                profile.local_bind_host.as_deref().unwrap_or_default(),
+                profile.local_bind_port,
+                profile.group.as_deref().unwrap_or_default()
+            ),
         }
     }
 
@@ -142,6 +170,7 @@ impl SessionManagerDisplayItem {
             Self::Serial(_) => LucideIcon::Radio,
             Self::Telnet(_) => LucideIcon::Terminal,
             Self::RawTcp(_) => LucideIcon::Cable,
+            Self::RawUdp(_) => LucideIcon::Radio,
         }
     }
 }
@@ -174,6 +203,13 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::RawTcp),
+            )
+            .chain(
+                self.connection_store
+                    .raw_udp_profiles()
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::RawUdp),
             )
             .filter(|item| {
                 query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
@@ -824,6 +860,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Serial(_) => rgba(0xf59e0b33),
             SessionManagerDisplayItem::Telnet(_) => rgba(0x22c55e33),
             SessionManagerDisplayItem::RawTcp(_) => rgba(0xf9731633),
+            SessionManagerDisplayItem::RawUdp(_) => rgba(0x38bdf833),
         };
         let fg = match item {
             SessionManagerDisplayItem::Connection(connection) => connection
@@ -835,6 +872,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Serial(_) => rgb(0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => rgb(0x86efac),
             SessionManagerDisplayItem::RawTcp(_) => rgb(0xfb923c),
+            SessionManagerDisplayItem::RawUdp(_) => rgb(0x67e8f9),
         };
         div()
             .w(px(40.0))
@@ -1038,6 +1076,51 @@ impl WorkspaceApp {
                         cx,
                     ))
             }
+            SessionManagerDisplayItem::RawUdp(profile) => {
+                let open_id = profile.id.clone();
+                let edit_id = profile.id.clone();
+                let delete_id = profile.id.clone();
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        12.0,
+                        rgb(0x4ade80),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_raw_udp_profile(&open_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        12.0,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_raw_udp_profile_editor(&edit_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Trash2,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        12.0,
+                        rgb(0xf87171),
+                        has_background,
+                        move |this, _event, _window, cx| {
+                            this.request_delete_raw_udp_profile(&delete_id, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
         }
     }
 
@@ -1109,6 +1192,9 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::RawTcp(profile) => {
                 self.open_saved_raw_tcp_profile(&profile.id, window, cx)
+            }
+            SessionManagerDisplayItem::RawUdp(profile) => {
+                self.open_saved_raw_udp_profile(&profile.id, window, cx)
             }
         }
     }

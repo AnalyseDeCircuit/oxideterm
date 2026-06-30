@@ -16,8 +16,9 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::store::{ImportedManagedSshKey, ManagedSshKey, ManagedSshKeyOrigin};
 use crate::{
     AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, RawTcpProfilesSyncSnapshot,
-    SavedAuth, SavedConnection, SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth,
-    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SecretString, SerialProfilesSyncSnapshot,
+    RawUdpProfilesSyncSnapshot, SavedAuth, SavedConnection, SavedPrivilegeCredential,
+    SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    SecretString, SerialProfilesSyncSnapshot,
 };
 
 use super::{
@@ -58,6 +59,7 @@ pub struct OxideExportOptions {
     pub quick_commands_json: Option<String>,
     pub serial_profiles_json: Option<String>,
     pub raw_tcp_profiles_json: Option<String>,
+    pub raw_udp_profiles_json: Option<String>,
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     pub portable_secrets: Vec<EncryptedPortableSecret>,
     pub forwards: Vec<OxideForwardRecord>,
@@ -76,6 +78,7 @@ impl Default for OxideExportOptions {
             quick_commands_json: None,
             serial_profiles_json: None,
             raw_tcp_profiles_json: None,
+            raw_udp_profiles_json: None,
             plugin_settings: Vec::new(),
             portable_secrets: Vec::new(),
             forwards: Vec::new(),
@@ -91,6 +94,7 @@ pub struct OxideImportOptions {
     pub import_forwards: bool,
     pub import_serial_profiles: bool,
     pub import_raw_tcp_profiles: bool,
+    pub import_raw_udp_profiles: bool,
     pub import_portable_secrets: bool,
     /// Restore managed-key metadata instead of extracting managed keys as plain imported key files.
     pub restore_managed_keys: bool,
@@ -107,6 +111,7 @@ impl Default for OxideImportOptions {
             import_forwards: true,
             import_serial_profiles: true,
             import_raw_tcp_profiles: true,
+            import_raw_udp_profiles: true,
             import_portable_secrets: false,
             restore_managed_keys: true,
             restore_managed_key_passphrases: false,
@@ -170,6 +175,7 @@ pub struct ImportPreview {
     pub quick_command_categories_count: usize,
     pub serial_profiles_count: usize,
     pub raw_tcp_profiles_count: usize,
+    pub raw_udp_profiles_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_settings_format: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -252,10 +258,14 @@ pub struct ImportResultEnvelope {
     pub serial_profiles_json: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_tcp_profiles_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_udp_profiles_json: Option<String>,
     pub imported_serial_profiles: usize,
     pub skipped_serial_profiles: usize,
     pub imported_raw_tcp_profiles: usize,
     pub skipped_raw_tcp_profiles: usize,
+    pub imported_raw_udp_profiles: usize,
+    pub skipped_raw_udp_profiles: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     #[serde(skip)]
