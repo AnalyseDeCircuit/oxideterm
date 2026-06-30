@@ -837,7 +837,7 @@
     "start_exploring": "시작하기",
     "project_intro": "OxideTerm은 Rust로 구축된 현대적인 크로스 플랫폼 SSH 터미널 클라이언트입니다. 다중화 연결, 통합 SFTP, 스마트 포트 포워딩, AI 어시스턴트, CLI 컴패니언 도구를 갖추어 안전하고 빠르며 확장 가능합니다.",
     "highlight_performance": "Rust 고성능",
-    "highlight_performance_desc": "비동기 I/O, WebGL 렌더링, 제로카피 바이너리 프로토콜.",
+    "highlight_performance_desc": "비동기 I/O, GPUI 네이티브 렌더링, 제로카피 바이너리 프로토콜.",
     "highlight_security_arch": "보안 최우선",
     "highlight_security_arch_desc": "OS 키체인, ChaCha20 암호화, 순수 Rust SSH 스택.",
     "highlight_crossplatform": "크로스 플랫폼",

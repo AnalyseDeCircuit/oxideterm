@@ -837,7 +837,7 @@
     "start_exploring": "Bắt đầu khám phá",
     "project_intro": "OxideTerm là ứng dụng terminal SSH đa nền tảng hiện đại, xây dựng hoàn toàn bằng Rust. Quản lý máy chủ từ xa với kết nối ghép kênh, SFTP tích hợp, chuyển tiếp cổng thông minh, hỗ trợ AI và công cụ CLI đồng hành — an toàn, nhanh và mở rộng được.",
     "highlight_performance": "Hiệu năng Rust",
-    "highlight_performance_desc": "I/O bất đồng bộ, kết xuất WebGL, giao thức nhị phân zero-copy.",
+    "highlight_performance_desc": "I/O bất đồng bộ, kết xuất GPUI nguyên sinh, giao thức nhị phân zero-copy.",
     "highlight_security_arch": "Bảo mật hàng đầu",
     "highlight_security_arch_desc": "Chuỗi khóa hệ thống, mã hóa ChaCha20, ngăn xếp SSH thuần Rust.",
     "highlight_crossplatform": "Đa nền tảng",

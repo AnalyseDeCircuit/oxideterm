@@ -842,7 +842,7 @@
     "start_exploring": "Inizia a esplorare",
     "project_intro": "OxideTerm è un client terminale SSH moderno e multipiattaforma costruito interamente in Rust. Gestisci server remoti con connessioni multiplex, SFTP integrato, port forwarding intelligente, assistenza IA e uno strumento CLI compagno — sicuro, veloce ed estensibile.",
     "highlight_performance": "Prestazioni Rust",
-    "highlight_performance_desc": "I/O asincrono, rendering WebGL, protocollo binario zero-copy.",
+    "highlight_performance_desc": "I/O asincrono, rendering nativo GPUI, protocollo binario zero-copy.",
     "highlight_security_arch": "Sicurezza prima",
     "highlight_security_arch_desc": "Portachiavi di sistema, crittografia ChaCha20, stack SSH in puro Rust.",
     "highlight_crossplatform": "Multipiattaforma",
