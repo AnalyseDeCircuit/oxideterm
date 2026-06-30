@@ -6,10 +6,8 @@ version.workspace = true
 
 [features]
 default = []
-legacy-freerdp = ["dep:freerdp2"]
 
 [dependencies]
-freerdp2 = { version = "0.2", optional = true }
 ironrdp = { git = "https://github.com/Devolutions/IronRDP", rev = "9d206a3da7756fdf8ed13087592eb2298d73e0cc", features = ["cliprdr", "connector", "displaycontrol", "dvc", "graphics", "input", "pdu", "session", "svc"] }
 ironrdp-cliprdr-format = { git = "https://github.com/Devolutions/IronRDP", rev = "9d206a3da7756fdf8ed13087592eb2298d73e0cc" }
 ironrdp-core = { git = "https://github.com/Devolutions/IronRDP", rev = "9d206a3da7756fdf8ed13087592eb2298d73e0cc" }
