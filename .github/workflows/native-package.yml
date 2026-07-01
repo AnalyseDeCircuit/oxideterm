@@ -104,7 +104,7 @@ jobs:
       - name: Install Windows system dependencies
         if: runner.os == 'Windows'
         shell: pwsh
-        run: choco install nsis -y --no-progress
+        run: choco install nsis 7zip -y --no-progress
 
       - name: Package native app
         env:

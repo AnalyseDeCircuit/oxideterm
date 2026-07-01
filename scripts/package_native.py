@@ -316,6 +316,37 @@ def zip_directory(src: Path, dest: Path) -> None:
                 archive.writestr(info, file.read())
 
 
+def find_7zip() -> str | None:
+    for name in ("7z", "7zz", "7za"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def archive_windows_portable(package_root: Path, dest: Path) -> None:
+    if dest.exists():
+        dest.unlink()
+    if seven_zip := find_7zip():
+        # Keep the published artifact name as .zip while using 7-Zip's stronger
+        # Deflate settings to avoid a much larger portable package than NSIS.
+        run(
+            [
+                seven_zip,
+                "a",
+                "-tzip",
+                "-mx=9",
+                "-mfb=258",
+                "-mpass=15",
+                str(dest),
+                package_root.name,
+            ],
+            cwd=package_root.parent,
+        )
+        return
+    zip_directory(package_root, dest)
+
+
 def require_tool(name: str) -> str:
     tool = shutil.which(name)
     if tool:
@@ -423,10 +454,11 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
         shutil.copy2(ROOT_DIR / name, package_root / name)
     (package_root / PORTABLE_MARKER_FILENAME).touch()
 
-    # Portable artifacts are produced with stdlib archive writers so Windows runners
-    # do not depend on a Unix shell, tar, cp, or symlink behavior.
     if "windows" in target:
-        zip_directory(package_root, DIST_DIR / f"OxideTerm_{version}_{label}_portable.zip")
+        archive_windows_portable(
+            package_root,
+            DIST_DIR / f"OxideTerm_{version}_{label}_portable.zip",
+        )
     else:
         archive_path = DIST_DIR / f"OxideTerm_{version}_{label}_portable.tar.gz"
         with tarfile.open(archive_path, "w:gz") as archive:
