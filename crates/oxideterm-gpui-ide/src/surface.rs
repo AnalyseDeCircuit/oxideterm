@@ -134,6 +134,7 @@ const TAILWIND_AMBER_400: u32 = 0xfbbf24;
 pub enum IdeSurfaceEvent {
     RememberAgentMode(NodeAgentMode),
     ProjectOpened,
+    TransientFolderPickerCancelled,
     ReconnectRestoreProjectOpened {
         reconnect_node_id: String,
     },
@@ -338,6 +339,20 @@ struct DeleteConfirmState {
     deleting: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TreeClipboardOperation {
+    Copy,
+    Cut,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TreeClipboardState {
+    operation: TreeClipboardOperation,
+    location: IdeLocation,
+    name: String,
+    is_directory: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct AgentStatusMenu {
     trigger_bounds: Bounds<Pixels>,
@@ -418,6 +433,7 @@ pub struct IdeSurface {
     tree_context_menu: Option<TreeContextMenu>,
     tree_name_input: Option<TreeNameInputState>,
     delete_confirm: Option<DeleteConfirmState>,
+    tree_clipboard: Option<TreeClipboardState>,
     tab_drag: Option<TabDrag>,
     agent_opt_in_open: bool,
     agent_opt_in_remember: bool,

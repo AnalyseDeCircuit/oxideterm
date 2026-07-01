@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "在命令列顯示本地和 SSH 終端目前倉庫的分支。",
       "command_bar_project_tasks": "顯示專案任務",
       "command_bar_project_tasks_hint": "在命令列顯示本地和 SSH 終端偵測到的專案和任務操作。",
+      "command_bar_current_directory_awareness": "顯示工作目錄",
+      "command_bar_current_directory_awareness_hint": "在命令列顯示目前本地或 SSH 終端目錄，並允許從目錄選擇器切換目錄。",
       "command_bar_focus_handoff": "TUI 指令後聚焦終端",
       "command_bar_focus_handoff_hint": "從命令列執行這些指令後，將焦點交給終端，因為它們通常會接管鍵盤輸入。可用空格、逗號或換行分隔指令。",
       "command_marks": "命令標記",

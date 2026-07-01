@@ -72,6 +72,20 @@ pub enum TerminalPaneEvent {
     Exited { exit_code: Option<i32> },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalWorkingDirectorySource {
+    ShellIntegration,
+    VisibleCommand,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalCwdShellIntegrationStatus {
+    NotAttempted,
+    Active,
+    Failed,
+    Disabled,
+}
+
 fn log_privilege_prompt_terminal_pane(args: std::fmt::Arguments<'_>) {
     if env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
         eprintln!("[oxideterm:privilege] {args}");
@@ -158,7 +172,10 @@ pub struct TerminalPane {
     last_mouse_report_point: Option<TerminalPoint>,
     title: SharedString,
     cwd: Option<String>,
+    cwd_source: Option<TerminalWorkingDirectorySource>,
+    pending_cwd: Option<PendingTerminalCwd>,
     cwd_host: Option<String>,
+    cwd_shell_integration_status: TerminalCwdShellIntegrationStatus,
     shell_integration_status: ShellIntegrationStatus,
     command_marks: Vec<TerminalCommandMark>,
     selected_command_mark_id: Option<String>,
@@ -244,7 +261,15 @@ pub(crate) enum TerminalCommandNavigationDirection {
     Next,
 }
 
+#[derive(Clone, Debug)]
+struct PendingTerminalCwd {
+    path: String,
+    command: String,
+    created_at: Instant,
+}
+
 const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
+const PENDING_CWD_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_COMMAND_MARKS_PER_PANE: usize = 2000;
 const COMMAND_MARK_DEDUP_WINDOW_MS: u64 = 2000;
 const COMMAND_MARK_DEDUP_LINE_DISTANCE: usize = 2;
@@ -506,7 +531,10 @@ impl TerminalPane {
             last_mouse_report_point: None,
             title: SharedString::from("OxideTerm"),
             cwd: None,
+            cwd_source: None,
+            pending_cwd: None,
             cwd_host: None,
+            cwd_shell_integration_status: TerminalCwdShellIntegrationStatus::NotAttempted,
             shell_integration_status: ShellIntegrationStatus {
                 detected: false,
                 state: ShellIntegrationLifecycleState::Idle,
@@ -640,7 +668,21 @@ impl TerminalPane {
     }
 
     pub fn current_working_directory(&self) -> Option<String> {
-        self.cwd.clone()
+        self.pending_cwd
+            .as_ref()
+            .map(|pending| pending.path.clone())
+            .or_else(|| self.cwd.clone())
+    }
+
+    pub fn current_working_directory_source(&self) -> Option<TerminalWorkingDirectorySource> {
+        self.pending_cwd
+            .as_ref()
+            .map(|_| TerminalWorkingDirectorySource::VisibleCommand)
+            .or(self.cwd_source)
+    }
+
+    pub fn current_working_directory_is_pending(&self) -> bool {
+        self.pending_cwd.is_some()
     }
 
     pub fn set_current_working_directory_from_terminal_action(
@@ -655,11 +697,79 @@ impl TerminalPane {
         // Workspace-owned directory actions only call this after selecting a
         // path that was already resolved by the active pane's directory scope.
         self.cwd = Some(cwd.to_string());
+        self.cwd_source = Some(TerminalWorkingDirectorySource::VisibleCommand);
+        self.pending_cwd = None;
+        cx.notify();
+    }
+
+    pub fn set_pending_current_working_directory_from_terminal_action(
+        &mut self,
+        cwd: String,
+        command: String,
+        cx: &mut Context<Self>,
+    ) {
+        let cwd = cwd.trim();
+        let command = command.trim();
+        if cwd.is_empty()
+            || command.is_empty()
+            || cwd.chars().any(char::is_control)
+            || command.chars().any(char::is_control)
+        {
+            return;
+        }
+        // The UI may follow a user-selected, listed directory immediately,
+        // but the shell command mark remains the authority for success/failure.
+        self.pending_cwd = Some(PendingTerminalCwd {
+            path: cwd.to_string(),
+            command: command.to_string(),
+            created_at: Instant::now(),
+        });
         cx.notify();
     }
 
     pub fn current_working_directory_host(&self) -> Option<String> {
         self.cwd_host.clone()
+    }
+
+    pub fn cwd_shell_integration_status(&self) -> TerminalCwdShellIntegrationStatus {
+        if !self.settings.current_directory_awareness_enabled {
+            return TerminalCwdShellIntegrationStatus::Disabled;
+        }
+        self.cwd_shell_integration_status
+    }
+
+    pub fn can_switch_working_directory_from_chrome(&self) -> bool {
+        let mode = self.terminal.lock().mode();
+        !mode.contains(TermMode::ALT_SCREEN) && !mode.intersects(TermMode::MOUSE_MODE)
+    }
+
+    pub fn try_install_current_directory_shell_integration(
+        &mut self,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.settings.current_directory_awareness_enabled {
+            self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::Disabled;
+            return false;
+        }
+        if self.cwd_shell_integration_status == TerminalCwdShellIntegrationStatus::Active
+            || self.pending_cwd.is_some()
+            || !self.can_switch_working_directory_from_chrome()
+            || !self.shell_integration_status.detected
+            || self.shell_integration_status.state != ShellIntegrationLifecycleState::Prompt
+        {
+            return false;
+        }
+
+        // Runtime hook installation is only safe after a shell-owned prompt
+        // boundary. Without that signal, the bytes could be delivered to a
+        // running full-screen or long-lived program instead of the shell.
+        if self.send_internal_control_command_line(command, cx) {
+            self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::Active;
+            return true;
+        }
+        self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::Failed;
+        false
     }
 
     pub fn command_marks(&self) -> Vec<TerminalCommandMark> {
@@ -746,6 +856,12 @@ impl TerminalPane {
             self.selected_command_mark_id = None;
             self.hovered_command_mark_id = None;
             self.command_mark_id_aliases.clear();
+        }
+        if !next_settings.current_directory_awareness_enabled {
+            self.pending_cwd = None;
+            self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::Disabled;
+        } else if !self.settings.current_directory_awareness_enabled {
+            self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::NotAttempted;
         }
         if !next_settings.smooth_scroll {
             self.clear_smooth_scroll_remainder();
@@ -1200,11 +1316,27 @@ impl TerminalPane {
         if self.advance_smooth_scroll_animation() {
             needs_notify = true;
         }
+        if self.expire_pending_terminal_cwd(now) {
+            needs_notify = true;
+        }
         if needs_notify {
             cx.notify();
         }
 
         self.update_cursor_blink(cx);
+    }
+
+    fn expire_pending_terminal_cwd(&mut self, now: Instant) -> bool {
+        let Some(pending) = self.pending_cwd.as_ref() else {
+            return false;
+        };
+        if self.settings.current_directory_awareness_enabled
+            && now.duration_since(pending.created_at) < PENDING_CWD_TIMEOUT
+        {
+            return false;
+        }
+        self.pending_cwd = None;
+        true
     }
 
     fn advance_smooth_scroll_animation(&mut self) -> bool {
@@ -1493,6 +1625,8 @@ impl TerminalPane {
             }
             TerminalEvent::CwdChanged { cwd, host } => {
                 self.cwd = Some(cwd);
+                self.cwd_source = Some(TerminalWorkingDirectorySource::ShellIntegration);
+                self.pending_cwd = None;
                 self.cwd_host = host;
                 TerminalEventEffect::notify()
             }
@@ -1629,12 +1763,11 @@ impl TerminalPane {
     fn observe_autosuggest_input_bytes(
         &mut self,
         bytes: &[u8],
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Option<String> {
         let command = self.input_tracker.apply_bytes(bytes)?;
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
-        self.observe_terminal_cwd_action_from_completed_command(&command, cx);
         Some(command)
     }
 
@@ -2007,7 +2140,6 @@ mod tests {
         assert_eq!(cols, 15);
     }
 
-    #[test]
     #[test]
     fn row_timestamps_track_last_modified_nonblank_content() {
         let mut row_timestamps = HashMap::new();

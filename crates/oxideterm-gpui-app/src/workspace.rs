@@ -136,8 +136,8 @@ use oxideterm_gpui_terminal::{
     TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice,
     TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPaneEvent,
     TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
-    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme, detect_custom_privilege_prompt,
-    detect_privilege_prompt,
+    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
+    detect_custom_privilege_prompt, detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -653,6 +653,7 @@ pub(crate) struct WorkspaceApp {
     terminal_cwd_tx: std::sync::mpsc::Sender<terminal_cwd::TerminalCwdDelivery>,
     terminal_cwd_rx: std::sync::mpsc::Receiver<terminal_cwd::TerminalCwdDelivery>,
     terminal_cwd_picker: terminal_cwd::TerminalCwdPickerState,
+    terminal_cwd_bootstrap_requested: HashSet<PaneId>,
     terminal_git_store: oxideterm_environment::GitStatusStore,
     terminal_git_tx: std::sync::mpsc::Sender<terminal_git::TerminalGitDelivery>,
     terminal_git_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,

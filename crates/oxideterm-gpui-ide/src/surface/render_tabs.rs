@@ -342,6 +342,7 @@ impl IdeSurface {
             .min(f32::from(viewport.height) - IDE_TREE_CONTEXT_MENU_MAX_HEIGHT - 8.0)
             .max(8.0);
         let remote_disabled = !self.remote_actions_ready();
+        let paste_disabled = remote_disabled || self.tree_clipboard.is_none();
 
         let popup = div()
             .w(px(IDE_TREE_CONTEXT_MENU_WIDTH))
@@ -441,6 +442,67 @@ impl IdeSurface {
             .child(self.render_tree_context_menu_divider())
             .child(self.render_tree_context_menu_item(
                 "lucide/copy.svg",
+                self.labels.context_copy.clone(),
+                None,
+                false,
+                remote_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let name = menu.name.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.request_copy_tree_item(
+                            location.clone(),
+                            name.clone(),
+                            is_directory,
+                            cx,
+                        );
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
+                }),
+            ))
+            .child(self.render_tree_context_menu_item(
+                "lucide/scissors.svg",
+                self.labels.context_cut.clone(),
+                None,
+                false,
+                remote_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let name = menu.name.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.request_cut_tree_item(
+                            location.clone(),
+                            name.clone(),
+                            is_directory,
+                            cx,
+                        );
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
+                }),
+            ))
+            .child(self.render_tree_context_menu_item(
+                "lucide/clipboard-paste.svg",
+                self.labels.context_paste.clone(),
+                None,
+                false,
+                paste_disabled,
+                cx.listener({
+                    let location = menu.location.clone();
+                    let is_directory = menu.is_directory;
+                    move |this, _event, _window, cx| {
+                        this.paste_tree_clipboard(location.clone(), is_directory, cx);
+                        this.tree_context_menu = None;
+                        cx.stop_propagation();
+                    }
+                }),
+            ))
+            .child(self.render_tree_context_menu_divider())
+            .child(self.render_tree_context_menu_item(
+                "lucide/copy.svg",
                 self.labels.context_copy_path.clone(),
                 None,
                 false,
@@ -453,18 +515,6 @@ impl IdeSurface {
                         cx.stop_propagation();
                         cx.notify();
                     }
-                }),
-            ))
-            .child(self.render_tree_context_menu_item(
-                "lucide/terminal.svg",
-                self.labels.context_open_in_terminal.clone(),
-                None,
-                false,
-                remote_disabled,
-                cx.listener(|this, _event, _window, cx| {
-                    this.tree_context_menu = None;
-                    cx.stop_propagation();
-                    cx.notify();
                 }),
             ))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

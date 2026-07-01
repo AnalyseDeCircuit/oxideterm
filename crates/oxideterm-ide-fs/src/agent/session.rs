@@ -107,6 +107,49 @@ impl AgentSession {
         serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
     }
 
+    async fn create_folder(&self, path: &str) -> Result<(), AgentError> {
+        self.transport
+            .call(
+                "fs/mkdir",
+                serde_json::json!({ "path": path, "recursive": false }),
+            )
+            .await
+            .map(|_| ())
+    }
+
+    async fn remove_item(&self, path: &str, recursive: bool) -> Result<(), AgentError> {
+        self.transport
+            .call(
+                "fs/remove",
+                serde_json::json!({ "path": path, "recursive": recursive }),
+            )
+            .await
+            .map(|_| ())
+    }
+
+    async fn rename_item(&self, old_path: &str, new_path: &str) -> Result<(), AgentError> {
+        self.transport
+            .call(
+                "fs/rename",
+                serde_json::json!({ "old_path": old_path, "new_path": new_path }),
+            )
+            .await
+            .map(|_| ())
+    }
+
+    async fn copy_item(&self, source_path: &str, target_path: &str) -> Result<(), AgentError> {
+        self.transport
+            .call(
+                "fs/copy",
+                serde_json::json!({
+                    "source_path": source_path,
+                    "target_path": target_path,
+                }),
+            )
+            .await
+            .map(|_| ())
+    }
+
     async fn grep(
         &self,
         pattern: &str,

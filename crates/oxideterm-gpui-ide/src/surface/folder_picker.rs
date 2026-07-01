@@ -136,8 +136,16 @@ impl IdeSurface {
     }
 
     fn close_folder_picker(&mut self, cx: &mut Context<Self>) {
+        let close_transient_surface =
+            self.root_path.is_none() && matches!(self.load_state, IdeLoadState::Empty);
         self.folder_picker.open = false;
         self.folder_picker.path_input_focused = false;
+        if close_transient_surface {
+            // Folder-picker-only IDE tabs are created before a project exists.
+            // Canceling the picker should discard that temporary tab instead of
+            // leaving an empty IDE surface that blocks the next open attempt.
+            cx.emit(IdeSurfaceEvent::TransientFolderPickerCancelled);
+        }
         cx.notify();
     }
 

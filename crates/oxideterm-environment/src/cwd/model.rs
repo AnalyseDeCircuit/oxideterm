@@ -95,15 +95,35 @@ impl CurrentDirectorySnapshot {
     }
 }
 
-/// One selectable directory row in a cwd switcher.
+/// Kind of path row shown in a current-directory picker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum CurrentDirectoryEntryKind {
+    Directory,
+    File,
+}
+
+/// One selectable path row in a cwd switcher.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CurrentDirectoryEntry {
     name: String,
     path: String,
+    kind: CurrentDirectoryEntryKind,
 }
 
 impl CurrentDirectoryEntry {
     pub fn new(name: impl Into<String>, path: impl Into<String>) -> Option<Self> {
+        Self::new_with_kind(name, path, CurrentDirectoryEntryKind::Directory)
+    }
+
+    pub fn new_file(name: impl Into<String>, path: impl Into<String>) -> Option<Self> {
+        Self::new_with_kind(name, path, CurrentDirectoryEntryKind::File)
+    }
+
+    pub fn new_with_kind(
+        name: impl Into<String>,
+        path: impl Into<String>,
+        kind: CurrentDirectoryEntryKind,
+    ) -> Option<Self> {
         let name = name.into();
         let name = name.trim();
         let path = normalize_current_directory_path(path)?;
@@ -113,6 +133,7 @@ impl CurrentDirectoryEntry {
         Some(Self {
             name: name.to_string(),
             path,
+            kind,
         })
     }
 
@@ -123,17 +144,34 @@ impl CurrentDirectoryEntry {
     pub fn path(&self) -> &str {
         &self.path
     }
+
+    pub fn kind(&self) -> CurrentDirectoryEntryKind {
+        self.kind
+    }
+}
+
+/// Build a shell-safe path argument for inserting a cwd-aware file path.
+pub fn current_directory_shell_path_argument(path: &str) -> Option<String> {
+    let path = normalize_current_directory_path(path)?;
+    Some(shell_cd_target(&path))
 }
 
 /// Build the visible shell command that changes the active terminal directory.
 pub fn current_directory_cd_command(path: &str) -> Option<String> {
-    let path = normalize_current_directory_path(path)?;
-    Some(format!("cd {}", shell_cd_target(&path)))
+    Some(format!(
+        "cd {}",
+        current_directory_shell_path_argument(path)?
+    ))
 }
 
 /// Build the active-shell command that reports cwd through OSC 7.
 pub fn current_directory_report_command() -> &'static str {
-    "printf '\\033]7;%s\\007' \"${PWD:-$(pwd)}\""
+    "___oxide_cwd=${PWD:-$(pwd)}; ___oxide_host=${HOSTNAME:-$(hostname 2>/dev/null || printf localhost)}; ___oxide_path=$(printf '%s' \"$___oxide_cwd\" | awk 'BEGIN{for(i=0;i<256;i++)ord[sprintf(\"%c\",i)]=i}{for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c~/[A-Za-z0-9._~\\/:@-]/)printf \"%s\",c;else printf \"%%%02X\",ord[c]}}'); printf '\\033]7;file://%s%s\\007' \"$___oxide_host\" \"$___oxide_path\"; unset ___oxide_cwd ___oxide_host ___oxide_path"
+}
+
+/// Build a conservative runtime hook that reports cwd via OSC 7 on prompts.
+pub fn current_directory_shell_integration_command() -> &'static str {
+    "if [ -n \"${BASH_VERSION-}${ZSH_VERSION-}\" ]; then __oxideterm_osc7(){ local __oxide_cwd __oxide_host __oxide_path; __oxide_cwd=${PWD:-$(pwd)}; __oxide_host=${HOSTNAME:-$(hostname 2>/dev/null || printf localhost)}; __oxide_path=$(printf '%s' \"$__oxide_cwd\" | awk 'BEGIN{for(i=0;i<256;i++)ord[sprintf(\"%c\",i)]=i}{for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c~/[A-Za-z0-9._~\\/:@-]/)printf \"%s\",c;else printf \"%%%02X\",ord[c]}}'); printf '\\033]7;file://%s%s\\007' \"$__oxide_host\" \"$__oxide_path\"; }; if [ -n \"${ZSH_VERSION-}\" ]; then autoload -Uz add-zsh-hook 2>/dev/null; if typeset -f add-zsh-hook >/dev/null 2>&1; then case \" ${precmd_functions[*]-} \" in *\" __oxideterm_osc7 \"*) ;; *) add-zsh-hook precmd __oxideterm_osc7 ;; esac; fi; elif [ -n \"${BASH_VERSION-}\" ]; then case \";${PROMPT_COMMAND-};\" in *\";__oxideterm_osc7;\"*|\"__oxideterm_osc7;\"*) ;; *) PROMPT_COMMAND=\"__oxideterm_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}\" ;; esac; fi; __oxideterm_osc7; fi"
 }
 
 /// Return a conservative parent path for POSIX, home-relative, and Windows paths.
@@ -265,6 +303,10 @@ mod tests {
             current_directory_cd_command("/Users/dominical/it's ok").as_deref(),
             Some("cd '/Users/dominical/it'\\''s ok'")
         );
+        assert_eq!(
+            current_directory_shell_path_argument("/Users/dominical/it's ok").as_deref(),
+            Some("'/Users/dominical/it'\\''s ok'")
+        );
     }
 
     #[test]
@@ -279,13 +321,38 @@ mod tests {
     #[test]
     fn report_command_uses_osc7() {
         let command = current_directory_report_command();
-        assert!(command.contains("]7;%s"));
+        assert!(command.contains("]7;file://%s%s"));
         assert!(command.contains("${PWD:-$(pwd)}"));
+        assert!(command.contains("%%%02X"));
+    }
+
+    #[test]
+    fn shell_integration_command_installs_bash_and_zsh_hooks() {
+        let command = current_directory_shell_integration_command();
+        assert!(command.contains("]7;file://%s%s"));
+        assert!(command.contains("PROMPT_COMMAND"));
+        assert!(
+            command.contains(
+                "PROMPT_COMMAND=\"__oxideterm_osc7${PROMPT_COMMAND:+; $PROMPT_COMMAND}\""
+            )
+        );
+        assert!(command.contains("add-zsh-hook precmd"));
+        assert!(command.contains("precmd_functions[*]"));
+        assert!(command.contains("__oxideterm_osc7"));
+        assert!(!command.contains("PS1="));
+        assert!(!command.contains("title"));
     }
 
     #[test]
     fn entry_rejects_control_names() {
         assert!(CurrentDirectoryEntry::new("ok", "/tmp/ok").is_some());
         assert!(CurrentDirectoryEntry::new("bad\nname", "/tmp/bad").is_none());
+    }
+
+    #[test]
+    fn entry_tracks_file_kind() {
+        let entry =
+            CurrentDirectoryEntry::new_file("Cargo.toml", "/tmp/Cargo.toml").expect("file entry");
+        assert_eq!(entry.kind(), CurrentDirectoryEntryKind::File);
     }
 }

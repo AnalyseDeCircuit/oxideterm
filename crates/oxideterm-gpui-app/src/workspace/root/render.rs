@@ -148,6 +148,15 @@ impl Render for WorkspaceApp {
             })
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
+                    // Popovers inside the command bar stop propagation. Any
+                    // remaining workspace click is outside those overlays and
+                    // should dismiss them without stealing the original click.
+                    this.close_terminal_command_overlays(cx);
+                }),
+            )
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let active_ime_should_receive_key =
                     this.defer_active_ime_key(&event.keystroke, window, cx);

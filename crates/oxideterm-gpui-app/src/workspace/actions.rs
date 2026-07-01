@@ -535,7 +535,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.handle_terminal_cwd_picker_key(event, cx) {
+        if self.handle_terminal_cwd_picker_key(event, window, cx) {
             return;
         }
 

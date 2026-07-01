@@ -18,6 +18,30 @@ pub(super) enum IdeReconnectRestoreStatus {
 
 impl WorkspaceApp {
     pub(super) fn open_ide_folder_picker_tab(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
+        let active_terminal_cwd = self.active_ssh_terminal_cwd_path_for_node(&node_id, cx);
+        self.open_ide_folder_picker_tab_with_initial_path(node_id, active_terminal_cwd, cx);
+    }
+
+    pub(in crate::workspace) fn open_ide_folder_picker_tab_at_path(
+        &mut self,
+        node_id: NodeId,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let initial_path = if path.trim().is_empty() {
+            None
+        } else {
+            Some(path)
+        };
+        self.open_ide_folder_picker_tab_with_initial_path(node_id, initial_path, cx);
+    }
+
+    fn open_ide_folder_picker_tab_with_initial_path(
+        &mut self,
+        node_id: NodeId,
+        initial_path_override: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let node_title = self
             .ssh_nodes
             .get(&node_id)
@@ -31,9 +55,11 @@ impl WorkspaceApp {
         {
             if let Some(surface) = self.ide_tab_surfaces.get(tab_id) {
                 surface.update(cx, |surface: &mut IdeSurface, cx| {
-                    let initial_path = surface
-                        .project_root_path()
-                        .unwrap_or_else(|| "/".to_string());
+                    let initial_path = initial_path_override.clone().unwrap_or_else(|| {
+                        surface
+                            .project_root_path()
+                            .unwrap_or_else(|| "/".to_string())
+                    });
                     surface.open_remote_folder_picker_for_node(node_id.0.clone(), initial_path, cx);
                 });
             }
@@ -49,7 +75,8 @@ impl WorkspaceApp {
                 IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx)
             });
             surface.update(cx, |surface: &mut IdeSurface, cx| {
-                surface.open_remote_folder_picker_for_node(node_id.0.clone(), "/", cx);
+                let initial_path = initial_path_override.unwrap_or_else(|| "/".to_string());
+                surface.open_remote_folder_picker_for_node(node_id.0.clone(), initial_path, cx);
             });
 
             self.tabs.push(Tab {
@@ -368,6 +395,9 @@ impl WorkspaceApp {
             context_new_folder: self.i18n.t("ide.contextMenu.newFolder"),
             context_rename: self.i18n.t("ide.contextMenu.rename"),
             context_delete: self.i18n.t("ide.contextMenu.delete"),
+            context_copy: self.i18n.t("menu.copy"),
+            context_cut: self.i18n.t("fileManager.cut"),
+            context_paste: self.i18n.t("menu.paste"),
             context_copy_path: self.i18n.t("ide.contextMenu.copyPath"),
             context_open_in_terminal: self.i18n.t("ide.contextMenu.openInTerminal"),
             delete_confirm_title: self.i18n.t("ide.delete.confirmTitle"),
@@ -463,6 +493,9 @@ impl WorkspaceApp {
                         this.ide_last_closed_at_by_node.remove(&node_id);
                     }
                 }
+                IdeSurfaceEvent::TransientFolderPickerCancelled => {
+                    this.close_transient_ide_tab_after_folder_cancel(tab_id, cx);
+                }
                 IdeSurfaceEvent::ReconnectRestoreProjectOpened { reconnect_node_id } => {
                     this.complete_pending_ide_reconnect_restore(
                         &NodeId::new(reconnect_node_id.clone()),
@@ -483,6 +516,46 @@ impl WorkspaceApp {
             },
         );
         self.ide_surface_subscriptions.insert(tab_id, subscription);
+    }
+
+    fn close_transient_ide_tab_after_folder_cancel(
+        &mut self,
+        tab_id: oxideterm_workspace::TabId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return;
+        };
+        let removed_was_active = self.main_window_tabs.active_tab_id == Some(tab_id);
+        let tab = self.tabs.remove(index);
+        self.detached_tabs.remove(&tab.id);
+        self.ide_tab_surfaces.remove(&tab.id);
+        self.ide_surface_subscriptions.remove(&tab.id);
+        self.ide_tab_nodes.remove(&tab.id);
+
+        if removed_was_active {
+            // Picker cancellation is not a user project-close action. Pick the
+            // nearest visible tab without recording an IDE last-closed marker,
+            // so reconnect restore remains governed only by real project tabs.
+            self.main_window_tabs.active_tab_id = self
+                .tabs
+                .iter()
+                .enumerate()
+                .skip(index.min(self.tabs.len().saturating_sub(1)))
+                .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                .or_else(|| {
+                    self.tabs
+                        .iter()
+                        .enumerate()
+                        .take(index)
+                        .rev()
+                        .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                })
+                .map(|(_, tab)| tab.id);
+        }
+
+        self.sync_active_tab_surface();
+        cx.notify();
     }
 
     fn remember_ide_agent_mode(&mut self, mode: NodeAgentMode, cx: &mut Context<Self>) {

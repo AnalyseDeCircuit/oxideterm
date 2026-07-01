@@ -142,15 +142,29 @@
       "unpin": "実行後に閉じる"
     },
     "cwd": {
-      "search_directories": "ディレクトリを検索...",
+      "search_directories": "ファイルとディレクトリを検索...",
       "loading": "ディレクトリを読み込み中...",
-      "no_directories": "一致するディレクトリはありません",
+      "no_directories": "一致するファイルまたはディレクトリはありません",
       "unavailable": "現在の作業ディレクトリを取得できません。",
       "remote_list_failed": "リモートディレクトリを読み込めませんでした。",
       "parent_directory": ".. (親ディレクトリ)",
       "enter_directory": "ディレクトリに入る",
       "go_to_path": "パスへ移動",
-      "inferred": "推定"
+      "inferred": "推定",
+      "scope_local": "ローカル",
+      "scope_ssh": "SSH",
+      "source_process": "プロセス",
+      "source_manual": "手動フォールバック",
+      "source_shell": "シェル統合",
+      "quality_process": "プロセスフォールバック",
+      "quality_manual": "手動フォールバック",
+      "quality_cwd_only": "作業ディレクトリのみ",
+      "host": "ホスト",
+      "switch_to_directory": "このディレクトリに切り替え",
+      "copy_path": "パスをコピー",
+      "open_file_manager": "ファイルマネージャーで開く",
+      "open_sftp": "SFTP で開く",
+      "open_ide": "IDE で開く"
     },
     "project": {
       "search_tasks": "プロジェクトタスクを検索...",

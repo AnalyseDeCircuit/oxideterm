@@ -142,15 +142,29 @@
       "unpin": "실행 후 닫기"
     },
     "cwd": {
-      "search_directories": "디렉터리 검색...",
+      "search_directories": "파일 및 디렉터리 검색...",
       "loading": "디렉터리 로드 중...",
-      "no_directories": "일치하는 디렉터리가 없습니다",
+      "no_directories": "일치하는 파일 또는 디렉터리가 없습니다",
       "unavailable": "현재 작업 디렉터리를 사용할 수 없습니다.",
       "remote_list_failed": "원격 디렉터리를 불러오지 못했습니다.",
       "parent_directory": ".. (상위 디렉터리)",
       "enter_directory": "디렉터리로 들어가기",
       "go_to_path": "경로로 이동",
-      "inferred": "추론됨"
+      "inferred": "추론됨",
+      "scope_local": "로컬",
+      "scope_ssh": "SSH",
+      "source_process": "프로세스",
+      "source_manual": "수동 대체",
+      "source_shell": "셸 통합",
+      "quality_process": "프로세스 대체",
+      "quality_manual": "수동 대체",
+      "quality_cwd_only": "작업 디렉터리만",
+      "host": "호스트",
+      "switch_to_directory": "이 디렉터리로 전환",
+      "copy_path": "경로 복사",
+      "open_file_manager": "파일 관리자에서 열기",
+      "open_sftp": "SFTP에서 열기",
+      "open_ide": "IDE에서 열기"
     },
     "project": {
       "search_tasks": "프로젝트 작업 검색...",

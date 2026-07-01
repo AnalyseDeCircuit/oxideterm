@@ -142,15 +142,29 @@
       "unpin": "Nach Ausführen schließen"
     },
     "cwd": {
-      "search_directories": "Verzeichnisse suchen...",
+      "search_directories": "Dateien und Verzeichnisse suchen...",
       "loading": "Verzeichnisse werden geladen...",
-      "no_directories": "Keine passenden Verzeichnisse",
+      "no_directories": "Keine passenden Dateien oder Verzeichnisse",
       "unavailable": "Aktuelles Arbeitsverzeichnis ist nicht verfügbar.",
       "remote_list_failed": "Entfernte Verzeichnisse konnten nicht geladen werden.",
       "parent_directory": ".. (Übergeordnetes Verzeichnis)",
       "enter_directory": "Verzeichnis öffnen",
       "go_to_path": "Zu Pfad wechseln",
-      "inferred": "abgeleitet"
+      "inferred": "abgeleitet",
+      "scope_local": "Lokal",
+      "scope_ssh": "SSH",
+      "source_process": "Prozess",
+      "source_manual": "Manueller Fallback",
+      "source_shell": "Shell-Integration",
+      "quality_process": "Prozess-Fallback",
+      "quality_manual": "manueller Fallback",
+      "quality_cwd_only": "nur Arbeitsverzeichnis",
+      "host": "Host",
+      "switch_to_directory": "Zu diesem Verzeichnis wechseln",
+      "copy_path": "Pfad kopieren",
+      "open_file_manager": "Im Dateimanager öffnen",
+      "open_sftp": "In SFTP öffnen",
+      "open_ide": "In IDE öffnen"
     },
     "project": {
       "search_tasks": "Projektaufgaben suchen...",

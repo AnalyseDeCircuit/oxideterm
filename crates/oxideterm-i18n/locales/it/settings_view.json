@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "Mostra il ramo del repository attivo nella barra comandi per terminali locali e SSH.",
       "command_bar_project_tasks": "Mostra attività progetto",
       "command_bar_project_tasks_hint": "Mostra azioni di progetto e attività rilevate nella barra comandi per terminali locali e SSH.",
+      "command_bar_current_directory_awareness": "Mostra directory di lavoro",
+      "command_bar_current_directory_awareness_hint": "Mostra la directory attiva del terminale locale o SSH nella barra comandi e consente di cambiarla dal selettore directory.",
       "command_bar_focus_handoff": "Focalizza terminale per comandi TUI",
       "command_bar_focus_handoff_hint": "Dopo questi comandi dalla barra comandi, il focus torna al terminale perché di solito catturano la tastiera. Separa i comandi con spazi, virgole o nuove righe.",
       "command_marks": "Marcatori comandi",

@@ -295,6 +295,23 @@ impl NodeAgentIdeFileSystem {
         path: impl Into<String>,
         recursive: bool,
     ) -> Result<(), IdeFileError> {
+        let node_id = node_id.into();
+        let path = path.into();
+        let node_id_ref = NodeId::new(node_id.clone());
+        self.ensure_ide_session_for_node(&node_id_ref).await?;
+        if let Some(session) = self.agent_session(&node_id_ref).await {
+            match session.remove_item(&path, recursive).await {
+                Ok(()) => return Ok(()),
+                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                    warn!(
+                        "[ide-agent] delete via agent failed ({}), falling back to SFTP",
+                        agent_error_log_label(&error)
+                    );
+                    self.set_status_for_node(&node_id_ref, None, AgentStatus::SftpFallback);
+                }
+                Err(error) => return Err(ide_error_from_agent_error(error)),
+            }
+        }
         self.sftp.delete_item(node_id, path, recursive).await
     }
 
@@ -311,6 +328,23 @@ impl NodeAgentIdeFileSystem {
         node_id: impl Into<String>,
         path: impl Into<String>,
     ) -> Result<(), IdeFileError> {
+        let node_id = node_id.into();
+        let path = path.into();
+        let node_id_ref = NodeId::new(node_id.clone());
+        self.ensure_ide_session_for_node(&node_id_ref).await?;
+        if let Some(session) = self.agent_session(&node_id_ref).await {
+            match session.create_folder(&path).await {
+                Ok(()) => return Ok(()),
+                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                    warn!(
+                        "[ide-agent] mkdir via agent failed ({}), falling back to SFTP",
+                        agent_error_log_label(&error)
+                    );
+                    self.set_status_for_node(&node_id_ref, None, AgentStatus::SftpFallback);
+                }
+                Err(error) => return Err(ide_error_from_agent_error(error)),
+            }
+        }
         self.sftp.create_folder(node_id, path).await
     }
 
@@ -320,7 +354,52 @@ impl NodeAgentIdeFileSystem {
         old_path: impl Into<String>,
         new_path: impl Into<String>,
     ) -> Result<(), IdeFileError> {
+        let node_id = node_id.into();
+        let old_path = old_path.into();
+        let new_path = new_path.into();
+        let node_id_ref = NodeId::new(node_id.clone());
+        self.ensure_ide_session_for_node(&node_id_ref).await?;
+        if let Some(session) = self.agent_session(&node_id_ref).await {
+            match session.rename_item(&old_path, &new_path).await {
+                Ok(()) => return Ok(()),
+                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                    warn!(
+                        "[ide-agent] rename via agent failed ({}), falling back to SFTP",
+                        agent_error_log_label(&error)
+                    );
+                    self.set_status_for_node(&node_id_ref, None, AgentStatus::SftpFallback);
+                }
+                Err(error) => return Err(ide_error_from_agent_error(error)),
+            }
+        }
         self.sftp.rename_item(node_id, old_path, new_path).await
+    }
+
+    pub async fn copy_item(
+        &self,
+        node_id: impl Into<String>,
+        source_path: impl Into<String>,
+        target_path: impl Into<String>,
+    ) -> Result<(), IdeFileError> {
+        let node_id = node_id.into();
+        let source_path = source_path.into();
+        let target_path = target_path.into();
+        let node_id_ref = NodeId::new(node_id.clone());
+        self.ensure_ide_session_for_node(&node_id_ref).await?;
+        if let Some(session) = self.agent_session(&node_id_ref).await {
+            match session.copy_item(&source_path, &target_path).await {
+                Ok(()) => return Ok(()),
+                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                    warn!(
+                        "[ide-agent] copy via agent failed ({}), falling back to SFTP",
+                        agent_error_log_label(&error)
+                    );
+                    self.set_status_for_node(&node_id_ref, None, AgentStatus::SftpFallback);
+                }
+                Err(error) => return Err(ide_error_from_agent_error(error)),
+            }
+        }
+        self.sftp.copy_item(node_id, source_path, target_path).await
     }
 
     pub async fn grep_project(
@@ -693,6 +772,30 @@ impl NodeAgentIdeFileSystem {
         };
         self.agent_statuses.insert(key.clone(), status);
         self.latest_agent_status.insert(node_id.0.clone(), key);
+    }
+}
+
+fn should_fallback_from_agent_fs_management(error: &AgentError) -> bool {
+    match error {
+        AgentError::Rpc { code, message } if is_agent_conflict_parts(*code, message) => false,
+        // Older deployed agents may not expose new file-management methods.
+        AgentError::Rpc { code: -32601, .. } => true,
+        AgentError::ChannelClosed
+        | AgentError::Timeout(_)
+        | AgentError::Route(_)
+        | AgentError::Ssh(_)
+        | AgentError::Sftp(_)
+        | AgentError::ExecFailed(_)
+        | AgentError::StartFailed(_)
+        | AgentError::Handshake(_)
+        | AgentError::ArchDetection(_)
+        | AgentError::UnsupportedArch(_)
+        | AgentError::BinaryNotFound(_) => true,
+        AgentError::Rpc { .. }
+        | AgentError::Upload(_)
+        | AgentError::LocalIo(_)
+        | AgentError::Serialize(_)
+        | AgentError::Deserialize(_) => false,
     }
 }
 

@@ -9,8 +9,8 @@ use super::terminal_git::{
 use super::*;
 use oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID;
 use oxideterm_environment::{
-    CurrentDirectorySnapshot, GitChangedPath, GitRepositoryStatus, ProjectSnapshot, ProjectTask,
-    ProjectTaskGroup,
+    CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource, GitChangedPath,
+    GitRepositoryStatus, ProjectSnapshot, ProjectTask, ProjectTaskGroup,
 };
 use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 use oxideterm_gpui_ui::context_menu::{
@@ -294,6 +294,65 @@ fn privilege_prompt_matches_custom_patterns(
         .any(|pattern| !pattern.is_empty() && prompt_text.contains(&pattern))
 }
 
+fn terminal_cwd_chip_label(path: &str) -> String {
+    let path = path.trim();
+    if path.is_empty()
+        || path == "/"
+        || path == "~"
+        || path.ends_with(":\\")
+        || path.ends_with(":/")
+    {
+        return path.to_string();
+    }
+    let separator = if path.contains('\\') { '\\' } else { '/' };
+    let mut segments = path
+        .split(separator)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
+        return path.to_string();
+    }
+    let tail = segments.split_off(segments.len().saturating_sub(2));
+    let label = tail.join(&separator.to_string());
+    if path.starts_with("~/") && tail.len() == 1 {
+        format!("~/{label}")
+    } else {
+        label
+    }
+}
+
+fn terminal_cwd_chip_tooltip(
+    snapshot: Option<&CurrentDirectorySnapshot>,
+    host: Option<String>,
+    i18n: &I18n,
+) -> String {
+    let Some(snapshot) = snapshot else {
+        return i18n.t("terminal.cwd.unavailable").to_string();
+    };
+    let scope = match snapshot.scope() {
+        CurrentDirectoryScope::Local => i18n.t("terminal.cwd.scope_local"),
+        CurrentDirectoryScope::SshNode(_) => i18n.t("terminal.cwd.scope_ssh"),
+    };
+    let source = match snapshot.source() {
+        CurrentDirectorySource::ProcessFallback => i18n.t("terminal.cwd.source_process"),
+        CurrentDirectorySource::VisibleText => i18n.t("terminal.cwd.source_manual"),
+        CurrentDirectorySource::ShellIntegration => i18n.t("terminal.cwd.source_shell"),
+    };
+    let quality = match snapshot.source() {
+        CurrentDirectorySource::ProcessFallback => i18n.t("terminal.cwd.quality_process"),
+        CurrentDirectorySource::VisibleText => i18n.t("terminal.cwd.quality_manual"),
+        CurrentDirectorySource::ShellIntegration => i18n.t("terminal.cwd.quality_cwd_only"),
+    };
+    let mut lines = vec![
+        snapshot.path().to_string(),
+        format!("{scope} · {source} · {quality}"),
+    ];
+    if let Some(host) = host.filter(|host| !host.trim().is_empty()) {
+        lines.push(format!("{}: {host}", i18n.t("terminal.cwd.host")));
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 fn build_privilege_prompt_helper_state(
     connection_id: String,
@@ -461,9 +520,16 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let active = self.terminal_cwd_picker.open;
         let workspace = cx.entity();
+        let tooltip_id = "terminal-cwd-chip";
+        let tooltip_label = terminal_cwd_chip_tooltip(
+            snapshot.as_ref(),
+            self.active_terminal_cwd_host(cx),
+            &self.i18n,
+        );
+        let pending = self.active_terminal_cwd_is_pending(cx);
         let path = snapshot
             .as_ref()
-            .map(|snapshot| snapshot.path().to_string())
+            .map(|snapshot| terminal_cwd_chip_label(snapshot.path()))
             .unwrap_or_else(|| "...".to_string());
         let foreground = if active {
             rgb(theme.accent)
@@ -501,10 +567,30 @@ impl WorkspaceApp {
                 div()
                     .min_w(px(0.0))
                     .truncate()
+                    .when(pending, |this| {
+                        this.italic().text_color(rgb(theme.text_muted))
+                    })
                     .child(path)
                     .into_any_element(),
                 Vec::new(),
             )
+            .id(tooltip_id)
+            .on_mouse_move(
+                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id,
+                        tooltip_label.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }),
+            )
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(tooltip_id, cx);
+                }
+            }))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .on_mouse_down(
                 MouseButton::Left,
@@ -557,7 +643,7 @@ impl WorkspaceApp {
         .child(self.render_terminal_cwd_search(cx));
 
         if let Some(path) = self.terminal_cwd_browse_path() {
-            panel = panel.child(self.render_terminal_cwd_context_row(path.to_string()));
+            panel = panel.child(self.render_terminal_cwd_context_row(path.to_string(), cx));
         }
 
         let body = if self.terminal_cwd_picker.loading {
@@ -575,24 +661,160 @@ impl WorkspaceApp {
                     self.i18n.t("terminal.cwd.no_directories"),
                 )
             } else {
-                let mut list = div().flex().flex_col().gap(px(2.0));
-                for entry in visible {
-                    list = list.child(self.render_terminal_cwd_entry_row(entry, cx));
-                }
-                div()
-                    .min_h(px(0.0))
-                    .max_h(px(TERMINAL_CWD_MENU_MAX_HEIGHT))
-                    .overflow_y_scrollbar()
-                    .child(list)
-                    .into_any_element()
+                self.render_terminal_cwd_entry_list(visible, cx)
             }
         };
 
         panel.child(body).into_any_element()
     }
 
-    fn render_terminal_cwd_context_row(&self, path: String) -> AnyElement {
+    fn render_terminal_cwd_entry_list(
+        &self,
+        visible: Vec<terminal_cwd::TerminalCwdVisibleEntry>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.sync_terminal_cwd_list_state(&visible);
+        let total = visible.len();
+        let state = self.terminal_cwd_picker.list_state.clone();
+        let spec = terminal_cwd::terminal_cwd_list_spec();
+        let estimated_row_height = f32::from(spec.row_height);
+        let list_height = (total as f32 * estimated_row_height)
+            .clamp(estimated_row_height, TERMINAL_CWD_MENU_MAX_HEIGHT);
+        let workspace = cx.entity();
+
+        div()
+            .min_h(px(0.0))
+            .h(px(list_height))
+            .max_h(px(TERMINAL_CWD_MENU_MAX_HEIGHT))
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| {
+                    let total = visible.len();
+                    let Some(entry) = visible.get(index).cloned() else {
+                        return div().into_any_element();
+                    };
+                    workspace.update(cx, move |this, cx| {
+                        this.render_terminal_cwd_entry_list_item(entry, index, total, cx)
+                    })
+                },
+            ))
+            .into_any_element()
+    }
+
+    fn render_terminal_cwd_entry_list_item(
+        &self,
+        entry: terminal_cwd::TerminalCwdVisibleEntry,
+        index: usize,
+        total: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .when(index + 1 < total, |item| item.pb(px(2.0)))
+            .child(self.render_terminal_cwd_entry_row(entry, cx))
+            .into_any_element()
+    }
+
+    fn sync_terminal_cwd_list_state(&self, entries: &[terminal_cwd::TerminalCwdVisibleEntry]) {
+        let signatures = entries
+            .iter()
+            .map(terminal_cwd_entry_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.terminal_cwd_picker.list_state,
+            &mut self.terminal_cwd_picker.list_cache.borrow_mut(),
+            "terminal-cwd-picker",
+            &signatures,
+            terminal_cwd::terminal_cwd_list_spec(),
+        );
+    }
+
+    fn render_terminal_cwd_context_row(&self, path: String, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let display_path = path.clone();
+        let switch_path = path.clone();
+        let scope = self
+            .terminal_cwd_picker
+            .snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.scope().clone());
+        let mut trailing = vec![
+            self.render_terminal_cwd_context_action(
+                LucideIcon::Check,
+                self.i18n.t("terminal.cwd.switch_to_directory"),
+                {
+                    let path = path.clone();
+                    move |this, _event, window, cx| {
+                        this.select_terminal_cwd_path(path.clone(), true, window, cx);
+                        cx.stop_propagation();
+                    }
+                },
+                cx,
+            ),
+            self.render_terminal_cwd_context_action(
+                LucideIcon::Copy,
+                self.i18n.t("terminal.cwd.copy_path"),
+                {
+                    let path = path.clone();
+                    move |this, _event, _window, cx| {
+                        this.copy_terminal_cwd_path(path.clone(), cx);
+                        cx.stop_propagation();
+                    }
+                },
+                cx,
+            ),
+        ];
+        match scope {
+            Some(CurrentDirectoryScope::Local) => {
+                trailing.push(self.render_terminal_cwd_context_action(
+                    LucideIcon::FolderOpen,
+                    self.i18n.t("terminal.cwd.open_file_manager"),
+                    {
+                        let path = path.clone();
+                        move |this, _event, window, cx| {
+                            this.open_terminal_cwd_path_in_file_manager(path.clone(), window, cx);
+                            cx.stop_propagation();
+                        }
+                    },
+                    cx,
+                ));
+            }
+            Some(CurrentDirectoryScope::SshNode(node_id)) => {
+                trailing.push(self.render_terminal_cwd_context_action(
+                    LucideIcon::Cloud,
+                    self.i18n.t("terminal.cwd.open_sftp"),
+                    {
+                        let node_id = NodeId::new(node_id.clone());
+                        let path = path.clone();
+                        move |this, _event, window, cx| {
+                            this.open_terminal_cwd_path_in_sftp(
+                                node_id.clone(),
+                                path.clone(),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }
+                    },
+                    cx,
+                ));
+                trailing.push(self.render_terminal_cwd_context_action(
+                    LucideIcon::FileCode,
+                    self.i18n.t("terminal.cwd.open_ide"),
+                    {
+                        let node_id = NodeId::new(node_id);
+                        let path = path.clone();
+                        move |this, _event, _window, cx| {
+                            this.open_terminal_cwd_path_in_ide(node_id.clone(), path.clone(), cx);
+                            cx.stop_propagation();
+                        }
+                    },
+                    cx,
+                ));
+            }
+            None => {}
+        }
         entity_list_row(
             &self.tokens,
             EntityListRowOptions::new().compact(),
@@ -605,13 +827,47 @@ impl WorkspaceApp {
                 .truncate()
                 .font_family(settings_mono_font_family(self.settings_store.settings()))
                 .text_color(rgb(theme.text))
-                .child(path)
+                .child(display_path)
                 .into_any_element(),
             None,
             Vec::new(),
-            Vec::new(),
+            trailing,
+        )
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                if event.click_count >= 2 {
+                    this.select_terminal_cwd_path(switch_path.clone(), true, window, cx);
+                }
+                cx.stop_propagation();
+            }),
         )
         .into_any_element()
+    }
+
+    fn render_terminal_cwd_context_action(
+        &self,
+        icon: LucideIcon,
+        tooltip: String,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_tooltip_icon_button(
+            icon,
+            12.0,
+            rgb(self.tokens.ui.text_muted),
+            IconButtonOptions {
+                idle_opacity: 0.72,
+                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(24.0, ButtonRadius::Md)
+            },
+            tooltip,
+            "terminal-cwd-context-action",
+            true,
+            cx.listener(listener),
+            cx.entity(),
+        )
     }
 
     fn render_terminal_cwd_search(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -673,6 +929,9 @@ impl WorkspaceApp {
             terminal_cwd::TerminalCwdVisibleEntryKind::Directory => {
                 (LucideIcon::Folder, entry.name.clone(), rgb(theme.text))
             }
+            terminal_cwd::TerminalCwdVisibleEntryKind::File => {
+                (LucideIcon::FileText, entry.name.clone(), rgb(theme.text))
+            }
             terminal_cwd::TerminalCwdVisibleEntryKind::TypedPath => (
                 LucideIcon::CornerDownLeft,
                 self.i18n.t("terminal.cwd.go_to_path"),
@@ -680,6 +939,7 @@ impl WorkspaceApp {
             ),
         };
         let path = entry.path.clone();
+        let entry_kind = entry.kind;
         let verified_directory = matches!(
             entry.kind,
             terminal_cwd::TerminalCwdVisibleEntryKind::Parent
@@ -778,10 +1038,20 @@ impl WorkspaceApp {
         }))
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                 this.terminal_cwd_picker.highlighted_path = Some(path.clone());
                 if event.click_count >= 2 {
-                    this.select_terminal_cwd_path(path.clone(), verified_directory, cx);
+                    match entry_kind {
+                        terminal_cwd::TerminalCwdVisibleEntryKind::File => {
+                            this.insert_terminal_cwd_file_path(path.clone(), cx);
+                        }
+                        _ => this.select_terminal_cwd_path(
+                            path.clone(),
+                            verified_directory,
+                            window,
+                            cx,
+                        ),
+                    }
                 } else {
                     cx.notify();
                 }
@@ -3188,6 +3458,14 @@ impl WorkspaceApp {
             .flatten();
         let cwd_supported =
             cwd_awareness_enabled && self.active_terminal_cwd_scope_and_pane().is_some();
+        if cwd_supported && cwd_snapshot.is_none() {
+            cx.spawn(async move |weak, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.bootstrap_active_terminal_cwd(cx);
+                });
+            })
+            .detach();
+        }
         let git_snapshot = self.active_terminal_git_snapshot(cx);
         let project_tasks_enabled = self.terminal_project_tasks_enabled();
         let project_snapshot = project_tasks_enabled
@@ -4029,6 +4307,27 @@ fn terminal_cwd_browse_element_id(path: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
     hasher.finish()
+}
+
+fn terminal_cwd_entry_signature(entry: &terminal_cwd::TerminalCwdVisibleEntry) -> u64 {
+    // Virtual list state is index-based, so rows need a stable content signature
+    // when filtering or changing directories reshuffles the visible entries.
+    let mut hasher = DefaultHasher::new();
+    terminal_cwd_visible_entry_kind_signature(entry.kind).hash(&mut hasher);
+    entry.name.hash(&mut hasher);
+    entry.path.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn terminal_cwd_visible_entry_kind_signature(
+    kind: terminal_cwd::TerminalCwdVisibleEntryKind,
+) -> u8 {
+    match kind {
+        terminal_cwd::TerminalCwdVisibleEntryKind::Parent => 0,
+        terminal_cwd::TerminalCwdVisibleEntryKind::Directory => 1,
+        terminal_cwd::TerminalCwdVisibleEntryKind::File => 2,
+        terminal_cwd::TerminalCwdVisibleEntryKind::TypedPath => 3,
+    }
 }
 
 #[cfg(test)]

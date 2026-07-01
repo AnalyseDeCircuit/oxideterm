@@ -1,12 +1,13 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::time::Duration;
+use std::{cell::RefCell, time::Duration};
 
 use oxideterm_environment::{
-    CurrentDirectoryEntry, CurrentDirectoryKey, CurrentDirectoryScope, CurrentDirectorySnapshot,
-    CurrentDirectorySource, current_directory_cd_command, current_directory_parent,
-    current_directory_report_command,
+    CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
+    CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
+    current_directory_parent, current_directory_report_command,
+    current_directory_shell_integration_command, current_directory_shell_path_argument,
 };
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};
 use oxideterm_ssh::NodeId;
@@ -17,6 +18,15 @@ const TERMINAL_CWD_REMOTE_LIST_TIMEOUT: Duration = Duration::from_millis(1_200);
 const TERMINAL_CWD_REPORT_POLL_INTERVAL: Duration = Duration::from_millis(40);
 const TERMINAL_CWD_REPORT_POLL_ATTEMPTS: usize = 30;
 const TERMINAL_CWD_MAX_ENTRIES: usize = 160;
+const TERMINAL_CWD_LIST_ESTIMATED_HEIGHT: f32 = 42.0;
+const TERMINAL_CWD_LIST_OVERSCAN: usize = 8;
+
+pub(in crate::workspace) fn terminal_cwd_list_spec() -> TauriVirtualListSpec {
+    TauriVirtualListSpec::new(
+        px(TERMINAL_CWD_LIST_ESTIMATED_HEIGHT),
+        TERMINAL_CWD_LIST_OVERSCAN,
+    )
+}
 
 #[derive(Clone, Debug)]
 pub(in crate::workspace) enum TerminalCwdDelivery {
@@ -38,6 +48,7 @@ pub(in crate::workspace) enum TerminalCwdListOutcome {
 pub(in crate::workspace) enum TerminalCwdVisibleEntryKind {
     Parent,
     Directory,
+    File,
     TypedPath,
 }
 
@@ -48,7 +59,6 @@ pub(in crate::workspace) struct TerminalCwdVisibleEntry {
     pub path: String,
 }
 
-#[derive(Default)]
 pub(in crate::workspace) struct TerminalCwdPickerState {
     pub open: bool,
     pub key: Option<CurrentDirectoryKey>,
@@ -58,9 +68,33 @@ pub(in crate::workspace) struct TerminalCwdPickerState {
     pub highlighted_path: Option<String>,
     pub loading: bool,
     pub error: Option<String>,
+    pub list_state: ListState,
+    pub list_cache: RefCell<VirtualListSignatureCache>,
     probe_scope: Option<CurrentDirectoryScope>,
     probe_pane_id: Option<PaneId>,
     generation: u64,
+}
+
+impl Default for TerminalCwdPickerState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            key: None,
+            snapshot: None,
+            query: String::new(),
+            entries: Vec::new(),
+            highlighted_path: None,
+            loading: false,
+            error: None,
+            // Keep the picker scroll owned by GPUI ListState so the visual
+            // scrollbar and rendered rows stay synchronized for large folders.
+            list_state: tauri_virtual_list_state(0, ListAlignment::Top, terminal_cwd_list_spec()),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            probe_scope: None,
+            probe_pane_id: None,
+            generation: 0,
+        }
+    }
 }
 
 impl TerminalCwdPickerState {
@@ -91,6 +125,61 @@ impl WorkspaceApp {
         self.terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
     }
 
+    pub(in crate::workspace) fn active_terminal_cwd_host(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let (_, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        self.panes
+            .get(&pane_id)?
+            .read(cx)
+            .current_working_directory_host()
+    }
+
+    pub(in crate::workspace) fn active_terminal_cwd_is_pending(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((_, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
+            return false;
+        };
+        self.panes
+            .get(&pane_id)
+            .is_some_and(|pane| pane.read(cx).current_working_directory_is_pending())
+    }
+
+    pub(in crate::workspace) fn active_local_terminal_cwd_path(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        if !self.terminal_current_directory_awareness_enabled() {
+            return None;
+        }
+        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        if !matches!(&scope, CurrentDirectoryScope::Local) {
+            return None;
+        }
+        self.terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
+            .map(|snapshot| snapshot.path().to_string())
+    }
+
+    pub(in crate::workspace) fn active_ssh_terminal_cwd_path_for_node(
+        &self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        if !self.terminal_current_directory_awareness_enabled() {
+            return None;
+        }
+        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        match &scope {
+            CurrentDirectoryScope::SshNode(active_node_id) if active_node_id == &node_id.0 => {}
+            _ => return None,
+        }
+        self.terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
+            .map(|snapshot| snapshot.path().to_string())
+    }
+
     pub(in crate::workspace) fn active_terminal_cwd_scope_and_pane(
         &self,
     ) -> Option<(CurrentDirectoryScope, PaneId)> {
@@ -119,11 +208,15 @@ impl WorkspaceApp {
         // OSC 7 is the active shell channel's own cwd report. The picker must
         // not infer cwd from prompt text, node metadata, or tab titles.
         if let Some(cwd) = pane.current_working_directory() {
-            return CurrentDirectorySnapshot::new(
-                scope,
-                cwd,
-                CurrentDirectorySource::ShellIntegration,
-            );
+            let source = match pane.current_working_directory_source() {
+                Some(TerminalWorkingDirectorySource::ShellIntegration) => {
+                    CurrentDirectorySource::ShellIntegration
+                }
+                Some(TerminalWorkingDirectorySource::VisibleCommand) | None => {
+                    CurrentDirectorySource::VisibleText
+                }
+            };
+            return CurrentDirectorySnapshot::new(scope, cwd, source);
         }
         if matches!(&scope, CurrentDirectoryScope::Local) {
             return pane.process_info().cwd.and_then(|path| {
@@ -238,6 +331,44 @@ impl WorkspaceApp {
         })
     }
 
+    pub(in crate::workspace) fn bootstrap_active_terminal_cwd(&mut self, cx: &mut Context<Self>) {
+        if !self.terminal_current_directory_awareness_enabled() {
+            return;
+        }
+        let Some((scope, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
+            return;
+        };
+        if matches!(&scope, CurrentDirectoryScope::Local)
+            || self.terminal_cwd_bootstrap_requested.contains(&pane_id)
+            || self
+                .terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
+                .is_some()
+        {
+            return;
+        }
+        let Some(pane) = self.panes.get(&pane_id) else {
+            return;
+        };
+        if !pane.read(cx).can_switch_working_directory_from_chrome() {
+            return;
+        }
+
+        // SSH panes have no local process cwd fallback. Ask the live shell to
+        // report OSC 7. A prompt-safe shell hook is preferred when the pane
+        // already exposed a shell-integration prompt boundary; otherwise fall
+        // back to the one-shot report command.
+        self.terminal_cwd_bootstrap_requested.insert(pane_id);
+        let shell_integration_command = current_directory_shell_integration_command();
+        if pane.update(cx, |pane, cx| {
+            pane.try_install_current_directory_shell_integration(shell_integration_command, cx)
+        }) {
+            return;
+        }
+        if !self.request_terminal_cwd_report(pane_id, cx) {
+            self.terminal_cwd_bootstrap_requested.remove(&pane_id);
+        }
+    }
+
     fn spawn_terminal_cwd_report_poll(&mut self, generation: u64, cx: &mut Context<Self>) {
         cx.spawn(async move |weak, cx| {
             for _ in 0..TERMINAL_CWD_REPORT_POLL_ATTEMPTS {
@@ -302,6 +433,45 @@ impl WorkspaceApp {
         was_open
     }
 
+    pub(in crate::workspace) fn copy_terminal_cwd_path(
+        &mut self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        cx.write_to_clipboard(ClipboardItem::new_string(path));
+    }
+
+    pub(in crate::workspace) fn open_terminal_cwd_path_in_file_manager(
+        &mut self,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_terminal_cwd_picker();
+        self.open_file_manager_tab_at_path(path, window, cx);
+    }
+
+    pub(in crate::workspace) fn open_terminal_cwd_path_in_sftp(
+        &mut self,
+        node_id: NodeId,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_terminal_cwd_picker();
+        self.open_sftp_tab_at_remote_path(node_id, path, window, cx);
+    }
+
+    pub(in crate::workspace) fn open_terminal_cwd_path_in_ide(
+        &mut self,
+        node_id: NodeId,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_terminal_cwd_picker();
+        self.open_ide_folder_picker_tab_at_path(node_id, path, cx);
+    }
+
     pub(in crate::workspace) fn visible_terminal_cwd_entries(
         &self,
     ) -> Vec<TerminalCwdVisibleEntry> {
@@ -329,7 +499,12 @@ impl WorkspaceApp {
                         || entry.path().to_ascii_lowercase().contains(&query)
                 })
                 .map(|entry| TerminalCwdVisibleEntry {
-                    kind: TerminalCwdVisibleEntryKind::Directory,
+                    kind: match entry.kind() {
+                        CurrentDirectoryEntryKind::Directory => {
+                            TerminalCwdVisibleEntryKind::Directory
+                        }
+                        CurrentDirectoryEntryKind::File => TerminalCwdVisibleEntryKind::File,
+                    },
                     name: entry.name().to_string(),
                     path: entry.path().to_string(),
                 }),
@@ -379,6 +554,7 @@ impl WorkspaceApp {
         &mut self,
         path: String,
         verified_directory: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(command) = current_directory_cd_command(&path) else {
@@ -396,6 +572,12 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
+        if !pane.read(cx).can_switch_working_directory_from_chrome() {
+            self.terminal_cwd_picker.error =
+                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            cx.notify();
+            return;
+        }
 
         // Directory changes must be visible shell actions on the active pane;
         // background probes never mutate cwd on a reused SSH node.
@@ -403,10 +585,43 @@ impl WorkspaceApp {
             pane.send_command_line(&command, cx);
             if verified_directory {
                 // Listed directories were resolved in the active pane scope, so
-                // the chrome can follow the visible `cd` without prompt parsing.
-                pane.set_current_working_directory_from_terminal_action(path.clone(), cx);
+                // the chrome can follow the visible `cd` while the command mark
+                // still gets the final say on success or rollback.
+                pane.set_pending_current_working_directory_from_terminal_action(
+                    path.clone(),
+                    command.clone(),
+                    cx,
+                );
             }
         });
+        self.close_terminal_cwd_picker();
+        self.focus_active_pane(window, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn insert_terminal_cwd_file_path(
+        &mut self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(argument) = current_directory_shell_path_argument(&path) else {
+            return;
+        };
+
+        // File rows should help compose the command bar, not run shell input or
+        // change cwd. Preserve any draft command and append a shell-safe path.
+        if self
+            .terminal_command_bar_draft
+            .chars()
+            .next_back()
+            .is_some_and(|last| !last.is_whitespace())
+        {
+            self.terminal_command_bar_draft.push(' ');
+        }
+        self.terminal_command_bar_draft.push_str(&argument);
+        self.terminal_command_bar_focused = true;
+        self.terminal_command_suggestions_open = false;
+        self.terminal_command_suggestion_highlighted = None;
         self.close_terminal_cwd_picker();
         cx.notify();
     }
@@ -414,6 +629,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_terminal_cwd_picker_key(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.terminal_cwd_picker.open {
@@ -459,14 +675,19 @@ impl WorkspaceApp {
                     .as_deref()
                     .and_then(|path| visible.iter().find(|entry| entry.path == path))
                     .or_else(|| visible.first())
-                    .map(|entry| {
-                        (
-                            entry.path.clone(),
+                    .cloned();
+                if let Some(entry) = selected {
+                    match entry.kind {
+                        TerminalCwdVisibleEntryKind::File => {
+                            self.insert_terminal_cwd_file_path(entry.path, cx);
+                        }
+                        _ => self.select_terminal_cwd_path(
+                            entry.path,
                             terminal_cwd_entry_confirms_directory(entry.kind),
-                        )
-                    });
-                if let Some((path, verified_directory)) = selected {
-                    self.select_terminal_cwd_path(path, verified_directory, cx);
+                            window,
+                            cx,
+                        ),
+                    }
                 }
                 true
             }
@@ -522,14 +743,22 @@ impl WorkspaceApp {
                     .map_err(|error| error.to_string())?
                 };
                 let (_, entries) = entries;
-                Ok::<Vec<CurrentDirectoryEntry>, String>(
-                    entries
-                        .into_iter()
-                        .filter(|entry| entry.file_type == RemotePathFileType::Directory)
-                        .filter_map(|entry| CurrentDirectoryEntry::new(entry.name, entry.path))
-                        .take(TERMINAL_CWD_MAX_ENTRIES)
-                        .collect(),
-                )
+                let mut rows = entries
+                    .into_iter()
+                    .filter_map(|entry| match entry.file_type {
+                        RemotePathFileType::Directory => {
+                            CurrentDirectoryEntry::new(entry.name, entry.path)
+                        }
+                        RemotePathFileType::File
+                        | RemotePathFileType::Symlink
+                        | RemotePathFileType::Unknown => {
+                            CurrentDirectoryEntry::new_file(entry.name, entry.path)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                rows.sort_by(terminal_cwd_entry_order);
+                rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
+                Ok::<Vec<CurrentDirectoryEntry>, String>(rows)
             })
             .await
             .ok()
@@ -678,21 +907,40 @@ fn terminal_cwd_local_directory_entries(cwd: &str) -> TerminalCwdListOutcome {
     let Ok(entries) = std::fs::read_dir(&actual_cwd) else {
         return TerminalCwdListOutcome::Unavailable;
     };
-    let mut directories = entries
+    let mut rows = entries
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let metadata = std::fs::symlink_metadata(entry.path()).ok()?;
-            metadata.is_dir().then_some(entry)
-        })
-        .filter_map(|entry| {
+            let kind = if metadata.is_dir() {
+                CurrentDirectoryEntryKind::Directory
+            } else if metadata.is_file() || metadata.file_type().is_symlink() {
+                CurrentDirectoryEntryKind::File
+            } else {
+                return None;
+            };
             let name = entry.file_name().to_string_lossy().to_string();
             let path = terminal_cwd_join_display_child(cwd, &entry.path(), &name);
-            CurrentDirectoryEntry::new(name, path)
+            CurrentDirectoryEntry::new_with_kind(name, path, kind)
         })
-        .take(TERMINAL_CWD_MAX_ENTRIES)
         .collect::<Vec<_>>();
-    directories.sort_by(|left, right| left.name().to_lowercase().cmp(&right.name().to_lowercase()));
-    TerminalCwdListOutcome::Ready(directories)
+    rows.sort_by(terminal_cwd_entry_order);
+    rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
+    TerminalCwdListOutcome::Ready(rows)
+}
+
+fn terminal_cwd_entry_order(
+    left: &CurrentDirectoryEntry,
+    right: &CurrentDirectoryEntry,
+) -> std::cmp::Ordering {
+    match (left.kind(), right.kind()) {
+        (CurrentDirectoryEntryKind::Directory, CurrentDirectoryEntryKind::File) => {
+            std::cmp::Ordering::Less
+        }
+        (CurrentDirectoryEntryKind::File, CurrentDirectoryEntryKind::Directory) => {
+            std::cmp::Ordering::Greater
+        }
+        _ => left.name().to_lowercase().cmp(&right.name().to_lowercase()),
+    }
 }
 
 fn terminal_cwd_expand_local_home(cwd: &str) -> std::path::PathBuf {
@@ -785,6 +1033,9 @@ mod tests {
         ));
         assert!(terminal_cwd_entry_confirms_directory(
             TerminalCwdVisibleEntryKind::Directory
+        ));
+        assert!(!terminal_cwd_entry_confirms_directory(
+            TerminalCwdVisibleEntryKind::File
         ));
         assert!(!terminal_cwd_entry_confirms_directory(
             TerminalCwdVisibleEntryKind::TypedPath

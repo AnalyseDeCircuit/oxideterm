@@ -671,6 +671,104 @@ wait
     }
 
     #[test]
+    fn shell_integration_osc7_accepts_raw_path_compatibility() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]7;/tmp/Oxide%20Term\x07$ ",
+            |event| events.push(event),
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CwdChanged { cwd, host: None }
+                if cwd == "/tmp/Oxide Term"
+        )));
+    }
+
+    #[test]
+    fn shell_integration_osc633_property_can_update_cwd() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]633;P;Cwd=/work/Oxide%20Term\x07$ ",
+            |event| events.push(event),
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CwdChanged { cwd, host: None }
+                if cwd == "/work/Oxide Term"
+        )));
+        assert!(integration.command_marks().is_empty());
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!visible_text.contains("633;P"));
+    }
+
+    #[test]
+    fn shell_integration_osc1337_current_dir_can_update_cwd() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]1337;CurrentDir=/srv/Oxide%20Term\x07$ ",
+            |event| events.push(event),
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CwdChanged { cwd, host: None }
+                if cwd == "/srv/Oxide Term"
+        )));
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!visible_text.contains("CurrentDir="));
+    }
+
+    #[test]
     fn shell_integration_scanner_waits_for_split_osc_terminator() {
         let size = TerminalSize {
             cols: 80,

@@ -1,34 +1,21 @@
 impl TerminalPane {
-    fn observe_terminal_cwd_action_from_completed_command(
-        &mut self,
-        command: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let mode = self.terminal.lock().mode();
-        if mode.contains(TermMode::ALT_SCREEN) || mode.intersects(TermMode::MOUSE_MODE) {
-            return;
-        }
-        if !self.settings.current_directory_awareness_enabled {
-            return;
-        }
-        if self.shell_integration_status.detected {
-            return;
-        }
-        let Some(cwd) = cwd_after_simple_cd_command(command, self.cwd.as_deref()) else {
-            return;
-        };
-        self.set_current_working_directory_from_terminal_action(cwd, cx);
-    }
-
     fn observe_terminal_cwd_action_from_closed_command_mark(
         &mut self,
         mark: &TerminalCommandMark,
         cx: &mut Context<Self>,
     ) {
+        if self.apply_pending_cwd_from_closed_command_mark(mark, cx) {
+            return;
+        }
         if mark.exit_code != Some(0) {
             return;
         }
         if !self.settings.current_directory_awareness_enabled {
+            return;
+        }
+        // Once shell integration is present, OSC 7 owns cwd updates; the
+        // visible-command parser is only a fallback for non-integrated shells.
+        if self.shell_integration_status.detected {
             return;
         }
         let Some(command) = mark.command.as_deref() else {
@@ -38,6 +25,30 @@ impl TerminalPane {
             return;
         };
         self.set_current_working_directory_from_terminal_action(cwd, cx);
+    }
+
+    fn apply_pending_cwd_from_closed_command_mark(
+        &mut self,
+        mark: &TerminalCommandMark,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(pending) = self.pending_cwd.as_ref() else {
+            return false;
+        };
+        let Some(command) = mark.command.as_deref().map(str::trim) else {
+            return false;
+        };
+        if command != pending.command {
+            return false;
+        }
+
+        if mark.exit_code == Some(0) {
+            self.cwd = Some(pending.path.clone());
+            self.cwd_source = Some(TerminalWorkingDirectorySource::VisibleCommand);
+        }
+        self.pending_cwd = None;
+        cx.notify();
+        true
     }
 
     pub fn begin_command_mark(

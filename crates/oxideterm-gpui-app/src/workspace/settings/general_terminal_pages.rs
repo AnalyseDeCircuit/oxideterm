@@ -596,6 +596,14 @@ impl WorkspaceApp {
                         cx,
                     ),
                     self.card_separator(),
+                    self.bool_row(
+                        "settings_view.terminal.command_bar_current_directory_awareness",
+                        "settings_view.terminal.command_bar_current_directory_awareness_hint",
+                        settings.terminal.command_bar.current_directory_awareness,
+                        set_command_bar_current_directory_awareness,
+                        cx,
+                    ),
+                    self.card_separator(),
                     self.focus_handoff_commands_row(settings, cx),
                     self.card_separator(),
                     self.bool_row(

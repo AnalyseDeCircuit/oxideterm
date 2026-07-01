@@ -8,8 +8,9 @@ mod terminal_view;
 mod trzsz_worker;
 
 pub use app::{
-    SharedTerminalSession, TerminalContextAction, TerminalCursorAnchor, TerminalInputInterceptor,
-    TerminalInputInterceptorResult, TerminalPane, TerminalPaneEvent, TerminalSearchStatus,
+    SharedTerminalSession, TerminalContextAction, TerminalCursorAnchor,
+    TerminalCwdShellIntegrationStatus, TerminalInputInterceptor, TerminalInputInterceptorResult,
+    TerminalPane, TerminalPaneEvent, TerminalSearchStatus, TerminalWorkingDirectorySource,
 };
 pub use background_cache::BackgroundImageRenderCache;
 pub use command_facts::{
