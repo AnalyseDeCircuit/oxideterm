@@ -1,0 +1,53 @@
+name: Remote Agent Binaries
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-agent-binaries-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build bundled Linux agents
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./agent -> target
+          key: remote-agent-binaries
+          cache-on-failure: false
+
+      - name: Build bundled remote agents
+        run: ./scripts/build-agent.sh
+
+      - name: Verify bundled artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-x86_64-linux-musl
+          test -x crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-aarch64-linux-musl
+          file crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*-linux-musl
+          sha256sum crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*-linux-musl
+
+      - name: Upload bundled agents
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxideterm-agent-linux-musl
+          path: |
+            crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-x86_64-linux-musl
+            crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-aarch64-linux-musl
+          if-no-files-found: error

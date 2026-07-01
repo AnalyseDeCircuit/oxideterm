@@ -22,6 +22,10 @@ for pair in "${TARGETS[@]}"; do
   cp "$ROOT_DIR/agent/target/$rust_target/release/oxideterm-agent" \
     "$OUT_DIR/oxideterm-agent-$artifact_suffix"
   chmod +x "$OUT_DIR/oxideterm-agent-$artifact_suffix"
+  if command -v llvm-strip >/dev/null 2>&1; then
+    # llvm-strip handles both bundled Linux agent targets from one host runner.
+    llvm-strip "$OUT_DIR/oxideterm-agent-$artifact_suffix"
+  fi
 done
 
 echo "Agent artifacts written to $OUT_DIR"

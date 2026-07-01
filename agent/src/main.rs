@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
-const COMPATIBILITY_VERSION: u32 = 2;
+const COMPATIBILITY_VERSION: u32 = 3;
 const ERR_METHOD_NOT_FOUND: i32 = -32601;
 const ERR_INVALID_PARAMS: i32 = -32602;
 const ERR_INTERNAL: i32 = -32603;
@@ -226,6 +226,12 @@ struct RenameParams {
 }
 
 #[derive(Debug, Deserialize)]
+struct CopyParams {
+    source_path: String,
+    target_path: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChmodParams {
     path: String,
     mode: String,
@@ -308,6 +314,10 @@ fn dispatch(method: &str, params: Value) -> Result<Value, RpcError> {
         }
         "fs/rename" => {
             rename(from_params(params)?)?;
+            Ok(json!({}))
+        }
+        "fs/copy" => {
+            copy_path(from_params(params)?)?;
             Ok(json!({}))
         }
         "fs/chmod" => {
@@ -471,6 +481,43 @@ fn rename(params: RenameParams) -> Result<(), RpcError> {
     let old_path = normalize_path(&params.old_path);
     let new_path = normalize_path(&params.new_path);
     fs::rename(&old_path, &new_path).map_err(|error| map_io_error(error, &old_path))
+}
+
+fn copy_path(params: CopyParams) -> Result<(), RpcError> {
+    let source_path = normalize_path(&params.source_path);
+    let target_path = normalize_path(&params.target_path);
+    copy_path_recursive(&source_path, &target_path)
+}
+
+fn copy_path_recursive(source_path: &Path, target_path: &Path) -> Result<(), RpcError> {
+    let metadata =
+        fs::symlink_metadata(source_path).map_err(|error| map_io_error(error, source_path))?;
+    if target_path.exists() {
+        return Err(rpc_error(
+            ERR_ALREADY_EXISTS,
+            format!("Target already exists: {}", target_path.display()),
+        ));
+    }
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        if target_path.starts_with(source_path) {
+            return Err(rpc_error(
+                ERR_INVALID_PARAMS,
+                "Cannot copy a directory into itself",
+            ));
+        }
+        fs::create_dir(target_path).map_err(|error| map_io_error(error, target_path))?;
+        for entry in fs::read_dir(source_path).map_err(|error| map_io_error(error, source_path))? {
+            let entry = entry.map_err(|error| map_io_error(error, source_path))?;
+            let name = entry.file_name();
+            copy_path_recursive(&entry.path(), &target_path.join(name))?;
+        }
+    } else {
+        if let Some(parent) = target_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| map_io_error(error, parent))?;
+        }
+        fs::copy(source_path, target_path).map_err(|error| map_io_error(error, source_path))?;
+    }
+    Ok(())
 }
 
 fn chmod(params: ChmodParams) -> Result<(), RpcError> {
