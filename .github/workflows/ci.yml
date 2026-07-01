@@ -29,7 +29,7 @@ jobs:
     name: Frontend (TypeScript + i18n)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -56,7 +56,7 @@ jobs:
     name: Rust (check + fmt)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -114,7 +114,7 @@ jobs:
     name: License & dependency audit (cargo deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: cargo deny (src-tauri)
         uses: EmbarkStudios/cargo-deny-action@v2
