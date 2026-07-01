@@ -2,6 +2,11 @@ name: Remote Agent Binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Git ref to build agent binaries from, for example experiment/rust-native-v2'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -17,6 +22,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Keep this workflow on the default branch while building the requested source branch.
+          ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
