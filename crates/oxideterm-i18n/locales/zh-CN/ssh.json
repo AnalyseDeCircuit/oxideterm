@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "新建连接",
-      "subtitle": "输入新 SSH 连接的详细信息。",
+      "subtitle": "配置一条 SSH 连接，可用于终端、SFTP、端口转发和远程文件编辑。",
       "name": "名称（可选）",
       "name_placeholder": "我的服务器",
       "host": "目标主机 *",

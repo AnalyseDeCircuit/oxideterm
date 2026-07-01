@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "새 연결",
-      "subtitle": "새 SSH 연결 세부 정보를 입력하세요.",
+      "subtitle": "터미널, SFTP, 포트 포워딩, 원격 파일 편집에 사용할 SSH 프로필을 설정합니다.",
       "name": "이름 (선택 사항)",
       "name_placeholder": "내 서버",
       "host": "대상 호스트 *",

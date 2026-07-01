@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "Nuova connessione",
-      "subtitle": "Inserisci i dettagli per una nuova connessione SSH.",
+      "subtitle": "Configura un profilo SSH per terminali, SFTP, inoltro porte e modifica di file remoti.",
       "name": "Nome (opzionale)",
       "name_placeholder": "Mio server",
       "host": "Host di destinazione *",

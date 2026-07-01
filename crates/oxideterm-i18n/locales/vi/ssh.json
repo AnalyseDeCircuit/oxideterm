@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "Kết nối mới",
-      "subtitle": "Nhập chi tiết cho kết nối SSH mới.",
+      "subtitle": "Cấu hình một hồ sơ SSH cho terminal, SFTP, chuyển tiếp cổng và chỉnh sửa tệp từ xa.",
       "name": "Tên (tùy chọn)",
       "name_placeholder": "Máy chủ của tôi",
       "host": "Máy chủ đích *",

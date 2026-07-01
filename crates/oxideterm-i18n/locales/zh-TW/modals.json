@@ -294,7 +294,7 @@
     },
     "new_connection": {
       "title": "新增連線",
-      "description": "輸入您新 SSH 連線的詳細資訊。",
+      "description": "設定一條 SSH 連線，可用於終端機、SFTP、連接埠轉送與遠端檔案編輯。",
       "twofa_error": "2FA 錯誤：{{error}}",
       "name": "名稱（選填）",
       "name_placeholder": "我的伺服器",

@@ -23,6 +23,70 @@ fn word_selection_ignores_separator_cells() {
 }
 
 #[test]
+fn word_selection_splits_shell_control_operators() {
+    let snapshot = selection_snapshot("first&&second");
+    let first = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 1 })
+        .expect("first token selection");
+    let second = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 8 })
+        .expect("second token selection");
+
+    assert_eq!(
+        first.normalized(),
+        (
+            TerminalGridPoint { line: 0, col: 0 },
+            TerminalGridPoint { line: 0, col: 4 }
+        )
+    );
+    assert_eq!(
+        second.normalized(),
+        (
+            TerminalGridPoint { line: 0, col: 7 },
+            TerminalGridPoint { line: 0, col: 12 }
+        )
+    );
+    assert!(word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 5 }).is_none());
+}
+
+#[test]
+fn word_selection_keeps_url_but_trims_trailing_punctuation() {
+    let snapshot = selection_snapshot("open https://example.com/docs).");
+    let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 13 })
+        .expect("url selection");
+
+    assert_eq!(
+        selection.normalized(),
+        (
+            TerminalGridPoint { line: 0, col: 5 },
+            TerminalGridPoint { line: 0, col: 28 }
+        )
+    );
+}
+
+#[test]
+fn word_selection_keeps_variable_and_flag_values() {
+    let snapshot = selection_snapshot("echo $HOME --color=always");
+    let variable = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 7 })
+        .expect("variable selection");
+    let flag = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 15 })
+        .expect("flag selection");
+
+    assert_eq!(
+        variable.normalized(),
+        (
+            TerminalGridPoint { line: 0, col: 5 },
+            TerminalGridPoint { line: 0, col: 9 }
+        )
+    );
+    assert_eq!(
+        flag.normalized(),
+        (
+            TerminalGridPoint { line: 0, col: 11 },
+            TerminalGridPoint { line: 0, col: 24 }
+        )
+    );
+}
+
+#[test]
 fn triple_click_line_selection_selects_trimmed_visual_line() {
     let snapshot = selection_snapshot("pwd   ");
     let selection = line_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 1 })

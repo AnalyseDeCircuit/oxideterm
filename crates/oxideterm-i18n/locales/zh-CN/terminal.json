@@ -52,6 +52,8 @@
       "reconnect_transport": "重新连接",
       "send_to_ai": "发送到 OxideSens",
       "fill_command_bar": "填入命令栏",
+      "insert_selection_into_command": "在此插入选区",
+      "replace_command_with_selection": "用选区替换当前命令",
       "find": "查找...",
       "select_command": "选择命令",
       "previous_command": "上一个命令",

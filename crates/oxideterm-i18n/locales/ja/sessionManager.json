@@ -86,6 +86,7 @@
     "edit_properties": {
       "title": "接続を編集",
       "description": "接続のプロパティを変更します。",
+      "save_and_reconnect": "保存して再接続",
       "duplicate_title": "接続を複製",
       "duplicate_description": "この接続をテンプレートとして使用し、新しいホストとして保存します。",
       "name": "名前",

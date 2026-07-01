@@ -1,9 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>Client SSH avec IA pour serveurs distants — Application native 100% Rust</strong>
+  <strong>Espace de travail d’exploitation natif avec IA pour serveurs distants — Application native 100% Rust</strong>
   <br>
-  Terminaux SSH et Telnet, SFTP, redirection de ports, consoles série et édition légère dans un espace de travail natif.
+  Terminaux SSH, Telnet, série, RDP/VNC, SFTP, redirection de ports, Raw TCP/UDP et édition légère dans un espace de travail natif.
   <br>
   Rendu GPU. Gratuit. Aucun compte requis.
   <br>
@@ -41,7 +41,7 @@
 
 ## Ce que vous pouvez faire
 
-- Gérer des terminaux SSH et Telnet, SFTP, redirections de ports, consoles série, shells locaux et édition légère dans un espace de travail natif
+- Gérer SSH, Telnet, série, RDP/VNC, SFTP, redirections de ports, Raw TCP/UDP, shells locaux et édition légère dans un espace de travail natif
 - Continuer le travail distant malgré les coupures réseau grâce à la reconnexion Grace Period
 - Demander à OxideSens AI d’inspecter les sessions actives et d’exécuter des actions approuvées dans l’espace de travail via votre propre fournisseur IA
 
@@ -51,16 +51,16 @@
 
 | Si vous tenez à... | OxideTerm Native vous donne... |
 |---|---|
-| Un nœud distant, plusieurs outils | Terminal, SFTP, redirection de ports, trzsz, IDE natif, supervision et OxideSens AI restent attachés au même espace de travail SSH |
+| Un nœud distant, plusieurs outils | Terminal, SFTP, redirection de ports, RDP/VNC, Raw TCP/UDP, trzsz, IDE natif, supervision et OxideSens AI restent attachés au même espace de travail |
 | Shell natif sans WebView | GPUI dessine l’interface de bureau directement sur une surface GPU, sans DOM, CSS, JavaScript, Chromium ni runtime WebKit |
-| Flux SSH locaux d’abord | SSH, Telnet, SFTP, redirection, shell local, terminaux série et configuration fonctionnent sans inscription |
+| Flux d’exploitation locaux d’abord | SSH, Telnet, SFTP, redirection, RDP/VNC, Raw TCP/UDP, shell local, terminaux série et configuration fonctionnent sans inscription |
 | OxideSens AI avec BYOK plutôt que crédits de plateforme | OxideSens utilise votre point d’accès OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible avec MCP, RAG et actions approuvées dans l’espace de travail |
 | Reconnexion stable | Grace Period sonde l’ancienne connexion pendant 30 s avant de la remplacer, afin que les TUI survivent aux microcoupures |
 | SSH pur Rust et sécurité des identifiants | `russh` + `ring`, sans OpenSSL/libssh2 ; mots de passe et clés API restent dans le trousseau OS, `.oxide` utilise ChaCha20-Poly1305 + Argon2id |
 
 ## Ce que c'est / ce que ce n'est pas
 
-OxideTerm Native se concentre sur un **espace de travail IA local d’abord pour serveurs distants**, reconstruit comme application de bureau GPUI en Rust pur. Il s’adresse aux utilisateurs qui veulent garder terminaux, fichiers, ports, transferts, édition légère, consoles série et OxideSens AI autour de leurs propres machines et nœuds distants.
+OxideTerm Native se concentre sur un **espace de travail IA local d’abord pour serveurs distants**, reconstruit comme application de bureau GPUI en Rust pur. Il s’adresse aux utilisateurs qui veulent garder terminaux, bureaux distants, sockets bruts, fichiers, ports, transferts, édition légère, consoles série et OxideSens AI autour de leurs propres machines et nœuds distants.
 
 Ce n'est pas une plateforme d’agents hébergée dans le cloud. Ce n'est pas non plus Electron, Tauri ou un terminal web : pas de Chromium, pas de WebView, pas de JavaScript, pas de CSS.
 
@@ -99,17 +99,19 @@ L’interface native suit le même modèle d’espace de travail OxideTerm et le
 
 | Catégorie | Fonctionnalités |
 |---|---|
-| Terminal | PTY local, SSH, Telnet, terminaux série locaux, panneaux divisés, shell integration, marques de commande, asciicast, trzsz, graphiques Sixel/Kitty, politique de rendu |
+| Terminal | PTY local, SSH, Telnet, terminaux Raw TCP/UDP, terminaux série locaux, panneaux divisés, shell integration, marques de commande, asciicast, trzsz, graphiques Sixel/Kitty, politique de rendu |
 | SSH & Auth | Pool de connexions, ProxyJump illimité, Grace Period reconnect, TOFU host-key, SSH Agent redirection, mot de passe/clé/certificat/keyboard-interactive |
 | SFTP / IDE | Navigateur double panneau, file de transferts, aperçu, favoris, écritures atomiques, arbre distant, éditeur multi-onglets, résolution de conflits |
 | Forwarding | Local, Remote, Dynamic SOCKS5, règles sauvegardées, restauration après reconnexion, rapport de mort, expiration d’inactivité |
+| Bureau distant | Onglets RDP et VNC intégrés, contrôles de reconnexion, taille adaptée au viewport, clavier, souris, presse-papiers et curseur |
+| Raw TCP/UDP | Terminaux Raw TCP et Raw UDP pour déboguer services ponctuels, protocoles d’appareils et datagrammes |
 | IA | OxideSens avec OpenAI, Anthropic, Gemini, Ollama/compatible, MCP, RAG et approbation de commandes |
 | Cloud Sync / `.oxide` | push/pull/apply/resolve, S3/WebDAV/Git, sauvegardes rollback, import/export chiffré |
 | Plugins / CLI | Sandbox WASM, API hôte native, réglages par plugin ; CLI pour settings, connections, redirections, plugins, secrets, cloud-sync, backup, report |
 
 ## Architecture
 
-OxideTerm Native retire le pont WebView et garde terminal, SSH, Telnet, SFTP, redirection, IDE, IA, plugins et CLI dans une architecture Rust native. Les détails complets sont conservés ci-dessous.
+OxideTerm Native retire le pont WebView et garde terminal, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, redirection, IDE, IA, plugins et CLI dans une architecture Rust native. Les détails complets sont conservés ci-dessous.
 
 <details>
 <summary><strong>Architecture, internes SSH, shell GPUI, reconnexion, IA, plugins et plus</strong></summary>
@@ -175,7 +177,7 @@ OxideSens reste BYOK d’abord, avec construction du contexte dans le processus 
 
 L’UI est dessinée directement avec GPUI, sans pipeline DOM/CSS/JavaScript :
 
-- 17 types d’onglets espace de travail : terminaux locaux, SSH et Telnet, SFTP, IDE, Forwards, Settings, Plugin, Topology, etc.
+- Types d’onglets de l’espace de travail : terminaux locaux, SSH, Telnet, série, RDP, VNC et Raw TCP/UDP, SFTP, IDE, Forwards, Settings, plugins, Topology, etc.
 - Arbre binaire de panes avec séparateurs déplaçables, jusqu’à quatre panes par onglet terminal
 - Command palette, raccourcis globaux et sidebars construits avec des primitives GPUI
 - Immediate-mode rendering réagit à l’état Rust sans round-trip de sérialisation
@@ -272,6 +274,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] Flux de terminal dans le processus sans WebSocket
 - [x] SFTP, redirection, IDE, IA, synchronisation cloud, plugins, CLI
 - [x] Terminaux série locaux et Telnet
+- [x] Bureau distant RDP/VNC et terminaux Raw TCP/UDP
 - [x] ProxyCommand complet
 - [ ] Audit logging
 

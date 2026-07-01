@@ -488,6 +488,7 @@ impl WorkspaceApp {
             new_connection_form: None,
             drill_down_parent_node_id: None,
             editing_saved_connection_id: None,
+            editing_saved_connection_connect_after_save_node_id: None,
             editing_raw_tcp_profile_id: None,
             editing_raw_udp_profile_id: None,
             duplicating_saved_connection_id: None,
@@ -1047,6 +1048,7 @@ impl WorkspaceApp {
             copy_on_select: terminal.copy_on_select,
             middle_click_paste: terminal.middle_click_paste,
             selection_requires_shift: terminal.selection_requires_shift,
+            free_type_cursor_positioning: terminal.free_type_cursor_positioning,
             bidi_enabled: terminal.unicode.bidi_enabled,
             current_directory_awareness_enabled: terminal
                 .command_bar
@@ -1074,6 +1076,12 @@ impl WorkspaceApp {
                 reconnect_transport: self.i18n.t("terminal.command_selection.reconnect_transport"),
                 send_to_ai: self.i18n.t("terminal.command_selection.send_to_ai"),
                 fill_command_bar: self.i18n.t("terminal.command_selection.fill_command_bar"),
+                insert_selection_into_command: self
+                    .i18n
+                    .t("terminal.command_selection.insert_selection_into_command"),
+                replace_command_with_selection: self
+                    .i18n
+                    .t("terminal.command_selection.replace_command_with_selection"),
                 find: self.i18n.t("terminal.command_selection.find"),
                 select_command: self.i18n.t("terminal.command_selection.select_command"),
                 previous_command: self.i18n.t("terminal.command_selection.previous_command"),

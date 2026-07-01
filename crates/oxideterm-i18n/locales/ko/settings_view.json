@@ -192,6 +192,8 @@
       "smart_copy_hint": "Windows와 Linux에서는 Ctrl+C로 현재 선택 영역을 복사하고, 선택된 내용이 없을 때만 SIGINT를 보냅니다",
       "selection_requires_shift": "텍스트 선택 시 Shift 필요",
       "selection_requires_shift_hint": "활성화하면 일반 드래그는 터미널 상호작용을 유지하고, Shift + 드래그로만 텍스트 선택이 시작됩니다",
+      "free_type_cursor_positioning": "자유 입력 커서 위치 지정",
+      "free_type_cursor_positioning_hint": "활성화하면 현재 명령 입력 영역을 클릭해 원격 커서를 이동합니다. 전체 화면 및 마우스 추적 앱은 자체 마우스 처리를 유지합니다",
       "in_band_transfer": {
         "title": "인밴드 파일 전송",
         "enabled": "trzsz 전송 활성화",

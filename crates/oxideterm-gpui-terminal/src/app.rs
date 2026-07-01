@@ -154,6 +154,7 @@ pub struct TerminalPane {
     hovered_link: Option<TerminalLinkRange>,
     hovered_command_mark_id: Option<String>,
     selecting: bool,
+    free_type_drag: Option<FreeTypeDragState>,
     last_mouse_report_point: Option<TerminalPoint>,
     title: SharedString,
     cwd: Option<String>,
@@ -206,11 +207,20 @@ pub struct TerminalPane {
 pub(crate) struct TerminalContextMenu {
     pub x: f32,
     pub y: f32,
+    pub target: TerminalPoint,
     pub has_selection: bool,
     pub reference_line: usize,
     pub command_mark_id: Option<String>,
     pub has_previous_command: bool,
     pub has_next_command: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FreeTypeDragState {
+    pub start_position: Point<Pixels>,
+    pub text: String,
+    pub replace_current_command: bool,
+    pub active: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -492,6 +502,7 @@ impl TerminalPane {
             hovered_link: None,
             hovered_command_mark_id: None,
             selecting: false,
+            free_type_drag: None,
             last_mouse_report_point: None,
             title: SharedString::from("OxideTerm"),
             cwd: None,
@@ -989,6 +1000,8 @@ impl TerminalPane {
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
             return;
         };
+        let mode = self.terminal.lock().mode();
+        self.delete_free_type_selection_if_active(mode, cx);
         let now = Instant::now();
         // Pasted terminal input can include the sudo command while the later
         // prompt is a bare `Password:`. Feed it through the privilege tracker
@@ -1549,17 +1562,6 @@ impl TerminalPane {
         }
     }
 
-    fn send_user_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        if !self.terminal_accepts_input() {
-            return;
-        }
-        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
-            return;
-        };
-        self.observe_user_input("text", &bytes, cx);
-        self.send_protocol_bytes(&bytes, cx);
-    }
-
     fn apply_plugin_input_interceptor(&self, bytes: &[u8]) -> Option<Vec<u8>> {
         let Some(interceptor) = &self.plugin_input_interceptor else {
             return Some(bytes.to_vec());
@@ -1642,7 +1644,16 @@ impl TerminalPane {
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.marked_text = None;
-        self.send_user_text(text, cx);
+        if !self.terminal_accepts_input() {
+            return;
+        }
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+            return;
+        };
+        let mode = self.terminal.lock().mode();
+        self.delete_free_type_selection_if_active(mode, cx);
+        self.observe_user_input("text", &bytes, cx);
+        self.send_protocol_bytes(&bytes, cx);
     }
 
     fn set_marked_text(&mut self, text: &str, cx: &mut Context<Self>) {

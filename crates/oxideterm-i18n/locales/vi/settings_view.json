@@ -192,6 +192,8 @@
       "smart_copy_hint": "Trên Windows và Linux, Ctrl+C sẽ sao chép vùng chọn hiện tại và chỉ gửi SIGINT khi không có gì được chọn",
       "selection_requires_shift": "Yêu cầu giữ Shift để chọn văn bản",
       "selection_requires_shift_hint": "Khi bật, thao tác kéo thông thường vẫn giữ nguyên tương tác với terminal và chỉ Shift + kéo mới bắt đầu chọn văn bản",
+      "free_type_cursor_positioning": "Định vị con trỏ nhập tự do",
+      "free_type_cursor_positioning_hint": "Di chuyển con trỏ từ xa bằng cách nhấp trong vùng nhập lệnh đang hoạt động; ứng dụng toàn màn hình và theo dõi chuột vẫn giữ cách xử lý chuột riêng",
       "in_band_transfer": {
         "title": "Truyền tệp trong băng",
         "enabled": "Bật truyền trzsz",

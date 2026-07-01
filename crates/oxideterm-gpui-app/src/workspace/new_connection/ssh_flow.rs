@@ -169,6 +169,7 @@ impl WorkspaceApp {
         });
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -259,6 +260,7 @@ impl WorkspaceApp {
         ));
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = Some(id.to_string());
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -293,6 +295,7 @@ impl WorkspaceApp {
         ));
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = Some(id.to_string());
         self.duplicating_saved_connection_id = None;
@@ -337,6 +340,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -473,6 +477,7 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -532,6 +537,7 @@ impl WorkspaceApp {
         self.new_connection_form = None;
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -1522,6 +1528,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -1546,6 +1553,54 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
+        self.editing_saved_connection_connect_after_save_node_id = None;
+        self.editing_raw_tcp_profile_id = None;
+        self.editing_raw_udp_profile_id = None;
+        self.duplicating_saved_connection_id = None;
+        self.saved_connection_prompt_action = None;
+        self.close_new_connection_select();
+        self.new_connection_caret_visible = true;
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_saved_connection_reconnect_editor(
+        &mut self,
+        node_id: NodeId,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_saved_connection_editor(id, None, window, cx);
+        if self.editing_saved_connection_id.as_deref() == Some(id) {
+            // This marker is consumed after a successful save so normal
+            // connection edits keep their existing save-only behavior.
+            self.editing_saved_connection_connect_after_save_node_id = Some(node_id);
+        }
+    }
+
+    pub(in crate::workspace) fn open_runtime_node_reconnect_editor(
+        &mut self,
+        node_id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+            return;
+        };
+        self.prepare_modal_interaction_boundary();
+        let mut form = form_from_runtime_config(
+            &node.config,
+            Some(&node.title),
+            self.i18n.t("ssh.form.ungrouped"),
+        );
+        form.agent_available = detect_ssh_agent_available();
+        form.save_connection = false;
+        self.new_connection_form = Some(form);
+        self.drill_down_parent_node_id = None;
+        self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -1627,16 +1682,47 @@ impl WorkspaceApp {
                 match self.connection_store.upsert(request) {
                     Ok(_) => {
                         self.sync_saved_connection_node_title(&id);
+                        let connect_after_save_node_id = self
+                            .editing_saved_connection_connect_after_save_node_id
+                            .take();
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
                         self.editing_raw_tcp_profile_id = None;
                         self.editing_raw_udp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
-                        self.session_manager.status =
-                            Some(self.i18n.t("sessionManager.edit_properties.save"));
                         self.queue_cloud_sync_dirty_refresh(cx);
-                        self.focus_active_pane(window, cx);
+                        if let Some(node_id) = connect_after_save_node_id {
+                            if let Some(conn) = self.connection_store.get(&id).cloned()
+                                && let Some(config) = ssh_config_from_saved_connection(
+                                    &self.connection_store,
+                                    self.settings_store.settings(),
+                                    &conn,
+                                )
+                            {
+                                let title = conn.name.clone();
+                                // Drop the stale failed runtime node before
+                                // materializing the edited connection again.
+                                self.remove_inactive_session_tree_node(&node_id, window, cx);
+                                self.start_saved_connection_flow(id, config, title, window, cx);
+                            } else {
+                                self.open_saved_connection_prompt(
+                                    &id,
+                                    SavedConnectionPromptAction::Connect,
+                                    Some(
+                                        self.i18n.t(
+                                            "sessionManager.edit_properties.password_placeholder",
+                                        ),
+                                    ),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        } else {
+                            self.session_manager.status =
+                                Some(self.i18n.t("sessionManager.edit_properties.save"));
+                            self.focus_active_pane(window, cx);
+                        }
                     }
                     Err(error) => {
                         if let Some(form) = self.new_connection_form.as_mut() {
@@ -1679,6 +1765,7 @@ impl WorkspaceApp {
                     Ok(_) => {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
+                        self.editing_saved_connection_connect_after_save_node_id = None;
                         self.editing_raw_tcp_profile_id = None;
                         self.editing_raw_udp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
@@ -2391,6 +2478,7 @@ impl WorkspaceApp {
                 if self.saved_connection_prompt_action.is_some() {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
+                    self.editing_saved_connection_connect_after_save_node_id = None;
                     self.duplicating_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
                     self.close_new_connection_select();
@@ -2702,6 +2790,7 @@ impl WorkspaceApp {
                 if self.saved_connection_prompt_action.is_some() {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
+                    self.editing_saved_connection_connect_after_save_node_id = None;
                     self.duplicating_saved_connection_id = None;
                     self.saved_connection_prompt_action = None;
                     self.close_new_connection_select();

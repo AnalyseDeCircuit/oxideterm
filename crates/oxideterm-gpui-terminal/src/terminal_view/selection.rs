@@ -86,7 +86,18 @@ pub(crate) fn word_selection_at_point(
     let row = snapshot.lines.get(point.row)?;
     let col = point.col.min(row.cells.len().saturating_sub(1));
     let cell = row.cells.get(col)?;
-    if !is_word_selection_char(cell.ch) {
+    if is_url_selection_char(cell.ch)
+        && let Some(selection) = url_selection_at_point(
+            snapshot,
+            TerminalPoint {
+                row: point.row,
+                col,
+            },
+        )
+    {
+        return Some(selection);
+    }
+    if !is_shell_token_selection_char(cell.ch) {
         return None;
     }
 
@@ -95,7 +106,7 @@ pub(crate) fn word_selection_at_point(
         col,
     };
     while let Some(previous) = previous_logical_cell(snapshot, start)
-        && is_word_selection_char(snapshot.lines[previous.row].cells[previous.col].ch)
+        && is_shell_token_selection_char(snapshot.lines[previous.row].cells[previous.col].ch)
     {
         start = previous;
     }
@@ -105,7 +116,7 @@ pub(crate) fn word_selection_at_point(
         col,
     };
     while let Some(next) = next_logical_cell(snapshot, end)
-        && is_word_selection_char(snapshot.lines[next.row].cells[next.col].ch)
+        && is_shell_token_selection_char(snapshot.lines[next.row].cells[next.col].ch)
     {
         end = next;
     }
@@ -115,6 +126,57 @@ pub(crate) fn word_selection_at_point(
         head: grid_point_for_viewport_point(snapshot, end)?,
         mode: TerminalSelectionMode::Semantic,
     })
+}
+
+fn url_selection_at_point(
+    snapshot: &TerminalSnapshot,
+    point: TerminalPoint,
+) -> Option<TerminalSelection> {
+    let mut start = point;
+    while let Some(previous) = previous_logical_cell(snapshot, start)
+        && is_url_selection_char(snapshot.lines[previous.row].cells[previous.col].ch)
+    {
+        start = previous;
+    }
+
+    let mut end = point;
+    while let Some(next) = next_logical_cell(snapshot, end)
+        && is_url_selection_char(snapshot.lines[next.row].cells[next.col].ch)
+    {
+        end = next;
+    }
+
+    let candidate = text_for_logical_range(snapshot, start, end)?;
+    if !candidate.contains("://") {
+        return None;
+    }
+
+    while end != start && is_trailing_url_punctuation(snapshot.lines[end.row].cells[end.col].ch) {
+        end = previous_logical_cell(snapshot, end)?;
+    }
+
+    Some(TerminalSelection {
+        anchor: grid_point_for_viewport_point(snapshot, start)?,
+        head: grid_point_for_viewport_point(snapshot, end)?,
+        mode: TerminalSelectionMode::Semantic,
+    })
+}
+
+fn text_for_logical_range(
+    snapshot: &TerminalSnapshot,
+    start: TerminalPoint,
+    end: TerminalPoint,
+) -> Option<String> {
+    let mut point = start;
+    let mut text = String::new();
+    loop {
+        text.push(snapshot.lines.get(point.row)?.cells.get(point.col)?.ch);
+        if point == end {
+            break;
+        }
+        point = next_logical_cell(snapshot, point)?;
+    }
+    Some(text)
 }
 
 pub(crate) fn previous_logical_cell(
@@ -298,10 +360,59 @@ pub(crate) fn cell_text(cell: &TerminalCell) -> String {
     text
 }
 
-pub(crate) fn is_word_selection_char(ch: char) -> bool {
+fn is_shell_token_selection_char(ch: char) -> bool {
     !ch.is_whitespace()
         && !matches!(
             ch,
-            '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';' | '|'
+            '"' | '\''
+                | '`'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | ','
+                | ';'
+                | '|'
+                | '&'
         )
+}
+
+fn is_url_selection_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+        || matches!(
+            ch,
+            ':' | '/'
+                | '?'
+                | '#'
+                | '['
+                | ']'
+                | '@'
+                | '!'
+                | '$'
+                | '&'
+                | '\''
+                | '('
+                | ')'
+                | '*'
+                | '+'
+                | ','
+                | ';'
+                | '='
+                | '-'
+                | '.'
+                | '_'
+                | '~'
+                | '%'
+        )
+}
+
+fn is_trailing_url_punctuation(ch: char) -> bool {
+    matches!(
+        ch,
+        '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '>'
+    )
 }

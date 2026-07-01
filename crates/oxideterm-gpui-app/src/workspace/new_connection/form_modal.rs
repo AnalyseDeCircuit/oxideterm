@@ -921,6 +921,13 @@ impl WorkspaceApp {
                                         == Some(SavedConnectionPromptAction::Connect)
                                     {
                                         self.i18n.t("ssh.form.connect")
+                                    } else if edit_properties_mode
+                                        && self
+                                            .editing_saved_connection_connect_after_save_node_id
+                                            .is_some()
+                                    {
+                                        self.i18n
+                                            .t("sessionManager.edit_properties.save_and_reconnect")
                                     } else if edit_properties_mode {
                                         self.i18n.t("sessionManager.edit_properties.save")
                                     } else {

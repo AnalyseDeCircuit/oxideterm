@@ -696,6 +696,8 @@
         "port_forwarding": "Port Forwarding",
         "disconnect": "Disconnect",
         "reconnect": "Reconnect",
+        "edit_and_reconnect": "Edit & Reconnect",
+        "remove_session": "Remove Session",
         "cancel_reconnect": "Cancel Reconnect",
         "drill_in": "Drill In (Next Hop)",
         "saved_next_hop": "Use Saved Next Hop...",

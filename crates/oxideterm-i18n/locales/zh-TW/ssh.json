@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "新增連線",
-      "subtitle": "輸入新的 SSH 連線詳細資料。",
+      "subtitle": "設定一條 SSH 連線，可用於終端機、SFTP、連接埠轉送與遠端檔案編輯。",
       "name": "名稱（選填）",
       "name_placeholder": "我的伺服器",
       "host": "目標主機 *",

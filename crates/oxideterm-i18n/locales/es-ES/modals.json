@@ -294,7 +294,7 @@
     },
     "new_connection": {
       "title": "Nueva conexión",
-      "description": "Introduce los detalles para una nueva conexión SSH.",
+      "description": "Configura un perfil SSH para terminales, SFTP, reenvío de puertos y edición de archivos remotos.",
       "twofa_error": "Error 2FA: {{error}}",
       "name": "Nombre (opcional)",
       "name_placeholder": "Mi servidor",

@@ -192,6 +192,8 @@
       "middle_click_paste_hint": "终端未处于鼠标跟踪模式时，使用中键粘贴当前剪贴板内容",
       "selection_requires_shift": "按住 Shift 才能选择文本",
       "selection_requires_shift_hint": "启用后，普通拖拽会优先保持终端交互；只有 Shift + 拖拽才会开始文本选择",
+      "free_type_cursor_positioning": "自由输入光标定位",
+      "free_type_cursor_positioning_hint": "启用后，可在当前命令输入区域单击移动远端光标；全屏和鼠标追踪程序仍保留自己的鼠标行为",
       "in_band_transfer": {
         "title": "带内文件传输",
         "enabled": "启用 trzsz 传输",

@@ -300,7 +300,7 @@
     },
     "new_connection": {
       "title": "新規接続",
-      "description": "新しいSSH接続の詳細を入力してください。",
+      "description": "ターミナル、SFTP、ポート転送、リモートファイル編集に使う SSH プロファイルを設定します。",
       "twofa_error": "2FAエラー: {{error}}",
       "name": "名前（オプション）",
       "name_placeholder": "マイサーバー",

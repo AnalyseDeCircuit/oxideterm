@@ -226,6 +226,11 @@ struct TopologyDragState {
     last_y: f32,
 }
 
+#[derive(Clone, Copy)]
+struct HostToolsTabScrollbarDragState {
+    grab_offset_x: f32,
+}
+
 #[derive(Clone)]
 struct TopologyNodeMenuState {
     node_id: Option<NodeId>,
@@ -655,6 +660,7 @@ pub(super) struct ConnectionMonitorState {
     host_package_list_state: ListState,
     host_package_list_cache: RefCell<VirtualListSignatureCache>,
     topology_transform: TopologyTransform,
+    tab_scrollbar_drag: Option<HostToolsTabScrollbarDragState>,
     topology_drag: Option<TopologyDragState>,
     topology_menu: Option<TopologyNodeMenuState>,
 }
@@ -846,6 +852,7 @@ impl ConnectionMonitorState {
             ),
             host_package_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             topology_transform: TopologyTransform::default(),
+            tab_scrollbar_drag: None,
             topology_drag: None,
             topology_menu: None,
         }

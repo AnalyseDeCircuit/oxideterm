@@ -300,7 +300,7 @@
     },
     "new_connection": {
       "title": "新建连接",
-      "description": "输入新 SSH 连接的详细信息。",
+      "description": "配置一条 SSH 连接，可用于终端、SFTP、端口转发和远程文件编辑。",
       "twofa_error": "2FA 错误: {{error}}",
       "name": "名称（可选）",
       "name_placeholder": "我的服务器",

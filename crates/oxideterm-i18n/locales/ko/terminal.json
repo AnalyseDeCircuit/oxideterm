@@ -16,6 +16,8 @@
       "reconnect_transport": "다시 연결",
       "send_to_ai": "OxideSens로 보내기",
       "fill_command_bar": "명령 표시줄 채우기",
+      "insert_selection_into_command": "선택 항목을 여기에 삽입",
+      "replace_command_with_selection": "선택 항목으로 명령 바꾸기",
       "find": "찾기...",
       "select_command": "명령 선택",
       "previous_command": "이전 명령",

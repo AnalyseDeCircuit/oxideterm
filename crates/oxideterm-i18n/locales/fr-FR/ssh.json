@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "Nouvelle connexion",
-      "subtitle": "Saisissez les détails de la nouvelle connexion SSH.",
+      "subtitle": "Configurez un profil SSH pour les terminaux, SFTP, les redirections de ports et l’édition de fichiers distants.",
       "name": "Nom (facultatif)",
       "name_placeholder": "Mon serveur",
       "host": "Hôte cible *",

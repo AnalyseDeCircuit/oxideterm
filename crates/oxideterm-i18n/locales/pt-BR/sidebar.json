@@ -695,6 +695,8 @@
         "sftp": "SFTP",
         "disconnect": "Desconectar",
         "reconnect": "Reconectar",
+        "edit_and_reconnect": "Editar e reconectar",
+        "remove_session": "Remover sessão",
         "cancel_reconnect": "Cancelar reconexão",
         "port_forwarding": "Encaminhamento de portas",
         "drill_in": "Navegar (próximo salto)",

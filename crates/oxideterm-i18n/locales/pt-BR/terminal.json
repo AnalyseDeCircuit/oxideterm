@@ -16,6 +16,8 @@
       "reconnect_transport": "Reconectar",
       "send_to_ai": "Enviar para OxideSens",
       "fill_command_bar": "Preencher barra de comandos",
+      "insert_selection_into_command": "Inserir seleção aqui",
+      "replace_command_with_selection": "Substituir comando pela seleção",
       "find": "Buscar...",
       "select_command": "Selecionar comando",
       "previous_command": "Comando anterior",

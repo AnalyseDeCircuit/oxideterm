@@ -29,7 +29,7 @@ const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 18.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 20.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
 
@@ -292,6 +292,16 @@ impl TerminalPane {
             .command_selection_labels
             .fill_command_bar
             .clone();
+        let insert_selection_label = self
+            .preferences
+            .command_selection_labels
+            .insert_selection_into_command
+            .clone();
+        let replace_command_label = self
+            .preferences
+            .command_selection_labels
+            .replace_command_with_selection
+            .clone();
         let reconnect_transport_label = self
             .preferences
             .command_selection_labels
@@ -327,6 +337,12 @@ impl TerminalPane {
         let next_reference_line = menu.reference_line;
         let select_command_mark_id = command_mark_id.clone();
         let copy_command_mark_id = command_mark_id.clone();
+        let free_type_insert_selection_available =
+            self.free_type_context_insert_selection_available(&menu);
+        let free_type_replace_command_available =
+            self.free_type_context_replace_command_available(&menu);
+        let insert_target = menu.target;
+        let replace_target = menu.target;
 
         let tokens = &self.theme.tokens;
         let popup = context_menu_event_boundary(
@@ -358,6 +374,32 @@ impl TerminalPane {
                     |this, _event, _window, cx| {
                         this.dismiss_terminal_context_menu(cx);
                         this.paste_from_clipboard(cx);
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    insert_selection_label,
+                    !free_type_insert_selection_available,
+                    move |this, _event, _window, cx| {
+                        this.dismiss_terminal_context_menu(cx);
+                        this.insert_selection_into_free_type_command_from_context_menu(
+                            insert_target,
+                            false,
+                            cx,
+                        );
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    replace_command_label,
+                    !free_type_replace_command_available,
+                    move |this, _event, _window, cx| {
+                        this.dismiss_terminal_context_menu(cx);
+                        this.insert_selection_into_free_type_command_from_context_menu(
+                            replace_target,
+                            true,
+                            cx,
+                        );
                     },
                     cx,
                 ))

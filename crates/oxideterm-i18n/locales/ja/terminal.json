@@ -16,6 +16,8 @@
       "reconnect_transport": "再接続",
       "send_to_ai": "OxideSensに送信",
       "fill_command_bar": "コマンドバーに入力",
+      "insert_selection_into_command": "選択範囲をここに挿入",
+      "replace_command_with_selection": "選択範囲でコマンドを置換",
       "find": "検索...",
       "select_command": "コマンドを選択",
       "previous_command": "前のコマンド",

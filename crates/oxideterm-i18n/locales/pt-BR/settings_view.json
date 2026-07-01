@@ -192,6 +192,8 @@
       "smart_copy_hint": "No Windows e Linux, Ctrl+C copia a seleção atual e só envia SIGINT quando nada estiver selecionado",
       "selection_requires_shift": "Exigir Shift para selecionar texto",
       "selection_requires_shift_hint": "Quando habilitado, o arrasto normal mantém a interação do terminal intacta e apenas Shift + arrastar inicia uma seleção de texto",
+      "free_type_cursor_positioning": "Posicionamento livre do cursor",
+      "free_type_cursor_positioning_hint": "Mover o cursor remoto clicando na área ativa de entrada de comandos; apps em tela cheia e com rastreamento de mouse mantêm seu próprio controle do mouse",
       "in_band_transfer": {
         "title": "Transferência de arquivos in-band",
         "enabled": "Habilitar transferência trzsz",

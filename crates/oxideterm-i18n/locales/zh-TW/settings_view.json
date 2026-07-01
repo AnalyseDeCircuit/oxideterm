@@ -192,6 +192,8 @@
       "smart_copy_hint": "在 Windows 和 Linux 上，Ctrl+C 會複製目前選取內容，只有在未選取任何內容時才送出 SIGINT",
       "selection_requires_shift": "按住 Shift 才能選取文字",
       "selection_requires_shift_hint": "啟用後，普通拖曳會優先保留終端互動；只有 Shift + 拖曳才會開始文字選取",
+      "free_type_cursor_positioning": "自由輸入游標定位",
+      "free_type_cursor_positioning_hint": "啟用後，可在目前命令輸入區域點擊移動遠端游標；全螢幕和滑鼠追蹤程式仍保留自己的滑鼠行為",
       "in_band_transfer": {
         "title": "帶內檔案傳輸",
         "enabled": "啟用 trzsz 傳輸",

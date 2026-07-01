@@ -695,6 +695,8 @@
         "sftp": "SFTP",
         "disconnect": "Ngắt kết nối",
         "reconnect": "Kết nối lại",
+        "edit_and_reconnect": "Sửa và kết nối lại",
+        "remove_session": "Xóa phiên",
         "cancel_reconnect": "Hủy kết nối lại",
         "port_forwarding": "Chuyển tiếp cổng",
         "drill_in": "Drill In (Bước tiếp)",

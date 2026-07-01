@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "Neue Verbindung",
-      "subtitle": "Details für eine neue SSH-Verbindung eingeben.",
+      "subtitle": "Konfigurieren Sie ein SSH-Profil für Terminals, SFTP, Portweiterleitungen und die Bearbeitung entfernter Dateien.",
       "name": "Name (optional)",
       "name_placeholder": "Mein Server",
       "host": "Zielhost *",

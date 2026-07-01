@@ -226,6 +226,8 @@ pub struct TerminalSettings {
     pub copy_on_select: bool,
     pub middle_click_paste: bool,
     pub selection_requires_shift: bool,
+    #[serde(default)]
+    pub free_type_cursor_positioning: bool,
     pub autosuggest: TerminalAutosuggestSettings,
     pub command_bar: TerminalCommandBarSettings,
     pub command_marks: TerminalCommandMarksSettings,
@@ -266,6 +268,7 @@ impl Default for TerminalSettings {
             copy_on_select: false,
             middle_click_paste: false,
             selection_requires_shift: false,
+            free_type_cursor_positioning: false,
             autosuggest: TerminalAutosuggestSettings::default(),
             command_bar: TerminalCommandBarSettings::default(),
             command_marks: TerminalCommandMarksSettings::default(),
@@ -296,6 +299,19 @@ mod tests {
         let settings: TerminalSettings = serde_json::from_value(value).unwrap();
 
         assert!(settings.smooth_scroll);
+    }
+
+    #[test]
+    fn terminal_settings_default_free_type_cursor_positioning_when_missing() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("freeTypeCursorPositioning");
+
+        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+
+        assert!(!settings.free_type_cursor_positioning);
     }
 
     #[test]

@@ -879,6 +879,7 @@ pub(crate) struct WorkspaceApp {
     new_connection_form: Option<NewConnectionForm>,
     drill_down_parent_node_id: Option<NodeId>,
     editing_saved_connection_id: Option<String>,
+    editing_saved_connection_connect_after_save_node_id: Option<NodeId>,
     editing_raw_tcp_profile_id: Option<String>,
     editing_raw_udp_profile_id: Option<String>,
     duplicating_saved_connection_id: Option<String>,

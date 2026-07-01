@@ -1,9 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>面向遠端伺服器、具備 AI 能力的 SSH 用戶端 —— 純 Rust 原生應用</strong>
+  <strong>面向遠端伺服器、具備 AI 能力的原生維運工作區 —— 純 Rust 原生應用</strong>
   <br>
-  SSH 與 Telnet 終端、SFTP、連接埠轉發、序列埠主控台和輕量編輯，集中在一個原生工作區。
+  SSH、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發、Raw TCP/UDP 和輕量編輯，集中在一個原生工作區。
   <br>
   GPU 直接渲染。免費，無需註冊。
   <br>
@@ -41,11 +41,11 @@
 
 ## OxideTerm Native 是什麼
 
-OxideTerm Native 是一個**純 Rust GPUI 桌面應用**——Termius 與 SecureCRT 的開源替代，用於透過 SSH 原生連接遠端伺服器。
+OxideTerm Native 是一個**純 Rust GPUI 桌面應用**——面向 SSH、檔案、連接埠轉發、Raw TCP/UDP 和遠端桌面工作流的開源維運工作區。
 
 **你可以做什麼：**
 
-- 在一個原生工作區裡管理 SSH 與 Telnet 終端、SFTP、連接埠轉發、序列埠主控台、本地 Shell 和輕量編輯
+- 在一個原生工作區裡管理 SSH、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發、Raw TCP/UDP、本地 Shell 和輕量編輯
 - 透過寬限期重新連線，讓遠端工作更能扛住網路抖動
 - 讓 OxideSens AI 透過你自己的 AI 提供商檢查即時會話，並執行經過批准的工作區操作
 
@@ -57,9 +57,9 @@ OxideTerm Native 是一個**純 Rust GPUI 桌面應用**——Termius 與 Secure
 
 | 如果你在意... | OxideTerm Native 提供... |
 |---|---|
-| 一個遠端節點，多種工具 | 終端、SFTP、連接埠轉發、trzsz、原生 IDE、監控和 OxideSens AI 都掛在同一個 SSH 工作區上 |
+| 一個遠端節點，多種工具 | 終端、SFTP、連接埠轉發、RDP/VNC、Raw TCP/UDP、trzsz、原生 IDE、監控和 OxideSens AI 都掛在同一個工作區上 |
 | 零 WebView 原生外殼 | GPUI 直接在 GPU 表面繪製桌面介面 — 沒有 DOM、CSS、JavaScript、Chromium 或 WebKit 執行時 |
-| 本地優先 SSH 工作流 | SSH、Telnet、SFTP、轉發、本地 Shell、序列埠終端和配置管理都無需註冊 |
+| 本地優先維運工作流 | SSH、Telnet、SFTP、轉發、RDP/VNC、Raw TCP/UDP、本地 Shell、序列埠終端和配置管理都無需註冊 |
 | BYOK OxideSens AI，而不是平台點數 | OxideSens 使用你自己的 OpenAI/Anthropic/Gemini/Ollama/OpenAI 相容端點，支援 MCP、RAG 和經過批准的工作區操作 |
 | 重連穩定性 | 寬限期會先探測舊連線 30 秒再替換它，短暫網路中斷時 TUI 應用仍有機會存活 |
 | 純 Rust SSH 與憑證安全 | `russh` + `ring`，無 OpenSSL/libssh2；密碼和 API 金鑰保存在系統鑰匙圈，`.oxide` 使用 ChaCha20-Poly1305 + Argon2id |
@@ -99,17 +99,19 @@ OxideTerm Native 是一個**純 Rust GPUI 桌面應用**——Termius 與 Secure
 
 | 分類 | 功能 |
 |---|---|
-| 終端 | 本地 PTY、SSH、Telnet、本地序列埠終端、分屏、shell integration、命令標記、asciicast 錄製/回放、trzsz、Sixel/Kitty graphics、渲染策略 |
+| 終端 | 本地 PTY、SSH、Telnet、Raw TCP/UDP 終端、本地序列埠終端、分屏、shell integration、命令標記、asciicast 錄製/回放、trzsz、Sixel/Kitty graphics、渲染策略 |
 | SSH 與認證 | 連線池、無限 ProxyJump、Grace Period 重連、Host-key TOFU、SSH Agent 轉發、密碼/金鑰/憑證/鍵盤互動認證 |
 | SFTP / IDE | 雙欄瀏覽器、傳輸佇列、預覽、書籤、原子寫入、遠端檔案樹、多分頁編輯、衝突處理 |
 | 轉發 | Local、Remote、Dynamic SOCKS5，保存規則，重連恢復，死亡回報，閒置逾時 |
+| 遠端桌面 | 內建 RDP 與 VNC 分頁，支援重連控制、視口尺寸適配、鍵盤、滑鼠、剪貼簿和游標基礎能力 |
+| Raw TCP/UDP | Raw TCP 與 Raw UDP 終端，用於臨時服務、設備協定和資料報除錯 |
 | AI | OxideSens 支援 OpenAI、Anthropic、Gemini、Ollama/相容端點、MCP、RAG、命令審批 |
 | 雲同步與 `.oxide` | push/pull/apply/resolve，S3/WebDAV/Git，回滾備份；加密匯入匯出連線、轉發、設定、快捷命令和外掛設定 |
 | 外掛與 CLI | WASM 沙箱、原生宿主 API、外掛設定；CLI 含 settings、connections、forwards、quick-commands、plugins、密鑰、cloud-sync、backup、report 等命令 |
 
 ## 內部實作
 
-OxideTerm Native 移除了 WebView 橋接，並把終端、SSH、Telnet、SFTP、轉發、IDE、AI、插件和 CLI 保持在一套 Rust 原生架構中。完整實作細節保留在下方，方便需要工程細節的讀者展開查看。
+OxideTerm Native 移除了 WebView 橋接，並把終端、SSH、Telnet、RDP、VNC、Raw TCP/UDP、SFTP、轉發、IDE、AI、插件和 CLI 保持在一套 Rust 原生架構中。完整實作細節保留在下方，方便需要工程細節的讀者展開查看。
 
 <details>
 <summary><strong>架構、SSH 內部、GPUI 外殼、重連、AI、插件與更多細節</strong></summary>
@@ -175,7 +177,7 @@ OxideSens 仍然是 BYOK 優先，native 版本把上下文構建放在程序內
 
 整個 UI 使用 GPUI 直接繪製，沒有 DOM/CSS/JavaScript rendering pipeline：
 
-- 17 類工作區分頁：本地終端、SSH 終端、Telnet 終端、SFTP、Forwards、Settings、Plugin、Topology 等
+- 工作區分頁類型：本地終端、SSH、Telnet、序列埠、RDP、VNC、Raw TCP/UDP、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
 - Binary pane tree 與可拖曳 divider，每個 terminal tab 最多 4 個 pane
 - Command palette、global key bindings 與 sidebar 都使用 GPUI primitive
 - Immediate-mode rendering 直接回應 Rust state 變化，無 serialization round-trip
@@ -272,6 +274,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] 無 WebSocket 的進程內終端資料流
 - [x] SFTP、轉發、IDE、AI、雲同步、外掛、CLI
 - [x] 本地序列埠與 Telnet 終端
+- [x] RDP/VNC 遠端桌面與 Raw TCP/UDP 終端
 - [x] 完整 ProxyCommand
 - [ ] 審計日誌
 

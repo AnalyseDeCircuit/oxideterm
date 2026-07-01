@@ -2,7 +2,7 @@
   "ssh": {
     "form": {
       "title": "New Connection",
-      "subtitle": "Enter details for a new SSH connection.",
+      "subtitle": "Configure one SSH profile for terminals, SFTP, port forwarding, and remote file editing.",
       "name": "Name (optional)",
       "name_placeholder": "My Server",
       "host": "Target Host *",

@@ -12,6 +12,16 @@ const HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET: f32 = 12.0;
 const HOST_TOOLS_TAB_SCROLLBAR_MIN_THUMB_WIDTH: f32 = 32.0;
 const HOST_TOOLS_TAB_SCROLLBAR_RADIUS: f32 = 2.0;
 const HOST_TOOLS_TAB_SCROLLBAR_ALPHA: u32 = 0x66;
+const HOST_TOOLS_TAB_SCROLLBAR_DRAG_HEIGHT: f32 = 12.0;
+
+#[derive(Clone, Copy)]
+struct HostToolsTabScrollbarGeometry {
+    viewport_left: f32,
+    track_width: f32,
+    thumb_width: f32,
+    thumb_left: f32,
+    max_scroll: f32,
+}
 
 impl WorkspaceApp {
     pub(super) fn render_host_tools_context_panel(
@@ -180,48 +190,52 @@ impl WorkspaceApp {
                 true,
                 cx,
             ))
-            .child(self.render_host_tools_tab_scrollbar());
+            .child(self.render_host_tools_tab_scrollbar(cx));
 
         tabs.into_any_element()
     }
 
-    fn render_host_tools_tab_scrollbar(&self) -> AnyElement {
-        let viewport_width = f32::from(self.host_tools_tab_scroll_handle.bounds().size.width);
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
-        let track_width = (viewport_width - HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET * 2.0)
-            .max(0.0);
-        if viewport_width <= 1.0 || max_scroll <= 1.0 || track_width <= 1.0 {
+    fn render_host_tools_tab_scrollbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
             return div().into_any_element();
-        }
-
-        let content_width = viewport_width + max_scroll;
-        let min_thumb_width = HOST_TOOLS_TAB_SCROLLBAR_MIN_THUMB_WIDTH.min(track_width);
-        let thumb_width = (viewport_width / content_width * track_width)
-            .max(min_thumb_width)
-            .min(track_width);
-        let current_scroll_x =
-            f32::from(-self.host_tools_tab_scroll_handle.offset().x).clamp(0.0, max_scroll);
-        let thumb_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET
-            + (current_scroll_x / max_scroll * (track_width - thumb_width).max(0.0));
+        };
         // The thumb is painted inside the scrollable strip, so compensate for
-        // the strip's content offset to keep the visible thumb aligned with the viewport track.
-        let content_thumb_left = thumb_left + current_scroll_x;
+        // the strip's content offset to keep the visible thumb aligned with the
+        // viewport track.
+        let content_thumb_left = geometry.thumb_left + self.current_host_tools_tab_scroll_x();
 
         // Tauri's tab-strip scrollbar uses a 3px thin thumb; the GPUI component
-        // `Always` mode paints a 16px hit area, so this surface draws only the
-        // lightweight always-visible affordance while wheel scrolling remains native.
+        // `Always` mode paints a 16px hit area, so this surface keeps the thin
+        // visual while adding an invisible drag target around it.
         div()
             .id("host-tools-tab-thin-scrollbar")
             .absolute()
             .left(px(0.0))
             .right(px(0.0))
             .bottom(px(HOST_TOOLS_TAB_SCROLLBAR_BOTTOM_INSET))
-            .h(px(HOST_TOOLS_TAB_SCROLLBAR_HEIGHT))
+            .h(px(HOST_TOOLS_TAB_SCROLLBAR_DRAG_HEIGHT))
+            .cursor(CursorStyle::Arrow)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                    this.start_host_tools_tab_scrollbar_drag(event, cx);
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                this.update_host_tools_tab_scrollbar_drag(event, cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.finish_host_tools_tab_scrollbar_drag(cx);
+                }),
+            )
             .child(
                 div()
                     .absolute()
                     .left(px(content_thumb_left))
-                    .w(px(thumb_width))
+                    .bottom_0()
+                    .w(px(geometry.thumb_width))
                     .h(px(HOST_TOOLS_TAB_SCROLLBAR_HEIGHT))
                     .rounded(px(HOST_TOOLS_TAB_SCROLLBAR_RADIUS))
                     .bg(rgba(
@@ -229,6 +243,110 @@ impl WorkspaceApp {
                     )),
             )
             .into_any_element()
+    }
+
+    fn host_tools_tab_scrollbar_geometry(&self) -> Option<HostToolsTabScrollbarGeometry> {
+        let viewport_bounds = self.host_tools_tab_scroll_handle.bounds();
+        let viewport_width = f32::from(viewport_bounds.size.width);
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        let track_width = (viewport_width - HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET * 2.0)
+            .max(0.0);
+        if viewport_width <= 1.0 || max_scroll <= 1.0 || track_width <= 1.0 {
+            return None;
+        }
+
+        let content_width = viewport_width + max_scroll;
+        let min_thumb_width = HOST_TOOLS_TAB_SCROLLBAR_MIN_THUMB_WIDTH.min(track_width);
+        let thumb_width = (viewport_width / content_width * track_width)
+            .max(min_thumb_width)
+            .min(track_width);
+        if track_width - thumb_width <= 1.0 {
+            return None;
+        }
+        let scroll_x = self.current_host_tools_tab_scroll_x();
+        let thumb_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET
+            + (scroll_x / max_scroll * (track_width - thumb_width).max(0.0));
+        Some(HostToolsTabScrollbarGeometry {
+            viewport_left: f32::from(viewport_bounds.origin.x),
+            track_width,
+            thumb_width,
+            thumb_left,
+            max_scroll,
+        })
+    }
+
+    fn current_host_tools_tab_scroll_x(&self) -> f32 {
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        f32::from(-self.host_tools_tab_scroll_handle.offset().x).clamp(0.0, max_scroll)
+    }
+
+    fn set_host_tools_tab_scroll_x(&mut self, scroll_x: f32, cx: &mut Context<Self>) {
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        let next_scroll_x = scroll_x.clamp(0.0, max_scroll);
+        let current_scroll_x = self.current_host_tools_tab_scroll_x();
+        if (next_scroll_x - current_scroll_x).abs() < 0.01 {
+            return;
+        }
+        self.host_tools_tab_scroll_handle
+            .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
+        cx.notify();
+    }
+
+    fn start_host_tools_tab_scrollbar_drag(
+        &mut self,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
+            return;
+        };
+        let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
+        let track_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET;
+        let track_right = track_left + geometry.track_width;
+        let thumb_right = geometry.thumb_left + geometry.thumb_width;
+        let grab_offset_x = if pointer_x >= geometry.thumb_left && pointer_x <= thumb_right {
+            pointer_x - geometry.thumb_left
+        } else {
+            geometry.thumb_width / 2.0
+        };
+        self.connection_monitor.tab_scrollbar_drag =
+            Some(HostToolsTabScrollbarDragState { grab_offset_x });
+        let thumb_left = (pointer_x - grab_offset_x)
+            .clamp(track_left, track_right - geometry.thumb_width);
+        let ratio = (thumb_left - track_left) / (geometry.track_width - geometry.thumb_width);
+        self.set_host_tools_tab_scroll_x(ratio * geometry.max_scroll, cx);
+        cx.stop_propagation();
+    }
+
+    fn update_host_tools_tab_scrollbar_drag(
+        &mut self,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(drag) = self.connection_monitor.tab_scrollbar_drag else {
+            return;
+        };
+        if !event.dragging() {
+            self.finish_host_tools_tab_scrollbar_drag(cx);
+            return;
+        }
+        let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
+            self.finish_host_tools_tab_scrollbar_drag(cx);
+            return;
+        };
+        let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
+        let track_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET;
+        let max_thumb_left = track_left + geometry.track_width - geometry.thumb_width;
+        let thumb_left = (pointer_x - drag.grab_offset_x).clamp(track_left, max_thumb_left);
+        let ratio = (thumb_left - track_left) / (geometry.track_width - geometry.thumb_width);
+        self.set_host_tools_tab_scroll_x(ratio * geometry.max_scroll, cx);
+        cx.stop_propagation();
+    }
+
+    fn finish_host_tools_tab_scrollbar_drag(&mut self, cx: &mut Context<Self>) {
+        if self.connection_monitor.tab_scrollbar_drag.take().is_some() {
+            cx.notify();
+        }
     }
 
     fn handle_host_tools_tab_scroll(
@@ -256,17 +374,14 @@ impl WorkspaceApp {
             return;
         }
 
-        let current_scroll_x =
-            f32::from(-self.host_tools_tab_scroll_handle.offset().x).clamp(0.0, max_scroll);
+        let current_scroll_x = self.current_host_tools_tab_scroll_x();
         let next_scroll_x = (current_scroll_x - scroll_delta).clamp(0.0, max_scroll);
         if (next_scroll_x - current_scroll_x).abs() < 0.01 {
             cx.stop_propagation();
             return;
         }
 
-        self.host_tools_tab_scroll_handle
-            .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
-        cx.notify();
+        self.set_host_tools_tab_scroll_x(next_scroll_x, cx);
         cx.stop_propagation();
     }
 

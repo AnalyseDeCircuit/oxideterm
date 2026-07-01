@@ -16,6 +16,8 @@
       "reconnect_transport": "Kết nối lại",
       "send_to_ai": "Gửi tới OxideSens",
       "fill_command_bar": "Điền vào thanh lệnh",
+      "insert_selection_into_command": "Chèn vùng chọn tại đây",
+      "replace_command_with_selection": "Thay lệnh bằng vùng chọn",
       "find": "Tìm...",
       "select_command": "Chọn lệnh",
       "previous_command": "Lệnh trước",

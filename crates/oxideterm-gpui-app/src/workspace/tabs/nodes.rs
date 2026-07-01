@@ -211,6 +211,44 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn remove_inactive_session_tree_node(
+        &mut self,
+        cleanup_root: &NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut nodes_to_remove = self.node_runtime_store.subtree_postorder(cleanup_root);
+        if nodes_to_remove.is_empty() {
+            nodes_to_remove.push(cleanup_root.clone());
+        }
+        for node_id in &nodes_to_remove {
+            // A failed node can still own stale tabs, reconnect jobs, forwards,
+            // or transfer records. Clear those owners before dropping the tree.
+            self.close_tabs_for_node(node_id, window, cx);
+            self.abort_connection_chain_for_node(node_id);
+            self.reconnect_orchestrator.cancel(&node_id.0);
+            self.cancel_forward_restore_token(node_id);
+            self.pending_reconnect_node_ids.remove(node_id);
+            self.reconnect_requeue_counts.remove(node_id);
+            self.pending_reconnect_cascade_nodes
+                .retain(|pending_node_id| pending_node_id != node_id);
+            let _ = self.interrupt_sftp_transfers_by_node(
+                node_id,
+                "Connection removed".to_string(),
+            );
+        }
+        if self
+            .reconnect_pipeline_active_node
+            .as_ref()
+            .is_some_and(|active_node_id| nodes_to_remove.contains(active_node_id))
+        {
+            self.reconnect_pipeline_active_node = None;
+        }
+        self.cleanup_temporary_session_tree_node(cleanup_root);
+        self.persist_session_tree_snapshot();
+        cx.notify();
+    }
+
     pub(super) fn poll_reconnect_worker_results(
         &mut self,
         window: &mut Window,

@@ -192,6 +192,8 @@
       "smart_copy_hint": "Windows と Linux では、Ctrl+C で現在の選択範囲をコピーし、何も選択されていない場合のみ SIGINT を送信します",
       "selection_requires_shift": "テキスト選択に Shift を必須にする",
       "selection_requires_shift_hint": "有効にすると、通常のドラッグは端末操作を維持し、Shift + ドラッグでのみテキスト選択を開始します",
+      "free_type_cursor_positioning": "フリータイプカーソル位置指定",
+      "free_type_cursor_positioning_hint": "有効にすると、現在のコマンド入力領域をクリックしてリモートカーソルを移動できます。全画面アプリとマウス追跡アプリは独自のマウス処理を維持します",
       "in_band_transfer": {
         "title": "インバンドファイル転送",
         "enabled": "trzsz 転送を有効化",

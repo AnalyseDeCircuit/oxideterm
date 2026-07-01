@@ -751,6 +751,7 @@ impl WorkspaceApp {
         });
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
+        self.editing_saved_connection_connect_after_save_node_id = None;
         self.editing_raw_tcp_profile_id = None;
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
@@ -777,6 +778,7 @@ impl WorkspaceApp {
                     );
                     self.drill_down_parent_node_id = None;
                     self.editing_saved_connection_id = None;
+                    self.editing_saved_connection_connect_after_save_node_id = None;
                     self.editing_raw_tcp_profile_id = None;
                     self.editing_raw_udp_profile_id = None;
                     self.duplicating_saved_connection_id = None;

@@ -1,9 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>KI-gestützter SSH-Client für Remote-Server — native App aus reinem Rust</strong>
+  <strong>KI-gestützter nativer Betriebsarbeitsbereich für Remote-Server — native App aus reinem Rust</strong>
   <br>
-  SSH- und Telnet-Terminals, SFTP, Portweiterleitung, serielle Konsolen und leichtes Editieren in einem nativen Arbeitsbereich.
+  SSH, Telnet, serielle Terminals, RDP/VNC, SFTP, Portweiterleitung, Raw TCP/UDP und leichtes Editieren in einem nativen Arbeitsbereich.
   <br>
   GPU-gerendert. Kostenlos. Kein Konto nötig.
   <br>
@@ -41,11 +41,11 @@
 
 ## Was OxideTerm Native ist
 
-OxideTerm Native ist eine **GPUI-Desktop-App aus reinem Rust** – eine Open-Source-Alternative zu Termius und SecureCRT.
+OxideTerm Native ist eine **GPUI-Desktop-App aus reinem Rust** – ein Open-Source-Betriebsarbeitsbereich für SSH, Dateien, Portweiterleitung, Raw TCP/UDP und Remote-Desktop-Workflows.
 
 **Was Sie damit tun können:**
 
-- SSH- und Telnet-Terminals, SFTP, Portweiterleitungen, serielle Konsolen, lokale Shells und leichtes Editieren in einem nativen Arbeitsbereich verwalten
+- SSH, Telnet, serielle Terminals, RDP/VNC, SFTP, Portweiterleitungen, Raw TCP/UDP, lokale Shells und leichtes Editieren in einem nativen Arbeitsbereich verwalten
 - Remote-Arbeit mit der Grace-Period-Wiederverbindung bei kurzen Netzwerkaussetzern am Leben halten
 - OxideSens AI kann mit Ihrem eigenen KI-Anbieter laufende Sitzungen prüfen und genehmigte Arbeitsbereichsaktionen ausführen
 
@@ -57,9 +57,9 @@ OxideTerm Native ist keine gehostete Cloud-Agent-Plattform. Es ist auch keine El
 
 | Wenn Ihnen wichtig ist... | OxideTerm Native bietet... |
 |---|---|
-| Ein Remote-Knoten, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, trzsz, native IDE, Überwachung und OxideSens AI im selben SSH-Arbeitsbereich |
+| Ein Remote-Knoten, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, RDP/VNC, Raw TCP/UDP, trzsz, native IDE, Überwachung und OxideSens AI im selben Arbeitsbereich |
 | Native Shell ohne WebView | GPUI zeichnet die Desktop-Oberfläche direkt auf einer GPU-Oberfläche – kein DOM, CSS, JavaScript, Chromium oder WebKit |
-| Lokale SSH-Arbeitsabläufe | SSH, Telnet, SFTP, Weiterleitung, lokale Shell, serielle Terminals und Konfiguration ohne Anmeldung |
+| Lokale Betriebsabläufe | SSH, Telnet, SFTP, Weiterleitung, RDP/VNC, Raw TCP/UDP, lokale Shell, serielle Terminals und Konfiguration ohne Anmeldung |
 | BYOK mit OxideSens AI statt Plattformguthaben | OxideSens nutzt Ihren OpenAI/Anthropic/Gemini/Ollama/OpenAI-kompatiblen Endpunkt mit MCP, RAG und genehmigten Arbeitsbereichsaktionen |
 | Wiederverbindungsstabilität | Grace Period prüft die alte Verbindung 30 s lang, bevor sie ersetzt wird – TUI-Apps überleben kurze Netzwerkausfälle |
 | Reines Rust-SSH und sichere Zugangsdaten | `russh` + `ring`, kein OpenSSL/libssh2; Passwörter und API-Schlüssel im Schlüsselbund des Betriebssystems, `.oxide`-Bundle mit ChaCha20-Poly1305 + Argon2id |
@@ -99,17 +99,19 @@ Die native UI folgt demselben OxideTerm-Workspace-Modell und derselben visuellen
 
 | Kategorie | Funktionen |
 |---|---|
-| Terminal | lokales PTY, SSH, Telnet, lokale serielle Terminals, geteilte Fenster, Shell-Integration, Befehlsmarken, asciicast, trzsz, Sixel/Kitty graphics, Rendering-Policy |
+| Terminal | lokales PTY, SSH, Telnet, Raw-TCP/UDP-Terminals, lokale serielle Terminals, geteilte Fenster, Shell-Integration, Befehlsmarken, asciicast, trzsz, Sixel/Kitty graphics, Rendering-Policy |
 | SSH & Auth | Connection pool, unlimited ProxyJump, Grace Period reconnect, Host-key TOFU, SSH Agent forwarding, password/key/cert/keyboard-interactive |
 | SFTP / IDE | Zwei-Spalten-Browser, Transfer-Warteschlange, Vorschau, Lesezeichen, atomare Schreibvorgänge, Remote-Dateibaum, Multi-Tab-Editor, Konfliktlösung |
 | Forwarding | Local, Remote, Dynamic SOCKS5, gespeicherte Regeln, Wiederherstellung nach Reconnect, Ausfallmeldung, Leerlauf-Timeout |
+| Remote Desktop | Integrierte RDP- und VNC-Tabs, Reconnect-Steuerung, Viewport-Größenanpassung, Tastatur, Maus, Zwischenablage und Cursor |
+| Raw TCP/UDP | Raw-TCP- und Raw-UDP-Terminals für spontane Service-, Geräteprotokoll- und Datagramm-Debugging-Aufgaben |
 | KI | OxideSens mit OpenAI, Anthropic, Gemini, Ollama/compatible, MCP, RAG, Befehlsfreigabe |
 | Cloud Sync / `.oxide` | push/pull/apply/resolve, S3/WebDAV/Git, rollback backups, verschlüsselter Import/Export |
 | Plugins / CLI | WASM-Sandbox, native Host-API, Plugin-Einstellungen; CLI für settings, connections, forwards, plugins, secrets, cloud-sync, backup, report |
 
 ## Architektur
 
-OxideTerm Native entfernt die WebView-Bridge und hält Terminal, SSH, Telnet, SFTP, Forwarding, IDE, KI, Plugins und CLI in einer Rust-nativen Architektur. Die vollständigen Implementierungsdetails bleiben unten erhalten.
+OxideTerm Native entfernt die WebView-Bridge und hält Terminal, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, Forwarding, IDE, KI, Plugins und CLI in einer Rust-nativen Architektur. Die vollständigen Implementierungsdetails bleiben unten erhalten.
 
 <details>
 <summary><strong>Architektur, SSH-Internals, GPUI-Shell, Reconnect, KI, Plugins und mehr</strong></summary>
@@ -175,7 +177,7 @@ OxideSens bleibt BYOK zuerst, mit Kontextaufbau direkt im Prozess:
 
 Die UI wird direkt mit GPUI gezeichnet, ohne DOM/CSS/JavaScript-Rendering-Pipeline:
 
-- 17 Workspace-Tab-Typen: lokale, SSH- und Telnet-Terminals, SFTP, IDE, Forwards, Settings, Plugin, Topology und mehr
+- Workspace-Tab-Typen: lokale, SSH-, Telnet-, serielle, RDP-, VNC- und Raw-TCP/UDP-Terminals, SFTP, IDE, Forwards, Settings, Plugins, Topology und mehr
 - Binärer Pane-Tree mit ziehbaren Dividern, bis zu vier Panes pro Terminal-Tab
 - Command Palette, globale Tastenkürzel und Sidebars bestehen aus GPUI-Primitives
 - Immediate-mode Rendering reagiert auf Rust-State ohne Serialisierungs-Roundtrip
@@ -272,6 +274,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] In-process Terminaldatenfluss ohne WebSocket
 - [x] SFTP, Forwarding, IDE, KI, Cloud Sync, Plugins, CLI
 - [x] Lokale serielle Terminals
+- [x] RDP/VNC Remote Desktop und Raw-TCP/UDP-Terminals
 - [x] Full ProxyCommand
 - [ ] Audit logging
 

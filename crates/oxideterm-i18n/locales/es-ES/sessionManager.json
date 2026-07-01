@@ -86,6 +86,7 @@
     "edit_properties": {
       "title": "Editar conexión",
       "description": "Modificar las propiedades de la conexión.",
+      "save_and_reconnect": "Guardar y reconectar",
       "duplicate_title": "Duplicar conexión",
       "duplicate_description": "Usa esta conexión como plantilla y guárdala como un host nuevo.",
       "name": "Nombre",

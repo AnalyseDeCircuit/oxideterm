@@ -1136,10 +1136,52 @@ impl WorkspaceApp {
                 });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
-                    is_last,
+                    false,
                     LucideIcon::RefreshCw,
                     self.i18n.t("sessions.actions.reconnect"),
                     SessionActionVariant::Primary,
+                    listener,
+                    cx,
+                ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    let saved_connection_id = node.saved_connection_id.clone();
+                    move |this, _event, window, cx| {
+                        if let Some(saved_connection_id) = saved_connection_id.as_deref() {
+                            this.open_saved_connection_reconnect_editor(
+                                node_id.clone(),
+                                saved_connection_id,
+                                window,
+                                cx,
+                            );
+                        } else {
+                            this.open_runtime_node_reconnect_editor(node_id.clone(), window, cx);
+                        }
+                        cx.stop_propagation();
+                    }
+                });
+                children.push(self.render_session_action_item(
+                    node_depth + 1,
+                    false,
+                    LucideIcon::Pencil,
+                    self.i18n.t("sessions.tree.actions.edit_and_reconnect"),
+                    SessionActionVariant::Primary,
+                    listener,
+                    cx,
+                ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, window, cx| {
+                        this.remove_inactive_session_tree_node(&node_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                });
+                children.push(self.render_session_action_item(
+                    node_depth + 1,
+                    is_last,
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessions.tree.actions.remove_session"),
+                    SessionActionVariant::Danger,
                     listener,
                     cx,
                 ));

@@ -300,7 +300,7 @@
     },
     "new_connection": {
       "title": "New Connection",
-      "description": "Enter details for your new SSH connection.",
+      "description": "Configure one SSH profile for terminals, SFTP, port forwarding, and remote file editing.",
       "twofa_error": "2FA Error: {{error}}",
       "name": "Name (Optional)",
       "name_placeholder": "My Server",

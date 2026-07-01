@@ -298,6 +298,9 @@ fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18n) -> Strin
         "copyOnSelect" => i18n.t("settings_view.terminal.copy_on_select"),
         "middleClickPaste" => i18n.t("settings_view.terminal.middle_click_paste"),
         "selectionRequiresShift" => i18n.t("settings_view.terminal.selection_requires_shift"),
+        "freeTypeCursorPositioning" => {
+            i18n.t("settings_view.terminal.free_type_cursor_positioning")
+        }
         "sidebarCollapsedDefault" => i18n.t("modals.settings.appearance.sidebar_collapse"),
         "uiDensity" => i18n.t("settings_view.appearance.density"),
         "borderRadius" => i18n.t("settings_view.appearance.border_radius"),

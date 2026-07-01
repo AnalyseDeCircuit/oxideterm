@@ -1,9 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>AI-Powered SSH Client for Remote Servers — Pure Rust Native App</strong>
+  <strong>AI-Powered Native Operations Workspace for Remote Servers — Pure Rust Native App</strong>
   <br>
-  SSH and Telnet terminals, SFTP, port forwarding, serial consoles, and lightweight editing in one native workspace.
+  SSH, Telnet, Serial, RDP/VNC, SFTP, port forwarding, Raw TCP/UDP, and lightweight editing in one native workspace.
   <br>
   GPU-rendered. Free. No account needed.
   <br>
@@ -40,11 +40,11 @@
 
 ## What OxideTerm Native Is
 
-OxideTerm Native is a **pure Rust GPUI desktop app** — an open-source alternative to Termius & SecureCRT for connecting to remote servers over SSH.
+OxideTerm Native is a **pure Rust GPUI desktop app** — an open-source operations workspace for SSH, files, port forwarding, raw sockets, and remote desktop workflows.
 
 **What you can do:**
 
-- Manage SSH and Telnet terminals, SFTP, port forwards, serial consoles, local shells, and lightweight editing in one native workspace
+- Manage SSH, Telnet, Serial, RDP/VNC, SFTP, port forwards, Raw TCP/UDP sockets, local shells, and lightweight editing in one native workspace
 - Keep remote work alive through network hiccups with Grace Period reconnect
 - Ask OxideSens AI to inspect live sessions and perform approved workspace actions through your own AI provider
 
@@ -56,9 +56,9 @@ It is **not** a hosted cloud agent platform, an Electron app, a Tauri app, or a 
 
 | If you care about... | OxideTerm Native gives you... |
 |---|---|
-| One remote node, many tools | Terminal, SFTP, port forwarding, trzsz, native IDE, monitoring, and OxideSens AI stay attached to the same SSH workspace |
+| One remote node, many tools | Terminal, SFTP, port forwarding, RDP/VNC, Raw TCP/UDP, trzsz, native IDE, monitoring, and OxideSens AI stay attached to the same workspace |
 | Zero WebView native shell | GPUI draws the desktop UI directly on a GPU surface — no DOM, CSS, JavaScript, Chromium, or WebKit runtime |
-| Local-first SSH workflows | SSH, Telnet, SFTP, forwarding, local shell, serial terminals, and config work without signup |
+| Local-first operations workflows | SSH, Telnet, SFTP, forwarding, RDP/VNC, Raw TCP/UDP, local shell, serial terminals, and config work without signup |
 | BYOK OxideSens AI instead of platform credits | OxideSens uses your OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint with MCP, RAG, and approved workspace actions |
 | Reconnect stability | Grace Period probes the old connection for 30s before replacing it, so TUI apps can survive short network drops |
 | Pure Rust SSH and credential safety | `russh` + `ring`, no OpenSSL/libssh2; passwords and API keys stay in OS keychain, and `.oxide` bundles use ChaCha20-Poly1305 + Argon2id |
@@ -106,11 +106,13 @@ OxideTerm started there too (the Tauri version). The native branch removes the b
 
 | Category | Features |
 |---|---|
-| **Terminal** | Local PTY (zsh/bash/fish/pwsh/WSL2), SSH remote, Telnet, local serial terminals, split panes, shell integration, command marks, recording/playback (asciicast v2), trzsz in-band file transfer, Sixel/Kitty graphics, rendering policy (Boost/Normal/Idle) |
+| **Terminal** | Local PTY (zsh/bash/fish/pwsh/WSL2), SSH remote, Telnet, Raw TCP/UDP terminals, local serial terminals, split panes, shell integration, command marks, recording/playback (asciicast v2), trzsz in-band file transfer, Sixel/Kitty graphics, rendering policy (Boost/Normal/Idle) |
 | **SSH & Auth** | Connection pool, multi-hop ProxyJump (unlimited hops), Grace Period reconnect, host-key TOFU, SSH Agent forwarding. Auth: password, public key (RSA/Ed25519/ECDSA), SSH Agent, certificate, keyboard-interactive 2FA |
 | **SFTP** | Dual-pane browser, transfer queue (concurrent, speed-limited), adaptive chunking, progress + ETA, text/binary/image/archive preview, bookmarks, atomic writes |
 | **IDE** | SFTP-backed remote file tree, multi-tab editor, dirty tracking, conflict resolution, snapshot/restore, local + remote filesystem abstraction |
 | **Port Forwarding** | Local (-L), Remote (-R), Dynamic SOCKS5 (-D), saved rules, reconnect-aware restore, death reporting, idle timeout, remote port detection |
+| **Remote Desktop** | Built-in RDP and VNC tabs, reconnect controls, viewport-aware sizing, keyboard, mouse, clipboard, and cursor plumbing |
+| **Raw Sockets** | Raw TCP and Raw UDP terminals for ad-hoc service, device protocol, and datagram debugging |
 | **AI (OxideSens)** | OpenAI, Anthropic, Gemini, Ollama/OpenAI-compatible; MCP (stdio + SSE); RAG with BM25 + HNSW vector index, CJK bigram tokenizer; chat history, tool policy, command approval |
 | **Cloud Sync** | Push/pull/apply/resolve, S3/WebDAV/Git backends, structured manifest, conflict strategies, rollback backups, redacted diagnostics |
 | **Portable `.oxide`** | Encrypted export/import (ChaCha20-Poly1305 + Argon2id), connections, forwards, settings, quick commands, plugin settings, portable secrets |
@@ -122,7 +124,7 @@ OxideTerm started there too (the Tauri version). The native branch removes the b
 
 ## Under the Hood
 
-OxideTerm Native removes the WebView bridge and keeps terminal, SSH, Telnet, SFTP, forwarding, IDE, AI, plugins, and CLI in one Rust-native architecture. The full implementation notes are preserved below for readers who want the engineering details.
+OxideTerm Native removes the WebView bridge and keeps terminal, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, forwarding, IDE, AI, plugins, and CLI in one Rust-native architecture. The full implementation notes are preserved below for readers who want the engineering details.
 
 <details>
 <summary><strong>Architecture, SSH internals, GPUI shell, reconnect, AI, plugins, and more</strong></summary>
@@ -196,7 +198,7 @@ Same BYOK-first AI as Tauri, with all context building done in-process:
 The entire UI is written in Rust using GPUI (Zed's GPU-backed UI framework):
 
 - **No CSS, no DOM, no JavaScript** in the rendering pipeline
-- **17 workspace tab types**: `LocalTerminal`, `SshTerminal`, `Sftp`, `Ide`, `Forwards`, `SessionManager`, `CloudSync`, `Settings`, `PluginManager`, `Topology`, `ConnectionPool`, `ConnectionMonitor`, `NotificationCenter`, `FileManager`, `Launcher`, `Graphics`, custom `Plugin` tabs
+- **Workspace tab types**: local terminal, SSH, Telnet, Serial, RDP, VNC, SFTP, IDE, port forwards, Raw TCP/UDP, session manager, cloud sync, settings, plugins, topology, monitoring, file manager, launcher, graphics, and custom plugin tabs
 - **Split pane system**: binary pane tree, draggable dividers, up to 4 panes per terminal tab
 - **Command palette**, global key bindings, sidebar panels — all GPUI primitives
 - **Immediate-mode rendering**: UI reflects Rust state changes without a serialization round-trip
@@ -356,6 +358,7 @@ Prefer scoped crate checks while iterating. Broaden to `--workspace` when a chan
 - [x] In-process terminal data flow (no WebSocket)
 - [x] SFTP, port forwarding, IDE, AI, cloud sync, plugins, CLI
 - [x] Local serial and Telnet terminals
+- [x] RDP/VNC remote desktop and Raw TCP/UDP terminals
 - [x] Full ProxyCommand support
 - [ ] Audit logging
 

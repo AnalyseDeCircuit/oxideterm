@@ -192,6 +192,8 @@
       "smart_copy_hint": "Unter Windows und Linux kopiert Strg+C die aktuelle Auswahl und sendet nur dann SIGINT, wenn nichts ausgewählt ist",
       "selection_requires_shift": "Shift zum Auswählen von Text erforderlich",
       "selection_requires_shift_hint": "Wenn aktiviert, bleibt die Terminalinteraktion bei normalem Ziehen erhalten und nur Shift + Ziehen startet eine Textauswahl",
+      "free_type_cursor_positioning": "Freie Cursorpositionierung",
+      "free_type_cursor_positioning_hint": "Den Remote-Cursor per Klick im aktiven Befehlseingabebereich bewegen; Vollbild- und Mausverfolgungs-Apps behalten ihre eigene Maussteuerung",
       "in_band_transfer": {
         "title": "In-Band-Dateiübertragung",
         "enabled": "trzsz-Übertragung aktivieren",

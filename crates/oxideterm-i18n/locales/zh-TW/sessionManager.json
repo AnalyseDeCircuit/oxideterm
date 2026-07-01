@@ -86,6 +86,7 @@
     "edit_properties": {
       "title": "編輯連線",
       "description": "修改連線屬性。",
+      "save_and_reconnect": "儲存並重新連線",
       "duplicate_title": "複製連線",
       "duplicate_description": "以目前連線作為範本，修改後儲存為新主機。",
       "name": "名稱",

@@ -40,6 +40,7 @@ pub(crate) const TERMINAL_COPY_ON_SELECT: bool = false;
 pub(crate) const TERMINAL_MIDDLE_CLICK_PASTE: bool = false;
 pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
 pub(crate) const TERMINAL_SELECTION_REQUIRES_SHIFT: bool = false;
+pub(crate) const TERMINAL_FREE_TYPE_CURSOR_POSITIONING: bool = false;
 pub(crate) const TERMINAL_BIDI_ENABLED: bool = true;
 pub(crate) const TERMINAL_COMMAND_MARKS_ENABLED: bool = true;
 pub(crate) const TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS: bool = true;
@@ -60,6 +61,7 @@ pub struct TerminalUiPreferences {
     pub copy_on_select: bool,
     pub middle_click_paste: bool,
     pub selection_requires_shift: bool,
+    pub free_type_cursor_positioning: bool,
     pub bidi_enabled: bool,
     pub current_directory_awareness_enabled: bool,
     pub command_marks_enabled: bool,
@@ -97,6 +99,7 @@ impl Default for TerminalUiPreferences {
             copy_on_select: TERMINAL_COPY_ON_SELECT,
             middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
             selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
+            free_type_cursor_positioning: TERMINAL_FREE_TYPE_CURSOR_POSITIONING,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
             current_directory_awareness_enabled: false,
             command_marks_enabled: TERMINAL_COMMAND_MARKS_ENABLED,
@@ -196,6 +199,8 @@ pub struct TerminalCommandSelectionLabels {
     pub reconnect_transport: String,
     pub send_to_ai: String,
     pub fill_command_bar: String,
+    pub insert_selection_into_command: String,
+    pub replace_command_with_selection: String,
     pub find: String,
     pub select_command: String,
     pub previous_command: String,
@@ -213,6 +218,8 @@ impl Default for TerminalCommandSelectionLabels {
             reconnect_transport: "Reconnect".to_string(),
             send_to_ai: "Send to OxideSens".to_string(),
             fill_command_bar: "Fill command bar".to_string(),
+            insert_selection_into_command: "Insert selection here".to_string(),
+            replace_command_with_selection: "Replace command with selection".to_string(),
             find: "Find...".to_string(),
             select_command: "Select command".to_string(),
             previous_command: "Previous command".to_string(),
@@ -411,6 +418,7 @@ pub(crate) struct TerminalUiSettings {
     pub(crate) middle_click_paste: bool,
     pub(crate) keep_selection_on_copy: bool,
     pub(crate) selection_requires_shift: bool,
+    pub(crate) free_type_cursor_positioning: bool,
     pub(crate) smooth_scroll: bool,
     pub(crate) bidi_enabled: bool,
     pub(crate) current_directory_awareness_enabled: bool,
@@ -430,6 +438,7 @@ impl Default for TerminalUiSettings {
             middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
             selection_requires_shift: TERMINAL_SELECTION_REQUIRES_SHIFT,
+            free_type_cursor_positioning: TERMINAL_FREE_TYPE_CURSOR_POSITIONING,
             smooth_scroll: true,
             bidi_enabled: TERMINAL_BIDI_ENABLED,
             current_directory_awareness_enabled: false,
@@ -455,6 +464,7 @@ impl TerminalUiSettings {
             middle_click_paste: preferences.middle_click_paste,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,
             selection_requires_shift: preferences.selection_requires_shift,
+            free_type_cursor_positioning: preferences.free_type_cursor_positioning,
             smooth_scroll: preferences.smooth_scroll,
             bidi_enabled: preferences.bidi_enabled,
             current_directory_awareness_enabled: preferences.current_directory_awareness_enabled,

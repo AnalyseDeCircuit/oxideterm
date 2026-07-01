@@ -86,6 +86,7 @@
     "edit_properties": {
       "title": "연결 편집",
       "description": "연결 속성을 수정합니다.",
+      "save_and_reconnect": "저장 후 다시 연결",
       "duplicate_title": "연결 복제",
       "duplicate_description": "이 연결을 템플릿으로 사용한 뒤 새 호스트로 저장합니다.",
       "name": "이름",

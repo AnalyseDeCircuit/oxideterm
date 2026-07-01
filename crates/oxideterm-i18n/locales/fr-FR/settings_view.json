@@ -192,6 +192,8 @@
       "smart_copy_hint": "Sous Windows et Linux, Ctrl+C copie la sélection actuelle et n'envoie SIGINT que si rien n'est sélectionné",
       "selection_requires_shift": "Exiger Maj pour sélectionner du texte",
       "selection_requires_shift_hint": "Lorsqu'elle est activée, un glisser simple préserve l'interaction du terminal et seul Maj + glisser démarre une sélection de texte",
+      "free_type_cursor_positioning": "Positionnement libre du curseur",
+      "free_type_cursor_positioning_hint": "Déplacer le curseur distant en cliquant dans la zone de saisie de commande active ; les applications plein écran et avec suivi de souris gardent leur propre gestion de la souris",
       "in_band_transfer": {
         "title": "Transfert de fichiers in-band",
         "enabled": "Activer le transfert trzsz",

@@ -696,6 +696,8 @@
         "port_forwarding": "端口转发",
         "disconnect": "断开",
         "reconnect": "重新连接",
+        "edit_and_reconnect": "修改并重连",
+        "remove_session": "移除会话",
         "cancel_reconnect": "取消重连",
         "drill_in": "钻入 (下一跳)",
         "saved_next_hop": "使用已保存连接作为下一跳...",

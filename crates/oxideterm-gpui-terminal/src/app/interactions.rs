@@ -6,18 +6,32 @@ use gpui::{
 };
 use oxideterm_terminal::{TermMode, TerminalRow, TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
-use super::{ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane};
+use super::{
+    FreeTypeDragState, ScrollbarDrag, ScrollbarGeometry, TerminalContextMenu, TerminalPane,
+};
+use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 
 const TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS: u64 = 16;
 const TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS: i32 = 4;
+const TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS: usize = 4096;
+const TERMINAL_FREE_TYPE_DRAG_THRESHOLD_PX: f32 = 5.0;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
+const FREE_TYPE_DEBUG_ENV: &str = "OXIDETERM_FREE_TYPE_DEBUG";
 
 fn log_privilege_prompt_terminal(args: std::fmt::Arguments<'_>) {
     if env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
         eprintln!("[oxideterm:privilege] {args}");
+    }
+}
+
+fn log_free_type_terminal(args: std::fmt::Arguments<'_>) {
+    if env::var_os(FREE_TYPE_DEBUG_ENV).is_some() {
+        eprintln!("[oxideterm:free-type] {args}");
     }
 }
 
@@ -130,6 +144,12 @@ impl TerminalPane {
 
         if let Some(action) = oxideterm_terminal_scroll_action(&event.keystroke) {
             self.apply_scroll_action(action, cx);
+            return true;
+        }
+
+        if free_type_delete_key_requests_selection_delete(key, modifiers)
+            && self.delete_free_type_selection_if_active(mode, cx)
+        {
             return true;
         }
 
@@ -772,6 +792,11 @@ impl TerminalPane {
             return;
         }
 
+        if self.start_free_type_drag_candidate(event, mode) {
+            cx.notify();
+            return;
+        }
+
         if mouse_mode(mode, event.modifiers.shift) {
             let point = self.terminal_point_for_position(event.position);
             self.last_mouse_report_point = Some(point);
@@ -823,6 +848,7 @@ impl TerminalPane {
         self.context_menu = Some(TerminalContextMenu {
             x: f32::from(event.position.x - bounds.origin.x),
             y: f32::from(event.position.y - bounds.origin.y),
+            target: self.terminal_point_for_position(event.position),
             has_selection: self.selected_text_snapshot().is_some(),
             reference_line: navigation_line,
             command_mark_id,
@@ -867,6 +893,10 @@ impl TerminalPane {
             return;
         }
 
+        if self.update_free_type_drag(event, cx) {
+            return;
+        }
+
         if mouse_mode(mode, event.modifiers.shift) {
             let point = self.terminal_point_for_position(event.position);
             if self.last_mouse_report_point == Some(point) {
@@ -888,6 +918,10 @@ impl TerminalPane {
     pub(crate) fn handle_mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
         if self.scrollbar_drag.take().is_some() {
             cx.notify();
+            return;
+        }
+
+        if self.finish_free_type_drag(event.position, cx) {
             return;
         }
 
@@ -914,14 +948,301 @@ impl TerminalPane {
             if event.button == MouseButton::Left
                 && self.selection.is_some_and(|selection| selection.is_empty())
             {
-                self.select_command_mark_at_position(event.position, cx);
+                if !self.move_cursor_to_free_type_click(event.position, event.modifiers, mode, cx) {
+                    self.select_command_mark_at_position(event.position, cx);
+                }
             }
             self.last_mouse_report_point = None;
         } else {
+            if event.button == MouseButton::Left {
+                self.move_cursor_to_free_type_click(event.position, event.modifiers, mode, cx);
+            }
             self.selecting = false;
             self.selection_autoscroll_position = None;
             self.last_mouse_report_point = None;
         }
+    }
+
+    fn start_free_type_drag_candidate(&mut self, event: &MouseDownEvent, mode: TermMode) -> bool {
+        if !free_type_drag_candidate_allowed(
+            self.settings.free_type_cursor_positioning,
+            mode,
+            event.modifiers,
+        ) {
+            return false;
+        }
+        if event.button != MouseButton::Left || event.click_count > 1 {
+            return false;
+        }
+
+        let Some(selection) = self.selection.filter(|selection| !selection.is_empty()) else {
+            return false;
+        };
+        let Some(text) = self.selected_text_snapshot() else {
+            return false;
+        };
+        if !free_type_selected_text_can_be_command_input(&text) {
+            return false;
+        }
+
+        let target = self.terminal_point_for_position(event.position);
+        let Some(point) = grid_point_for_viewport_point(&self.snapshot, target) else {
+            return false;
+        };
+        if !selection_contains_grid_point(selection, point) {
+            return false;
+        }
+
+        self.free_type_drag = Some(FreeTypeDragState {
+            start_position: event.position,
+            text,
+            replace_current_command: event.modifiers.alt,
+            active: false,
+        });
+        self.selecting = false;
+        self.selection_autoscroll_position = None;
+        true
+    }
+
+    fn update_free_type_drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.free_type_drag.as_mut() else {
+            return false;
+        };
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.free_type_drag = None;
+            cx.notify();
+            return true;
+        }
+
+        if !drag.active && free_type_drag_distance_exceeded(drag.start_position, event.position) {
+            drag.active = true;
+            cx.notify();
+        }
+        true
+    }
+
+    fn finish_free_type_drag(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(drag) = self.free_type_drag.take() else {
+            return false;
+        };
+        if !drag.active {
+            cx.notify();
+            return true;
+        }
+
+        let target = self.terminal_point_for_position(position);
+        if self.send_free_type_command_edit_text(
+            target,
+            &drag.text,
+            drag.replace_current_command,
+            cx,
+        ) {
+            log_free_type_terminal(format_args!(
+                "drag drop accepted: replace_current_command={}",
+                drag.replace_current_command
+            ));
+        } else {
+            log_free_type_terminal(format_args!("drag drop rejected"));
+            cx.notify();
+        }
+        true
+    }
+
+    fn move_cursor_to_free_type_click(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        modifiers: Modifiers,
+        mode: TermMode,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !free_type_cursor_positioning_allowed(
+            self.settings.free_type_cursor_positioning,
+            mode,
+            modifiers,
+        ) {
+            log_free_type_terminal(format_args!(
+                "click rejected: {}",
+                free_type_cursor_positioning_rejection_reason(
+                    self.settings.free_type_cursor_positioning,
+                    mode,
+                    modifiers,
+                )
+                .unwrap_or("unknown")
+            ));
+            return false;
+        }
+
+        let target = self.terminal_point_for_position(position);
+        let input_state = self.input_tracker.state();
+        let Some(cursor_move) =
+            active_input_cursor_move(&self.snapshot, target, Some(&input_state))
+        else {
+            log_free_type_terminal(format_args!(
+                "click rejected: target outside active input row={} col={}",
+                target.row, target.col
+            ));
+            return false;
+        };
+        let Some(bytes) = free_type_cursor_move_bytes(cursor_move, mode) else {
+            log_free_type_terminal(format_args!(
+                "click accepted: already at target row={} col={}",
+                target.row, target.col
+            ));
+            return true;
+        };
+
+        // The remote shell is still the source of truth. Send regular cursor
+        // keys so readline, zsh, and other line editors can apply their own
+        // boundaries instead of letting the client mutate terminal state.
+        self.selection = None;
+        self.selecting = false;
+        self.selection_autoscroll_position = None;
+        log_free_type_terminal(format_args!(
+            "click accepted: cursor_delta={}",
+            cursor_move.delta
+        ));
+        self.send_user_protocol_bytes(&bytes, cx);
+        true
+    }
+
+    pub(super) fn delete_free_type_selection_if_active(
+        &mut self,
+        mode: TermMode,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !free_type_cursor_positioning_allowed(
+            self.settings.free_type_cursor_positioning,
+            mode,
+            Modifiers::default(),
+        ) {
+            log_free_type_terminal(format_args!(
+                "selection delete rejected: {}",
+                free_type_cursor_positioning_rejection_reason(
+                    self.settings.free_type_cursor_positioning,
+                    mode,
+                    Modifiers::default(),
+                )
+                .unwrap_or("unknown")
+            ));
+            return false;
+        }
+
+        let Some(selection) = self.selection else {
+            log_free_type_terminal(format_args!("selection delete rejected: no selection"));
+            return false;
+        };
+        let input_state = self.input_tracker.state();
+        let Some(bytes) =
+            free_type_selection_delete_bytes(&self.snapshot, selection, &input_state, mode)
+        else {
+            log_free_type_terminal(format_args!(
+                "selection delete rejected: selection outside active input"
+            ));
+            return false;
+        };
+
+        self.selection = None;
+        self.selecting = false;
+        self.selection_autoscroll_position = None;
+        log_free_type_terminal(format_args!(
+            "selection delete accepted: protocol_bytes={}",
+            bytes.len()
+        ));
+        self.send_user_protocol_bytes(&bytes, cx);
+        true
+    }
+
+    pub(crate) fn free_type_context_insert_selection_available(
+        &self,
+        menu: &TerminalContextMenu,
+    ) -> bool {
+        self.free_type_context_command_edit_bytes(menu.target, false)
+            .is_some()
+    }
+
+    pub(crate) fn free_type_context_replace_command_available(
+        &self,
+        menu: &TerminalContextMenu,
+    ) -> bool {
+        self.free_type_context_command_edit_bytes(menu.target, true)
+            .is_some()
+    }
+
+    fn free_type_context_command_edit_bytes(
+        &self,
+        target: TerminalPoint,
+        replace_current_command: bool,
+    ) -> Option<Vec<u8>> {
+        let text = self.selected_text_snapshot()?;
+        self.free_type_command_edit_bytes_for_text(target, &text, replace_current_command)
+    }
+
+    fn free_type_command_edit_bytes_for_text(
+        &self,
+        target: TerminalPoint,
+        text: &str,
+        replace_current_command: bool,
+    ) -> Option<Vec<u8>> {
+        if !self.terminal_accepts_input() {
+            return None;
+        }
+
+        let mode = self.terminal.lock().mode();
+        if !free_type_cursor_positioning_allowed(
+            self.settings.free_type_cursor_positioning,
+            mode,
+            Modifiers::default(),
+        ) {
+            return None;
+        }
+
+        let input_state = self.input_tracker.state();
+        free_type_command_edit_bytes(
+            &self.snapshot,
+            target,
+            &input_state,
+            &text,
+            replace_current_command,
+            mode,
+        )
+    }
+
+    fn send_free_type_command_edit_text(
+        &mut self,
+        target: TerminalPoint,
+        text: &str,
+        replace_current_command: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(bytes) =
+            self.free_type_command_edit_bytes_for_text(target, text, replace_current_command)
+        else {
+            return false;
+        };
+
+        // This is a terminal editing intent, not a local buffer mutation. Clear
+        // the visual selection and let the remote shell echo the final command.
+        self.selection = None;
+        self.selecting = false;
+        self.selection_autoscroll_position = None;
+        self.send_user_protocol_bytes(&bytes, cx);
+        true
+    }
+
+    pub(crate) fn insert_selection_into_free_type_command_from_context_menu(
+        &mut self,
+        target: TerminalPoint,
+        replace_current_command: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(text) = self.selected_text_snapshot() else {
+            return;
+        };
+        self.send_free_type_command_edit_text(target, &text, replace_current_command, cx);
     }
 
     fn selection_allowed(&self, shift: bool) -> bool {
@@ -1020,6 +1341,570 @@ fn privilege_prompt_enter_requests_submit(
     has_inline_hint
 }
 
+fn free_type_cursor_positioning_allowed(
+    enabled: bool,
+    mode: TermMode,
+    modifiers: Modifiers,
+) -> bool {
+    free_type_cursor_positioning_rejection_reason(enabled, mode, modifiers).is_none()
+}
+
+fn free_type_cursor_positioning_rejection_reason(
+    enabled: bool,
+    mode: TermMode,
+    modifiers: Modifiers,
+) -> Option<&'static str> {
+    if !enabled {
+        return Some("disabled");
+    }
+    if mode.contains(TermMode::ALT_SCREEN) {
+        return Some("alternate_screen");
+    }
+    if mouse_tracking_active(mode) {
+        return Some("mouse_tracking");
+    }
+    if modifiers.shift {
+        return Some("shift_modifier");
+    }
+    if modifiers.alt {
+        return Some("alt_modifier");
+    }
+    if modifiers.control {
+        return Some("control_modifier");
+    }
+    if modifiers.platform {
+        return Some("platform_modifier");
+    }
+    None
+}
+
+fn free_type_drag_candidate_allowed(enabled: bool, mode: TermMode, modifiers: Modifiers) -> bool {
+    if !enabled || mode.contains(TermMode::ALT_SCREEN) || mouse_tracking_active(mode) {
+        return false;
+    }
+
+    // Alt is reserved for "replace current command" drags. Other modifiers
+    // keep their existing terminal or platform meanings.
+    !modifiers.shift && !modifiers.control && !modifiers.platform
+}
+
+fn free_type_delete_key_requests_selection_delete(key: &str, modifiers: Modifiers) -> bool {
+    matches!(key, "backspace" | "back" | "delete")
+        && !modifiers.platform
+        && !modifiers.control
+        && !modifiers.alt
+}
+
+fn free_type_selected_text_can_be_command_input(text: &str) -> bool {
+    !text.is_empty() && !text.contains(['\r', '\n'])
+}
+
+fn free_type_drag_distance_exceeded(
+    start: gpui::Point<Pixels>,
+    current: gpui::Point<Pixels>,
+) -> bool {
+    let dx = f32::from(current.x - start.x);
+    let dy = f32::from(current.y - start.y);
+    dx.hypot(dy) >= TERMINAL_FREE_TYPE_DRAG_THRESHOLD_PX
+}
+
+fn selection_contains_grid_point(selection: TerminalSelection, point: TerminalGridPoint) -> bool {
+    let (start, end) = selection.normalized();
+    match selection.mode {
+        TerminalSelectionMode::Block => {
+            let line_start = start.line.min(end.line);
+            let line_end = start.line.max(end.line);
+            let col_start = start.col.min(end.col);
+            let col_end = start.col.max(end.col);
+            point.line >= line_start
+                && point.line <= line_end
+                && point.col >= col_start
+                && point.col <= col_end
+        }
+        TerminalSelectionMode::Lines => point.line >= start.line && point.line <= end.line,
+        TerminalSelectionMode::Simple | TerminalSelectionMode::Semantic => {
+            if point.line < start.line || point.line > end.line {
+                return false;
+            }
+            if start.line == end.line {
+                point.col >= start.col && point.col <= end.col
+            } else if point.line == start.line {
+                point.col >= start.col
+            } else if point.line == end.line {
+                point.col <= end.col
+            } else {
+                true
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn active_input_cursor_delta(
+    snapshot: &TerminalSnapshot,
+    target: TerminalPoint,
+    input_state: Option<&TerminalAutosuggestInputState>,
+) -> Option<isize> {
+    active_input_cursor_move(snapshot, target, input_state).map(|cursor_move| cursor_move.delta)
+}
+
+fn active_input_cursor_move(
+    snapshot: &TerminalSnapshot,
+    target: TerminalPoint,
+    input_state: Option<&TerminalAutosuggestInputState>,
+) -> Option<FreeTypeCursorMove> {
+    let cursor_row = snapshot.lines.get(snapshot.cursor_row)?;
+    let target_row = snapshot.lines.get(target.row)?;
+    if !cursor_row.active_input {
+        return None;
+    }
+
+    let width = snapshot.cols.max(1);
+    let cursor_col = snapshot.cursor_col.min(width.saturating_sub(1));
+    let target_col = target.col.min(width.saturating_sub(1));
+    if let Some(state) = input_state
+        && let Some(range) =
+            active_command_visible_range_from_viewport_cursor(snapshot, state, cursor_col, width)
+        && viewport_offset_is_inside_range_row(target.row, range, width)
+    {
+        let raw_target_offset = viewport_grid_offset(target.row, target_col, width);
+        let target_offset = raw_target_offset.clamp(range.start, range.end);
+        return tracked_command_cursor_move(state, target_offset, range.start);
+    }
+
+    if !target_row.active_input {
+        return None;
+    }
+
+    let (start, end) = active_input_block_bounds(snapshot)?;
+    if !(start..=end).contains(&target.row) {
+        return None;
+    }
+
+    let cursor_offset = grid_offset_from_block_start(snapshot.cursor_row, cursor_col, start, width);
+    let raw_target_offset = grid_offset_from_block_start(target.row, target_col, start, width);
+    if let Some(state) = input_state
+        && let Some(range) =
+            active_command_visible_range(Some(state), cursor_offset, start, end, width)
+    {
+        let target_offset = raw_target_offset.clamp(range.start, range.end);
+        return tracked_command_cursor_move(state, target_offset, range.start);
+    }
+
+    Some(FreeTypeCursorMove::new(
+        raw_target_offset as isize - cursor_offset as isize,
+        FreeTypeCursorBoundary::None,
+    ))
+}
+
+fn active_input_block_bounds(snapshot: &TerminalSnapshot) -> Option<(usize, usize)> {
+    let cursor_row = snapshot.lines.get(snapshot.cursor_row)?;
+    if !cursor_row.active_input {
+        return None;
+    }
+
+    let mut start = snapshot.cursor_row;
+    while start > 0
+        && snapshot
+            .lines
+            .get(start - 1)
+            .is_some_and(|row| row.active_input)
+    {
+        start -= 1;
+    }
+
+    let mut end = snapshot.cursor_row;
+    while end + 1 < snapshot.lines.len()
+        && snapshot
+            .lines
+            .get(end + 1)
+            .is_some_and(|row| row.active_input)
+    {
+        end += 1;
+    }
+
+    Some((start, end))
+}
+
+fn active_command_visible_range_from_viewport_cursor(
+    snapshot: &TerminalSnapshot,
+    input_state: &TerminalAutosuggestInputState,
+    cursor_col: usize,
+    width: usize,
+) -> Option<ActiveCommandVisibleRange> {
+    // The input tracker can prove the command span even when the terminal
+    // snapshot only marks the cursor row as active input.
+    if input_state.cursor_index > input_state.value.len()
+        || !input_state.value.is_char_boundary(input_state.cursor_index)
+    {
+        return None;
+    }
+
+    let cursor_offset = viewport_grid_offset(snapshot.cursor_row, cursor_col, width);
+    let prefix_width = terminal_text_display_width(&input_state.value[..input_state.cursor_index]);
+    let command_width = terminal_text_display_width(&input_state.value);
+    let start = cursor_offset.checked_sub(prefix_width)?;
+    let end = start.saturating_add(command_width);
+    let viewport_cell_count = snapshot.rows.saturating_mul(width);
+    if end > viewport_cell_count {
+        return None;
+    }
+
+    Some(ActiveCommandVisibleRange { start, end })
+}
+
+fn viewport_grid_offset(row: usize, col: usize, width: usize) -> usize {
+    row.saturating_mul(width).saturating_add(col)
+}
+
+fn viewport_offset_is_inside_range_row(
+    row: usize,
+    range: ActiveCommandVisibleRange,
+    width: usize,
+) -> bool {
+    let row_start = row.saturating_mul(width);
+    let row_end = row_start.saturating_add(width.saturating_sub(1));
+    row_start <= range.end && row_end >= range.start
+}
+
+fn grid_offset_from_block_start(row: usize, col: usize, start: usize, width: usize) -> usize {
+    row.saturating_sub(start)
+        .saturating_mul(width)
+        .saturating_add(col)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ActiveCommandVisibleRange {
+    start: usize,
+    end: usize,
+}
+
+fn active_command_visible_range(
+    input_state: Option<&TerminalAutosuggestInputState>,
+    cursor_offset: usize,
+    block_start: usize,
+    block_end: usize,
+    width: usize,
+) -> Option<ActiveCommandVisibleRange> {
+    let state = input_state?;
+    if state.cursor_index > state.value.len() || !state.value.is_char_boundary(state.cursor_index) {
+        return None;
+    }
+
+    let prefix_width = terminal_text_display_width(&state.value[..state.cursor_index]);
+    let command_width = terminal_text_display_width(&state.value);
+    let start = cursor_offset.checked_sub(prefix_width)?;
+    let end = start.saturating_add(command_width);
+    let block_cell_count = block_end
+        .saturating_sub(block_start)
+        .saturating_add(1)
+        .saturating_mul(width);
+    if end > block_cell_count {
+        return None;
+    }
+
+    Some(ActiveCommandVisibleRange { start, end })
+}
+
+fn terminal_text_display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FreeTypeCursorMove {
+    delta: isize,
+    boundary: FreeTypeCursorBoundary,
+}
+
+impl FreeTypeCursorMove {
+    fn new(delta: isize, boundary: FreeTypeCursorBoundary) -> Self {
+        Self { delta, boundary }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FreeTypeCursorBoundary {
+    None,
+    CommandStart,
+    CommandEnd,
+}
+
+fn tracked_command_cursor_move(
+    state: &TerminalAutosuggestInputState,
+    target_offset: usize,
+    command_start_offset: usize,
+) -> Option<FreeTypeCursorMove> {
+    // Arrow keys move through the remote line editor by logical characters, not
+    // terminal cells. Convert the clicked cell back to a command string boundary
+    // before deciding how many key presses to send.
+    let target_cell = target_offset.saturating_sub(command_start_offset);
+    let target_index = command_cursor_index_for_cell(&state.value, target_cell);
+    command_cursor_move_to_index(state, target_index)
+}
+
+fn command_cursor_move_to_index(
+    input_state: &TerminalAutosuggestInputState,
+    target_index: usize,
+) -> Option<FreeTypeCursorMove> {
+    let delta = command_cursor_delta_between(input_state, target_index)?;
+    let boundary = if target_index == 0 && input_state.cursor_index != 0 {
+        FreeTypeCursorBoundary::CommandStart
+    } else if target_index == input_state.value.len()
+        && input_state.cursor_index != input_state.value.len()
+    {
+        FreeTypeCursorBoundary::CommandEnd
+    } else {
+        FreeTypeCursorBoundary::None
+    };
+    Some(FreeTypeCursorMove::new(delta, boundary))
+}
+
+fn command_cursor_index_for_cell(text: &str, target_cell: usize) -> usize {
+    let mut cell_cursor = 0usize;
+    for (byte_index, grapheme) in text.grapheme_indices(true) {
+        if target_cell <= cell_cursor {
+            return byte_index;
+        }
+
+        let width = UnicodeWidthStr::width(grapheme);
+        let next_cell_cursor = cell_cursor.saturating_add(width);
+        if target_cell < next_cell_cursor {
+            // Wide cells and composed graphemes do not have a legal cursor stop
+            // in the middle. Pick the nearest boundary so a click inside them
+            // still moves by one remote editor step.
+            let before_distance = target_cell.saturating_sub(cell_cursor);
+            let after_distance = next_cell_cursor.saturating_sub(target_cell);
+            return if before_distance >= after_distance {
+                byte_index + grapheme.len()
+            } else {
+                byte_index
+            };
+        }
+        cell_cursor = next_cell_cursor;
+    }
+    text.len()
+}
+
+fn command_cursor_step_count(text: &str) -> usize {
+    text.graphemes(true).count()
+}
+
+fn free_type_selection_delete_bytes(
+    snapshot: &TerminalSnapshot,
+    selection: TerminalSelection,
+    input_state: &TerminalAutosuggestInputState,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    let (start_index, end_index) =
+        free_type_selection_command_range(snapshot, selection, input_state)?;
+    if start_index >= end_index {
+        return None;
+    }
+
+    let cursor_move = command_cursor_move_to_index(input_state, start_index)?;
+    let delete_count = command_cursor_step_count(&input_state.value[start_index..end_index]);
+    if delete_count == 0 || delete_count > TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS {
+        return None;
+    }
+
+    let mut bytes = free_type_cursor_move_bytes(cursor_move, mode).unwrap_or_default();
+    for _ in 0..delete_count {
+        bytes.extend_from_slice(b"\x1b[3~");
+    }
+    Some(bytes)
+}
+
+fn free_type_current_command_delete_bytes(
+    input_state: &TerminalAutosuggestInputState,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    let delete_count = command_cursor_step_count(&input_state.value);
+    if delete_count > TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS {
+        return None;
+    }
+
+    let mut bytes =
+        free_type_cursor_move_bytes(command_cursor_move_to_index(input_state, 0)?, mode)
+            .unwrap_or_default();
+    for _ in 0..delete_count {
+        bytes.extend_from_slice(b"\x1b[3~");
+    }
+    Some(bytes)
+}
+
+fn free_type_command_edit_bytes(
+    snapshot: &TerminalSnapshot,
+    target: TerminalPoint,
+    input_state: &TerminalAutosuggestInputState,
+    text: &str,
+    replace_current_command: bool,
+    mode: TermMode,
+) -> Option<Vec<u8>> {
+    // Build editor keystrokes only; the remote line editor remains authoritative.
+    if !free_type_selected_text_can_be_command_input(text) {
+        return None;
+    }
+
+    let cursor_move = active_input_cursor_move(snapshot, target, Some(input_state))?;
+    let mut bytes = if replace_current_command {
+        free_type_current_command_delete_bytes(input_state, mode)?
+    } else {
+        free_type_cursor_move_bytes(cursor_move, mode).unwrap_or_default()
+    };
+    bytes.extend_from_slice(text.as_bytes());
+    Some(bytes)
+}
+
+fn free_type_selection_command_range(
+    snapshot: &TerminalSnapshot,
+    selection: TerminalSelection,
+    input_state: &TerminalAutosuggestInputState,
+) -> Option<(usize, usize)> {
+    if !matches!(
+        selection.mode,
+        TerminalSelectionMode::Simple
+            | TerminalSelectionMode::Semantic
+            | TerminalSelectionMode::Lines
+    ) || selection.is_empty()
+    {
+        return None;
+    }
+
+    let (block_start, block_end) = active_input_block_bounds(snapshot)?;
+    let width = snapshot.cols.max(1);
+    let cursor_col = snapshot.cursor_col.min(width.saturating_sub(1));
+    let cursor_offset =
+        grid_offset_from_block_start(snapshot.cursor_row, cursor_col, block_start, width);
+    let command_range = active_command_visible_range(
+        Some(input_state),
+        cursor_offset,
+        block_start,
+        block_end,
+        width,
+    )?;
+    let (selection_start, selection_end) = selection.normalized();
+    let start_offset = selection_point_offset(snapshot, selection_start, block_start, width)?;
+    let end_offset =
+        selection_point_offset(snapshot, selection_end, block_start, width)?.saturating_add(1);
+    let start_offset = start_offset.clamp(command_range.start, command_range.end);
+    let end_offset = end_offset.clamp(command_range.start, command_range.end);
+    if start_offset >= end_offset {
+        return None;
+    }
+
+    let start_index =
+        command_cursor_index_for_cell(&input_state.value, start_offset - command_range.start);
+    let end_index =
+        command_cursor_index_for_cell(&input_state.value, end_offset - command_range.start);
+    Some((start_index.min(end_index), start_index.max(end_index)))
+}
+
+fn selection_point_offset(
+    snapshot: &TerminalSnapshot,
+    point: TerminalGridPoint,
+    block_start: usize,
+    width: usize,
+) -> Option<usize> {
+    let row = viewport_row_for_selection_line(snapshot, point.line)?;
+    snapshot
+        .lines
+        .get(row)
+        .is_some_and(|row| row.active_input)
+        .then_some(())?;
+    Some(grid_offset_from_block_start(
+        row,
+        point.col.min(width.saturating_sub(1)),
+        block_start,
+        width,
+    ))
+}
+
+fn viewport_row_for_selection_line(snapshot: &TerminalSnapshot, line: i32) -> Option<usize> {
+    let row = line + snapshot.display_offset as i32;
+    usize::try_from(row).ok().filter(|row| *row < snapshot.rows)
+}
+
+fn command_cursor_delta_between(
+    input_state: &TerminalAutosuggestInputState,
+    target_index: usize,
+) -> Option<isize> {
+    if target_index > input_state.value.len()
+        || !input_state.value.is_char_boundary(target_index)
+        || input_state.cursor_index > input_state.value.len()
+        || !input_state.value.is_char_boundary(input_state.cursor_index)
+    {
+        return None;
+    }
+
+    if target_index > input_state.cursor_index {
+        Some(
+            command_cursor_step_count(&input_state.value[input_state.cursor_index..target_index])
+                as isize,
+        )
+    } else {
+        Some(
+            -(command_cursor_step_count(&input_state.value[target_index..input_state.cursor_index])
+                as isize),
+        )
+    }
+}
+
+fn free_type_cursor_move_bytes(cursor_move: FreeTypeCursorMove, mode: TermMode) -> Option<Vec<u8>> {
+    if cursor_move.delta == 0 {
+        return None;
+    }
+
+    match cursor_move.boundary {
+        FreeTypeCursorBoundary::CommandStart if cursor_move.delta.unsigned_abs() > 1 => {
+            Some(home_key_bytes(mode).to_vec())
+        }
+        FreeTypeCursorBoundary::CommandEnd if cursor_move.delta.unsigned_abs() > 1 => {
+            Some(end_key_bytes(mode).to_vec())
+        }
+        _ => cursor_motion_bytes(cursor_move.delta, mode),
+    }
+}
+
+fn home_key_bytes(mode: TermMode) -> &'static [u8] {
+    if mode.contains(TermMode::APP_CURSOR) {
+        b"\x1bOH"
+    } else {
+        b"\x1b[H"
+    }
+}
+
+fn end_key_bytes(mode: TermMode) -> &'static [u8] {
+    if mode.contains(TermMode::APP_CURSOR) {
+        b"\x1bOF"
+    } else {
+        b"\x1b[F"
+    }
+}
+
+fn cursor_motion_bytes(delta: isize, mode: TermMode) -> Option<Vec<u8>> {
+    if delta == 0 {
+        return None;
+    }
+
+    let app_cursor = mode.contains(TermMode::APP_CURSOR);
+    let sequence = match (delta.is_positive(), app_cursor) {
+        (true, true) => b"\x1bOC".as_slice(),
+        (true, false) => b"\x1b[C".as_slice(),
+        (false, true) => b"\x1bOD".as_slice(),
+        (false, false) => b"\x1b[D".as_slice(),
+    };
+    let steps = delta.unsigned_abs();
+    if steps > TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS {
+        return None;
+    }
+
+    let mut bytes = Vec::with_capacity(sequence.len() * steps);
+    for _ in 0..steps {
+        bytes.extend_from_slice(sequence);
+    }
+    Some(bytes)
+}
+
 fn snapshot_text_from_rows(rows: &[TerminalRow]) -> String {
     rows.iter()
         .map(|row| row.text().trim_end().to_string())
@@ -1099,11 +1984,20 @@ mod tests {
     }
 
     fn test_snapshot(lines: Vec<TerminalRow>, cursor_row: usize) -> TerminalSnapshot {
+        test_snapshot_with_cursor(lines, cursor_row, 0, 120)
+    }
+
+    fn test_snapshot_with_cursor(
+        lines: Vec<TerminalRow>,
+        cursor_row: usize,
+        cursor_col: usize,
+        cols: usize,
+    ) -> TerminalSnapshot {
         TerminalSnapshot {
             generation: 1,
-            cols: 120,
+            cols,
             rows: lines.len(),
-            cursor_col: 0,
+            cursor_col,
             cursor_row,
             cursor_shape: TerminalCursorShape::Block,
             display_offset: 0,
@@ -1174,6 +2068,749 @@ mod tests {
             },
             true
         ));
+    }
+
+    #[test]
+    fn free_type_cursor_positioning_respects_conflict_guards() {
+        assert!(free_type_cursor_positioning_allowed(
+            true,
+            TermMode::default(),
+            Modifiers::default()
+        ));
+        assert!(!free_type_cursor_positioning_allowed(
+            false,
+            TermMode::default(),
+            Modifiers::default()
+        ));
+        assert!(!free_type_cursor_positioning_allowed(
+            true,
+            TermMode::ALT_SCREEN,
+            Modifiers::default()
+        ));
+        assert!(!free_type_cursor_positioning_allowed(
+            true,
+            TermMode::MOUSE_REPORT_CLICK,
+            Modifiers::default()
+        ));
+        assert!(free_type_cursor_positioning_allowed(
+            true,
+            TermMode::BRACKETED_PASTE,
+            Modifiers::default()
+        ));
+        assert!(free_type_cursor_positioning_allowed(
+            true,
+            TermMode::KITTY_KEYBOARD_PROTOCOL,
+            Modifiers::default()
+        ));
+        assert!(!free_type_cursor_positioning_allowed(
+            true,
+            TermMode::default(),
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            }
+        ));
+        assert!(!free_type_cursor_positioning_allowed(
+            true,
+            TermMode::default(),
+            Modifiers {
+                platform: true,
+                ..Modifiers::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn free_type_drag_candidate_allows_alt_replace_but_rejects_conflicts() {
+        assert!(free_type_drag_candidate_allowed(
+            true,
+            TermMode::default(),
+            Modifiers {
+                alt: true,
+                ..Modifiers::default()
+            }
+        ));
+        assert!(!free_type_drag_candidate_allowed(
+            false,
+            TermMode::default(),
+            Modifiers::default()
+        ));
+        assert!(!free_type_drag_candidate_allowed(
+            true,
+            TermMode::ALT_SCREEN,
+            Modifiers::default()
+        ));
+        assert!(!free_type_drag_candidate_allowed(
+            true,
+            TermMode::MOUSE_REPORT_CLICK,
+            Modifiers::default()
+        ));
+        assert!(!free_type_drag_candidate_allowed(
+            true,
+            TermMode::default(),
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn free_type_drag_distance_uses_activation_threshold() {
+        let start = gpui::point(px(10.0), px(10.0));
+
+        assert!(!free_type_drag_distance_exceeded(
+            start,
+            gpui::point(px(13.0), px(13.0))
+        ));
+        assert!(free_type_drag_distance_exceeded(
+            start,
+            gpui::point(px(14.0), px(13.0))
+        ));
+    }
+
+    #[test]
+    fn free_type_drag_hit_test_matches_selection_shape() {
+        let simple = TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 5 },
+            head: TerminalGridPoint { line: 1, col: 2 },
+            mode: TerminalSelectionMode::Simple,
+        };
+        assert!(selection_contains_grid_point(
+            simple,
+            TerminalGridPoint { line: 0, col: 20 }
+        ));
+        assert!(selection_contains_grid_point(
+            simple,
+            TerminalGridPoint { line: 1, col: 1 }
+        ));
+        assert!(!selection_contains_grid_point(
+            simple,
+            TerminalGridPoint { line: 2, col: 1 }
+        ));
+
+        let block = TerminalSelection {
+            anchor: TerminalGridPoint { line: 1, col: 3 },
+            head: TerminalGridPoint { line: 3, col: 6 },
+            mode: TerminalSelectionMode::Block,
+        };
+        assert!(selection_contains_grid_point(
+            block,
+            TerminalGridPoint { line: 2, col: 4 }
+        ));
+        assert!(!selection_contains_grid_point(
+            block,
+            TerminalGridPoint { line: 2, col: 8 }
+        ));
+
+        let lines = TerminalSelection {
+            anchor: TerminalGridPoint { line: 4, col: 50 },
+            head: TerminalGridPoint { line: 6, col: 0 },
+            mode: TerminalSelectionMode::Lines,
+        };
+        assert!(selection_contains_grid_point(
+            lines,
+            TerminalGridPoint { line: 5, col: 0 }
+        ));
+        assert!(!selection_contains_grid_point(
+            lines,
+            TerminalGridPoint { line: 7, col: 0 }
+        ));
+    }
+
+    #[test]
+    fn free_type_selected_text_command_input_rejects_multiline_text() {
+        assert!(free_type_selected_text_can_be_command_input("plain-text"));
+        assert!(!free_type_selected_text_can_be_command_input(""));
+        assert!(!free_type_selected_text_can_be_command_input(
+            "echo one\necho two"
+        ));
+        assert!(!free_type_selected_text_can_be_command_input(
+            "echo one\recho two"
+        ));
+    }
+
+    #[test]
+    fn free_type_cursor_delta_stays_inside_active_input_block() {
+        let snapshot = test_snapshot_with_cursor(
+            vec![
+                test_row("output", false),
+                test_row("prompt command", true),
+                test_row("wrapped continuation", true),
+            ],
+            1,
+            7,
+            20,
+        );
+
+        assert_eq!(
+            active_input_cursor_delta(&snapshot, TerminalPoint { row: 1, col: 12 }, None),
+            Some(5)
+        );
+        assert_eq!(
+            active_input_cursor_delta(&snapshot, TerminalPoint { row: 2, col: 2 }, None),
+            Some(15)
+        );
+        assert_eq!(
+            active_input_cursor_delta(&snapshot, TerminalPoint { row: 0, col: 2 }, None),
+            None
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_uses_tracked_command_range_when_target_row_is_unmarked() {
+        let snapshot = test_snapshot_with_cursor(
+            vec![test_row("$ abc", false), test_row("def", true)],
+            1,
+            2,
+            6,
+        );
+        let input_state = TerminalAutosuggestInputState {
+            value: "abcdef".to_string(),
+            cursor_index: 6,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                Some(&input_state)
+            ),
+            Some(-5)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_rejects_unmarked_rows_outside_tracked_command_range() {
+        let snapshot = test_snapshot_with_cursor(
+            vec![test_row("old output", false), test_row("$ abc", true)],
+            1,
+            5,
+            20,
+        );
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 4 },
+                Some(&input_state)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_clamps_to_tracked_command_range() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 0 },
+                Some(&input_state)
+            ),
+            Some(-3)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 18 },
+                Some(&input_state)
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                Some(&input_state)
+            ),
+            Some(-2)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_ignores_stale_tracked_command_range() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ a", true)], 0, 3, 4);
+        let input_state = TerminalAutosuggestInputState {
+            value: "this command is no longer visible".to_string(),
+            cursor_index: 31,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 0 },
+                Some(&input_state)
+            ),
+            Some(-3)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_moves_by_characters_for_wide_cells() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ 你a", true)], 0, 5, 20);
+        let input_state = TerminalAutosuggestInputState {
+            value: "你a".to_string(),
+            cursor_index: "你a".len(),
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 4 },
+                Some(&input_state)
+            ),
+            Some(-1)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                Some(&input_state)
+            ),
+            Some(-1)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 2 },
+                Some(&input_state)
+            ),
+            Some(-2)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_keeps_grapheme_clusters_together() {
+        let combining = "e\u{301}x";
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ e\u{301}x", true)], 0, 4, 20);
+        let input_state = TerminalAutosuggestInputState {
+            value: combining.to_string(),
+            cursor_index: combining.len(),
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            command_cursor_index_for_cell(combining, 1),
+            "e\u{301}".len()
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                Some(&input_state)
+            ),
+            Some(-1)
+        );
+
+        let family = "👨\u{200d}👩\u{200d}👧\u{200d}👦x";
+        assert_eq!(
+            command_cursor_index_for_cell(family, 1),
+            "👨\u{200d}👩\u{200d}👧\u{200d}👦".len()
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_maps_zero_width_characters_without_extra_cells() {
+        let text = "a\u{200b}b";
+
+        assert_eq!(command_cursor_index_for_cell(text, 1), "a".len());
+        assert_eq!(command_cursor_index_for_cell(text, 2), text.len());
+
+        let input_state = TerminalAutosuggestInputState {
+            value: text.to_string(),
+            cursor_index: text.len(),
+            is_cursor_at_end: true,
+        };
+        assert_eq!(
+            command_cursor_delta_between(&input_state, "a".len()),
+            Some(-2)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_maps_tracked_command_across_wrapped_rows() {
+        let snapshot = test_snapshot_with_cursor(
+            vec![test_row("$ ab", true), test_row("cdef", true)],
+            1,
+            4,
+            5,
+        );
+        let input_state = TerminalAutosuggestInputState {
+            value: "abcdef".to_string(),
+            cursor_index: 6,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 2 },
+                Some(&input_state)
+            ),
+            Some(-6)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 0, col: 4 },
+                Some(&input_state)
+            ),
+            Some(-5)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 1, col: 2 },
+                Some(&input_state)
+            ),
+            Some(-2)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_maps_long_wrapped_command_by_display_width() {
+        let snapshot = test_snapshot_with_cursor(
+            vec![
+                test_row("$ abc", true),
+                test_row("defghi", true),
+                test_row("jklm", true),
+            ],
+            2,
+            3,
+            6,
+        );
+        let input_state = TerminalAutosuggestInputState {
+            value: "abcdefghijklm".to_string(),
+            cursor_index: 13,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 1, col: 2 },
+                Some(&input_state)
+            ),
+            Some(-7)
+        );
+        assert_eq!(
+            active_input_cursor_delta(
+                &snapshot,
+                TerminalPoint { row: 2, col: 5 },
+                Some(&input_state)
+            ),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_move_uses_home_and_end_at_command_boundaries() {
+        let input_state = TerminalAutosuggestInputState {
+            value: "abcdef".to_string(),
+            cursor_index: 6,
+            is_cursor_at_end: true,
+        };
+
+        let start_move = command_cursor_move_to_index(&input_state, 0).unwrap();
+        assert_eq!(
+            free_type_cursor_move_bytes(start_move, TermMode::default()).as_deref(),
+            Some(b"\x1b[H".as_slice())
+        );
+        assert_eq!(
+            free_type_cursor_move_bytes(start_move, TermMode::APP_CURSOR).as_deref(),
+            Some(b"\x1bOH".as_slice())
+        );
+
+        let input_state = TerminalAutosuggestInputState {
+            value: "abcdef".to_string(),
+            cursor_index: 0,
+            is_cursor_at_end: false,
+        };
+        let end_move = command_cursor_move_to_index(&input_state, input_state.value.len()).unwrap();
+        assert_eq!(
+            free_type_cursor_move_bytes(end_move, TermMode::default()).as_deref(),
+            Some(b"\x1b[F".as_slice())
+        );
+        assert_eq!(
+            free_type_cursor_move_bytes(end_move, TermMode::APP_CURSOR).as_deref(),
+            Some(b"\x1bOF".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_move_keeps_arrows_for_mid_command_targets() {
+        let input_state = TerminalAutosuggestInputState {
+            value: "abcdef".to_string(),
+            cursor_index: 6,
+            is_cursor_at_end: true,
+        };
+
+        let cursor_move = command_cursor_move_to_index(&input_state, 3).unwrap();
+        assert_eq!(
+            free_type_cursor_move_bytes(cursor_move, TermMode::default()).as_deref(),
+            Some(b"\x1b[D\x1b[D\x1b[D".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_move_rejects_oversized_mid_command_targets() {
+        let cursor_move = FreeTypeCursorMove::new(
+            TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS as isize + 1,
+            FreeTypeCursorBoundary::None,
+        );
+
+        assert!(free_type_cursor_move_bytes(cursor_move, TermMode::default()).is_none());
+    }
+
+    #[test]
+    fn free_type_command_edit_bytes_inserts_selection_at_target() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            free_type_command_edit_bytes(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                &input_state,
+                "XYZ",
+                false,
+                TermMode::default(),
+            )
+            .as_deref(),
+            Some(b"\x1b[D\x1b[DXYZ".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_command_edit_bytes_replaces_current_command() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            free_type_command_edit_bytes(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                &input_state,
+                "XYZ",
+                true,
+                TermMode::default(),
+            )
+            .as_deref(),
+            Some(b"\x1b[H\x1b[3~\x1b[3~\x1b[3~XYZ".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_command_edit_bytes_rejects_multiline_selection() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert!(
+            free_type_command_edit_bytes(
+                &snapshot,
+                TerminalPoint { row: 0, col: 3 },
+                &input_state,
+                "one\ntwo",
+                false,
+                TermMode::default(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn free_type_command_edit_bytes_rejects_oversized_replace() {
+        let value = "x".repeat(TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS + 1);
+        let line = format!("$ {value}");
+        let snapshot =
+            test_snapshot_with_cursor(vec![test_row(&line, true)], 0, line.len(), 20_000);
+        let input_state = TerminalAutosuggestInputState {
+            cursor_index: value.len(),
+            value,
+            is_cursor_at_end: true,
+        };
+
+        assert!(
+            free_type_command_edit_bytes(
+                &snapshot,
+                TerminalPoint { row: 0, col: 2 },
+                &input_state,
+                "replacement",
+                true,
+                TermMode::default(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn free_type_selection_delete_bytes_targets_command_selection() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
+        let selection = TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 3 },
+            head: TerminalGridPoint { line: 0, col: 3 },
+            mode: TerminalSelectionMode::Semantic,
+        };
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            free_type_selection_delete_bytes(
+                &snapshot,
+                selection,
+                &input_state,
+                TermMode::default()
+            )
+            .as_deref(),
+            Some(b"\x1b[D\x1b[D\x1b[3~".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_selection_delete_bytes_clamps_line_selection_to_command() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
+        let selection = TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 0 },
+            head: TerminalGridPoint { line: 0, col: 5 },
+            mode: TerminalSelectionMode::Lines,
+        };
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            free_type_selection_delete_bytes(
+                &snapshot,
+                selection,
+                &input_state,
+                TermMode::default()
+            )
+            .as_deref(),
+            Some(b"\x1b[H\x1b[3~\x1b[3~\x1b[3~".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_selection_delete_bytes_rejects_oversized_selection() {
+        let value = "x".repeat(TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS + 1);
+        let line = format!("$ {value}");
+        let snapshot =
+            test_snapshot_with_cursor(vec![test_row(&line, true)], 0, line.len(), 20_000);
+        let selection = TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 2 },
+            head: TerminalGridPoint {
+                line: 0,
+                col: line.len(),
+            },
+            mode: TerminalSelectionMode::Simple,
+        };
+        let input_state = TerminalAutosuggestInputState {
+            cursor_index: value.len(),
+            value,
+            is_cursor_at_end: true,
+        };
+
+        assert!(
+            free_type_selection_delete_bytes(
+                &snapshot,
+                selection,
+                &input_state,
+                TermMode::default()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn free_type_current_command_delete_bytes_removes_whole_command() {
+        let input_state = TerminalAutosuggestInputState {
+            value: "abc".to_string(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+
+        assert_eq!(
+            free_type_current_command_delete_bytes(&input_state, TermMode::default()).as_deref(),
+            Some(b"\x1b[H\x1b[3~\x1b[3~\x1b[3~".as_slice())
+        );
+    }
+
+    #[test]
+    fn free_type_current_command_delete_bytes_rejects_oversized_commands() {
+        let value = "x".repeat(TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS + 1);
+        let input_state = TerminalAutosuggestInputState {
+            cursor_index: value.len(),
+            value,
+            is_cursor_at_end: true,
+        };
+
+        assert!(
+            free_type_current_command_delete_bytes(&input_state, TermMode::default()).is_none()
+        );
+    }
+
+    #[test]
+    fn free_type_cursor_delta_requires_cursor_on_active_input() {
+        let snapshot = test_snapshot_with_cursor(
+            vec![test_row("output", false), test_row("input", true)],
+            0,
+            0,
+            20,
+        );
+
+        assert_eq!(
+            active_input_cursor_delta(&snapshot, TerminalPoint { row: 1, col: 2 }, None),
+            None
+        );
+    }
+
+    #[test]
+    fn cursor_motion_bytes_respect_application_cursor_mode() {
+        assert_eq!(
+            cursor_motion_bytes(2, TermMode::default()).as_deref(),
+            Some(b"\x1b[C\x1b[C".as_slice())
+        );
+        assert_eq!(
+            cursor_motion_bytes(1, TermMode::APP_CURSOR).as_deref(),
+            Some(b"\x1bOC".as_slice())
+        );
+        assert_eq!(
+            cursor_motion_bytes(-1, TermMode::APP_CURSOR).as_deref(),
+            Some(b"\x1bOD".as_slice())
+        );
+        assert!(cursor_motion_bytes(0, TermMode::default()).is_none());
     }
 
     #[test]

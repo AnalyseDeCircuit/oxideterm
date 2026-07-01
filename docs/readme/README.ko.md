@@ -1,9 +1,9 @@
 <h1 align="center">⚡ OxideTerm — Native</h1>
 
 <p align="center">
-  <strong>원격 서버를 위한 AI 기반 SSH 클라이언트 — 순수 Rust 네이티브 앱</strong>
+  <strong>원격 서버를 위한 AI 기반 네이티브 운영 워크스페이스 — 순수 Rust 네이티브 앱</strong>
   <br>
-  SSH 및 Telnet 터미널, SFTP, 포트 포워딩, 시리얼 콘솔, 경량 편집을 하나의 네이티브 워크스페이스에.
+  SSH, Telnet, 시리얼, RDP/VNC, SFTP, 포트 포워딩, Raw TCP/UDP, 경량 편집을 하나의 네이티브 워크스페이스에.
   <br>
   GPU 직접 렌더링. 무료, 계정 불필요.
   <br>
@@ -41,11 +41,11 @@
 
 ## OxideTerm Native란
 
-OxideTerm Native는 **순수 Rust GPUI 데스크톱 앱**——Termius & SecureCRT의 오픈소스 대안입니다.
+OxideTerm Native는 **순수 Rust GPUI 데스크톱 앱**——SSH, 파일, 포트 포워딩, Raw TCP/UDP, 원격 데스크톱 작업 흐름을 위한 오픈소스 운영 워크스페이스입니다.
 
 **할 수 있는 일:**
 
-- SSH 및 Telnet 터미널, SFTP, 포트 포워딩, 시리얼 콘솔, 로컬 셸, 가벼운 편집을 하나의 네이티브 작업 공간에서 관리
+- SSH, Telnet, 시리얼, RDP/VNC, SFTP, 포트 포워딩, Raw TCP/UDP, 로컬 셸, 가벼운 편집을 하나의 네이티브 작업 공간에서 관리
 - Grace Period 재연결로 네트워크가 흔들려도 원격 작업 유지
 - OxideSens AI가 사용자의 AI 제공자로 실행 중인 세션을 확인하고 승인된 작업 공간 동작을 실행하도록 요청
 
@@ -57,9 +57,9 @@ OxideTerm Native는 **순수 Rust GPUI 데스크톱 앱**——Termius & SecureC
 
 | 당신이 중요하게 생각하는 것... | OxideTerm Native가 제공하는 것... |
 |---|---|
-| 하나의 원격 노드, 많은 도구 | 터미널, SFTP, 포트 포워딩, trzsz, 네이티브 IDE, 모니터링, OxideSens AI가 동일한 SSH 작업 공간에 연결 |
+| 하나의 원격 노드, 많은 도구 | 터미널, SFTP, 포트 포워딩, RDP/VNC, Raw TCP/UDP, trzsz, 네이티브 IDE, 모니터링, OxideSens AI가 동일한 작업 공간에 연결 |
 | WebView 없는 네이티브 셸 | GPUI가 GPU 표면에 데스크톱 UI를 직접 그림 — DOM, CSS, JavaScript, Chromium, WebKit 런타임 없음 |
-| 로컬 우선 SSH 작업 흐름 | SSH, Telnet, SFTP, 포워딩, 로컬 셸, 시리얼 터미널, 설정 작업에 가입 불필요 |
+| 로컬 우선 운영 작업 흐름 | SSH, Telnet, SFTP, 포워딩, RDP/VNC, Raw TCP/UDP, 로컬 셸, 시리얼 터미널, 설정 작업에 가입 불필요 |
 | BYOK OxideSens AI | OxideSens는 사용자의 OpenAI/Anthropic/Gemini/Ollama/호환 엔드포인트를 MCP, RAG, 승인된 작업 공간 동작과 함께 사용 |
 | 재연결 안정성 | Grace Period가 30초 동안 기존 연결을 확인 — TUI 앱이 짧은 네트워크 단절에서도 살아남음 |
 | 순수 Rust SSH와 자격 증명 안전성 | `russh` + `ring`, OpenSSL/libssh2 없음; 비밀번호와 API 키는 OS 키체인에 저장, `.oxide` 번들은 ChaCha20-Poly1305 + Argon2id 사용 |
@@ -99,17 +99,19 @@ OxideTerm Native는 **순수 Rust GPUI 데스크톱 앱**——Termius & SecureC
 
 | 분류 | 기능 |
 |---|---|
-| 터미널 | 로컬 PTY, SSH, Telnet, 로컬 시리얼 터미널, 분할 패널, 셸 통합, 명령 표시, asciicast, trzsz, Sixel/Kitty graphics, 렌더링 정책 |
+| 터미널 | 로컬 PTY, SSH, Telnet, Raw TCP/UDP 터미널, 로컬 시리얼 터미널, 분할 패널, 셸 통합, 명령 표시, asciicast, trzsz, Sixel/Kitty graphics, 렌더링 정책 |
 | SSH 및 인증 | 연결 풀, 무제한 ProxyJump, Grace Period 재연결, 호스트 키 TOFU, SSH Agent 포워딩, password/key/cert/keyboard-interactive |
 | SFTP / IDE | 듀얼 패널 브라우저, 전송 대기열, 미리보기, 북마크, 원자적 쓰기, 원격 파일 트리, 다중 탭 편집기, 충돌 해결 |
 | 포워딩 | Local, Remote, Dynamic SOCKS5, 저장된 규칙, 재연결 복원, 종료 보고, 유휴 시간 초과 |
+| 원격 데스크톱 | 내장 RDP/VNC 탭, 재연결 제어, 뷰포트 크기 조정, 키보드, 마우스, 클립보드, 커서 처리 |
+| Raw TCP/UDP | 임시 서비스, 장치 프로토콜, 데이터그램 디버깅용 Raw TCP/UDP 터미널 |
 | AI | OpenAI, Anthropic, Gemini, Ollama/compatible, MCP, RAG, 명령 승인을 지원하는 OxideSens |
 | 클라우드 동기화 / `.oxide` | push/pull/apply/resolve, S3/WebDAV/Git, 롤백 백업, 암호화 가져오기/내보내기 |
 | 플러그인 / CLI | WASM 샌드박스, 네이티브 호스트 API, 플러그인 설정; CLI 명령: settings, connections, 포워딩, plugins, secrets, cloud-sync, backup, report |
 
 ## 아키텍처
 
-OxideTerm Native는 WebView 브리지를 제거하고 터미널, SSH, Telnet, SFTP, 포워딩, IDE, AI, 플러그인, CLI를 하나의 Rust 네이티브 아키텍처 안에 유지합니다. 구현 세부 사항은 아래에 보존했습니다.
+OxideTerm Native는 WebView 브리지를 제거하고 터미널, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, 포워딩, IDE, AI, 플러그인, CLI를 하나의 Rust 네이티브 아키텍처 안에 유지합니다. 구현 세부 사항은 아래에 보존했습니다.
 
 <details>
 <summary><strong>아키텍처, SSH 내부, GPUI 셸, 재연결, AI, 플러그인 등</strong></summary>
@@ -175,7 +177,7 @@ OxideSens는 BYOK 우선을 유지하며 컨텍스트 구성은 프로세스 안
 
 UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없습니다.
 
-- 17 작업 공간 탭 유형: local terminal, SSH terminal, Telnet terminal, SFTP, IDE, Forwards, Settings, Plugin, Topology 등
+- 작업 공간 탭 유형: local terminal, SSH, Telnet, Serial, RDP, VNC, Raw TCP/UDP, SFTP, IDE, Forwards, Settings, Plugin, Topology 등
 - draggable dividers를 가진 binary pane tree, terminal tab당 최대 4 panes
 - Command palette, global key bindings, sidebars는 GPUI primitives
 - Immediate-mode rendering은 serialization round-trip 없이 Rust state에 반응
@@ -271,7 +273,8 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 - [x] SSH Agent 포워딩, Grace Period 재연결, GPUI desktop shell
 - [x] WebSocket 없는 프로세스 내 터미널 데이터 흐름
 - [x] SFTP, forwarding, IDE, AI, 클라우드 동기화, plugins, CLI
-- [x] Local serial and Telnet terminals
+- [x] 로컬 시리얼 및 Telnet 터미널
+- [x] RDP/VNC 원격 데스크톱 및 Raw TCP/UDP 터미널
 - [x] Full ProxyCommand
 - [ ] Audit logging
 

@@ -215,6 +215,16 @@ impl WorkspaceApp {
             ),
             16.0,
         ))
+        .child(self.settings_row_with_margin(
+            self.checkbox_row(
+                "settings_view.terminal.free_type_cursor_positioning",
+                "settings_view.terminal.free_type_cursor_positioning_hint",
+                settings.terminal.free_type_cursor_positioning,
+                set_free_type_cursor_positioning,
+                cx,
+            ),
+            16.0,
+        ))
         .child(
             div()
                 .my(px(20.0))

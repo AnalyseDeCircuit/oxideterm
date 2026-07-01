@@ -300,7 +300,7 @@
     },
     "new_connection": {
       "title": "Nuova Connessione",
-      "description": "Inserisci i dettagli per la tua nuova connessione SSH.",
+      "description": "Configura un profilo SSH per terminali, SFTP, inoltro porte e modifica di file remoti.",
       "twofa_error": "Errore 2FA: {{error}}",
       "name": "Nome (Opzionale)",
       "name_placeholder": "Il Mio Server",
