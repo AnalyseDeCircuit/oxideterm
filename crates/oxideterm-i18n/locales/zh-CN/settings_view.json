@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "在命令栏显示本地和 SSH 终端当前仓库的分支。",
       "command_bar_project_tasks": "显示项目任务",
       "command_bar_project_tasks_hint": "在命令栏显示本地和 SSH 终端检测到的项目和任务操作。",
+      "command_bar_current_directory_awareness": "显示工作目录",
+      "command_bar_current_directory_awareness_hint": "在命令栏显示当前本地或 SSH 终端目录，并允许从目录选择器切换目录。",
       "command_bar_focus_handoff": "TUI 命令后聚焦终端",
       "command_bar_focus_handoff_hint": "从命令栏运行这些命令后，将焦点交给终端，因为它们通常会接管键盘输入。可用空格、逗号或换行分隔命令。",
       "command_marks": "命令标记",

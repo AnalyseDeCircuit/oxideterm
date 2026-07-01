@@ -425,6 +425,10 @@ pub fn set_command_bar_project_tasks(settings: &mut PersistedSettings, value: bo
     settings.terminal.command_bar.project_tasks = value;
 }
 
+pub fn set_command_bar_current_directory_awareness(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.command_bar.current_directory_awareness = value;
+}
+
 pub fn set_quick_commands_enabled(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.command_bar.quick_commands_enabled = value;
 }

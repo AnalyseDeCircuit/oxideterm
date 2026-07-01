@@ -295,6 +295,18 @@ impl TerminalShellIntegration {
             }
             return false;
         }
+        if code == "633"
+            && let Some((cwd, host)) = parse_osc633_cwd(data)
+        {
+            emit(crate::TerminalEvent::CwdChanged { cwd, host });
+            return true;
+        }
+        if code == "1337"
+            && let Some((cwd, host)) = parse_osc1337_cwd(data)
+        {
+            emit(crate::TerminalEvent::CwdChanged { cwd, host });
+            return true;
+        }
         let source = match code {
             "133" => ShellIntegrationSource::Osc133,
             "633" => ShellIntegrationSource::Osc633,
@@ -542,6 +554,23 @@ fn parse_shell_integration_event(
 }
 
 fn parse_osc7_cwd(data: &str) -> Option<(String, Option<String>)> {
+    parse_cwd_payload(data)
+}
+
+fn parse_osc633_cwd(data: &str) -> Option<(String, Option<String>)> {
+    let (sequence, args) = split_sequence(data);
+    if sequence != "P" {
+        return None;
+    }
+    args.iter()
+        .find_map(|arg| arg.strip_prefix("Cwd=").and_then(parse_cwd_payload))
+}
+
+fn parse_osc1337_cwd(data: &str) -> Option<(String, Option<String>)> {
+    data.strip_prefix("CurrentDir=").and_then(parse_cwd_payload)
+}
+
+fn parse_cwd_payload(data: &str) -> Option<(String, Option<String>)> {
     if let Some(rest) = data.strip_prefix("file://") {
         let (host, path) = if rest.starts_with('/') {
             (None, rest)
@@ -554,7 +583,8 @@ fn parse_osc7_cwd(data: &str) -> Option<(String, Option<String>)> {
         return (!cwd.is_empty()).then_some((cwd, host));
     }
 
-    (!data.is_empty()).then(|| (data.to_string(), None))
+    let cwd = percent_decode(data)?;
+    (!cwd.is_empty()).then_some((cwd, None))
 }
 
 fn split_sequence(data: &str) -> (String, Vec<String>) {

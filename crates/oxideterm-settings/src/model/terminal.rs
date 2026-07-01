@@ -43,7 +43,7 @@ pub struct TerminalCommandBarSettings {
     pub git_status: bool,
     #[serde(default = "default_command_bar_project_tasks")]
     pub project_tasks: bool,
-    #[serde(default)]
+    #[serde(default = "default_command_bar_current_directory_awareness")]
     pub current_directory_awareness: bool,
     pub smart_completion: bool,
     pub quick_commands_enabled: bool,
@@ -60,7 +60,7 @@ impl Default for TerminalCommandBarSettings {
             enabled: true,
             git_status: true,
             project_tasks: true,
-            current_directory_awareness: false,
+            current_directory_awareness: true,
             smart_completion: true,
             quick_commands_enabled: true,
             quick_commands_confirm_before_run: false,
@@ -96,6 +96,10 @@ impl Default for TerminalCommandBarSettings {
 }
 
 fn default_command_bar_project_tasks() -> bool {
+    true
+}
+
+fn default_command_bar_current_directory_awareness() -> bool {
     true
 }
 
@@ -324,7 +328,7 @@ mod tests {
 
         let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
 
-        assert!(!settings.current_directory_awareness);
+        assert!(settings.current_directory_awareness);
     }
 
     #[test]

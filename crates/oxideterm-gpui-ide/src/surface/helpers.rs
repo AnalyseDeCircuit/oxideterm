@@ -114,6 +114,29 @@ fn remote_path(location: &IdeLocation) -> Option<&str> {
     }
 }
 
+fn paste_target_directory(location: &IdeLocation, is_directory: bool) -> Option<(String, String)> {
+    match location {
+        IdeLocation::Remote { node_id, path } if is_directory => {
+            Some((node_id.clone(), normalize_remote_path(path)))
+        }
+        IdeLocation::Remote { node_id, path } => {
+            Some((node_id.clone(), parent_remote_path(path)))
+        }
+        IdeLocation::Local { .. } => None,
+    }
+}
+
+fn remote_path_contains_path(parent: &str, child: &str) -> bool {
+    // The tree clipboard blocks self-nesting before it reaches Agent or SFTP backends.
+    let parent = normalize_remote_path(parent);
+    let child = normalize_remote_path(child);
+    if parent == "/" {
+        return child.starts_with('/');
+    }
+    let parent = parent.trim_end_matches('/');
+    child == parent || child.starts_with(&format!("{parent}/"))
+}
+
 fn format_conflict_mtime(mtime: Option<i64>) -> String {
     mtime
         .filter(|mtime| *mtime > 0)

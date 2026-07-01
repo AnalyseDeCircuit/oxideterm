@@ -142,15 +142,29 @@
       "unpin": "執行後關閉"
     },
     "cwd": {
-      "search_directories": "搜尋目錄...",
+      "search_directories": "搜尋檔案和目錄...",
       "loading": "正在載入目錄...",
-      "no_directories": "沒有符合的目錄",
+      "no_directories": "沒有符合的檔案或目錄",
       "unavailable": "目前工作目錄不可用。",
       "remote_list_failed": "無法載入遠端目錄。",
       "parent_directory": "..（上層目錄）",
       "enter_directory": "進入目錄",
       "go_to_path": "前往路徑",
-      "inferred": "推斷"
+      "inferred": "推斷",
+      "scope_local": "本機",
+      "scope_ssh": "SSH",
+      "source_process": "程序",
+      "source_manual": "手動回退",
+      "source_shell": "Shell 整合",
+      "quality_process": "程序回退",
+      "quality_manual": "手動回退",
+      "quality_cwd_only": "僅工作目錄",
+      "host": "主機",
+      "switch_to_directory": "切換到此目錄",
+      "copy_path": "複製路徑",
+      "open_file_manager": "在檔案管理器中開啟",
+      "open_sftp": "在 SFTP 中開啟",
+      "open_ide": "在 IDE 中開啟"
     },
     "project": {
       "search_tasks": "搜尋專案任務...",

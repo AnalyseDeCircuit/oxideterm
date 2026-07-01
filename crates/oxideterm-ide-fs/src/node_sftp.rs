@@ -226,6 +226,26 @@ impl NodeSftpIdeFileSystem {
         .await
     }
 
+    pub async fn copy_item(
+        &self,
+        node_id: impl Into<String>,
+        source_path: impl Into<String>,
+        target_path: impl Into<String>,
+    ) -> Result<(), IdeFileError> {
+        let node_id = NodeId::new(node_id);
+        let source_path = source_path.into();
+        let target_path = target_path.into();
+        self.with_sftp_retry(&node_id, |sftp| {
+            let source_path = source_path.clone();
+            let target_path = target_path.clone();
+            Box::pin(async move {
+                let sftp = sftp.lock().await;
+                copy_sftp_item_recursive(&sftp, &source_path, &target_path).await
+            })
+        })
+        .await
+    }
+
     async fn with_sftp_retry<T, F>(&self, node_id: &NodeId, operation: F) -> Result<T, IdeFileError>
     where
         F: for<'a> Fn(&'a SharedSftp) -> IdeOperationFuture<'a, T>,
@@ -408,6 +428,79 @@ impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
             }
         })
     }
+}
+
+async fn copy_sftp_item_recursive(
+    sftp: &SftpSession,
+    source_path: &str,
+    target_path: &str,
+) -> Result<(), IdeFileError> {
+    let mut pending = vec![(source_path.to_string(), target_path.to_string())];
+    while let Some((source_path, target_path)) = pending.pop() {
+        if sftp.stat(&target_path).await.is_ok() {
+            return Err(IdeFileError::new(
+                IdeFileErrorKind::Conflict,
+                "ide.error.alreadyExists",
+            ));
+        }
+        let source_info = sftp.stat(&source_path).await.map_err(map_sftp_error)?;
+        match source_info.file_type {
+            FileType::Directory => {
+                if remote_path_is_self_or_child(&target_path, &source_info.path) {
+                    return Err(IdeFileError::new(
+                        IdeFileErrorKind::Conflict,
+                        "Cannot copy a directory into itself",
+                    ));
+                }
+                sftp.mkdir(&target_path).await.map_err(map_sftp_error)?;
+                let entries = sftp
+                    .list_dir(
+                        &source_info.path,
+                        Some(ListFilter {
+                            show_hidden: true,
+                            pattern: None,
+                            sort: oxideterm_sftp::SortOrder::Name,
+                        }),
+                    )
+                    .await
+                    .map_err(map_sftp_error)?;
+                for entry in entries.into_iter().rev() {
+                    let child_target = join_remote_path_for_ide(&target_path, &entry.name);
+                    pending.push((entry.path, child_target));
+                }
+            }
+            FileType::File | FileType::Symlink => {
+                let bytes = sftp
+                    .read_file_bytes(&source_info.path)
+                    .await
+                    .map_err(map_sftp_error)?;
+                sftp.write_content(&target_path, &bytes)
+                    .await
+                    .map_err(map_sftp_error)?;
+            }
+            FileType::Unknown => {
+                return Err(IdeFileError::new(
+                    IdeFileErrorKind::Unsupported,
+                    "Unsupported file type",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn join_remote_path_for_ide(parent: &str, child: &str) -> String {
+    if parent == "/" {
+        format!("/{child}")
+    } else {
+        format!("{}/{child}", parent.trim_end_matches('/'))
+    }
+}
+
+fn remote_path_is_self_or_child(path: &str, ancestor: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    let ancestor = ancestor.trim_end_matches('/');
+    path == ancestor || path.starts_with(&format!("{ancestor}/"))
 }
 
 fn remote_location(location: &IdeLocation) -> Result<(NodeId, String), IdeFileError> {

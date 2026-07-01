@@ -5,6 +5,7 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let initial_remote_path = self.active_ssh_terminal_cwd_path_for_node(&node_id, cx);
         let node_title = self
             .ssh_nodes
             .get(&node_id)
@@ -35,10 +36,31 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
         self.activate_sftp_view_for_node(&node_id);
+        if let Some(path) = initial_remote_path.filter(|path| !path.trim().is_empty()) {
+            // SFTP keeps its own remembered path, but an explicit open from an
+            // active SSH terminal can use that pane cwd as the initial folder.
+            self.set_sftp_path(SftpPane::Remote, path);
+        }
         // Opening the SFTP surface mirrors Tauri's createTab path: it does
         // not start SSH. The SFTP worker consumes an already-connected node
         // and reports the router's not-connected error when the node is down.
         self.sftp_view.remote_load_pending = true;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_sftp_tab_at_remote_path(
+        &mut self,
+        node_id: NodeId,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_sftp_tab(node_id, window, cx);
+        if !path.trim().is_empty() {
+            // This path comes from an explicit cwd-panel action, so it may be a
+            // browsed row rather than the active terminal's confirmed cwd.
+            self.set_sftp_path(SftpPane::Remote, path);
+        }
         cx.notify();
     }
 

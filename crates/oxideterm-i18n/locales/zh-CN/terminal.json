@@ -152,15 +152,29 @@
       "unpin": "执行后关闭"
     },
     "cwd": {
-      "search_directories": "搜索目录...",
+      "search_directories": "搜索文件和目录...",
       "loading": "正在加载目录...",
-      "no_directories": "没有匹配的目录",
+      "no_directories": "没有匹配的文件或目录",
       "unavailable": "当前工作目录不可用。",
       "remote_list_failed": "无法加载远程目录。",
       "parent_directory": "..（上级目录）",
       "enter_directory": "进入目录",
       "go_to_path": "跳转到路径",
-      "inferred": "推断"
+      "inferred": "推断",
+      "scope_local": "本地",
+      "scope_ssh": "SSH",
+      "source_process": "进程",
+      "source_manual": "手动回退",
+      "source_shell": "Shell 集成",
+      "quality_process": "进程回退",
+      "quality_manual": "手动回退",
+      "quality_cwd_only": "仅工作目录",
+      "host": "主机",
+      "switch_to_directory": "切换到此目录",
+      "copy_path": "复制路径",
+      "open_file_manager": "在文件管理器中打开",
+      "open_sftp": "在 SFTP 中打开",
+      "open_ide": "在 IDE 中打开"
     },
     "project": {
       "search_tasks": "搜索项目任务...",

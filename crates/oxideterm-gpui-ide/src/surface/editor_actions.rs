@@ -1147,6 +1147,142 @@ impl IdeSurface {
         cx.notify();
     }
 
+    fn request_copy_tree_item(
+        &mut self,
+        location: IdeLocation,
+        name: String,
+        is_directory: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ensure_remote_actions_ready(cx) {
+            return;
+        }
+        self.tree_clipboard = Some(TreeClipboardState {
+            operation: TreeClipboardOperation::Copy,
+            location,
+            name,
+            is_directory,
+        });
+        cx.notify();
+    }
+
+    fn request_cut_tree_item(
+        &mut self,
+        location: IdeLocation,
+        name: String,
+        is_directory: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ensure_remote_actions_ready(cx) {
+            return;
+        }
+        self.tree_clipboard = Some(TreeClipboardState {
+            operation: TreeClipboardOperation::Cut,
+            location,
+            name,
+            is_directory,
+        });
+        cx.notify();
+    }
+
+    fn paste_tree_clipboard(
+        &mut self,
+        target_location: IdeLocation,
+        target_is_directory: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ensure_remote_actions_ready(cx) {
+            return;
+        }
+        let Some(clipboard) = self.tree_clipboard.clone() else {
+            return;
+        };
+        let Some((node_id, target_dir)) =
+            paste_target_directory(&target_location, target_is_directory)
+        else {
+            return;
+        };
+        let (source_node_id, source_path) = match &clipboard.location {
+            IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
+            IdeLocation::Local { .. } => return,
+        };
+        if source_node_id != node_id {
+            self.last_error = Some("Cannot paste between different remote connections".to_string());
+            cx.notify();
+            return;
+        }
+        let target_path = join_remote_child(&target_dir, &clipboard.name);
+        if normalize_remote_path(&source_path) == normalize_remote_path(&target_path) {
+            return;
+        }
+        if clipboard.is_directory && remote_path_contains_path(&source_path, &target_path) {
+            self.last_error = Some("Cannot paste a directory into itself".to_string());
+            cx.notify();
+            return;
+        }
+
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        let generation = self.generation;
+        let source_parent = parent_remote_path(&source_path);
+        cx.notify();
+
+        cx.spawn(async move |weak, cx| {
+            let result = await_ide_backend(backend_runtime.spawn({
+                let node_id = node_id.clone();
+                let source_path = source_path.clone();
+                let target_path = target_path.clone();
+                async move {
+                    match clipboard.operation {
+                        TreeClipboardOperation::Copy => {
+                            fs.copy_item(node_id, source_path, target_path).await
+                        }
+                        TreeClipboardOperation::Cut => {
+                            fs.rename_item(node_id, source_path, target_path).await
+                        }
+                    }
+                }
+            }))
+            .await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(()) => {
+                        if clipboard.operation == TreeClipboardOperation::Cut {
+                            let new_location =
+                                IdeLocation::remote(source_node_id.clone(), target_path.clone());
+                            if let Err(error) =
+                                this.workspace.rename_tabs_under(&clipboard.location, &new_location)
+                            {
+                                this.last_error = Some(error.to_string());
+                            }
+                            this.tree_clipboard = None;
+                        }
+                        this.clear_search_cache();
+                        this.load_directory(
+                            IdeLocation::remote(source_node_id.clone(), target_dir),
+                            cx,
+                        );
+                        if source_parent != parent_remote_path(&target_path) {
+                            this.load_directory(
+                                IdeLocation::remote(source_node_id, source_parent),
+                                cx,
+                            );
+                        }
+                        this.start_agent_watch_if_ready(cx);
+                    }
+                    Err(error) => {
+                        this.last_error = Some(error.message);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn request_tree_name_input(
         &mut self,
         kind: TreeNameInputKind,

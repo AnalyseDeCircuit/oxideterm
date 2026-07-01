@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "Show the active repository branch in the Command Bar for local and SSH terminals.",
       "command_bar_project_tasks": "Show Project Tasks",
       "command_bar_project_tasks_hint": "Show detected project and task actions in the Command Bar for local and SSH terminals.",
+      "command_bar_current_directory_awareness": "Show Working Directory",
+      "command_bar_current_directory_awareness_hint": "Show the active local or SSH terminal directory in the Command Bar and allow switching it from the directory picker.",
       "command_bar_focus_handoff": "Focus Terminal for TUI Commands",
       "command_bar_focus_handoff_hint": "After running these commands from the Command Bar, focus the terminal because they usually take over keyboard input. Separate commands with spaces, commas, or new lines.",
       "command_marks": "Command Marks",

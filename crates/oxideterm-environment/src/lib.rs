@@ -13,9 +13,10 @@ pub mod project;
 pub mod terminal_context;
 
 pub use cwd::{
-    CurrentDirectoryEntry, CurrentDirectoryKey, CurrentDirectoryScope, CurrentDirectorySnapshot,
-    CurrentDirectorySource, current_directory_cd_command, current_directory_parent,
-    current_directory_report_command,
+    CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
+    CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
+    current_directory_parent, current_directory_report_command,
+    current_directory_shell_integration_command, current_directory_shell_path_argument,
 };
 pub use git::{
     GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath, GitCommandOutput,

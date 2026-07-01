@@ -839,6 +839,13 @@ impl WorkspaceApp {
             // Close stale project task UI when the owning awareness feature is disabled.
             self.close_terminal_project_panel();
         }
+        if !settings.terminal.command_bar.enabled
+            || !settings.terminal.command_bar.current_directory_awareness
+        {
+            // CWD picker state is transient command-bar chrome; disabling the
+            // feature should not leave an orphaned popover around.
+            self.close_terminal_cwd_picker();
+        }
         self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
             settings.connection_pool.idle_timeout_secs as u64,
         )));

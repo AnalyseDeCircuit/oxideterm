@@ -46,6 +46,7 @@ impl IdeSurface {
             tree_context_menu: None,
             tree_name_input: None,
             delete_confirm: None,
+            tree_clipboard: None,
             tab_drag: None,
             agent_opt_in_open: false,
             agent_opt_in_remember: false,
@@ -153,6 +154,7 @@ impl IdeSurface {
         self.saving_tabs.clear();
         self.tree_name_input = None;
         self.delete_confirm = None;
+        self.tree_clipboard = None;
         self.agent_action = None;
         self.editors.clear();
         self.workspace = IdeWorkspace::new();

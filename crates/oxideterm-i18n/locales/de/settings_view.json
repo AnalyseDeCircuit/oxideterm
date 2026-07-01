@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "Zeigt den Branch des aktiven Repositorys in der Befehlsleiste für lokale und SSH-Terminals an.",
       "command_bar_project_tasks": "Projektaufgaben anzeigen",
       "command_bar_project_tasks_hint": "Zeigt erkannte Projekt- und Aufgabenaktionen in der Befehlsleiste für lokale und SSH-Terminals an.",
+      "command_bar_current_directory_awareness": "Arbeitsverzeichnis anzeigen",
+      "command_bar_current_directory_awareness_hint": "Zeigt das aktive lokale oder SSH-Terminalverzeichnis in der Befehlsleiste an und erlaubt das Wechseln über die Verzeichnisauswahl.",
       "command_bar_focus_handoff": "Terminal bei TUI-Befehlen fokussieren",
       "command_bar_focus_handoff_hint": "Nach dem Ausführen dieser Befehle über die Befehlsleiste wird das Terminal fokussiert, weil sie meist die Tastatur übernehmen. Befehle mit Leerzeichen, Kommas oder Zeilenumbrüchen trennen.",
       "command_marks": "Befehlsmarken",

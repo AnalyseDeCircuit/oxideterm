@@ -137,6 +137,7 @@ impl WorkspaceApp {
             terminal_cwd_tx,
             terminal_cwd_rx,
             terminal_cwd_picker: terminal_cwd::TerminalCwdPickerState::default(),
+            terminal_cwd_bootstrap_requested: HashSet::new(),
             terminal_git_store: oxideterm_environment::GitStatusStore::default(),
             terminal_git_tx,
             terminal_git_rx,

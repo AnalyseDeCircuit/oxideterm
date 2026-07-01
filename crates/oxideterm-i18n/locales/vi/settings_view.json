@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "Hiển thị nhánh kho hiện tại trên thanh lệnh cho terminal cục bộ và SSH.",
       "command_bar_project_tasks": "Hiển thị tác vụ dự án",
       "command_bar_project_tasks_hint": "Hiển thị các thao tác dự án và tác vụ được phát hiện trên thanh lệnh cho terminal cục bộ và SSH.",
+      "command_bar_current_directory_awareness": "Hiển thị thư mục làm việc",
+      "command_bar_current_directory_awareness_hint": "Hiển thị thư mục hiện tại của terminal cục bộ hoặc SSH trên thanh lệnh và cho phép chuyển thư mục từ bộ chọn thư mục.",
       "command_bar_focus_handoff": "Tập trung terminal cho lệnh TUI",
       "command_bar_focus_handoff_hint": "Sau khi chạy các lệnh này từ thanh lệnh, chuyển focus về terminal vì chúng thường chiếm bàn phím. Tách lệnh bằng khoảng trắng, dấu phẩy hoặc dòng mới.",
       "command_marks": "Dấu lệnh",

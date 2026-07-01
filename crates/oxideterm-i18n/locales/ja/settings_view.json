@@ -348,6 +348,8 @@
       "command_bar_git_status_hint": "ローカル端末と SSH 端末のアクティブなリポジトリブランチをコマンドバーに表示します。",
       "command_bar_project_tasks": "プロジェクトタスクを表示",
       "command_bar_project_tasks_hint": "ローカル端末と SSH 端末で検出したプロジェクトとタスクの操作をコマンドバーに表示します。",
+      "command_bar_current_directory_awareness": "作業ディレクトリを表示",
+      "command_bar_current_directory_awareness_hint": "ローカルまたは SSH 端末の現在のディレクトリをコマンドバーに表示し、ディレクトリ選択から切り替えられるようにします。",
       "command_bar_focus_handoff": "TUI コマンド後に端末へフォーカス",
       "command_bar_focus_handoff_hint": "これらのコマンドをコマンドバーから実行した後、通常キーボード入力を引き継ぐため端末へフォーカスします。コマンドは空白、カンマ、改行で区切れます。",
       "command_marks": "コマンドマーク",

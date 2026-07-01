@@ -14,6 +14,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let initial_path = self.active_local_terminal_cwd_path(cx);
         let tab_id = if let Some(tab) = self
             .tabs
             .iter()
@@ -38,9 +39,31 @@ impl WorkspaceApp {
         if self.sidebar_collapsed {
             self.sidebar_collapsed = false;
         }
-        self.refresh_file_manager();
+        if let Some(path) = initial_path {
+            // Opening File Manager from a local terminal should start where the
+            // user is already working, without turning cwd into global state.
+            self.set_file_manager_path(path);
+        } else {
+            self.refresh_file_manager();
+        }
         self.persist_sidebar_settings();
         self.reveal_active_tab(window);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_file_manager_tab_at_path(
+        &mut self,
+        path: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_file_manager_tab(window, cx);
+        if !path.trim().is_empty() {
+            // The cwd picker can browse away from the active terminal's
+            // confirmed cwd before opening the surface, so apply that explicit
+            // selection after the tab is active.
+            self.set_file_manager_path(path);
+        }
         cx.notify();
     }
 

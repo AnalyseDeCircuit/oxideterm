@@ -142,15 +142,29 @@
       "unpin": "Cerrar tras ejecutar"
     },
     "cwd": {
-      "search_directories": "Buscar directorios...",
+      "search_directories": "Buscar archivos y directorios...",
       "loading": "Cargando directorios...",
-      "no_directories": "No hay directorios coincidentes",
+      "no_directories": "No hay archivos ni directorios coincidentes",
       "unavailable": "El directorio de trabajo actual no está disponible.",
       "remote_list_failed": "No se pudieron cargar los directorios remotos.",
       "parent_directory": ".. (Directorio superior)",
       "enter_directory": "Entrar al directorio",
       "go_to_path": "Ir a ruta",
-      "inferred": "inferido"
+      "inferred": "inferido",
+      "scope_local": "Local",
+      "scope_ssh": "SSH",
+      "source_process": "Proceso",
+      "source_manual": "Reserva manual",
+      "source_shell": "Integración de shell",
+      "quality_process": "reserva de proceso",
+      "quality_manual": "reserva manual",
+      "quality_cwd_only": "solo directorio actual",
+      "host": "Host",
+      "switch_to_directory": "Cambiar a este directorio",
+      "copy_path": "Copiar ruta",
+      "open_file_manager": "Abrir en el gestor de archivos",
+      "open_sftp": "Abrir en SFTP",
+      "open_ide": "Abrir en IDE"
     },
     "project": {
       "search_tasks": "Buscar tareas del proyecto...",
