@@ -350,7 +350,6 @@ impl WorkspaceApp {
             .and_then(|tab| tab.active_pane_id);
         match node {
             PaneNode::Leaf { pane_id, .. } => {
-                let theme = self.tokens.ui;
                 let active = Some(*pane_id) == active_pane_id;
                 let Some(pane) = self.panes.get(pane_id).cloned() else {
                     return div().size_full().into_any_element();
@@ -362,12 +361,6 @@ impl WorkspaceApp {
                     .min_w(px(self.tokens.metrics.min_pane_width))
                     .min_h(px(self.tokens.metrics.min_pane_height))
                     .overflow_hidden()
-                    .border_1()
-                    .border_color(if active {
-                        rgb(theme.border)
-                    } else {
-                        rgb(theme.bg_panel)
-                    })
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener({

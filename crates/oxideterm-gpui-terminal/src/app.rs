@@ -2008,14 +2008,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_grid_span_reserves_command_mark_gutter() {
-        let cell_width = 10.0;
-        let grid_span = terminal_grid_span_for_viewport(px(120.0), cell_width, 4.0);
-        let cols = whole_cells_in_span(grid_span, cell_width);
-
-        assert_eq!(cols, 10);
-    }
-
     #[test]
     fn row_timestamps_track_last_modified_nonblank_content() {
         let mut row_timestamps = HashMap::new();

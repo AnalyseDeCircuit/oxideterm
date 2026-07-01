@@ -99,15 +99,17 @@ pub(crate) fn paint_command_mark_overlay(
         window.paint_quad(fill(bounds, fill_color));
     }
 
-    let edge_width = if overlay.selected { 3.0 } else { 2.0 };
-    let edge_x = command_mark_edge_x(command_mark_gutter_width, edge_width);
-    window.paint_quad(fill(
-        Bounds::new(
-            origin + point(px(edge_x), px(y)),
-            size(px(edge_width), px(height)),
-        ),
-        accent,
-    ));
+    if command_mark_gutter_width > 0.0 {
+        let edge_width = if overlay.selected { 3.0 } else { 2.0 };
+        let edge_x = command_mark_edge_x(command_mark_gutter_width, edge_width);
+        window.paint_quad(fill(
+            Bounds::new(
+                origin + point(px(edge_x), px(y)),
+                size(px(edge_width), px(height)),
+            ),
+            accent,
+        ));
+    }
 
     if overlay.selected && overlay.has_top {
         window.paint_quad(fill(

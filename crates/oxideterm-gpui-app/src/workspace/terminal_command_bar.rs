@@ -3662,12 +3662,6 @@ impl WorkspaceApp {
                                         } else {
                                             rgb(theme.text)
                                         })
-                                        .when(focused && showing_placeholder, |input| {
-                                            input.child(text_caret(
-                                                &self.tokens,
-                                                self.new_connection_caret_visible,
-                                            ))
-                                        })
                                         // Tauri uses a real textarea, so the painted caret
                                         // follows selectionStart instead of always sitting
                                         // at the end of the value. Keep native rendering
