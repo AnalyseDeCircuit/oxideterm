@@ -279,9 +279,6 @@ const SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 260.0;
 const SETTINGS_SECTION_LIST_OVERSCAN: usize = 2;
 const SETTINGS_SCROLL_CARET_PAUSE_MS: u64 = 700;
 const AI_SETTINGS_SECTION_ESTIMATED_HEIGHT: f32 = 360.0;
-const AI_EXECUTION_PROFILE_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT: f32 = 232.0; // Responsive profile cards can wrap controls into multiple rows.
-const AI_EXECUTION_PROFILE_LIST_OVERSCAN: usize = 4;
 const AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
 const AI_PROVIDER_MODEL_ROW_LIST_OVERSCAN: usize = 6;
@@ -737,8 +734,6 @@ pub(crate) struct WorkspaceApp {
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
     settings_data_directory_confirm: Option<DataDirectoryConfirm>,
-    ai_execution_profile_list_state: ListState,
-    ai_execution_profile_list_cache: RefCell<VirtualListSignatureCache>,
     ai_context_model_list_states: RefCell<HashMap<String, ListState>>,
     ai_context_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     ai_reasoning_model_list_states: RefCell<HashMap<String, ListState>>,
@@ -776,7 +771,6 @@ pub(crate) struct WorkspaceApp {
     ai_cli_agent_sessions: HashMap<String, AiCliAgentSession>,
     ai_conversation_list_open: bool,
     ai_chat_menu_open: bool,
-    ai_profile_selector_open: bool,
     ai_safety_menu_open: bool,
     ai_safety_confirm_open: bool,
     ai_summarize_confirm_open: bool,

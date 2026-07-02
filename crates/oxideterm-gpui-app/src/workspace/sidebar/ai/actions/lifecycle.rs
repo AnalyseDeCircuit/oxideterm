@@ -45,7 +45,6 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self) {
         self.ai_conversation_list_open = false;
         self.ai_chat_menu_open = false;
-        self.ai_profile_selector_open = false;
         self.ai_safety_menu_open = false;
         self.ai_context_popover_open = false;
         self.close_ai_model_selector();
@@ -140,7 +139,6 @@ impl WorkspaceApp {
         self.ai_chat.set_active_conversation(id);
         self.ai_conversation_list_open = false;
         self.ai_chat_menu_open = false;
-        self.ai_profile_selector_open = false;
         self.ai_safety_menu_open = false;
         self.ai_editing_message_id = None;
         self.ai_editing_message_draft.clear();

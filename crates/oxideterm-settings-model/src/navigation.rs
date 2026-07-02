@@ -68,7 +68,7 @@ pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
     let page_cards = match page {
         AiSettingsPage::General => 1,
         AiSettingsPage::Providers => 1,
-        AiSettingsPage::Agents => 2,
+        AiSettingsPage::Agents => 1,
         AiSettingsPage::Context => 2,
         AiSettingsPage::Tools => 1,
     };

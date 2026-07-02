@@ -83,36 +83,6 @@ impl Default for AiContextSources {
     }
 }
 
-fn default_execution_profiles() -> Value {
-    json!({
-        "defaultProfileId": "default",
-        "profiles": [{
-            "id": "default",
-            "name": "Default",
-            "backend": "provider",
-            "providerId": null,
-            "acpAgentId": null,
-            "model": null,
-            "reasoningEffort": "auto",
-            "toolUse": {
-                "enabled": false,
-                "maxRounds": DEFAULT_AI_TOOL_MAX_ROUNDS,
-                "maxCallsPerRound": DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND,
-                "autoApproveTools": {},
-                "disabledTools": []
-            },
-            "context": {
-                "includeRuntimeChips": true,
-                "includeMemory": true,
-                "includeRag": true
-            },
-            "commandPolicy": { "allow": [], "deny": [] },
-            "createdAt": 0,
-            "updatedAt": 0
-        }]
-    })
-}
-
 fn default_acp_agent_enabled() -> bool {
     true
 }
@@ -211,6 +181,14 @@ impl std::fmt::Debug for AcpAgentConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiActiveBackend {
+    #[default]
+    Provider,
+    Acp,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSettings {
@@ -221,6 +199,10 @@ pub struct AiSettings {
     pub providers: Vec<Value>,
     pub active_provider_id: Option<String>,
     pub active_model: Option<String>,
+    #[serde(default)]
+    pub active_backend: AiActiveBackend,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_acp_agent_id: Option<String>,
     pub context_max_chars: i64,
     pub context_visible_lines: i64,
     pub thinking_style: AiThinkingStyle,
@@ -246,7 +228,6 @@ pub struct AiSettings {
     pub embedding_config: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_roles: Option<Value>,
-    pub execution_profiles: Value,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -261,6 +242,8 @@ impl Default for AiSettings {
             providers: Vec::new(),
             active_provider_id: None,
             active_model: None,
+            active_backend: AiActiveBackend::Provider,
+            active_acp_agent_id: None,
             context_max_chars: 8000,
             context_visible_lines: 120,
             thinking_style: AiThinkingStyle::Detailed,
@@ -279,7 +262,6 @@ impl Default for AiSettings {
             acp_agents: Vec::new(),
             embedding_config: None,
             agent_roles: None,
-            execution_profiles: default_execution_profiles(),
             extra: ExtraFields::new(),
         }
     }

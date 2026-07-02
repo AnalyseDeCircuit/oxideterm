@@ -27,9 +27,6 @@ impl WorkspaceApp {
                 SelectAnchorId::AiModelSelector,
                 cx,
             ))
-            .when_some(self.render_ai_profile_indicator(cx), |bar, indicator| {
-                bar.child(indicator)
-            })
             .child(self.render_ai_safety_indicator(cx))
             .child(self.render_ai_tool_indicator(cx))
             .into_any_element()
@@ -246,57 +243,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_ai_profile_indicator(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let conversation = self.ai_chat.active_conversation()?;
-        let profiles = self
-            .settings_store
-            .settings()
-            .ai
-            .execution_profiles
-            .get("profiles")
-            .and_then(|value| value.as_array())?;
-        if profiles.len() <= 1 {
-            return None;
-        }
-        let conversation_id = conversation.id.clone();
-        let workspace = cx.entity();
-        Some(
-            div()
-                .relative()
-                .flex_none()
-                .child(
-                    select_anchor_probe(
-                        SelectAnchorId::AiProfileSelector,
-                        ai_profile_button(
-                            &self.tokens,
-                            Self::render_lucide_icon(
-                                LucideIcon::Layers,
-                                14.0,
-                                rgb(self.tokens.ui.accent),
-                            ),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if this.ai_chat.active_conversation_id.as_deref()
-                                    != Some(conversation_id.as_str())
-                                {
-                                    return;
-                                }
-                                let next_open = !this.ai_profile_selector_open;
-                                this.close_ai_sidebar_popovers();
-                                this.ai_profile_selector_open = next_open;
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        ),
-                        Self::deferred_ai_select_anchor_update(workspace),
-                    ),
-                )
-            .into_any_element(),
-        )
-    }
-
     fn render_ai_safety_indicator(&self, cx: &mut Context<Self>) -> AnyElement {
         let mode = self.active_ai_safety_mode();
         let icon = match mode {
@@ -341,138 +287,6 @@ impl WorkspaceApp {
                 ),
             )
             .into_any_element()
-    }
-
-    fn render_ai_profile_dropdown(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(conversation) = self.ai_chat.active_conversation() else {
-            return div().into_any_element();
-        };
-        let profiles = self
-            .settings_store
-            .settings()
-            .ai
-            .execution_profiles
-            .get("profiles")
-            .and_then(|value| value.as_array())
-            .cloned()
-            .unwrap_or_default();
-        let default_profile_id = self
-            .settings_store
-            .settings()
-            .ai
-            .execution_profiles
-            .get("defaultProfileId")
-            .and_then(|value| value.as_str())
-            .map(str::to_string)
-            .or_else(|| {
-                profiles
-                    .first()
-                    .and_then(|profile| profile.get("id"))
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-            });
-        let active_profile_id = conversation
-            .profile_id
-            .clone()
-            .or_else(|| {
-                conversation
-                    .session_metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.get("profileId"))
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-            })
-            .or(default_profile_id.clone())
-            .unwrap_or_else(|| "default".to_string());
-        let conversation_id = conversation.id.clone();
-
-        let mut panel = div()
-            .w(px(220.0))
-            .overflow_hidden()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
-            .shadow_lg()
-            .py(px(4.0));
-        // Profile dropdown is a floating Radix-style menu in Tauri; wheel
-        // events over it should not route into the sidebar/chat scroll stack.
-        panel = panel.on_scroll_wheel(|_, _, cx| cx.stop_propagation());
-
-        for profile in profiles {
-            let profile_id = profile
-                .get("id")
-                .and_then(|value| value.as_str())
-                .unwrap_or("default")
-                .to_string();
-            let profile_name = profile
-                .get("name")
-                .and_then(|value| value.as_str())
-                .unwrap_or("Default")
-                .to_string();
-            let is_selected = profile_id == active_profile_id;
-            let is_default = default_profile_id.as_deref() == Some(profile_id.as_str());
-            let row_profile_id = profile_id.clone();
-            let row_conversation_id = conversation_id.clone();
-            panel = panel.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.two))
-                    .px(px(self.tokens.spacing.three))
-                    .py(px(self.tokens.spacing.two))
-                    .cursor_pointer()
-                    .bg(if is_selected {
-                        rgba((self.tokens.ui.accent << 8) | 0x1a)
-                    } else {
-                        rgba(0x00000000)
-                    })
-                    .hover(|row| row.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x99)))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(px(12.0))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(if is_selected {
-                                rgb(self.tokens.ui.accent)
-                            } else {
-                                rgb(self.tokens.ui.text)
-                            })
-                            .child(profile_name),
-                    )
-                    .when(is_default, |row| {
-                        row.child(
-                            div()
-                                .flex_none()
-                                .text_size(px(10.0))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(self.render_display_text_with_role(
-                                    SelectableTextRole::PlainDocument,
-                                    "ai-profile-badge",
-                                    "default",
-                                    self.i18n.t("ai.profile.default_badge"),
-                                    self.tokens.ui.text_muted,
-                                    cx,
-                                )),
-                        )
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.set_ai_conversation_profile(
-                                &row_conversation_id,
-                                row_profile_id.clone(),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ),
-            );
-        }
-
-        panel.into_any_element()
     }
 
     fn render_ai_safety_menu(&self, cx: &mut Context<Self>) -> AnyElement {

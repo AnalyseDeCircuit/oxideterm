@@ -303,21 +303,6 @@ impl WorkspaceApp {
             .measure_all(),
             settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             settings_data_directory_confirm: None,
-            // Execution profiles live inside the OxideSens section chrome, but
-            // user-created profile counts are unbounded. Keep the rows on their
-            // own ListState so scrolling the settings page does not rebuild all
-            // profile cards.
-            ai_execution_profile_list_state: ListState::new(
-                AI_EXECUTION_PROFILE_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(AI_EXECUTION_PROFILE_LIST_ESTIMATED_HEIGHT),
-                    AI_EXECUTION_PROFILE_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            ai_execution_profile_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             // Expanded context/reasoning override tables are per-provider model
             // rows. Store ListState by provider id to preserve each table's
             // measurements independently.
@@ -388,7 +373,6 @@ impl WorkspaceApp {
             ai_cli_agent_sessions: HashMap::new(),
             ai_conversation_list_open: false,
             ai_chat_menu_open: false,
-            ai_profile_selector_open: false,
             ai_safety_menu_open: false,
             ai_safety_confirm_open: false,
             ai_summarize_confirm_open: false,

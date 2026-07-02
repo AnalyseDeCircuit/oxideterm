@@ -595,7 +595,6 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiChatMenu
                     | SelectAnchorId::AiModelSelector
                     | SelectAnchorId::AiInlineModelSelector
-                    | SelectAnchorId::AiProfileSelector
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
             ) && self.has_ai_sidebar_floating_overlay())
@@ -1386,7 +1385,6 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::AiChatMenu
             | SelectAnchorId::AiModelSelector
             | SelectAnchorId::AiInlineModelSelector
-            | SelectAnchorId::AiProfileSelector
             | SelectAnchorId::AiSafetyMenu
             | SelectAnchorId::AiContextPopover
             | SelectAnchorId::NewConnectionGroup

@@ -74,10 +74,6 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::AiContextMaxChars => SelectAnchorId::SettingsAiContextMaxChars,
             Self::AiContextVisibleLines => SelectAnchorId::SettingsAiContextVisibleLines,
             Self::AiGlobalReasoning => SelectAnchorId::SettingsAiGlobalReasoning,
-            Self::AiProfileBackend(index) => SelectAnchorId::SettingsAiProfileBackend(index),
-            Self::AiProfileProvider(index) => SelectAnchorId::SettingsAiProfileProvider(index),
-            Self::AiProfileAcpAgent(index) => SelectAnchorId::SettingsAiProfileAcpAgent(index),
-            Self::AiProfileReasoning(index) => SelectAnchorId::SettingsAiProfileReasoning(index),
             Self::AiProviderReasoning(index) => SelectAnchorId::SettingsAiProviderReasoning(index),
             Self::AiModelReasoning(provider_index, model_index) => {
                 SelectAnchorId::SettingsAiModelReasoning(provider_index, model_index)

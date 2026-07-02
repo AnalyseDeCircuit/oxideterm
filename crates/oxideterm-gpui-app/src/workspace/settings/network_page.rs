@@ -1,7 +1,7 @@
 const SETTINGS_NETWORK_MAX_WIDTH: f32 = 672.0; // Tauri max-w-2xl
-const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0;
-const SETTINGS_NETWORK_FIELD_MIN_WIDTH: f32 = 220.0; // Proxy fields wrap before localized labels and controls collide.
-const SETTINGS_NETWORK_PORT_FIELD_MIN_WIDTH: f32 = 140.0; // Port fields can stay narrower than host/protocol fields.
+const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0; // Desktop preference for normal proxy fields.
+const SETTINGS_NETWORK_PORT_FIELD_WIDTH: f32 = 140.0; // Ports should stay compact instead of sharing a full row.
+const SETTINGS_NETWORK_CONTROL_FILL_WIDTH: f32 = SETTINGS_NETWORK_MAX_WIDTH; // Parent field slots clamp shared controls with max-w-full.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NetworkProxyAuthMode {
@@ -89,7 +89,7 @@ impl WorkspaceApp {
                         .items_start()
                         .gap(px(32.0))
                         .child(self.network_responsive_field(
-                            SETTINGS_NETWORK_FIELD_MIN_WIDTH,
+                            SETTINGS_NETWORK_FIELD_WIDTH,
                             self.network_select_field(
                                 "settings_view.network.protocol",
                                 "settings_view.network.protocol_hint",
@@ -105,7 +105,7 @@ impl WorkspaceApp {
                             ),
                         ))
                         .child(self.network_responsive_field(
-                            SETTINGS_NETWORK_PORT_FIELD_MIN_WIDTH,
+                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                             self.network_input_field(
                                 "settings_view.network.port",
                                 "settings_view.network.port_hint",
@@ -191,7 +191,7 @@ impl WorkspaceApp {
                     .items_start()
                     .gap(px(32.0))
                     .child(self.network_responsive_field(
-                        SETTINGS_NETWORK_FIELD_MIN_WIDTH,
+                        SETTINGS_NETWORK_FIELD_WIDTH,
                         self.network_select_field(
                             "settings_view.network.auth",
                             "settings_view.network.auth_hint",
@@ -277,7 +277,7 @@ impl WorkspaceApp {
                     .flex_wrap()
                     .gap(px(16.0))
                     .child(self.network_responsive_field(
-                        SETTINGS_NETWORK_FIELD_MIN_WIDTH,
+                        SETTINGS_NETWORK_FIELD_WIDTH,
                         self.network_input_field(
                             "settings_view.network.test_host",
                             "settings_view.network.host_hint",
@@ -289,7 +289,7 @@ impl WorkspaceApp {
                         ),
                     ))
                     .child(self.network_responsive_field(
-                        SETTINGS_NETWORK_PORT_FIELD_MIN_WIDTH,
+                        SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                         self.network_input_field(
                             "settings_view.network.test_port",
                             "settings_view.network.port_hint",
@@ -351,13 +351,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn network_responsive_field(&self, min_width: f32, field: AnyElement) -> AnyElement {
-        // The width is a desktop layout preference; flex-basis plus min-width
-        // zero lets narrow settings panes wrap instead of bleeding into sidebars.
+    fn network_responsive_field(&self, preferred_width: f32, field: AnyElement) -> AnyElement {
+        // Field slots own width. Controls fill the slot; the slot itself wraps
+        // or shrinks instead of growing into the right sidebar.
         div()
+            .w(px(preferred_width))
+            .max_w_full()
             .min_w(px(0.0))
-            .flex_1()
-            .flex_basis(px(min_width))
+            .flex_initial()
             .child(field)
             .into_any_element()
     }
@@ -390,13 +391,16 @@ impl WorkspaceApp {
             .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .flex()
+            .flex_wrap()
             .items_center()
-            .justify_between()
             .gap(px(16.0))
             .child(
                 div()
                     .min_w(px(0.0))
                     .flex_1()
+                    // Checkbox rows keep the label as the flexible item so the
+                    // fixed checkbox can wrap inside narrow settings panes.
+                    .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
                     .grid()
                     .gap(px(4.0))
                     .child(
@@ -427,7 +431,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .w(px(SETTINGS_NETWORK_FIELD_WIDTH))
+            .w_full()
             .max_w_full()
             .min_w(px(0.0))
             .grid()
@@ -448,7 +452,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .w(px(SETTINGS_NETWORK_FIELD_WIDTH))
+            .w_full()
             .max_w_full()
             .min_w(px(0.0))
             .grid()
@@ -459,7 +463,7 @@ impl WorkspaceApp {
                     input,
                     value,
                     placeholder,
-                    SETTINGS_NETWORK_FIELD_WIDTH,
+                    SETTINGS_NETWORK_CONTROL_FILL_WIDTH,
                     cx,
                 )
                 .into_any_element(),
@@ -536,7 +540,7 @@ impl WorkspaceApp {
                         div()
                             .min_w(px(0.0))
                             .flex_1()
-                            .flex_basis(px(SETTINGS_NETWORK_FIELD_MIN_WIDTH))
+                            .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
                             .child(self.settings_secret_text_input_control(
                                 password_input,
                                 String::new(),
@@ -545,56 +549,64 @@ impl WorkspaceApp {
                                 } else {
                                     String::new()
                                 },
-                                SETTINGS_NETWORK_FIELD_WIDTH,
+                                SETTINGS_NETWORK_CONTROL_FILL_WIDTH,
                                 cx,
                             )),
                     )
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.save_password"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::KeyRound,
-                            16.0,
-                            rgb(if save_disabled {
-                                self.tokens.ui.text_muted
-                            } else {
-                                self.tokens.ui.bg
-                            }),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Default,
-                                radius: ButtonRadius::Md,
-                                disabled: save_disabled,
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.save_settings_network_proxy_password(cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.remove_password"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Trash2,
-                            16.0,
-                            rgb(self.tokens.ui.text),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Ghost,
-                                size: ButtonSize::Default,
-                                radius: ButtonRadius::Md,
-                                disabled: remove_disabled,
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.remove_settings_network_proxy_password(cx);
-                            cx.stop_propagation();
-                        }),
-                    )),
+                    .child(
+                        div()
+                            .flex_none()
+                            .child(self.workspace_toolbar_action_button(
+                                self.i18n.t("settings_view.network.save_password"),
+                                Some(Self::render_lucide_icon(
+                                    LucideIcon::KeyRound,
+                                    16.0,
+                                    rgb(if save_disabled {
+                                        self.tokens.ui.text_muted
+                                    } else {
+                                        self.tokens.ui.bg
+                                    }),
+                                )),
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Default,
+                                        size: ButtonSize::Default,
+                                        radius: ButtonRadius::Md,
+                                        disabled: save_disabled,
+                                    },
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.save_settings_network_proxy_password(cx);
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .child(self.workspace_toolbar_action_button(
+                                self.i18n.t("settings_view.network.remove_password"),
+                                Some(Self::render_lucide_icon(
+                                    LucideIcon::Trash2,
+                                    16.0,
+                                    rgb(self.tokens.ui.text),
+                                )),
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Ghost,
+                                        size: ButtonSize::Default,
+                                        radius: ButtonRadius::Md,
+                                        disabled: remove_disabled,
+                                    },
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.remove_settings_network_proxy_password(cx);
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    ),
             )
             .when(!enabled, |field| field.opacity(0.5));
 

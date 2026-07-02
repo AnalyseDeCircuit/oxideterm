@@ -135,7 +135,6 @@ impl WorkspaceApp {
     }
 
     fn render_settings_ai_section_item(&mut self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        self.normalize_ai_execution_profiles_for_settings_render();
         let item = if index == 0 {
             self.render_settings_virtual_header(SettingsTab::Ai, cx)
         } else {
@@ -169,13 +168,6 @@ impl WorkspaceApp {
                 )
             }
             (AiSettingsPage::Agents, 0) => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_execution_profiles_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            (AiSettingsPage::Agents, 1) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_acp_agents_section(settings, cx),

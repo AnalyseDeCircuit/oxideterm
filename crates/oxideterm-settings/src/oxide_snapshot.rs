@@ -93,6 +93,8 @@ const AI_KEYS: &[&str] = &[
     "providers",
     "activeProviderId",
     "activeModel",
+    "activeBackend",
+    "activeAcpAgentId",
     "contextMaxChars",
     "contextVisibleLines",
     "thinkingStyle",
@@ -111,7 +113,6 @@ const AI_KEYS: &[&str] = &[
     "acpAgents",
     "embeddingConfig",
     "agentRoles",
-    "executionProfiles",
 ];
 const SFTP_KEYS: &[&str] = &[
     "maxConcurrentTransfers",
@@ -467,7 +468,7 @@ mod tests {
         );
         assert!(parsed["settings"].get("ai").is_some());
         assert!(parsed["settings"]["ai"].get("acpAgents").is_some());
-        assert!(parsed["settings"]["ai"].get("executionProfiles").is_some());
+        assert!(parsed["settings"]["ai"].get("activeBackend").is_some());
         assert_eq!(
             parsed["settings"]["localTerminal"]["defaultCwd"].as_str(),
             Some("/tmp")

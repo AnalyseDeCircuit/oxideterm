@@ -1,16 +1,4 @@
 impl WorkspaceApp {
-    fn normalize_ai_execution_profiles_for_settings_render(&mut self) {
-        if !ai_execution_profiles_need_normalization(self.settings_store.settings()) {
-            return;
-        }
-        // This is a data migration for legacy OxideSens profile shapes, not a
-        // user-visible settings edit. Avoid edit_settings() here because it
-        // refreshes every dependent surface and calls cx.notify() from the
-        // settings render path.
-        ai_normalize_execution_profiles(self.settings_store.settings_mut());
-        let _ = self.settings_store.save();
-    }
-
     fn settings_knowledge_section(
         &mut self,
         section_index: usize,

@@ -38,6 +38,9 @@ pub fn resolve_model_selector_provider_probe(
     if !provider.enabled {
         return ModelSelectorProviderProbe::Disabled;
     }
+    if provider.provider_type == "acp" {
+        return ModelSelectorProviderProbe::ImplicitKey { endpoint: None };
+    }
     if provider.provider_type == "ollama" {
         return ModelSelectorProviderProbe::ImplicitKey {
             endpoint: Some("/api/tags"),

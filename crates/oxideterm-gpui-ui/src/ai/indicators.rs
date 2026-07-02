@@ -83,31 +83,6 @@ pub fn ai_safety_indicator(
         .child(div().min_w_0().truncate().child(label.into()))
 }
 
-pub fn ai_profile_button(tokens: &ThemeTokens, icon: impl IntoElement) -> Div {
-    div()
-        .size(px(28.0))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .border_1()
-        .border_color(bg_alpha(
-            tokens,
-            tokens.ui.border,
-            AI_CHAT_INPUT_BORDER_ALPHA,
-        ))
-        .bg(bg_alpha(tokens, tokens.ui.bg_card, 0x99))
-        .text_color(bg_alpha(tokens, tokens.ui.accent, 0xcc))
-        .cursor_pointer()
-        .hover(|style| {
-            style
-                .bg(bg_alpha(tokens, tokens.ui.bg_hover, 0xb3))
-                .text_color(rgb(tokens.ui.accent))
-        })
-        .child(icon)
-}
-
 pub fn ai_context_usage_indicator(
     tokens: &ThemeTokens,
     usage: AiContextUsage,

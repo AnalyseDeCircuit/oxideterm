@@ -7,17 +7,7 @@ impl WorkspaceApp {
         self.ensure_ai_chat_initialized();
         let now = ai_now_ms();
         let id = self.next_ai_chat_id(now);
-        let profile_id = self
-            .settings_store
-            .settings()
-            .ai
-            .execution_profiles
-            .get("defaultProfileId")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
-        let id = self
-            .ai_chat
-            .create_conversation(id, title, now, profile_id);
+        let id = self.ai_chat.create_conversation(id, title, now, None);
         self.persist_ai_chat_state();
         self.ai_conversation_list_open = false;
         self.ai_chat_menu_open = false;
@@ -92,17 +82,9 @@ impl WorkspaceApp {
         let now = ai_now_ms();
         let title = generate_chat_title(&content);
         let id = self.next_ai_chat_id(now);
-        let profile_id = self
-            .settings_store
-            .settings()
-            .ai
-            .execution_profiles
-            .get("defaultProfileId")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
         let conversation_id = self
             .ai_chat
-            .ensure_conversation(id, Some(title), now, profile_id);
+            .ensure_conversation(id, Some(title), now, None);
         let message = AiChatMessage {
             id: self.next_ai_chat_id(now),
             role: AiChatRole::User,
@@ -125,11 +107,7 @@ impl WorkspaceApp {
         self.persist_ai_chat_state();
         let request_content = (!parsed_input.clean_text.is_empty())
             .then_some(parsed_input.clean_text.clone());
-        let applied_profile = self.resolved_ai_execution_profile();
-        let runtime_system_prompt = applied_profile
-            .include_runtime_chips
-            .then(|| self.resolve_ai_sidebar_system_prompt_segment(cx))
-            .flatten();
+        let runtime_system_prompt = self.resolve_ai_sidebar_system_prompt_segment(cx);
         let task_system_prompt = ai_chat_message_context([
             ai_input_system_prompt(slash_command, &parsed_input.participants),
             runtime_system_prompt,
@@ -257,17 +235,9 @@ impl WorkspaceApp {
         let now = ai_now_ms();
         let title = generate_chat_title(&content);
         let id = self.next_ai_chat_id(now);
-        let profile_id = self
-            .settings_store
-            .settings()
-            .ai
-            .execution_profiles
-            .get("defaultProfileId")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
         let conversation_id = self
             .ai_chat
-            .ensure_conversation(id, Some(title), now, profile_id);
+            .ensure_conversation(id, Some(title), now, None);
         let user_message = AiChatMessage {
             id: self.next_ai_chat_id(now),
             role: AiChatRole::User,
@@ -383,42 +353,6 @@ impl WorkspaceApp {
         self.ai_thinking_expansion_state.remove(message_id);
         conversation.message_count = conversation.messages.len();
         conversation.updated_at_ms = ai_now_ms();
-        self.persist_ai_chat_state();
-        cx.notify();
-    }
-
-    fn set_ai_conversation_profile(
-        &mut self,
-        conversation_id: &str,
-        profile_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(conversation) = self
-            .ai_chat
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)
-        else {
-            return;
-        };
-        let mut metadata = conversation
-            .session_metadata
-            .as_ref()
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
-        metadata.insert(
-            "conversationId".to_string(),
-            serde_json::json!(conversation.id.clone()),
-        );
-        metadata.insert(
-            "origin".to_string(),
-            serde_json::json!(conversation.origin.clone()),
-        );
-        metadata.insert("profileId".to_string(), serde_json::json!(&profile_id));
-        conversation.profile_id = Some(profile_id);
-        conversation.session_metadata = Some(serde_json::Value::Object(metadata));
-        conversation.updated_at_ms = ai_now_ms();
-        self.ai_profile_selector_open = false;
         self.persist_ai_chat_state();
         cx.notify();
     }

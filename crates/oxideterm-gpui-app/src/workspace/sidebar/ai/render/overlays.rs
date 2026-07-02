@@ -8,7 +8,6 @@ const AI_TOP_FLOATING_INSET_X: f32 = 8.0; // Tauri left-2/right-2 and right-0 wi
 const AI_FLOATING_GAP: f32 = 4.0; // Tauri mt-0.5/mb-1 style popup gap.
 const AI_CHAT_MENU_WIDTH: f32 = 160.0; // Tauri w-40.
 const AI_MODEL_SELECTOR_DROPDOWN_WIDTH: f32 = 256.0; // Tauri w-64.
-const AI_PROFILE_DROPDOWN_WIDTH: f32 = 220.0; // Native profile dropdown width.
 const AI_CONTEXT_POPOVER_WIDTH: f32 = 280.0; // Tauri-sized compact context popover.
 
 impl WorkspaceApp {
@@ -45,7 +44,6 @@ impl WorkspaceApp {
                     anchor.bounds.origin.x = anchor.bounds.origin.x + px(dx);
                 }
                 SelectAnchorId::AiModelSelector
-                | SelectAnchorId::AiProfileSelector
                 | SelectAnchorId::AiSafetyMenu
                 | SelectAnchorId::AiContextPopover => {
                     anchor.bounds.origin.x = anchor.bounds.origin.x + px(dx);
@@ -109,22 +107,9 @@ impl WorkspaceApp {
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_model_selector_dropdown(
-                    &ai_provider_views(&self.settings_store.settings().ai.providers),
+                    &self.ai_model_selector_providers(),
                     cx,
                 ),
-            )
-        } else if self.ai_profile_selector_open {
-            let anchor = self.select_anchors.get(&SelectAnchorId::AiProfileSelector)?;
-            (
-                Corner::BottomLeft,
-                ai_sidebar_popup_left(
-                    f32::from(anchor.bounds.left()),
-                    AI_PROFILE_DROPDOWN_WIDTH,
-                    panel_left,
-                    panel_right,
-                ),
-                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                self.render_ai_profile_dropdown(cx),
             )
         } else if self.ai_safety_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
@@ -191,7 +176,6 @@ impl WorkspaceApp {
             || self.ai_chat_menu_open
             || (self.ai_model_selector_open
                 && self.ai_model_selector_scope == Some(AiModelSelectorScope::Sidebar))
-            || self.ai_profile_selector_open
             || self.ai_safety_menu_open
             || self.ai_context_popover_open
     }

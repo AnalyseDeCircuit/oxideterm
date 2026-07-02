@@ -5,38 +5,7 @@ impl WorkspaceApp {
         anchor_id: SelectAnchorId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some((agent_name, ready)) = self.active_ai_acp_agent_selector_state() {
-            let trigger = ai_model_selector_trigger_compact(
-                &self.tokens,
-                model_selector_truncated_label(&agent_name),
-                ready,
-                false,
-                false,
-                Self::render_lucide_icon(
-                    LucideIcon::Settings,
-                    12.0,
-                    rgb(self.tokens.ui.text_muted),
-                ),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    this.open_ai_settings(window, cx);
-                    cx.stop_propagation();
-                }),
-            );
-
-            let workspace = cx.entity();
-            return ai_model_selector_root()
-                .child(select_anchor_probe(
-                    anchor_id,
-                    trigger,
-                    Self::deferred_ai_select_anchor_update(workspace),
-                ))
-                .into_any_element();
-        }
-
-        let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+        let providers = self.ai_model_selector_providers();
         let enabled_providers = providers
             .iter()
             .filter(|provider| provider.enabled)
@@ -58,16 +27,21 @@ impl WorkspaceApp {
             .into_any_element();
         }
 
-        let active_provider = active_provider_view(
-            &providers,
-            self.settings_store
-                .settings()
-                .ai
-                .active_provider_id
-                .as_deref(),
-        );
-        let active_model = self.settings_store.settings().ai.active_model.as_deref();
-        let display = model_selector_display_name(active_provider, active_model);
+        let active_provider_id = self.ai_active_model_selector_provider_id();
+        let active_provider = active_provider_view(&providers, active_provider_id.as_deref());
+        let settings = self.settings_store.settings();
+        let active_model = if settings.ai.active_backend == AiActiveBackend::Acp {
+            None
+        } else {
+            settings.ai.active_model.as_deref()
+        };
+        let display = if settings.ai.active_backend == AiActiveBackend::Acp {
+            active_provider
+                .map(|provider| provider.name.clone())
+                .unwrap_or_else(|| "OxideSens".to_string())
+        } else {
+            model_selector_display_name(active_provider, active_model)
+        };
         let selector_open =
             self.ai_model_selector_open && self.ai_model_selector_scope == Some(scope);
         let ready = active_provider
@@ -110,31 +84,6 @@ impl WorkspaceApp {
                 Self::deferred_ai_select_anchor_update(workspace),
             ))
             .into_any_element()
-    }
-
-    fn active_ai_acp_agent_selector_state(&self) -> Option<(String, bool)> {
-        let profile = self.resolved_ai_execution_profile();
-        if profile.backend != AiExecutionBackend::Acp {
-            return None;
-        }
-        let agent_id = profile.acp_agent_id.as_deref()?;
-        let agent = self
-            .settings_store
-            .settings()
-            .ai
-            .acp_agents
-            .iter()
-            .find(|agent| agent.id == agent_id)?;
-        let label = if agent.display_name.trim().is_empty() {
-            agent.id.clone()
-        } else {
-            agent.display_name.clone()
-        };
-        // ACP-backed profiles do not use the provider/model selector. Surface
-        // the selected agent here so the sidebar reflects the actual backend.
-        let ready = agent.enabled
-            && agent.status.state == oxideterm_settings::AcpAgentRuntimeState::Ready;
-        Some((label, ready))
     }
 
     fn render_ai_model_selector_dropdown(

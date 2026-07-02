@@ -51,10 +51,7 @@ pub use policy::{
     denied_commands, has_denied_commands, is_command_denied, is_orchestrator_tool_name,
     orchestrator_approval_key_for_tool, orchestrator_risk_for_tool, resolve_ai_policy_decision,
 };
-pub use profiles::{
-    AiExecutionBackend, ResolvedAiExecutionProfile, resolve_ai_execution_profile,
-    resolve_ai_reasoning_effort, tool_policy_from_parts,
-};
+pub use profiles::{AiExecutionBackend, resolve_ai_reasoning_effort, tool_policy_from_parts};
 pub use provider_embeddings::{
     AiChatEmbeddingApiKeyDecision, AiEmbeddingMode, AiEmbeddingProviderReason,
     ResolvedAiEmbeddingProvider, ai_embedding_requires_api_key, ai_provider_supports_embeddings,

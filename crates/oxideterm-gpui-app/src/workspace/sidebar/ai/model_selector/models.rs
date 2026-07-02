@@ -54,15 +54,14 @@ impl WorkspaceApp {
         }
 
         for model in visible_models {
-            let active = self
-                .settings_store
-                .settings()
-                .ai
-                .active_provider_id
-                .as_deref()
-                == Some(provider.id.as_str())
-                && self.settings_store.settings().ai.active_model.as_deref()
-                    == Some(model.as_str());
+            let active = if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+                self.ai_active_model_selector_provider_id().as_deref() == Some(provider.id.as_str())
+            } else {
+                self.settings_store.settings().ai.active_provider_id.as_deref()
+                    == Some(provider.id.as_str())
+                    && self.settings_store.settings().ai.active_model.as_deref()
+                        == Some(model.as_str())
+            };
             let model_for_click = model.clone();
             let provider_id = provider.id.clone();
             let highlighted =

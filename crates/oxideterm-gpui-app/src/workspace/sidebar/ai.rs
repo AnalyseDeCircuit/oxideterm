@@ -6,8 +6,8 @@ use oxideterm_ai::{
     AiChatStreamConfig, AiConversation, AiExecutionBackend, AiMessageBranches,
     AiOrchestratorObligation, AiOrchestratorObligationMode, AiPolicySafetyMode, AiProviderView,
     AiReferenceMatch, AiStreamEvent, AiToolCall, AiToolUsePolicy, ModelSelectorProviderProbe,
-    ResolvedAiExecutionProfile, active_model_or_provider_default, active_provider_view,
-    ai_autocomplete_candidates, ai_classify_orchestrator_obligation,
+    active_model_or_provider_default, active_provider_view, ai_autocomplete_candidates,
+    ai_classify_orchestrator_obligation,
     ai_detected_intent_system_prompt, ai_help_markdown as ai_help_markdown_core,
     ai_input_system_prompt, ai_orchestrator_obligation_prompt, ai_reference_context_block,
     ai_required_tool_retry_prompt, ai_should_trigger_hard_deny,
@@ -18,17 +18,16 @@ use oxideterm_ai::{
     model_selector_display_name, model_selector_truncated_label,
     model_selector_visible_provider_groups, parse_ai_suggestions, parse_ai_user_input,
     provider_chat_requires_key as ai_provider_chat_requires_key,
-    provider_views as ai_provider_views, resolve_ai_execution_profile, resolve_ai_policy_decision,
-    resolve_ai_slash_command, resolve_model_selector_provider_probe,
-    select_provider_model as ai_select_provider_model, stream_chat_completion,
-    tool_policy_from_parts,
+    provider_views as ai_provider_views, resolve_ai_policy_decision, resolve_ai_slash_command,
+    resolve_model_selector_provider_probe, select_provider_model as ai_select_provider_model,
+    stream_chat_completion, tool_policy_from_parts,
 };
 use crate::workspace::ime::WorkspaceImeTarget;
 use oxideterm_gpui_markdown::{
     MarkdownBlockLayout, MarkdownOptions, parser as markdown_parser, render as markdown_render,
 };
 use oxideterm_gpui_settings_view::SettingsTab;
-use oxideterm_settings::AiThinkingStyle;
+use oxideterm_settings::{AcpAgentConfig, AcpAgentRuntimeState, AiActiveBackend, AiThinkingStyle};
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, TextInputView,
     ai::{
@@ -44,7 +43,7 @@ use oxideterm_gpui_ui::{
         ai_model_selector_models_panel, ai_model_selector_no_provider_button,
         ai_model_selector_provider_header, ai_model_selector_provider_message,
         ai_model_selector_refresh_button, ai_model_selector_root, ai_model_selector_search_bar,
-        ai_model_selector_trigger_compact, ai_profile_button, ai_raw_block, ai_guardrail_block,
+        ai_model_selector_trigger_compact, ai_raw_block, ai_guardrail_block,
         ai_safety_indicator, ai_send_button, ai_status_indicator, ai_stop_button,
         ai_thinking_block, ai_thinking_compact, ai_thinking_content, ai_thinking_header,
         ai_tool_approval_bar, ai_tool_approval_button, ai_tool_args_pre, ai_tool_block,

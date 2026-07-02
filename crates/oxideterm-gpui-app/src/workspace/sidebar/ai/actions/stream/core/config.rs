@@ -51,13 +51,27 @@ impl WorkspaceApp {
 
     fn resolve_ai_stream_config(&self) -> Result<AiChatStreamConfig, String> {
         let settings = self.settings_store.settings();
-        let applied_profile = self.resolved_ai_execution_profile();
-        if applied_profile.backend == AiExecutionBackend::Acp {
-            let acp_agent_id = applied_profile
-                .acp_agent_id
+        let tool_policy = ai_tool_use_policy_from_settings(&settings.ai.tool_use);
+        if settings.ai.active_backend == AiActiveBackend::Acp {
+            let acp_agent_id = settings
+                .ai
+                .active_acp_agent_id
                 .clone()
                 .filter(|agent_id| !agent_id.trim().is_empty())
-                .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
+                .ok_or_else(|| "No ACP agent selected.".to_string())?;
+            let model_label = settings
+                .ai
+                .acp_agents
+                .iter()
+                .find(|agent| agent.id == acp_agent_id)
+                .map(|agent| {
+                    if agent.display_name.trim().is_empty() {
+                        agent.id.clone()
+                    } else {
+                        agent.display_name.clone()
+                    }
+                })
+                .unwrap_or_else(|| acp_agent_id.clone());
             return Ok(AiChatStreamConfig {
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,
@@ -65,7 +79,7 @@ impl WorkspaceApp {
                 acp_session_id: self.active_ai_conversation_acp_session_id(),
                 provider_type: "acp".to_string(),
                 base_url: String::new(),
-                model: acp_agent_id,
+                model: model_label,
                 api_key: None,
                 max_response_tokens: None,
                 reasoning_effort: None,
@@ -73,30 +87,30 @@ impl WorkspaceApp {
                     AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
                     AiSafetyMode::Default => AiPolicySafetyMode::Default,
                 },
-                profile_id: applied_profile.profile_id,
-                tool_policy: applied_profile.tool_policy,
+                profile_id: None,
+                tool_policy,
                 tools: Vec::new(),
                 tool_choice: oxideterm_ai::AiToolChoice::Auto,
             });
         }
 
         let providers = ai_provider_views(&settings.ai.providers);
-        let provider = active_provider_view(&providers, applied_profile.provider_id.as_deref())
+        let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model = active_model_or_provider_default(applied_profile.model.as_deref(), &provider)
+        let model = active_model_or_provider_default(settings.ai.active_model.as_deref(), &provider)
             .ok_or_else(|| "No model selected. Please refresh models or select one in Settings > AI.".to_string())?;
         let max_response_tokens = ai_chat_request_max_response_tokens(settings, &provider.id, &model);
         let reasoning_effort = oxideterm_ai::resolve_ai_reasoning_effort(
-            applied_profile.reasoning_effort.as_deref(),
+            ai_reasoning_effort_value(settings.ai.reasoning_effort).as_deref(),
             &settings.ai.reasoning_provider_overrides,
             &settings.ai.reasoning_model_overrides,
             Some(&provider.id),
             Some(&model),
         );
         let tools = ai_stream_tool_definitions(
-            applied_profile.tool_policy.enabled,
-            &applied_profile.tool_policy,
+            tool_policy.enabled,
+            &tool_policy,
             &self.ai_mcp_registry,
         );
         Ok(AiChatStreamConfig {
@@ -114,8 +128,8 @@ impl WorkspaceApp {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },
-            profile_id: applied_profile.profile_id,
-            tool_policy: applied_profile.tool_policy,
+            profile_id: None,
+            tool_policy,
             tools,
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
         })
@@ -173,44 +187,6 @@ impl WorkspaceApp {
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
-        })
-    }
-
-    fn resolved_ai_execution_profile(&self) -> ResolvedAiExecutionProfile {
-        let settings = self.settings_store.settings();
-        let active_profile_id = self.active_ai_conversation_profile_id();
-        let mut profile = resolve_ai_execution_profile(
-            &settings.ai.execution_profiles,
-            active_profile_id.as_deref(),
-            settings.ai.active_provider_id.as_deref(),
-            settings.ai.active_model.as_deref(),
-            ai_reasoning_effort_value(settings.ai.reasoning_effort).as_deref(),
-            ai_tool_use_policy_from_settings(&settings.ai.tool_use),
-        );
-        let default_profile_id = settings
-            .ai
-            .execution_profiles
-            .get("defaultProfileId")
-            .and_then(serde_json::Value::as_str);
-        if profile.backend == AiExecutionBackend::Provider
-            && profile.profile_id.as_deref() == default_profile_id
-        {
-            profile.provider_id = settings.ai.active_provider_id.clone();
-            profile.model = settings.ai.active_model.clone();
-        }
-        profile
-    }
-
-    fn active_ai_conversation_profile_id(&self) -> Option<String> {
-        self.ai_chat.active_conversation().and_then(|conversation| {
-            conversation.profile_id.clone().or_else(|| {
-                conversation
-                    .session_metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.get("profileId"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
-            })
         })
     }
 
@@ -544,7 +520,7 @@ impl WorkspaceApp {
         object.insert("source".to_string(), serde_json::json!("sidebar"));
         object.insert(
             "toolUseEnabled".to_string(),
-            serde_json::json!(self.resolved_ai_execution_profile().tool_policy.enabled),
+            serde_json::json!(self.settings_store.settings().ai.tool_use.enabled),
         );
         if let Some(provider_id) = self.settings_store.settings().ai.active_provider_id.as_ref() {
             object.insert("providerId".to_string(), serde_json::json!(provider_id));
@@ -576,10 +552,9 @@ impl WorkspaceApp {
             "\nYou are currently the model \"{}\", provided by {}.",
             config.model, provider_label
         ));
-        let applied_profile = self.resolved_ai_execution_profile();
         if let Some(memory) = ai_user_memory_prompt(
             &settings.ai.memory.content,
-            settings.ai.memory.enabled && applied_profile.include_memory,
+            settings.ai.memory.enabled,
         ) {
             prompt.push_str("\n\n");
             prompt.push_str(&memory);

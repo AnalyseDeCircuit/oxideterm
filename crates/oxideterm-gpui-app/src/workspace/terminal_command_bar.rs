@@ -466,12 +466,12 @@ impl WorkspaceApp {
     }
 
     fn terminal_command_context_chip_slot(max_width: f32, chip: AnyElement) -> AnyElement {
-        // Context chips are fixed-size primitives; this slot lets the command
-        // bar clip optional context before it can paint over action buttons.
+        // Context chips should measure to their content, then shrink only when
+        // the command bar is too narrow to keep action buttons visible.
         div()
             .min_w(px(0.0))
             .max_w(px(max_width))
-            .flex_1()
+            .flex_initial()
             .overflow_hidden()
             .child(chip)
             .into_any_element()

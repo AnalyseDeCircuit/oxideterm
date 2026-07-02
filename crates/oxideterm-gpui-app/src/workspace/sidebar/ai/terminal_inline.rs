@@ -470,7 +470,7 @@ impl WorkspaceApp {
                                 .top(px(40.0))
                                 .left(px(32.0))
                                 .child(self.render_ai_model_selector_dropdown(
-                                    &ai_provider_views(&self.settings_store.settings().ai.providers),
+                                    &self.ai_model_selector_providers(),
                                     cx,
                                 )),
                         )

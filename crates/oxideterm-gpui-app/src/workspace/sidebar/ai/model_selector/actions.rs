@@ -1,6 +1,6 @@
 impl WorkspaceApp {
     pub(super) fn ensure_ai_model_selector_mount_statuses(&mut self, cx: &mut Context<Self>) {
-        let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+        let providers = self.ai_model_selector_providers();
         let signature = ai_model_selector_status_signature(&providers);
         if self.ai_model_selector_status_signature == signature {
             return;
@@ -23,14 +23,10 @@ impl WorkspaceApp {
         self.ai_model_selector_open = next_open;
         self.ai_model_selector_scope = next_open.then_some(scope);
         if self.ai_model_selector_open {
-            let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+            let providers = self.ai_model_selector_providers();
             if let Some(provider) = active_provider_view(
                 &providers,
-                self.settings_store
-                    .settings()
-                    .ai
-                    .active_provider_id
-                    .as_deref(),
+                self.ai_active_model_selector_provider_id().as_deref(),
             ) {
                 self.ai_model_selector_expanded_providers
                     .insert(provider.id.clone());
@@ -49,7 +45,7 @@ impl WorkspaceApp {
     }
 
     fn ai_model_selector_visible_model_keys(&self) -> Vec<(String, String)> {
-        let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+        let providers = self.ai_model_selector_providers();
         let searching = !self.ai_model_selector_search_query.trim().is_empty();
         // Tauri renders models as focusable dropdown items only for expanded
         // providers, while search mode expands matching providers. Keep the
@@ -122,8 +118,14 @@ impl WorkspaceApp {
 
     fn refresh_ai_model_selector_provider_statuses(&mut self, cx: &mut Context<Self>) {
         self.ensure_ai_provider_key_statuses(cx);
-        let providers = ai_provider_views(&self.settings_store.settings().ai.providers);
+        let providers = self.ai_model_selector_providers();
         for provider in providers {
+            if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+                self.ai_provider_key_status.insert(provider.id.clone(), true);
+                self.ai_model_selector_provider_online
+                    .insert(provider.id.clone(), self.ai_acp_provider_ready(&provider.id));
+                continue;
+            }
             match resolve_model_selector_provider_probe(&provider) {
                 ModelSelectorProviderProbe::Disabled => {
                     self.ai_provider_key_status.insert(provider.id.clone(), false);
@@ -237,6 +239,9 @@ impl WorkspaceApp {
     }
 
     fn ai_model_selector_has_key(&self, provider: &AiProviderView) -> bool {
+        if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+            return provider.enabled;
+        }
         match resolve_model_selector_provider_probe(provider) {
             ModelSelectorProviderProbe::Disabled => false,
             ModelSelectorProviderProbe::ImplicitKey { .. } => true,
@@ -245,6 +250,9 @@ impl WorkspaceApp {
     }
 
     fn ai_model_selector_provider_is_online(&self, provider: &AiProviderView) -> bool {
+        if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+            return self.ai_acp_provider_ready(&provider.id);
+        }
         match resolve_model_selector_provider_probe(provider) {
             ModelSelectorProviderProbe::Disabled => false,
             ModelSelectorProviderProbe::StoredKey => true,
@@ -277,6 +285,9 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+            return;
+        }
         let Some(index) = ai_provider_views(&self.settings_store.settings().ai.providers)
             .iter()
             .position(|candidate| candidate.id == provider.id)
@@ -293,29 +304,29 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let previous_model = self.settings_store.settings().ai.active_model.clone();
-        let profile_id = self.active_ai_conversation_profile_id().or_else(|| {
-            self.settings_store
-                .settings()
-                .ai
-                .execution_profiles
-                .get("defaultProfileId")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        });
+        if let Some(agent_id) =
+            Self::ai_acp_agent_id_from_provider_id(&provider_id).map(str::to_string)
+        {
+            self.edit_settings(
+                move |settings| {
+                    settings.ai.active_backend = AiActiveBackend::Acp;
+                    settings.ai.active_acp_agent_id = Some(agent_id.clone());
+                },
+                cx,
+            );
+            self.close_ai_model_selector();
+            cx.notify();
+            return;
+        }
         self.edit_settings(
             |settings| {
+                settings.ai.active_backend = AiActiveBackend::Provider;
                 ai_select_provider_model(
                     &mut settings.ai.providers,
                     &mut settings.ai.active_provider_id,
                     &mut settings.ai.active_model,
                     &provider_id,
                     model.clone(),
-                );
-                Self::sync_ai_execution_profile_model(
-                    &mut settings.ai.execution_profiles,
-                    profile_id.as_deref(),
-                    &provider_id,
-                    &model,
                 );
             },
             cx,
@@ -325,6 +336,68 @@ impl WorkspaceApp {
         }
         self.close_ai_model_selector();
         cx.notify();
+    }
+
+    fn ai_model_selector_providers(&self) -> Vec<AiProviderView> {
+        let settings = self.settings_store.settings();
+        let mut providers = ai_provider_views(&settings.ai.providers);
+        providers.extend(settings.ai.acp_agents.iter().map(Self::ai_acp_agent_provider_view));
+        providers
+    }
+
+    fn ai_active_model_selector_provider_id(&self) -> Option<String> {
+        let settings = self.settings_store.settings();
+        if settings.ai.active_backend == AiActiveBackend::Acp {
+            return settings
+                .ai
+                .active_acp_agent_id
+                .as_deref()
+                .map(Self::ai_acp_provider_id);
+        }
+        settings.ai.active_provider_id.clone()
+    }
+
+    fn ai_acp_agent_provider_view(agent: &AcpAgentConfig) -> AiProviderView {
+        let label = Self::ai_acp_agent_label(agent);
+        AiProviderView {
+            id: Self::ai_acp_provider_id(&agent.id),
+            provider_type: "acp".to_string(),
+            name: format!("{label} (ACP)"),
+            base_url: String::new(),
+            default_model: label.clone(),
+            models: vec![label],
+            enabled: agent.enabled,
+            custom: false,
+        }
+    }
+
+    fn ai_acp_provider_id(agent_id: &str) -> String {
+        format!("acp:{agent_id}")
+    }
+
+    fn ai_acp_agent_id_from_provider_id(provider_id: &str) -> Option<&str> {
+        provider_id.strip_prefix("acp:")
+    }
+
+    fn ai_acp_agent_label(agent: &AcpAgentConfig) -> String {
+        if agent.display_name.trim().is_empty() {
+            agent.id.clone()
+        } else {
+            agent.display_name.clone()
+        }
+    }
+
+    fn ai_acp_provider_ready(&self, provider_id: &str) -> bool {
+        let Some(agent_id) = Self::ai_acp_agent_id_from_provider_id(provider_id) else {
+            return false;
+        };
+        self.settings_store
+            .settings()
+            .ai
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .is_some_and(|agent| agent.enabled && agent.status.state == AcpAgentRuntimeState::Ready)
     }
 
     fn update_ai_model_switch_warning(&mut self, provider_id: &str, model: &str) {
@@ -349,52 +422,6 @@ impl WorkspaceApp {
         }
     }
 
-    fn sync_ai_execution_profile_model(
-        execution_profiles: &mut serde_json::Value,
-        profile_id: Option<&str>,
-        provider_id: &str,
-        model: &str,
-    ) {
-        let Some(profile_id) = profile_id.filter(|profile_id| !profile_id.trim().is_empty()) else {
-            return;
-        };
-        let Some(profiles) = execution_profiles
-            .get_mut("profiles")
-            .and_then(serde_json::Value::as_array_mut)
-        else {
-            return;
-        };
-        let Some(profile) = profiles
-            .iter_mut()
-            .filter_map(serde_json::Value::as_object_mut)
-            .find(|profile| {
-                profile
-                    .get("id")
-                    .and_then(serde_json::Value::as_str)
-                    == Some(profile_id)
-            })
-        else {
-            return;
-        };
-        if profile
-            .get("backend")
-            .and_then(serde_json::Value::as_str)
-            == Some("acp")
-        {
-            // ACP profiles delegate model choice to the selected agent, so the
-            // provider/model selector must not rewrite their launch profile.
-            return;
-        }
-        profile.insert(
-            "providerId".to_string(),
-            serde_json::Value::String(provider_id.to_string()),
-        );
-        profile.insert(
-            "model".to_string(),
-            serde_json::Value::String(model.to_string()),
-        );
-        profile.insert("updatedAt".to_string(), serde_json::json!(ai_now_ms()));
-    }
 }
 
 pub(super) struct AiModelSelectorProbeDelivery {

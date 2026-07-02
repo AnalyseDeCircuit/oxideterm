@@ -18,8 +18,8 @@ use oxideterm_settings::{
 };
 
 use crate::{
-    SettingsInput, ai_patch_execution_profile, ai_update_provider, current_time_millis,
-    parse_focus_handoff_command_list, set_ai_model_max_response_tokens, set_ai_user_context_window,
+    SettingsInput, ai_update_provider, parse_focus_handoff_command_list,
+    set_ai_model_max_response_tokens, set_ai_user_context_window,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -162,8 +162,6 @@ pub fn persisted_settings_input_value(
             .and_then(|provider| ai_provider_string(provider, "defaultModel"))
             .unwrap_or_default(),
         SettingsInput::AiProviderApiKey(_) => String::new(),
-        SettingsInput::AiProfileName(index) => ai_profile_field(settings, index, "name"),
-        SettingsInput::AiProfileModel(index) => ai_profile_field(settings, index, "model"),
         SettingsInput::AiAcpAgentDisplayName(index) => settings
             .ai
             .acp_agents
@@ -409,35 +407,6 @@ pub fn apply_persisted_settings_input_draft(
         SettingsInput::AiProviderDefaultModel(index) => {
             set_ai_provider_string(settings, index, "defaultModel", draft.trim())
         }
-        SettingsInput::AiProfileName(index) => {
-            let value = draft.to_string();
-            ai_patch_execution_profile(settings, index, |profile| {
-                profile.insert("name".to_string(), serde_json::json!(value));
-                profile.insert(
-                    "updatedAt".to_string(),
-                    serde_json::json!(current_time_millis()),
-                );
-            });
-            SettingsInputDraftApply::Applied
-        }
-        SettingsInput::AiProfileModel(index) => {
-            let value = draft.trim().to_string();
-            ai_patch_execution_profile(settings, index, |profile| {
-                profile.insert(
-                    "model".to_string(),
-                    if value.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(value)
-                    },
-                );
-                profile.insert(
-                    "updatedAt".to_string(),
-                    serde_json::json!(current_time_millis()),
-                );
-            });
-            SettingsInputDraftApply::Applied
-        }
         SettingsInput::AiAcpAgentDisplayName(index) => {
             if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
                 agent.display_name = draft.trim().to_string();
@@ -561,19 +530,6 @@ pub fn apply_persisted_settings_input_draft(
         }
         _ => SettingsInputDraftApply::Unhandled,
     }
-}
-
-fn ai_profile_field(settings: &PersistedSettings, index: usize, key: &str) -> String {
-    settings
-        .ai
-        .execution_profiles
-        .get("profiles")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|profiles| profiles.get(index))
-        .and_then(|profile| profile.get(key))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string()
 }
 
 fn provider_model(

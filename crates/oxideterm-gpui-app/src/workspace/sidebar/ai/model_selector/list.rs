@@ -25,13 +25,11 @@ impl WorkspaceApp {
                     .ai_model_selector_expanded_providers
                     .contains(&provider.id);
             let active_provider = self
-                .settings_store
-                .settings()
-                .ai
-                .active_provider_id
+                .ai_active_model_selector_provider_id()
                 .as_deref()
                 == Some(provider.id.as_str());
-            let active_provider_model = active_provider
+            let active_provider_model = (active_provider
+                && Self::ai_acp_agent_id_from_provider_id(&provider.id).is_none())
                 .then(|| {
                     self.settings_store
                         .settings()
@@ -43,7 +41,10 @@ impl WorkspaceApp {
                 })
                 .flatten();
             let status = self.render_ai_model_selector_provider_status(&provider, has_key, online);
-            let refresh = (has_key && online).then(|| {
+            let refresh = (has_key
+                && online
+                && Self::ai_acp_agent_id_from_provider_id(&provider.id).is_none())
+                .then(|| {
                 let provider_for_refresh = provider.clone();
                 ai_model_selector_refresh_button(
                     &self.tokens,

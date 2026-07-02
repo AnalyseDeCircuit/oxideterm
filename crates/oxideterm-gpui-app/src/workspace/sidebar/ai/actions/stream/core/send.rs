@@ -7,11 +7,8 @@ impl WorkspaceApp {
         task_system_prompt: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let rag_query = self
-            .resolved_ai_execution_profile()
-            .include_rag
-            .then(|| request_content.clone())
-            .flatten()
+        let rag_query = request_content
+            .clone()
             .filter(|query| query.trim().chars().count() >= 4);
         let Some(rag_query) = rag_query else {
             self.start_ai_chat_stream_after_budget_preflight(
