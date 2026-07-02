@@ -15,7 +15,7 @@ use oxideterm_theme::ThemeTokens;
 
 use crate::{
     RemoteDesktopCursorState, RemoteDesktopViewState, SharedRemoteDesktopGeometry,
-    state::RemoteDesktopFrameTile,
+    state::RemoteDesktopFrameSurface,
 };
 
 const VIEW_PADDING: f32 = 14.0;
@@ -67,8 +67,8 @@ fn frame_body(
     state: &RemoteDesktopViewState,
     geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> AnyElement {
-    if let Some(frame_size) = state.frame_size() {
-        let Some(tiles) = state.frame_tiles() else {
+    if state.frame_size().is_some() {
+        let Some(surface) = state.frame_surface() else {
             if let Some(geometry) = geometry {
                 geometry.clear();
             }
@@ -84,9 +84,7 @@ fn frame_body(
             .bg(rgb(0x000000))
             .overflow_hidden()
             .child(remote_desktop_frame_canvas(
-                tiles,
-                frame_size.width,
-                frame_size.height,
+                surface,
                 cursor,
                 cursor_image,
                 geometry,
@@ -154,15 +152,15 @@ fn corrupted_frame_body(tokens: &ThemeTokens, state: &RemoteDesktopViewState) ->
 }
 
 fn remote_desktop_frame_canvas(
-    tiles: Vec<RemoteDesktopFrameTile>,
-    width: u32,
-    height: u32,
+    surface: RemoteDesktopFrameSurface,
     cursor: RemoteDesktopCursorState,
     cursor_image: Option<Arc<RenderImage>>,
     geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> impl IntoElement {
     let cursor_for_paint = cursor.clone();
     let cursor_image_for_paint = cursor_image.clone();
+    let width = surface.size.width;
+    let height = surface.size.height;
     canvas(
         move |bounds, _window: &mut Window, _cx| {
             let image_bounds = ObjectFit::Contain.get_bounds(
@@ -183,7 +181,7 @@ fn remote_desktop_frame_canvas(
         },
         move |bounds, image_bounds, window: &mut Window, _cx| {
             window.paint_quad(fill(bounds, rgb(0x000000)));
-            paint_remote_desktop_tiles(window, image_bounds, width, height, &tiles);
+            paint_remote_desktop_surface(window, image_bounds, &surface);
             if cursor_for_paint.visible
                 && let (Some(shape), Some(cursor_image)) = (
                     cursor_for_paint.shape.as_ref(),
@@ -210,43 +208,28 @@ fn remote_desktop_frame_canvas(
     .size_full()
 }
 
-fn paint_remote_desktop_tiles(
+fn paint_remote_desktop_surface(
     window: &mut Window,
     image_bounds: Bounds<Pixels>,
-    frame_width: u32,
-    frame_height: u32,
-    tiles: &[RemoteDesktopFrameTile],
+    surface: &RemoteDesktopFrameSurface,
 ) {
-    if frame_width == 0 || frame_height == 0 {
-        return;
-    }
-
-    let image_width = f32::from(image_bounds.size.width);
-    let image_height = f32::from(image_bounds.size.height);
-    for tile in tiles {
-        // GPUI does not expose sub-rectangle texture uploads, so the remote
-        // framebuffer is cached as independently refreshed tiles.
-        let left = tile.rect.x as f32 / frame_width as f32 * image_width;
-        let top = tile.rect.y as f32 / frame_height as f32 * image_height;
-        let right =
-            tile.rect.x.saturating_add(tile.rect.width) as f32 / frame_width as f32 * image_width;
-        let bottom = tile.rect.y.saturating_add(tile.rect.height) as f32 / frame_height as f32
-            * image_height;
-        let image = Arc::clone(&tile.image);
-        let _ = window.paint_image(
-            Bounds::new(
+    if let Ok(mut pending_updates) = surface.pending_texture_updates.lock() {
+        for update in pending_updates.drain(..) {
+            let update_bounds = Bounds::new(
                 point(
-                    image_bounds.origin.x + px(left),
-                    image_bounds.origin.y + px(top),
+                    DevicePixels(update.rect.x as i32),
+                    DevicePixels(update.rect.y as i32),
                 ),
-                size(px(right - left), px(bottom - top)),
-            ),
-            Corners::all(px(0.0)),
-            image,
-            0,
-            false,
-        );
+                size(
+                    DevicePixels(update.rect.width as i32),
+                    DevicePixels(update.rect.height as i32),
+                ),
+            );
+            let _ = window.update_dynamic_texture(&surface.texture, update_bounds, &update.bytes);
+        }
     }
+    let texture = Arc::clone(&surface.texture);
+    let _ = window.paint_dynamic_texture(image_bounds, Corners::all(px(0.0)), texture, false);
 }
 
 fn should_hide_system_cursor(

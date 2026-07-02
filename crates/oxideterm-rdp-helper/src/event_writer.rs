@@ -8,8 +8,8 @@ use std::{
 
 use oxideterm_remote_desktop::{RemoteDesktopHelperEvent, write_event_line};
 
-const FRAME_QUIET_COALESCE_WINDOW: Duration = Duration::from_millis(4);
-const FRAME_MAX_COALESCE_WINDOW: Duration = Duration::from_millis(16);
+const FRAME_QUIET_COALESCE_WINDOW: Duration = Duration::from_millis(2);
+const FRAME_MAX_COALESCE_WINDOW: Duration = Duration::from_millis(8);
 const FRAME_RECOVERY_THRESHOLD: usize = 24;
 
 #[derive(Clone)]

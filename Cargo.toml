@@ -57,6 +57,7 @@ members = [
   "crates/oxideterm-trzsz",
   "crates/oxideterm-workspace",
   "crates/oxideterm-x11-forwarding",
+  "crates/gpui",
   "crates/russh",
   "crates/russh-sftp",
 ]
@@ -64,6 +65,7 @@ default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 
 [patch.crates-io]
+gpui = { path = "crates/gpui" }
 russh = { path = "crates/russh" }
 russh-sftp = { path = "crates/russh-sftp" }
 

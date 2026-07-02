@@ -10,12 +10,12 @@ use std::{
         mpsc,
     },
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use oxideterm_gpui_remote_desktop::{
-    RemoteDesktopMappedPoint, RemoteDesktopViewState, SharedRemoteDesktopGeometry,
-    remote_desktop_surface_with_geometry,
+    RemoteDesktopFrameApplyStats, RemoteDesktopMappedPoint, RemoteDesktopViewState,
+    SharedRemoteDesktopGeometry, remote_desktop_surface_with_geometry,
 };
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
@@ -48,8 +48,10 @@ const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER: f32 = 100.0;
 const REMOTE_DESKTOP_SCROLL_PIXEL_STEP: f32 = 120.0;
 const REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD: usize = 24;
-const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 4;
+const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 32;
+const REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET: Duration = Duration::from_millis(6);
 const REMOTE_DESKTOP_REQUEST_WRITE_DRAIN_LIMIT: usize = 128;
+const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
 
 #[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
@@ -96,6 +98,82 @@ struct RemoteDesktopFrameDeliverySlot {
     queued: Arc<AtomicBool>,
     recovery_requested: Arc<AtomicBool>,
     supports_frame_recovery: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct RemoteDesktopRenderDiagnostics {
+    batches: u64,
+    events_drained: u64,
+    drain_budget_hits: u64,
+    full_frames: u64,
+    frame_updates: u64,
+    dirty_updates_applied: u64,
+    dirty_updates_rejected: u64,
+    full_update_recoveries: u64,
+    corrupted_frames: u64,
+    dirty_rect_pixels: u64,
+    dirty_frame_pixels: u64,
+    dirty_tiles_refreshed: u64,
+    frame_tiles_created: u64,
+    retired_images: u64,
+    total_apply_micros: u64,
+    max_apply_micros: u64,
+    recovery_requests: u64,
+}
+
+impl RemoteDesktopRenderDiagnostics {
+    fn record_batch(
+        &mut self,
+        drained_events: usize,
+        budget_hit: bool,
+        apply_elapsed: Duration,
+        apply_stats: RemoteDesktopFrameApplyStats,
+        retired_images: usize,
+    ) {
+        self.batches = self.batches.saturating_add(1);
+        self.events_drained = self.events_drained.saturating_add(drained_events as u64);
+        if budget_hit {
+            self.drain_budget_hits = self.drain_budget_hits.saturating_add(1);
+        }
+        self.full_frames = self
+            .full_frames
+            .saturating_add(apply_stats.full_frames as u64);
+        self.frame_updates = self
+            .frame_updates
+            .saturating_add(apply_stats.frame_updates as u64);
+        self.dirty_updates_applied = self
+            .dirty_updates_applied
+            .saturating_add(apply_stats.dirty_updates_applied as u64);
+        self.dirty_updates_rejected = self
+            .dirty_updates_rejected
+            .saturating_add(apply_stats.dirty_updates_rejected as u64);
+        self.full_update_recoveries = self
+            .full_update_recoveries
+            .saturating_add(apply_stats.full_update_recoveries as u64);
+        self.corrupted_frames = self
+            .corrupted_frames
+            .saturating_add(apply_stats.corrupted_frames as u64);
+        self.dirty_rect_pixels = self
+            .dirty_rect_pixels
+            .saturating_add(apply_stats.dirty_rect_pixels);
+        self.dirty_frame_pixels = self
+            .dirty_frame_pixels
+            .saturating_add(apply_stats.dirty_frame_pixels);
+        self.dirty_tiles_refreshed = self
+            .dirty_tiles_refreshed
+            .saturating_add(apply_stats.dirty_tiles_refreshed as u64);
+        self.frame_tiles_created = self
+            .frame_tiles_created
+            .saturating_add(apply_stats.frame_tiles_created as u64);
+        self.retired_images = self.retired_images.saturating_add(retired_images as u64);
+        let apply_micros = duration_micros_u64(apply_elapsed);
+        self.total_apply_micros = self.total_apply_micros.saturating_add(apply_micros);
+        self.max_apply_micros = self.max_apply_micros.max(apply_micros);
+    }
+
+    fn record_recovery_request(&mut self) {
+        self.recovery_requests = self.recovery_requests.saturating_add(1);
+    }
 }
 
 impl RemoteDesktopFrameDeliverySlot {
@@ -230,6 +308,7 @@ pub(super) struct RemoteDesktopSession {
     last_lock_keys: Option<RemoteDesktopLockKeys>,
     pressed_mouse_buttons: HashSet<RemoteDesktopMouseButton>,
     wheel_pixel_remainder: RemoteDesktopWheelDelta,
+    render_diagnostics: RemoteDesktopRenderDiagnostics,
 }
 
 impl RemoteDesktopSession {
@@ -264,6 +343,7 @@ impl RemoteDesktopSession {
             last_lock_keys: None,
             pressed_mouse_buttons: HashSet::new(),
             wheel_pixel_remainder: remote_desktop_empty_wheel_delta(),
+            render_diagnostics: RemoteDesktopRenderDiagnostics::default(),
         }
     }
 }
@@ -631,6 +711,9 @@ impl WorkspaceApp {
                 }
                 RemoteDesktopWorkerDelivery::FrameRecoveryNeeded { tab_id, generation } => {
                     if self.remote_desktop_worker_generation_matches(tab_id, generation) {
+                        if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
+                            session.render_diagnostics.record_recovery_request();
+                        }
                         self.send_remote_desktop_request(
                             tab_id,
                             RemoteDesktopHelperRequest::RequestFrame,
@@ -658,11 +741,10 @@ impl WorkspaceApp {
                             _ => {}
                         }
                         session.state.apply_event(event);
-                        Self::drop_remote_desktop_images(
-                            session.state.take_retired_images(),
-                            window,
-                            cx,
-                        );
+                        let retired_images = session.state.take_retired_images();
+                        let retired_textures = session.state.take_retired_textures();
+                        Self::drop_remote_desktop_images(retired_images, window, cx);
+                        Self::drop_remote_desktop_textures(retired_textures, window);
                         changed = true;
                     }
                 }
@@ -684,11 +766,10 @@ impl WorkspaceApp {
                                 message,
                                 category: Some(RemoteDesktopErrorCategory::Unknown),
                             });
-                        Self::drop_remote_desktop_images(
-                            session.state.take_retired_images(),
-                            window,
-                            cx,
-                        );
+                        let retired_images = session.state.take_retired_images();
+                        let retired_textures = session.state.take_retired_textures();
+                        Self::drop_remote_desktop_images(retired_images, window, cx);
+                        Self::drop_remote_desktop_textures(retired_textures, window);
                         changed = true;
                     }
                 }
@@ -707,7 +788,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(mut session) = self.remote_desktop_sessions.remove(&tab_id) {
-            Self::drop_remote_desktop_images(session.state.take_all_images(), window, cx);
+            let images = session.state.take_all_images();
+            let textures = session.state.take_all_textures();
+            Self::drop_remote_desktop_images(images, window, cx);
+            Self::drop_remote_desktop_textures(textures, window);
             // The helper owns external resources. Always send a protocol-level
             // close before dropping the channel so real helpers can disconnect.
             if let Some(request_tx) = session.request_tx {
@@ -1016,7 +1100,10 @@ impl WorkspaceApp {
         session
             .state
             .apply_event(RemoteDesktopHelperEvent::Disconnected { reason: None });
-        Self::drop_remote_desktop_images(session.state.take_retired_images(), window, cx);
+        let retired_images = session.state.take_retired_images();
+        let retired_textures = session.state.take_retired_textures();
+        Self::drop_remote_desktop_images(retired_images, window, cx);
+        Self::drop_remote_desktop_textures(retired_textures, window);
     }
 
     fn reconnect_remote_desktop(
@@ -1100,6 +1187,7 @@ impl WorkspaceApp {
 
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             let old_images = session.state.take_all_images();
+            let old_textures = session.state.take_all_textures();
             session.state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
                 .with_read_only(profile.read_only);
             session.state.apply_event(RemoteDesktopHelperEvent::Status {
@@ -1107,6 +1195,7 @@ impl WorkspaceApp {
                 message: None,
             });
             Self::drop_remote_desktop_images(old_images, window, cx);
+            Self::drop_remote_desktop_textures(old_textures, window);
             session.frame_slot = frame_slot;
             session.request_tx = Some(request_tx);
             session.worker_generation = generation;
@@ -1339,16 +1428,55 @@ impl WorkspaceApp {
         };
         let frame_slot = session.frame_slot.clone();
         let mut changed = false;
-        for _ in 0..REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT {
+        let mut events = Vec::new();
+        let started_at = Instant::now();
+        let mut budget_hit = false;
+        for index in 0..REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT {
+            if index > 0 && started_at.elapsed() >= REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET {
+                budget_hit = true;
+                break;
+            }
             let Some(event) = frame_slot.take() else {
                 break;
             };
-            // Apply a bounded batch so stale dirty updates do not add a full
-            // poll interval each while still yielding before large uploads.
-            session.state.apply_event(event);
-            Self::drop_remote_desktop_images(session.state.take_retired_images(), window, cx);
+            // Apply a bounded, time-budgeted batch so ordinary dirty bursts can
+            // catch up without letting large image uploads monopolize GPUI.
+            events.push(event);
             changed = true;
         }
+        let drained_events = events.len();
+        let apply_started_at = Instant::now();
+        let apply_stats = session.state.apply_frame_events(events);
+        let apply_elapsed = apply_started_at.elapsed();
+        let retired_images = session.state.take_retired_images();
+        let retired_textures = session.state.take_retired_textures();
+        let retired_image_count = retired_images.len();
+        session.render_diagnostics.record_batch(
+            drained_events,
+            budget_hit,
+            apply_elapsed,
+            apply_stats,
+            retired_image_count,
+        );
+        if remote_desktop_diagnostics_enabled() {
+            eprintln!(
+                "[oxideterm:remote-desktop-render] tab={tab_id:?} gen={generation} drained={drained_events} budget_hit={budget_hit} apply_us={} full={} updates={} dirty_applied={} dirty_rejected={} dirty_px={} dirty_frame_px={} tiles_refreshed={} tiles_created={} retired={} recoveries={} totals={:?}",
+                duration_micros_u64(apply_elapsed),
+                apply_stats.full_frames,
+                apply_stats.frame_updates,
+                apply_stats.dirty_updates_applied,
+                apply_stats.dirty_updates_rejected,
+                apply_stats.dirty_rect_pixels,
+                apply_stats.dirty_frame_pixels,
+                apply_stats.dirty_tiles_refreshed,
+                apply_stats.frame_tiles_created,
+                retired_image_count,
+                apply_stats.full_update_recoveries,
+                session.render_diagnostics,
+            );
+        }
+        Self::drop_remote_desktop_images(retired_images, window, cx);
+        Self::drop_remote_desktop_textures(retired_textures, window);
         frame_slot.complete_delivery(tab_id, generation, &delivery_tx);
         changed
     }
@@ -1362,6 +1490,12 @@ impl WorkspaceApp {
             // Remote desktop tiles are replaced continuously; GPUI keeps painted
             // images in the sprite atlas until the app explicitly drops them.
             cx.drop_image(image, Some(window));
+        }
+    }
+
+    fn drop_remote_desktop_textures(textures: Vec<Arc<gpui::DynamicTexture>>, window: &mut Window) {
+        for texture in textures {
+            let _ = window.drop_dynamic_texture(texture);
         }
     }
 
@@ -1976,6 +2110,14 @@ fn remote_desktop_nonzero_wheel_delta(
     } else {
         Some(delta)
     }
+}
+
+fn remote_desktop_diagnostics_enabled() -> bool {
+    std::env::var_os(REMOTE_DESKTOP_DIAGNOSTICS_ENV).is_some()
+}
+
+fn duration_micros_u64(duration: Duration) -> u64 {
+    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
 }
 
 fn next_remote_desktop_worker_generation(current: u64) -> u64 {
