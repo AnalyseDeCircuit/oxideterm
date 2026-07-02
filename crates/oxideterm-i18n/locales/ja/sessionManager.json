@@ -108,6 +108,8 @@
       "group": "グループ",
       "ungrouped": "未分類",
       "icon": "アイコン",
+      "choose_icon": "アイコンを変更",
+      "hide_icons": "アイコンを隠す",
       "default_icon": "既定のアイコン",
       "color": "色",
       "clear_color": "クリア",

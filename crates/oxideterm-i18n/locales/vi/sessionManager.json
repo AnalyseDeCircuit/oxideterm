@@ -108,6 +108,8 @@
       "group": "Nhóm",
       "ungrouped": "Chưa phân nhóm",
       "icon": "Biểu tượng",
+      "choose_icon": "Đổi biểu tượng",
+      "hide_icons": "Ẩn biểu tượng",
       "default_icon": "Biểu tượng mặc định",
       "color": "Màu",
       "clear_color": "Xóa",

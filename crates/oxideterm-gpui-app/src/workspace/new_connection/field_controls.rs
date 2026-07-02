@@ -994,6 +994,7 @@ impl WorkspaceApp {
         &self,
         icon_value: &str,
         color_value: &str,
+        expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -1058,6 +1059,7 @@ impl WorkspaceApp {
                 .child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .items_center()
                         .gap(px(self.tokens.spacing.three))
                         .child(
@@ -1079,23 +1081,56 @@ impl WorkspaceApp {
                         .child(
                             button(
                                 &self.tokens,
-                                self.i18n
-                                    .t("sessionManager.edit_properties.default_icon"),
+                                if expanded {
+                                    self.i18n.t("sessionManager.edit_properties.hide_icons")
+                                } else {
+                                    self.i18n.t("sessionManager.edit_properties.choose_icon")
+                                },
                                 ButtonTone::Secondary,
                             )
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
                                     if let Some(form) = this.new_connection_form.as_mut() {
-                                        form.icon.clear();
+                                        form.icon_picker_expanded = !form.icon_picker_expanded;
                                         clear_connection_selection(form);
                                     }
                                     cx.notify();
                                 }),
                             ),
-                        ),
+                        )
+                        .when(!icon_value.trim().is_empty(), |row| {
+                            row.child(
+                                button(
+                                    &self.tokens,
+                                    self.i18n
+                                        .t("sessionManager.edit_properties.default_icon"),
+                                    ButtonTone::Secondary,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        if let Some(form) = this.new_connection_form.as_mut() {
+                                            form.icon.clear();
+                                            clear_connection_selection(form);
+                                        }
+                                        cx.notify();
+                                    }),
+                                ),
+                            )
+                        }),
                 )
-                .child(grid),
+                .when(expanded, |content| {
+                    content.child(
+                        div()
+                            .id("edit-connection-icon-grid")
+                            .max_h(px(180.0))
+                            .selectable_overflow_y_scroll(
+                                &self.selectable_text_scroll_handle("edit-connection-icon-grid"),
+                            )
+                            .child(grid),
+                    )
+                }),
         )
     }
 

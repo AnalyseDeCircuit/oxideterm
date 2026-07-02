@@ -108,6 +108,8 @@
       "group": "Grupo",
       "ungrouped": "Sin grupo",
       "icon": "Icono",
+      "choose_icon": "Cambiar icono",
+      "hide_icons": "Ocultar iconos",
       "default_icon": "Icono predeterminado",
       "color": "Color",
       "clear_color": "Borrar",

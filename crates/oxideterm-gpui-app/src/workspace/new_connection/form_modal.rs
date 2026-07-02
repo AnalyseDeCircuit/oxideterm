@@ -654,6 +654,7 @@ impl WorkspaceApp {
                                         .child(self.render_edit_icon_field(
                                             &form.icon,
                                             &form.color,
+                                            form.icon_picker_expanded,
                                             cx,
                                         ))
                                         .child(self.render_edit_color_field(&form.color, cx))

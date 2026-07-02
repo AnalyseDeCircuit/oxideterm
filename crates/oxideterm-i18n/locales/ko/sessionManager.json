@@ -108,6 +108,8 @@
       "group": "그룹",
       "ungrouped": "그룹 없음",
       "icon": "아이콘",
+      "choose_icon": "아이콘 변경",
+      "hide_icons": "아이콘 접기",
       "default_icon": "기본 아이콘",
       "color": "색상",
       "clear_color": "삭제",
