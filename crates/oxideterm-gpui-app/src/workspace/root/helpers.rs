@@ -75,7 +75,7 @@ fn session_terminal_encoding(encoding: SettingsTerminalEncoding) -> SessionTermi
     }
 }
 
-fn locale_from_settings(language: Language) -> Locale {
+pub(crate) fn locale_from_settings(language: Language) -> Locale {
     match language {
         Language::De => Locale::De,
         Language::En => Locale::En,

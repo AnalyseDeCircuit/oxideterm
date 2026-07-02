@@ -17,7 +17,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::SettingsStore;
 
 use crate::assets::NativeAssets;
-use crate::workspace::WorkspaceApp;
+use crate::workspace::{WorkspaceApp, locale_from_settings};
 
 // Tauri's `tauri.conf.json` opens the main window at 1200x800. Keeping the
 // native default the same preserves first-launch sidebar proportions.
@@ -112,13 +112,16 @@ fn main() {
     let application = Application::new().with_assets(NativeAssets);
     application.on_reopen(|cx| {
         if !cx.windows().is_empty() {
+            oxideterm_desktop_presence::show_main_window();
             return;
         }
 
         // macOS keeps the application alive after closing the last window.
         // Reopening from the Dock should create a fresh workspace window
         // instead of leaving the app windowless.
-        if let Err(error) = open_main_workspace_window(cx, None) {
+        if let Err(error) =
+            open_main_workspace_window(cx, None, desktop_presence_menu_from_settings())
+        {
             eprintln!(
                 "OxideTerm could not reopen a native GPUI window: {error:#}\n\
                  Try updating GPU drivers, disabling incompatible graphics layers, \
@@ -131,6 +134,9 @@ fn main() {
         let startup_settings = SettingsStore::load_default()
             .map(|store| store.settings().clone())
             .unwrap_or_default();
+        oxideterm_desktop_presence::set_keep_running_on_close(
+            startup_settings.general.minimize_to_tray_on_close,
+        );
         app_icon::install_runtime_app_icon(startup_settings.appearance.app_icon);
         if let Err(error) =
             bundled_fonts::load_terminal_font_open_critical(&startup_settings, &cx.text_system())
@@ -169,7 +175,10 @@ fn main() {
         cx.bind_keys(platform::app_key_bindings(&startup_settings));
         cx.set_menus(platform::app_menus(&I18n::default()));
 
-        if let Err(err) = open_main_workspace_window(cx, ssh_launch) {
+        let desktop_presence_menu = desktop_presence_menu(&I18n::new(locale_from_settings(
+            startup_settings.general.language,
+        )));
+        if let Err(err) = open_main_workspace_window(cx, ssh_launch, desktop_presence_menu) {
             eprintln!(
                 "OxideTerm could not open a native GPUI window: {err:#}\n\
                  GPUI 0.2.2 does not expose a CPU renderer fallback. \
@@ -195,11 +204,24 @@ fn default_window_bounds(cx: &mut App) -> Bounds<gpui::Pixels> {
 fn open_main_workspace_window(
     cx: &mut App,
     ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+    desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
 ) -> anyhow::Result<()> {
     let bounds = default_window_bounds(cx);
     cx.open_window(platform::window_options(bounds), |window, cx| {
+        let desktop_presence_rx =
+            match oxideterm_desktop_presence::install_for_window(window, cx, desktop_presence_menu)
+            {
+                Ok(rx) => Some(rx),
+                Err(error) => {
+                    eprintln!(
+                        "failed to install OxideTerm desktop presence integration: {error:#}"
+                    );
+                    None
+                }
+            };
+
         let workspace = cx.new(|cx| {
-            WorkspaceApp::new(window, cx).unwrap_or_else(|err| {
+            WorkspaceApp::new(window, cx, desktop_presence_rx).unwrap_or_else(|err| {
                 panic!(
                     "failed to initialize OxideTerm workspace: {err:#}\n\
                      OxideTerm native uses GPUI's GPU-backed renderer. \
@@ -207,6 +229,9 @@ fn open_main_workspace_window(
                      OXIDETERM_RENDER_PROFILE=compatibility."
                 )
             })
+        });
+        let _ = workspace.update(cx, |workspace, cx| {
+            workspace.start_desktop_presence_polling(cx);
         });
         if let Some(launch) = ssh_launch
             && let Err(error) = workspace.update(cx, |workspace, cx| {
@@ -253,5 +278,32 @@ fn read_ssh_launch_file(
 }
 
 fn quit(_: &Quit, cx: &mut App) {
+    oxideterm_desktop_presence::request_quit();
     cx.quit();
+}
+
+fn desktop_presence_menu(i18n: &I18n) -> oxideterm_desktop_presence::DesktopPresenceMenu {
+    oxideterm_desktop_presence::DesktopPresenceMenu {
+        app_name: i18n.t("menu.app"),
+        status_title: "Ox".to_string(),
+        status_icon: Some(oxideterm_desktop_presence::DesktopPresenceIcon {
+            // macOS menu bar extras use the alpha channel of a dedicated
+            // template image; the full-color app icon is not a good source.
+            template_png_bytes: include_bytes!("../resources/icons/menu-bar-template@2x.png"),
+            point_size: 18.0,
+        }),
+        show_main_window: i18n.t("menu.show_main_window"),
+        hide_main_window: i18n.t("menu.hide_main_window"),
+        new_connection: i18n.t("layout.empty.new_connection"),
+        settings: i18n.t("menu.settings"),
+        check_for_updates: i18n.t("settings_view.help.check_update"),
+        quit: i18n.t("menu.quit"),
+    }
+}
+
+fn desktop_presence_menu_from_settings() -> oxideterm_desktop_presence::DesktopPresenceMenu {
+    let settings = SettingsStore::load_default()
+        .map(|store| store.settings().clone())
+        .unwrap_or_default();
+    desktop_presence_menu(&I18n::new(locale_from_settings(settings.general.language)))
 }

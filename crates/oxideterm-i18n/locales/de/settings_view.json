@@ -139,7 +139,13 @@
       "cli_checking": "Prüfen...",
       "cli_status_error": "Statusfehler",
       "cli_uninstalled": "Deinstalliert",
-      "update_channel": "Update-Kanal"
+      "update_channel": "Update-Kanal",
+      "window_behavior": "Fensterverhalten",
+      "window_behavior_hint": "Lege fest, wie das Hauptfenster geschlossen wird.",
+      "minimize_to_tray_on_close": "Beim Schließen in den Infobereich minimieren",
+      "minimize_to_tray_on_close_hint": "OxideTerm im Infobereich weiter ausführen, wenn die Schließen-Schaltfläche gedrückt wird.",
+      "keep_in_menu_bar_on_close": "Beim Schließen in der Menüleiste behalten",
+      "keep_in_menu_bar_on_close_hint": "OxideTerm über die macOS-Menüleiste weiter ausführen, wenn die Schließen-Schaltfläche gedrückt wird."
     },
     "terminal": {
       "title": "Terminal-Einstellungen",

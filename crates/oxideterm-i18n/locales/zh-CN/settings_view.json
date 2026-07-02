@@ -139,7 +139,13 @@
       "cli_checking": "正在检查...",
       "cli_status_error": "状态错误",
       "cli_uninstalled": "已卸载",
-      "update_channel": "更新通道"
+      "update_channel": "更新通道",
+      "window_behavior": "窗口行为",
+      "window_behavior_hint": "配置主窗口关闭时的行为。",
+      "minimize_to_tray_on_close": "关闭窗口时最小化到托盘",
+      "minimize_to_tray_on_close_hint": "点击窗口关闭按钮时，让 OxideTerm 继续在系统托盘中运行。",
+      "keep_in_menu_bar_on_close": "关闭窗口时保留在菜单栏",
+      "keep_in_menu_bar_on_close_hint": "点击窗口关闭按钮时，让 OxideTerm 继续在 macOS 菜单栏中运行。"
     },
     "terminal": {
       "title": "终端设置",

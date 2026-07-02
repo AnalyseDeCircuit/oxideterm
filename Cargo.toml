@@ -21,6 +21,7 @@ members = [
   "crates/oxideterm-gpui-editor",
   "crates/oxideterm-gpui-ide",
   "crates/oxideterm-connections",
+  "crates/oxideterm-desktop-presence",
   "crates/oxideterm-quick-commands",
   "crates/oxideterm-connection-monitor",
   "crates/oxideterm-notification-center",

@@ -139,7 +139,13 @@
       "cli_checking": "Đang kiểm tra...",
       "cli_status_error": "Lỗi trạng thái",
       "cli_uninstalled": "Đã gỡ cài đặt",
-      "update_channel": "Kênh cập nhật"
+      "update_channel": "Kênh cập nhật",
+      "window_behavior": "Hành vi cửa sổ",
+      "window_behavior_hint": "Cấu hình cách đóng cửa sổ chính.",
+      "minimize_to_tray_on_close": "Thu nhỏ xuống khay hệ thống khi đóng cửa sổ",
+      "minimize_to_tray_on_close_hint": "Giữ OxideTerm chạy trong khay hệ thống khi nhấn nút đóng cửa sổ.",
+      "keep_in_menu_bar_on_close": "Giữ trên thanh menu khi đóng cửa sổ",
+      "keep_in_menu_bar_on_close_hint": "Giữ OxideTerm chạy từ thanh menu macOS khi nhấn nút đóng cửa sổ."
     },
     "terminal": {
       "title": "Cài đặt Terminal",

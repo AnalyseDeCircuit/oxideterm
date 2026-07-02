@@ -4,6 +4,8 @@
     "services": "서비스",
     "new_terminal": "새 터미널",
     "close_tab": "탭 닫기",
+    "show_main_window": "기본 창 표시",
+    "hide_main_window": "기본 창 숨기기",
     "quit": "OxideTerm 종료",
     "edit": "편집",
     "copy": "복사",

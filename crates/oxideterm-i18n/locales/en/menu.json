@@ -4,6 +4,8 @@
     "services": "Services",
     "new_terminal": "New Terminal",
     "close_tab": "Close Tab",
+    "show_main_window": "Show Main Window",
+    "hide_main_window": "Hide Main Window",
     "quit": "Quit OxideTerm",
     "edit": "Edit",
     "copy": "Copy",

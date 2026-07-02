@@ -139,7 +139,13 @@
       "cli_checking": "確認中...",
       "cli_status_error": "ステータスエラー",
       "cli_uninstalled": "アンインストール済み",
-      "update_channel": "更新チャネル"
+      "update_channel": "更新チャネル",
+      "window_behavior": "ウィンドウの動作",
+      "window_behavior_hint": "メインウィンドウを閉じるときの動作を設定します。",
+      "minimize_to_tray_on_close": "ウィンドウを閉じるときにトレイへ最小化",
+      "minimize_to_tray_on_close_hint": "閉じるボタンを押したときも、OxideTerm をシステムトレイで実行し続けます。",
+      "keep_in_menu_bar_on_close": "ウィンドウを閉じるときにメニューバーに残す",
+      "keep_in_menu_bar_on_close_hint": "閉じるボタンを押したときも、OxideTerm を macOS メニューバーから実行し続けます。"
     },
     "terminal": {
       "title": "ターミナル設定",

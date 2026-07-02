@@ -109,6 +109,7 @@ impl RdpGraphicsFrameAccumulator {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn graphics_update_event(
     image: &DecodedImage,
     region: InclusiveRectangle,

@@ -20,7 +20,7 @@ pub(in crate::workspace) enum NativeUpdateDelivery {
 }
 
 impl WorkspaceApp {
-    fn check_native_update(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn check_native_update(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.native_update_state,
             NativeUpdateUiState::Checking
@@ -32,6 +32,9 @@ impl WorkspaceApp {
         }
 
         self.native_update_state = NativeUpdateUiState::Checking;
+        // Release notes belong to the next update result; reset virtual scroll
+        // so a previous changelog position cannot leak into the new package.
+        self.native_update_release_notes_scroll = MarkdownVirtualListScrollHandle::new();
         let channel = self.settings_store.settings().general.update_channel;
         let update_proxy = self.settings_store.settings().general.update_proxy.clone();
         let current_version = env!("CARGO_PKG_VERSION").to_string();

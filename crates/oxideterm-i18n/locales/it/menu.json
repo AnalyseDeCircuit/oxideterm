@@ -4,6 +4,8 @@
     "services": "Servizi",
     "new_terminal": "Nuovo terminale",
     "close_tab": "Chiudi scheda",
+    "show_main_window": "Mostra finestra principale",
+    "hide_main_window": "Nascondi finestra principale",
     "quit": "Esci da OxideTerm",
     "edit": "Modifica",
     "copy": "Copia",

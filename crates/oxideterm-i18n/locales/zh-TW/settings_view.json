@@ -139,7 +139,13 @@
       "cli_checking": "正在檢查...",
       "cli_status_error": "狀態錯誤",
       "cli_uninstalled": "已解除安裝",
-      "update_channel": "更新通道"
+      "update_channel": "更新通道",
+      "window_behavior": "視窗行為",
+      "window_behavior_hint": "設定主視窗關閉時的行為。",
+      "minimize_to_tray_on_close": "關閉視窗時最小化到系統匣",
+      "minimize_to_tray_on_close_hint": "按下視窗關閉按鈕時，讓 OxideTerm 繼續在系統匣中執行。",
+      "keep_in_menu_bar_on_close": "關閉視窗時保留在選單列",
+      "keep_in_menu_bar_on_close_hint": "按下視窗關閉按鈕時，讓 OxideTerm 繼續在 macOS 選單列中執行。"
     },
     "terminal": {
       "title": "終端機設定",

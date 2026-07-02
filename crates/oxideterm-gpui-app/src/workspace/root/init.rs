@@ -1,5 +1,9 @@
 impl WorkspaceApp {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Result<Self> {
+    pub(crate) fn new(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        desktop_presence_rx: Option<oxideterm_desktop_presence::DesktopPresenceReceiver>,
+    ) -> Result<Self> {
         let focus_handle = cx.focus_handle();
         let mut settings_store = SettingsStore::load_default()?;
         settings_store.settings_mut().sidebar_ui.zen_mode = false;
@@ -483,6 +487,9 @@ impl WorkspaceApp {
             native_update_rx: None,
             native_update_polling: false,
             native_update_cancel: None,
+            native_update_release_notes_scroll: MarkdownVirtualListScrollHandle::new(),
+            desktop_presence_rx,
+            desktop_presence_polling: false,
             portable_current_password: String::new(),
             portable_new_password: String::new(),
             portable_confirm_password: String::new(),

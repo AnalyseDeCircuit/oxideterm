@@ -1,7 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Arc;
+use std::{
+    sync::{Arc, OnceLock},
+    time::Instant,
+};
 
 use gpui::{
     AnyElement, Bounds, Corners, CursorStyle, DevicePixels, Div, ObjectFit, ParentElement, Pixels,
@@ -21,6 +24,7 @@ use crate::{
 const VIEW_PADDING: f32 = 14.0;
 const FRAME_BORDER_ALPHA: u32 = 0x80;
 const FRAME_BG_ALPHA: u32 = 0x66;
+const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
 
 pub fn remote_desktop_surface(tokens: &ThemeTokens, state: &RemoteDesktopViewState) -> AnyElement {
     remote_desktop_surface_with_geometry(tokens, state, None)
@@ -214,23 +218,77 @@ fn paint_remote_desktop_surface(
     surface: &RemoteDesktopFrameSurface,
 ) {
     debug_assert!(surface.generation > 0);
-    if let Ok(mut pending_updates) = surface.pending_texture_updates.lock() {
-        for update in pending_updates.drain(..) {
-            let update_bounds = Bounds::new(
-                point(
-                    DevicePixels(update.rect.x as i32),
-                    DevicePixels(update.rect.y as i32),
-                ),
-                size(
-                    DevicePixels(update.rect.width as i32),
-                    DevicePixels(update.rect.height as i32),
-                ),
-            );
-            let _ = window.update_dynamic_texture(&surface.texture, update_bounds, &update.bytes);
+    let diagnostics_enabled = remote_desktop_view_diagnostics_enabled();
+    let upload_started_at = diagnostics_enabled.then(Instant::now);
+    let mut upload_count = 0usize;
+    let mut upload_bytes = 0usize;
+    let mut upload_pixels = 0u64;
+    let mut largest_upload_pixels = 0u64;
+    let mut uploaded_sequence_ids = Vec::new();
+    for update in surface.pending_texture_uploads() {
+        let rect_pixels =
+            u64::from(update.rect.width).saturating_mul(u64::from(update.rect.height));
+        let rect_bytes = update.bytes.len();
+        let update_bounds = Bounds::new(
+            point(
+                DevicePixels(update.rect.x as i32),
+                DevicePixels(update.rect.y as i32),
+            ),
+            size(
+                DevicePixels(update.rect.width as i32),
+                DevicePixels(update.rect.height as i32),
+            ),
+        );
+        if window
+            .update_dynamic_texture(&surface.texture, update_bounds, &update.bytes)
+            .is_ok()
+        {
+            upload_count = upload_count.saturating_add(1);
+            upload_bytes = upload_bytes.saturating_add(rect_bytes);
+            upload_pixels = upload_pixels.saturating_add(rect_pixels);
+            largest_upload_pixels = largest_upload_pixels.max(rect_pixels);
+            uploaded_sequence_ids.extend(update.sequence_ids);
         }
+    }
+    if !uploaded_sequence_ids.is_empty() {
+        surface.acknowledge_texture_uploads(uploaded_sequence_ids);
+    }
+    if let Some(upload_started_at) = upload_started_at
+        && upload_count > 0
+    {
+        let frame_pixels =
+            u64::from(surface.size.width).saturating_mul(u64::from(surface.size.height));
+        let upload_ratio_per_mille = ratio_per_mille(upload_pixels, frame_pixels);
+        let largest_ratio_per_mille = ratio_per_mille(largest_upload_pixels, frame_pixels);
+        eprintln!(
+            "[oxideterm:remote-desktop-paint] gen={} uploads={} upload_bytes={} upload_pixels={} upload_ratio_per_mille={} largest_upload_ratio_per_mille={} upload_us={}",
+            surface.generation,
+            upload_count,
+            upload_bytes,
+            upload_pixels,
+            upload_ratio_per_mille,
+            largest_ratio_per_mille,
+            duration_micros_u64(upload_started_at.elapsed()),
+        );
     }
     let texture = Arc::clone(&surface.texture);
     let _ = window.paint_dynamic_texture(image_bounds, Corners::all(px(0.0)), texture, false);
+}
+
+fn remote_desktop_view_diagnostics_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os(REMOTE_DESKTOP_DIAGNOSTICS_ENV).is_some())
+}
+
+fn duration_micros_u64(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+}
+
+fn ratio_per_mille(value: u64, total: u64) -> u64 {
+    if total == 0 {
+        return 0;
+    }
+    value.saturating_mul(1_000) / total
 }
 
 fn should_hide_system_cursor(

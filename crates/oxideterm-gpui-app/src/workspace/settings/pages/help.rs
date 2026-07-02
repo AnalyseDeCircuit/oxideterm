@@ -24,6 +24,7 @@ const HELP_PREVIEW_NOTICE_BORDER_ALPHA: f32 = 0.30;
 const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
 const HELP_PORTABLE_NOTICE_BG_ALPHA: f32 = 0.70;
 const HELP_PORTABLE_NOTICE_BORDER_ALPHA: f32 = 0.60;
+const HELP_RELEASE_NOTES_VIEWPORT_HEIGHT: f32 = 280.0;
 
 impl WorkspaceApp {
     fn settings_help_section(&mut self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -553,7 +554,7 @@ impl WorkspaceApp {
                                     .child(format!("v{}", package.version)),
                             ),
                     )
-                    .child(self.help_release_notes(package.body.as_deref()))
+                    .child(self.help_release_notes(package.body.as_deref(), cx))
                     .child(
                         div().flex().justify_end().child(self.help_outline_button(
                             self.i18n.t("settings_view.help.download_update"),
@@ -761,7 +762,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn help_release_notes(&self, release_body: Option<&str>) -> AnyElement {
+    fn help_release_notes(
+        &self,
+        release_body: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(release_body) = release_body.filter(|body| !body.trim().is_empty()) else {
             return div()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -770,7 +775,13 @@ impl WorkspaceApp {
                 .into_any_element();
         };
 
+        let mut options = self.localized_markdown_options();
+        options.base_font_size = self.tokens.metrics.ui_text_sm;
+        options.block_gap = 8.0;
+        let code_actions = self.markdown_mermaid_actions(cx);
+
         div()
+            .h(px(HELP_RELEASE_NOTES_VIEWPORT_HEIGHT))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgba(
@@ -778,10 +789,21 @@ impl WorkspaceApp {
             ))
             .bg(rgba((self.tokens.ui.bg << 8) | alpha_byte(HELP_UPDATE_FOOTER_BORDER_ALPHA)))
             .p(px(12.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .line_height(px(22.0))
             .text_color(rgb(self.tokens.ui.text))
-            .child(release_body.to_string())
+            .child(
+                // Release notes can be long; use the shared virtual markdown
+                // renderer so headings, lists, links, and code blocks match
+                // other native markdown surfaces without rendering every block.
+                markdown_virtual_with_code_actions(
+                    cx.entity(),
+                    "settings-help-release-notes-markdown",
+                    &self.tokens,
+                    release_body,
+                    &options,
+                    &self.native_update_release_notes_scroll,
+                    &code_actions,
+                ),
+            )
             .into_any_element()
     }
 

@@ -139,7 +139,13 @@
       "cli_checking": "Checking...",
       "cli_status_error": "Status error",
       "cli_uninstalled": "Uninstalled",
-      "update_channel": "Update Channel"
+      "update_channel": "Update Channel",
+      "window_behavior": "Window Behavior",
+      "window_behavior_hint": "Configure how the main app window closes.",
+      "minimize_to_tray_on_close": "Minimize to tray when closing the window",
+      "minimize_to_tray_on_close_hint": "Keep OxideTerm running in the system tray when the window close button is pressed.",
+      "keep_in_menu_bar_on_close": "Keep in menu bar when closing the window",
+      "keep_in_menu_bar_on_close_hint": "Keep OxideTerm running from the macOS menu bar when the window close button is pressed."
     },
     "terminal": {
       "title": "Terminal Settings",

@@ -7150,6 +7150,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-desktop-presence"
+version = "2.0.0-gpui-preview.11"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "raw-window-handle",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "oxideterm-editor-core"
 version = "2.0.0-gpui-preview.11"
 dependencies = [
@@ -7252,6 +7265,7 @@ dependencies = [
  "oxideterm-cloud-sync",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
+ "oxideterm-desktop-presence",
  "oxideterm-editor-syntax",
  "oxideterm-environment",
  "oxideterm-forwarding",

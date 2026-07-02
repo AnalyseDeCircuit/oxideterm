@@ -4,6 +4,8 @@
     "services": "Dịch vụ",
     "new_terminal": "Terminal mới",
     "close_tab": "Đóng tab",
+    "show_main_window": "Hiện cửa sổ chính",
+    "hide_main_window": "Ẩn cửa sổ chính",
     "quit": "Thoát OxideTerm",
     "edit": "Chỉnh sửa",
     "copy": "Sao chép",

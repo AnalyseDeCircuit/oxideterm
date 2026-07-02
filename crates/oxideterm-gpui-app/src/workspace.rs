@@ -4,6 +4,7 @@ mod browser_behavior;
 mod cloud_sync;
 mod command_palette;
 mod connection_monitor;
+mod desktop_presence;
 mod detached_tab_window;
 mod file_manager;
 mod forwards;
@@ -247,7 +248,7 @@ use crate::{
 use crate::{assets::LucideIcon, bundled_fonts};
 use oxideterm_gpui_markdown::{
     MarkdownBlockLayout, MarkdownCodeBlockActions, MarkdownDocument, MarkdownMermaidZoomHandler,
-    MarkdownOptions,
+    MarkdownOptions, MarkdownVirtualListScrollHandle, markdown_virtual_with_code_actions,
 };
 
 const MERMAID_MODAL_RASTER_SCALE: f32 = 3.0;
@@ -874,6 +875,9 @@ pub(crate) struct WorkspaceApp {
     native_update_rx: Option<std::sync::mpsc::Receiver<settings::NativeUpdateDelivery>>,
     native_update_polling: bool,
     native_update_cancel: Option<Arc<AtomicBool>>,
+    native_update_release_notes_scroll: MarkdownVirtualListScrollHandle,
+    desktop_presence_rx: Option<oxideterm_desktop_presence::DesktopPresenceReceiver>,
+    desktop_presence_polling: bool,
     portable_current_password: String,
     portable_new_password: String,
     portable_confirm_password: String,

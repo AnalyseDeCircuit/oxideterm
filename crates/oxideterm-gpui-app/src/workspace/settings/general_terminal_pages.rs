@@ -254,8 +254,66 @@ impl WorkspaceApp {
                         .into_any_element(),
                 ])
             }
+            3 if cfg!(any(target_os = "windows", target_os = "macos")) => {
+                let (label_key, hint_key) = close_to_background_label_keys();
+                self.settings_card(
+                    "settings_view.general.window_behavior",
+                    "settings_view.general.window_behavior_hint",
+                    vec![self.general_checkbox_row(
+                        label_key,
+                        hint_key,
+                        settings.general.minimize_to_tray_on_close,
+                        |settings, enabled| settings.general.minimize_to_tray_on_close = enabled,
+                        cx,
+                    )],
+                )
+            }
             _ => div().into_any_element(),
         }
+    }
+
+    fn general_checkbox_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        checked: bool,
+        setter: fn(&mut PersistedSettings, bool),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .grid()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t(label_key)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t(hint_key)),
+                    ),
+            )
+            .child(
+                checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.edit_settings(|settings| setter(settings, !checked), cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            )
+            .into_any_element()
     }
 
     fn settings_data_directory_info(&self) -> oxideterm_settings::DataDirectoryInfo {
@@ -1227,5 +1285,19 @@ impl WorkspaceApp {
                     .t("settings_view.terminal.in_band_transfer.runtime_note"),
             )
             .into_any_element()
+    }
+}
+
+fn close_to_background_label_keys() -> (&'static str, &'static str) {
+    if cfg!(target_os = "macos") {
+        (
+            "settings_view.general.keep_in_menu_bar_on_close",
+            "settings_view.general.keep_in_menu_bar_on_close_hint",
+        )
+    } else {
+        (
+            "settings_view.general.minimize_to_tray_on_close",
+            "settings_view.general.minimize_to_tray_on_close_hint",
+        )
     }
 }

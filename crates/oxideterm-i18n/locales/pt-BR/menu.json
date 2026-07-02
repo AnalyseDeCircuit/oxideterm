@@ -4,6 +4,8 @@
     "services": "Serviços",
     "new_terminal": "Novo terminal",
     "close_tab": "Fechar aba",
+    "show_main_window": "Mostrar janela principal",
+    "hide_main_window": "Ocultar janela principal",
     "quit": "Sair do OxideTerm",
     "edit": "Editar",
     "copy": "Copiar",

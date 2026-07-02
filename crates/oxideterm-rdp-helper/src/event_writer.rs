@@ -10,7 +10,6 @@ use oxideterm_remote_desktop::{RemoteDesktopHelperEvent, write_event_line};
 
 const FRAME_QUIET_COALESCE_WINDOW: Duration = Duration::from_millis(2);
 const FRAME_MAX_COALESCE_WINDOW: Duration = Duration::from_millis(8);
-const FRAME_RECOVERY_THRESHOLD: usize = 24;
 
 #[derive(Clone)]
 pub(crate) struct SharedEventWriter {
@@ -21,8 +20,6 @@ pub(crate) struct SharedEventWriter {
 #[derive(Default)]
 struct EventWriterQueue {
     frames: VecDeque<RemoteDesktopHelperEvent>,
-    needs_frame_recovery: bool,
-    frame_recovery_notified: bool,
 }
 
 impl SharedEventWriter {
@@ -69,18 +66,6 @@ impl SharedEventWriter {
         write_event_line(&mut *stdout, &event)
             .map_err(|error| format!("RDP event write failed: {error}"))?;
         Ok(())
-    }
-
-    pub(crate) fn take_frame_recovery_request(&self) -> Result<bool, String> {
-        let (queue, _) = &*self.queue;
-        let mut queue = queue
-            .lock()
-            .map_err(|_| "RDP event queue lock is poisoned.".to_string())?;
-        let requested = queue.needs_frame_recovery && !queue.frame_recovery_notified;
-        if requested {
-            queue.frame_recovery_notified = true;
-        }
-        Ok(requested)
     }
 
     fn start_stdout_thread(&self) {
@@ -150,12 +135,6 @@ fn push_frame_event(queue: &mut EventWriterQueue, event: RemoteDesktopHelperEven
     if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
         queue.frames.clear();
         queue.frames.push_back(event);
-        queue.needs_frame_recovery = false;
-        queue.frame_recovery_notified = false;
-        return;
-    }
-
-    if queue.needs_frame_recovery {
         return;
     }
 
@@ -165,15 +144,6 @@ fn push_frame_event(queue: &mut EventWriterQueue, event: RemoteDesktopHelperEven
         }
     } else {
         queue.frames.push_back(event);
-    }
-
-    if queue.frames.len() > FRAME_RECOVERY_THRESHOLD {
-        // Sparse dirty updates are only useful while the downstream UI can
-        // consume them in order. Once the writer falls too far behind, discard
-        // the stale delta chain and ask the RDP session for a new base frame.
-        queue.frames.clear();
-        queue.needs_frame_recovery = true;
-        queue.frame_recovery_notified = false;
     }
 }
 
@@ -244,23 +214,25 @@ mod tests {
     }
 
     #[test]
-    fn sparse_dirty_backlog_requests_base_frame_recovery() {
+    fn sparse_dirty_backlog_stays_dirty_without_base_frame_recovery() {
         let writer = SharedEventWriter::inert_for_tests();
+        let backlog_count = 32;
 
-        for index in 0..=FRAME_RECOVERY_THRESHOLD {
+        for index in 0..backlog_count {
             writer
                 .send(dirty_update_at((index as u32) * 2))
                 .expect("dirty update should enqueue");
         }
 
-        assert!(writer.take_frame_recovery_request().unwrap());
-        assert!(!writer.take_frame_recovery_request().unwrap());
+        let (queue, _) = &*writer.queue;
+        let queue = queue.lock().unwrap();
+        assert_eq!(queue.frames.len(), backlog_count);
     }
 
     #[test]
-    fn base_frame_clears_writer_recovery_state() {
+    fn base_frame_supersedes_pending_dirty_queue() {
         let writer = SharedEventWriter::inert_for_tests();
-        for index in 0..=FRAME_RECOVERY_THRESHOLD {
+        for index in 0..32 {
             writer
                 .send(dirty_update_at((index as u32) * 2))
                 .expect("dirty update should enqueue");
@@ -279,26 +251,30 @@ mod tests {
             })
             .expect("base frame should enqueue");
 
-        assert!(!writer.take_frame_recovery_request().unwrap());
+        let (queue, _) = &*writer.queue;
+        let queue = queue.lock().unwrap();
+        assert_eq!(queue.frames.len(), 1);
+        assert!(matches!(
+            queue.frames.front(),
+            Some(RemoteDesktopHelperEvent::Frame { .. })
+        ));
     }
 
     #[test]
-    fn dirty_updates_are_dropped_while_writer_waits_for_base_frame() {
+    fn dirty_updates_continue_when_writer_has_sparse_backlog() {
         let writer = SharedEventWriter::inert_for_tests();
-        for index in 0..=FRAME_RECOVERY_THRESHOLD {
+        let backlog_count = 32;
+        for index in 0..backlog_count {
             writer
                 .send(dirty_update_at((index as u32) * 2))
                 .expect("dirty update should enqueue");
         }
-        assert!(writer.take_frame_recovery_request().unwrap());
-
         writer
             .send(dirty_update_at(99))
-            .expect("dirty update should be accepted and dropped");
+            .expect("dirty update should enqueue");
 
         let (queue, _) = &*writer.queue;
         let queue = queue.lock().unwrap();
-        assert!(queue.frames.is_empty());
-        assert!(queue.needs_frame_recovery);
+        assert_eq!(queue.frames.len(), backlog_count + 1);
     }
 }

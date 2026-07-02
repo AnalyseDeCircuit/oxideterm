@@ -319,6 +319,7 @@ impl WorkspaceApp {
 
         match self.settings_page.active_tab {
             SettingsTab::General => {
+                settings.general.minimize_to_tray_on_close.hash(&mut hasher);
                 self.settings_page.cli_companion_loading.hash(&mut hasher);
                 self.settings_page.cli_companion_error.is_some().hash(&mut hasher);
                 self.settings_page.cli_companion_status.hash(&mut hasher);
@@ -826,6 +827,9 @@ impl WorkspaceApp {
         }
         self.i18n
             .set_locale(locale_from_settings(settings.general.language));
+        oxideterm_desktop_presence::set_keep_running_on_close(
+            settings.general.minimize_to_tray_on_close,
+        );
         self.tokens = tokens_from_settings(&settings);
         self.render_policy = compute_render_policy(
             self.render_profile_override

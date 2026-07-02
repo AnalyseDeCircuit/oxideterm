@@ -22,7 +22,13 @@ pub fn settings_tab_section_count(
     dynamic: SettingsDynamicSectionCounts,
 ) -> usize {
     match tab {
-        SettingsTab::General => 3,
+        SettingsTab::General => {
+            if cfg!(any(target_os = "windows", target_os = "macos")) {
+                4
+            } else {
+                3
+            }
+        }
         SettingsTab::Portable => 1,
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
         SettingsTab::Appearance => 4,

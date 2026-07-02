@@ -4,6 +4,8 @@
     "services": "服務",
     "new_terminal": "新終端機",
     "close_tab": "關閉分頁",
+    "show_main_window": "顯示主視窗",
+    "hide_main_window": "隱藏主視窗",
     "quit": "退出 OxideTerm",
     "edit": "編輯",
     "copy": "複製",

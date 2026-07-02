@@ -1226,6 +1226,7 @@ fn flush_pending_rdp_graphics_updates(
     flush_rdp_graphics_updates(output_tx, image, frame_state, false)
 }
 
+#[cfg(test)]
 fn flush_queued_rdp_graphics_updates(
     output_tx: &ClientRdpOutputSender,
     image: &DecodedImage,
@@ -1610,9 +1611,6 @@ fn run_client_rdp_loop(
         let output_drain = drain_client_rdp_outputs(writer, &output_rx)?;
         if let Some(exit) = output_drain.exit {
             return Ok(exit);
-        }
-        if writer.take_frame_recovery_request()? {
-            let _ = input_tx.send(RdpInputEvent::RequestFrame);
         }
 
         if output_drain.drained < RDP_CLIENT_OUTPUT_DRAIN_LIMIT && !handled_requests {

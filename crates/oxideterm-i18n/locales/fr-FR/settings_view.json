@@ -139,7 +139,13 @@
       "cli_checking": "Vérification...",
       "cli_status_error": "Erreur de statut",
       "cli_uninstalled": "Désinstallé",
-      "update_channel": "Canal de mise à jour"
+      "update_channel": "Canal de mise à jour",
+      "window_behavior": "Comportement de la fenêtre",
+      "window_behavior_hint": "Configure la fermeture de la fenêtre principale.",
+      "minimize_to_tray_on_close": "Réduire dans la zone de notification à la fermeture",
+      "minimize_to_tray_on_close_hint": "Garde OxideTerm en cours d'exécution dans la zone de notification lorsque le bouton de fermeture est utilisé.",
+      "keep_in_menu_bar_on_close": "Conserver dans la barre des menus à la fermeture",
+      "keep_in_menu_bar_on_close_hint": "Garde OxideTerm en cours d'exécution depuis la barre des menus macOS lorsque le bouton de fermeture est utilisé."
     },
     "terminal": {
       "title": "Paramètres du terminal",

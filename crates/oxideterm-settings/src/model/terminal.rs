@@ -2,6 +2,11 @@
 pub struct GeneralSettings {
     pub language: Language,
     pub update_channel: UpdateChannel,
+    #[serde(
+        rename = "minimizeToTrayOnClose",
+        default = "default_minimize_to_tray_on_close"
+    )]
+    pub minimize_to_tray_on_close: bool,
     #[serde(default)]
     pub update_proxy: UpdateProxySettings,
     #[serde(flatten)]
@@ -13,10 +18,15 @@ impl Default for GeneralSettings {
         Self {
             language: Language::ZhCn,
             update_channel: UpdateChannel::default(),
+            minimize_to_tray_on_close: default_minimize_to_tray_on_close(),
             update_proxy: UpdateProxySettings::default(),
             extra: ExtraFields::new(),
         }
     }
+}
+
+fn default_minimize_to_tray_on_close() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -4,6 +4,8 @@
     "services": "サービス",
     "new_terminal": "新しいターミナル",
     "close_tab": "タブを閉じる",
+    "show_main_window": "メインウィンドウを表示",
+    "hide_main_window": "メインウィンドウを非表示",
     "quit": "OxideTerm を終了",
     "edit": "編集",
     "copy": "コピー",

@@ -20,6 +20,7 @@ oxideterm-acp-adapter = { path = "../oxideterm-acp-adapter" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-desktop-presence = { path = "../oxideterm-desktop-presence" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-cloud-sync = { path = "../oxideterm-gpui-cloud-sync" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
