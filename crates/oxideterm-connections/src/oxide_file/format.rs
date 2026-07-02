@@ -219,7 +219,10 @@ pub struct EncryptedConnection {
     pub port: u16,
     pub username: String,
     pub auth: EncryptedAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub tags: Vec<String>,
     pub options: ConnectionOptions,
     #[serde(

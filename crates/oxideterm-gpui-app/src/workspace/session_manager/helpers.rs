@@ -339,6 +339,7 @@ pub(super) fn form_from_saved_connection(
         save_password,
         group: group_label_for_form(conn.group.as_deref()),
         color: conn.color.clone().unwrap_or_default(),
+        icon: conn.icon.clone().unwrap_or_default(),
         tags: conn.tags.clone(),
         post_connect_command: conn.post_connect_command().unwrap_or_default().to_string(),
         upstream_proxy_policy: upstream_proxy_form.policy,
@@ -451,6 +452,7 @@ fn connection_draft_from_form(form: &NewConnectionForm) -> ConnectionDraft {
         auth: auth_draft_from_form(form),
         group: form.group.clone(),
         color: form.color.clone(),
+        icon: form.icon.clone(),
         tags: form.tags.clone(),
         proxy_hops: form
             .proxy_hops

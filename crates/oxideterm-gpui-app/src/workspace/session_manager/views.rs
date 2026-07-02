@@ -166,7 +166,10 @@ impl SessionManagerDisplayItem {
 
     fn icon(&self) -> LucideIcon {
         match self {
-            Self::Connection(_) => LucideIcon::Server,
+            Self::Connection(connection) => {
+                session_icons::session_icon_from_id(connection.icon.as_deref())
+                    .unwrap_or(LucideIcon::Server)
+            }
             Self::Serial(_) => LucideIcon::Radio,
             Self::Telnet(_) => LucideIcon::Terminal,
             Self::RawTcp(_) => LucideIcon::Cable,

@@ -990,6 +990,115 @@ impl WorkspaceApp {
         )
     }
 
+    fn render_edit_icon_field(
+        &self,
+        icon_value: &str,
+        color_value: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let preview_color = parse_form_hex_color(color_value).unwrap_or(theme.accent);
+        let active_icon = session_icon_from_id(Some(icon_value)).unwrap_or(LucideIcon::Server);
+        let mut grid = div()
+            .flex()
+            .flex_wrap()
+            .gap(px(self.tokens.spacing.two));
+
+        for choice in SESSION_ICON_CHOICES {
+            let selected = icon_value.trim() == choice.id;
+            let icon_id = choice.id.to_string();
+            grid = grid.child(
+                div()
+                    .size(px(38.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(if selected {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.border)
+                    })
+                    .bg(if selected {
+                        rgba((theme.accent << 8) | 0x22)
+                    } else {
+                        rgb(theme.bg)
+                    })
+                    .cursor_pointer()
+                    .child(Self::render_lucide_icon(
+                        choice.icon,
+                        18.0,
+                        if selected {
+                            rgb(theme.accent)
+                        } else {
+                            rgb(theme.text_muted)
+                        },
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if let Some(form) = this.new_connection_form.as_mut() {
+                                form.icon = icon_id.clone();
+                                clear_connection_selection(form);
+                            }
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+
+        form_field(
+            &self.tokens,
+            self.i18n.t("sessionManager.edit_properties.icon"),
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.spacing.three))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(self.tokens.spacing.three))
+                        .child(
+                            div()
+                                .size(px(self.tokens.metrics.form_input_height))
+                                .rounded(px(self.tokens.radii.md))
+                                .border_1()
+                                .border_color(rgb(theme.border))
+                                .bg(rgba((preview_color << 8) | 0x22))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(Self::render_lucide_icon(
+                                    active_icon,
+                                    18.0,
+                                    rgb(preview_color),
+                                )),
+                        )
+                        .child(
+                            button(
+                                &self.tokens,
+                                self.i18n
+                                    .t("sessionManager.edit_properties.default_icon"),
+                                ButtonTone::Secondary,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    if let Some(form) = this.new_connection_form.as_mut() {
+                                        form.icon.clear();
+                                        clear_connection_selection(form);
+                                    }
+                                    cx.notify();
+                                }),
+                            ),
+                        ),
+                )
+                .child(grid),
+        )
+    }
+
     fn render_transport_selector(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let active_transport = self

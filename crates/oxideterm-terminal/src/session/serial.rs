@@ -1,4 +1,5 @@
 const SERIAL_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
+const SERIAL_HEXDUMP_WIDTH: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SerialParity {
@@ -56,6 +57,15 @@ pub struct SerialError {
     pub message: String,
     pub port_path: Option<String>,
     pub recoverable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SerialBreakDuration(std::time::Duration);
+
+impl Default for SerialBreakDuration {
+    fn default() -> Self {
+        Self(std::time::Duration::from_millis(250))
+    }
 }
 
 impl std::fmt::Display for SerialError {
@@ -169,11 +179,19 @@ pub struct SerialSession {
     modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
     serial_console_ingress: SerialConsoleIngress,
+    control_state: SerialControlState,
+    runtime_options: SerialRuntimeOptions,
+    hexdump_offset: u64,
 }
 
 #[derive(Debug)]
 enum SerialCommand {
     Data(Vec<u8>),
+    SetControlLine {
+        line: SerialControlLine,
+        asserted: bool,
+    },
+    SendBreak(SerialBreakDuration),
     Close,
 }
 
@@ -325,6 +343,9 @@ impl SerialSession {
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
             serial_console_ingress: SerialConsoleIngress::default(),
+            control_state: SerialControlState::default(),
+            runtime_options: SerialRuntimeOptions::default(),
+            hexdump_offset: 0,
         })
     }
 
@@ -429,7 +450,7 @@ impl SerialSession {
     }
 
     fn feed_plain_transport_output(&mut self, bytes: &[u8]) {
-        let terminal_bytes = self.serial_console_ingress.filter(bytes);
+        let terminal_bytes = self.prepare_display_output(bytes);
         if terminal_bytes.is_empty() {
             return;
         }
@@ -512,6 +533,18 @@ impl SerialSession {
         }
     }
 
+    fn prepare_display_output(&mut self, bytes: &[u8]) -> Vec<u8> {
+        match self.runtime_options.display_mode {
+            SerialDisplayMode::Text => self.serial_console_ingress.filter(bytes),
+            SerialDisplayMode::Hex => {
+                format_serial_hexdump(bytes, &mut self.hexdump_offset, false)
+            }
+            SerialDisplayMode::Mixed => {
+                format_serial_hexdump(bytes, &mut self.hexdump_offset, true)
+            }
+        }
+    }
+
     fn feed_utf8_terminal_output(&mut self, bytes: &[u8]) {
         self.push_output_event(bytes);
         let mut term = self.term.lock();
@@ -573,6 +606,16 @@ impl SerialSession {
             AlacEvent::ChildExit(_) | AlacEvent::Exit => false,
         }
     }
+
+    fn encode_user_input(&self, bytes: &[u8]) -> Result<Vec<u8>> {
+        match self.runtime_options.send_mode {
+            SerialSendMode::Text => Ok(encode_serial_text_input(
+                bytes,
+                self.runtime_options.line_ending,
+            )),
+            SerialSendMode::Hex => parse_serial_hex_input(bytes),
+        }
+    }
 }
 
 impl TerminalSessionBackend for SerialSession {
@@ -626,7 +669,12 @@ impl TerminalSessionBackend for SerialSession {
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
-        self.write_protocol_bytes(bytes)
+        let encoded = self.encode_user_input(bytes)?;
+        self.write_protocol_bytes(&encoded)?;
+        if self.runtime_options.local_echo {
+            self.feed_plain_transport_output(&encoded);
+        }
+        Ok(())
     }
 
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
@@ -640,14 +688,14 @@ impl TerminalSessionBackend for SerialSession {
 
     fn write_text(&mut self, text: &str) -> Result<()> {
         let encoded = self.input_encoder.encode_text(text);
-        self.write_protocol_bytes(encoded.as_ref())
+        self.write_input(encoded.as_ref())
     }
 
     fn paste_text(&mut self, text: &str) -> Result<()> {
         let bytes = self
             .input_encoder
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
-        self.write_protocol_bytes(&bytes)
+        self.write_input(&bytes)
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -669,6 +717,55 @@ impl TerminalSessionBackend for SerialSession {
 
     fn set_output_events_enabled(&mut self, enabled: bool) {
         self.output_events_enabled = enabled;
+    }
+
+    fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {
+        Some(self.runtime_options)
+    }
+
+    fn set_serial_runtime_options(&mut self, options: SerialRuntimeOptions) -> Result<()> {
+        if self.runtime_options.display_mode != options.display_mode {
+            // A display-mode switch only affects future bytes; restart the
+            // hexdump offset so the next rendered packet begins cleanly.
+            self.hexdump_offset = 0;
+        }
+        self.runtime_options = options;
+        Ok(())
+    }
+
+    fn serial_control_state(&self) -> Option<SerialControlState> {
+        Some(self.control_state)
+    }
+
+    fn set_serial_control_line(
+        &mut self,
+        line: SerialControlLine,
+        asserted: bool,
+    ) -> Result<()> {
+        if !self.lifecycle.is_running() {
+            return Ok(());
+        }
+        self.command_tx
+            .try_send(SerialCommand::SetControlLine { line, asserted })
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        match line {
+            SerialControlLine::DataTerminalReady => {
+                self.control_state.data_terminal_ready = asserted;
+            }
+            SerialControlLine::RequestToSend => {
+                self.control_state.request_to_send = asserted;
+            }
+        }
+        Ok(())
+    }
+
+    fn send_serial_break(&mut self) -> Result<()> {
+        if self.lifecycle.is_running() {
+            self.command_tx
+                .try_send(SerialCommand::SendBreak(SerialBreakDuration::default()))
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        }
+        Ok(())
     }
 
     fn start_modem_transfer(
@@ -880,6 +977,71 @@ fn run_serial_worker(
     run_serial_worker_with_port(&mut *port, &config, command_rx, worker_tx);
 }
 
+trait SerialWorkerPort: Read + Write {
+    fn set_control_line(
+        &mut self,
+        line: SerialControlLine,
+        asserted: bool,
+        port_path: &str,
+    ) -> Result<(), SerialError> {
+        let _ = (line, asserted);
+        Err(SerialError::new(
+            SerialErrorCode::UnsupportedPlatform,
+            "Serial control lines are not supported by this test port",
+            Some(port_path.to_string()),
+            true,
+        ))
+    }
+
+    fn send_break(
+        &mut self,
+        duration: SerialBreakDuration,
+        port_path: &str,
+    ) -> Result<(), SerialError> {
+        let _ = duration;
+        Err(SerialError::new(
+            SerialErrorCode::UnsupportedPlatform,
+            "Serial break is not supported by this test port",
+            Some(port_path.to_string()),
+            true,
+        ))
+    }
+}
+
+impl<T> SerialWorkerPort for T
+where
+    T: serialport::SerialPort + ?Sized,
+{
+    fn set_control_line(
+        &mut self,
+        line: SerialControlLine,
+        asserted: bool,
+        port_path: &str,
+    ) -> Result<(), SerialError> {
+        let result = match line {
+            SerialControlLine::DataTerminalReady => self.write_data_terminal_ready(asserted),
+            SerialControlLine::RequestToSend => self.write_request_to_send(asserted),
+        };
+        result.map_err(|error| {
+            map_serial_control_error(error, SerialErrorCode::WriteFailed, port_path)
+        })
+    }
+
+    fn send_break(
+        &mut self,
+        duration: SerialBreakDuration,
+        port_path: &str,
+    ) -> Result<(), SerialError> {
+        self.set_break().map_err(|error| {
+            map_serial_control_error(error, SerialErrorCode::WriteFailed, port_path)
+        })?;
+        std::thread::sleep(duration.0);
+        self.clear_break().map_err(|error| {
+            map_serial_control_error(error, SerialErrorCode::WriteFailed, port_path)
+        })
+    }
+}
+
 // Keep the worker loop injectable so lifecycle tests can use a fake serial
 // stream while production still owns a real serialport handle.
 fn run_serial_worker_with_port<P>(
@@ -888,7 +1050,7 @@ fn run_serial_worker_with_port<P>(
     command_rx: crossbeam_channel::Receiver<SerialCommand>,
     worker_tx: crossbeam_channel::Sender<SerialWorkerEvent>,
 ) where
-    P: Read + Write + ?Sized,
+    P: SerialWorkerPort + ?Sized,
 {
     let mut buffer = [0_u8; 8192];
     loop {
@@ -901,6 +1063,18 @@ fn run_serial_worker_with_port<P>(
                             SerialErrorCode::WriteFailed,
                             &config.port_path,
                         )));
+                        return;
+                    }
+                }
+                SerialCommand::SetControlLine { line, asserted } => {
+                    if let Err(error) = port.set_control_line(line, asserted, &config.port_path) {
+                        let _ = worker_tx.send(SerialWorkerEvent::Failed(error));
+                        return;
+                    }
+                }
+                SerialCommand::SendBreak(duration) => {
+                    if let Err(error) = port.send_break(duration, &config.port_path) {
+                        let _ = worker_tx.send(SerialWorkerEvent::Failed(error));
                         return;
                     }
                 }
@@ -1134,6 +1308,29 @@ fn map_serial_open_error(error: serialport::Error, port_path: &str) -> SerialErr
     )
 }
 
+fn map_serial_control_error(
+    error: serialport::Error,
+    fallback: SerialErrorCode,
+    port_path: &str,
+) -> SerialError {
+    let code = match error.kind() {
+        serialport::ErrorKind::NoDevice => SerialErrorCode::DeviceDisconnected,
+        serialport::ErrorKind::InvalidInput => SerialErrorCode::InvalidParameters,
+        serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) => {
+            SerialErrorCode::PermissionDenied
+        }
+        serialport::ErrorKind::Io(
+            std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::UnexpectedEof,
+        ) => SerialErrorCode::DeviceDisconnected,
+        serialport::ErrorKind::Unknown | serialport::ErrorKind::Io(_) => fallback,
+    };
+    SerialError::new(code, error.to_string(), Some(port_path.to_string()), true)
+}
+
 fn map_serial_io_error(
     error: std::io::Error,
     fallback: SerialErrorCode,
@@ -1149,6 +1346,100 @@ fn map_serial_io_error(
         _ => fallback,
     };
     SerialError::new(code, error.to_string(), Some(port_path.to_string()), true)
+}
+
+fn encode_serial_text_input(bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
+    if matches!(line_ending, SerialLineEnding::None) {
+        return bytes.to_vec();
+    }
+
+    let replacement = match line_ending {
+        SerialLineEnding::Lf => b"\n".as_slice(),
+        SerialLineEnding::CrLf => b"\r\n".as_slice(),
+        SerialLineEnding::Cr => b"\r".as_slice(),
+        SerialLineEnding::None => unreachable!(),
+    };
+
+    let mut encoded = Vec::with_capacity(bytes.len() + 4);
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                if bytes.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+                encoded.extend_from_slice(replacement);
+            }
+            b'\n' => encoded.extend_from_slice(replacement),
+            byte => encoded.push(byte),
+        }
+        index += 1;
+    }
+    encoded
+}
+
+fn parse_serial_hex_input(bytes: &[u8]) -> Result<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).context("Serial hex input must be UTF-8 text")?;
+    let mut nibbles = Vec::new();
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        let Some(value) = ch.to_digit(16) else {
+            bail!("Serial hex input contains non-hex character '{ch}'");
+        };
+        nibbles.push(value as u8);
+    }
+    if nibbles.len() % 2 != 0 {
+        bail!("Serial hex input must contain an even number of hex digits");
+    }
+
+    let mut parsed = Vec::with_capacity(nibbles.len() / 2);
+    for pair in nibbles.chunks_exact(2) {
+        parsed.push((pair[0] << 4) | pair[1]);
+    }
+    Ok(parsed)
+}
+
+fn format_serial_hexdump(bytes: &[u8], offset: &mut u64, include_ascii: bool) -> Vec<u8> {
+    use std::fmt::Write as _;
+
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut output = String::new();
+    for chunk in bytes.chunks(SERIAL_HEXDUMP_WIDTH) {
+        let _ = write!(&mut output, "{:08x}  ", *offset);
+        for index in 0..SERIAL_HEXDUMP_WIDTH {
+            if let Some(byte) = chunk.get(index) {
+                let _ = write!(&mut output, "{byte:02x} ");
+            } else {
+                output.push_str("   ");
+            }
+            if index == 7 {
+                output.push(' ');
+            }
+        }
+        if include_ascii {
+            output.push_str(" |");
+            for byte in chunk {
+                output.push(printable_serial_ascii(*byte));
+            }
+            output.push('|');
+        }
+        output.push_str("\r\n");
+        *offset = offset.saturating_add(chunk.len() as u64);
+    }
+    output.into_bytes()
+}
+
+fn printable_serial_ascii(byte: u8) -> char {
+    if byte.is_ascii_graphic() || byte == b' ' {
+        byte as char
+    } else {
+        '.'
+    }
 }
 
 #[cfg(test)]
@@ -1174,9 +1465,16 @@ mod serial_tests {
         Error(io::ErrorKind),
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    enum FakeControlEvent {
+        Line(SerialControlLine, bool),
+        Break,
+    }
+
     struct FakeSerialPort {
         reads: VecDeque<FakeRead>,
         writes: Arc<Mutex<Vec<Vec<u8>>>>,
+        controls: Arc<Mutex<Vec<FakeControlEvent>>>,
     }
 
     impl FakeSerialPort {
@@ -1184,6 +1482,7 @@ mod serial_tests {
             Self {
                 reads: reads.into(),
                 writes: Arc::new(Mutex::new(Vec::new())),
+                controls: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -1209,6 +1508,30 @@ mod serial_tests {
         }
 
         fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl SerialWorkerPort for FakeSerialPort {
+        fn set_control_line(
+            &mut self,
+            line: SerialControlLine,
+            asserted: bool,
+            _port_path: &str,
+        ) -> Result<(), SerialError> {
+            self.controls
+                .lock()
+                .unwrap()
+                .push(FakeControlEvent::Line(line, asserted));
+            Ok(())
+        }
+
+        fn send_break(
+            &mut self,
+            _duration: SerialBreakDuration,
+            _port_path: &str,
+        ) -> Result<(), SerialError> {
+            self.controls.lock().unwrap().push(FakeControlEvent::Break);
             Ok(())
         }
     }
@@ -1258,6 +1581,9 @@ mod serial_tests {
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
             serial_console_ingress: SerialConsoleIngress::default(),
+            control_state: SerialControlState::default(),
+            runtime_options: SerialRuntimeOptions::default(),
+            hexdump_offset: 0,
         }
     }
 
@@ -1377,6 +1703,110 @@ mod serial_tests {
             SerialWorkerEvent::Closed
         ));
         assert!(worker_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn fake_serial_worker_applies_control_lines_and_break() {
+        let config = valid_config();
+        let mut port = FakeSerialPort::new(VecDeque::new());
+        let controls = port.controls.clone();
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        let (worker_tx, worker_rx) = crossbeam_channel::unbounded();
+
+        command_tx
+            .send(SerialCommand::SetControlLine {
+                line: SerialControlLine::DataTerminalReady,
+                asserted: true,
+            })
+            .unwrap();
+        command_tx
+            .send(SerialCommand::SetControlLine {
+                line: SerialControlLine::RequestToSend,
+                asserted: false,
+            })
+            .unwrap();
+        command_tx
+            .send(SerialCommand::SendBreak(SerialBreakDuration::default()))
+            .unwrap();
+        command_tx.send(SerialCommand::Close).unwrap();
+        run_serial_worker_with_port(&mut port, &config, command_rx, worker_tx);
+
+        assert_eq!(
+            controls.lock().unwrap().as_slice(),
+            &[
+                FakeControlEvent::Line(SerialControlLine::DataTerminalReady, true),
+                FakeControlEvent::Line(SerialControlLine::RequestToSend, false),
+                FakeControlEvent::Break,
+            ]
+        );
+        assert!(matches!(
+            worker_rx.recv().unwrap(),
+            SerialWorkerEvent::Closed
+        ));
+    }
+
+    #[test]
+    fn serial_text_input_maps_line_endings() {
+        assert_eq!(
+            encode_serial_text_input(b"show\n", SerialLineEnding::CrLf),
+            b"show\r\n"
+        );
+        assert_eq!(
+            encode_serial_text_input(b"a\r\nb\r", SerialLineEnding::Lf),
+            b"a\nb\n"
+        );
+        assert_eq!(
+            encode_serial_text_input(b"a\n", SerialLineEnding::None),
+            b"a\n"
+        );
+    }
+
+    #[test]
+    fn serial_hex_parser_accepts_whitespace_and_rejects_invalid_input() {
+        assert_eq!(parse_serial_hex_input(b"48 65 6c 6c 6f").unwrap(), b"Hello");
+        assert_eq!(parse_serial_hex_input(b"48656c6c6f").unwrap(), b"Hello");
+        assert!(parse_serial_hex_input(b"4").is_err());
+        assert!(parse_serial_hex_input(b"zz").is_err());
+    }
+
+    #[test]
+    fn serial_hexdump_can_include_ascii_column() {
+        let mut offset = 0;
+        let dump = format_serial_hexdump(b"Hello", &mut offset, true);
+
+        assert_eq!(offset, 5);
+        let rendered = String::from_utf8(dump).unwrap();
+        assert!(rendered.contains("00000000"));
+        assert!(rendered.contains("48 65 6c 6c 6f"));
+        assert!(rendered.contains("|Hello|"));
+    }
+
+    #[test]
+    fn serial_runtime_options_control_encoding_and_local_echo() {
+        let mut session = test_serial_session();
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        session.command_tx = command_tx;
+        session
+            .set_serial_runtime_options(SerialRuntimeOptions {
+                line_ending: SerialLineEnding::CrLf,
+                display_mode: SerialDisplayMode::Mixed,
+                send_mode: SerialSendMode::Hex,
+                local_echo: true,
+            })
+            .unwrap();
+
+        session.write_input(b"48 69").unwrap();
+
+        assert!(matches!(
+            command_rx.recv().unwrap(),
+            SerialCommand::Data(bytes) if bytes == b"Hi"
+        ));
+        assert_eq!(
+            session.serial_runtime_options().unwrap().send_mode,
+            SerialSendMode::Hex
+        );
+        assert!(session.buffer_text().contains("48 69"));
+        assert!(session.buffer_text().contains("|Hi|"));
     }
 
     #[test]

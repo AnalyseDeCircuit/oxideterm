@@ -18,13 +18,14 @@ use gpui::{
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
-    GraphicsOptions, LocalPtyConfig, RawTcpSessionConfig, RawUdpSessionConfig, SerialSessionConfig,
-    ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig,
-    TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
-    TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent, TerminalDrainBudget,
-    TerminalDrainReport, TerminalEvent, TerminalLifecycle, TerminalOutputProcessor,
-    TerminalProcessInfo, TerminalRow, TerminalSession, TerminalSnapshot, TrzszTransferDirection,
-    TrzszTransferSelection,
+    GraphicsOptions, LocalPtyConfig, RawTcpSessionConfig, RawUdpSessionConfig, SerialControlLine,
+    SerialControlState, SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode,
+    SerialSessionConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig,
+    TelnetSessionConfig, TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
+    TerminalDrainBudget, TerminalDrainReport, TerminalEvent, TerminalLifecycle,
+    TerminalOutputProcessor, TerminalProcessInfo, TerminalRow, TerminalSession, TerminalSnapshot,
+    TrzszTransferDirection, TrzszTransferSelection, serial_list_ports,
 };
 use oxideterm_trzsz::TrzszState;
 use parking_lot::Mutex;
@@ -121,6 +122,16 @@ pub struct TerminalSearchStatus {
     pub match_count: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalSerialStatus {
+    pub config: SerialSessionConfig,
+    pub lifecycle: TerminalLifecycle,
+    pub control_state: SerialControlState,
+    pub runtime_options: SerialRuntimeOptions,
+    pub port_available: Option<bool>,
+    pub can_reconnect: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct TerminalEventEffect {
     needs_notify: bool,
@@ -140,6 +151,8 @@ pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
     raw_tcp_reconnect_config: Option<RawTcpSessionConfig>,
     raw_udp_reconnect_config: Option<RawUdpSessionConfig>,
+    serial_reconnect_config: Option<SerialSessionConfig>,
+    serial_port_available: Option<bool>,
     focus_handle: FocusHandle,
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
@@ -423,6 +436,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
+        let reconnect_config = config.clone();
         let terminal = Arc::new(Mutex::new(
             TerminalSession::serial_with_graphics_and_encoding(
                 config,
@@ -433,7 +447,9 @@ impl TerminalPane {
                 preferences.scrollback_lines,
             )?,
         ));
-        Self::from_session(terminal, preferences, window, cx)
+        let mut pane = Self::from_session(terminal, preferences, window, cx)?;
+        pane.serial_reconnect_config = Some(reconnect_config);
+        Ok(pane)
     }
 
     pub fn from_shared_session(
@@ -503,6 +519,8 @@ impl TerminalPane {
             terminal,
             raw_tcp_reconnect_config: None,
             raw_udp_reconnect_config: None,
+            serial_reconnect_config: None,
+            serial_port_available: None,
             focus_handle,
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
@@ -899,8 +917,25 @@ impl TerminalPane {
         self.raw_udp_reconnect_config.is_some()
     }
 
+    pub fn is_serial_transport(&self) -> bool {
+        self.serial_reconnect_config.is_some()
+    }
+
     pub fn is_raw_socket_transport(&self) -> bool {
         self.is_raw_tcp_transport() || self.is_raw_udp_transport()
+    }
+
+    pub fn serial_status(&self) -> Option<TerminalSerialStatus> {
+        let config = self.serial_reconnect_config.clone()?;
+        let terminal = self.terminal.lock();
+        Some(TerminalSerialStatus {
+            config,
+            lifecycle: terminal.lifecycle(),
+            control_state: terminal.serial_control_state().unwrap_or_default(),
+            runtime_options: terminal.serial_runtime_options().unwrap_or_default(),
+            port_available: self.serial_port_available,
+            can_reconnect: self.can_reconnect_serial(),
+        })
     }
 
     fn can_reconnect_raw_tcp(&self) -> bool {
@@ -913,6 +948,183 @@ impl TerminalPane {
 
     fn can_reconnect_raw_socket(&self) -> bool {
         self.can_reconnect_raw_tcp() || self.can_reconnect_raw_udp()
+    }
+
+    fn can_reconnect_serial(&self) -> bool {
+        self.serial_reconnect_config.is_some() && self.terminal_exited
+    }
+
+    fn reconnect_serial(&mut self, cx: &mut Context<Self>) {
+        if !self.can_reconnect_serial() {
+            return;
+        }
+        let Some(config) = self.serial_reconnect_config.clone() else {
+            return;
+        };
+
+        let resize = self
+            .last_pty_resize
+            .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS, 0, 0));
+        let runtime_options = self
+            .terminal
+            .lock()
+            .serial_runtime_options()
+            .unwrap_or_default();
+        self.terminal.lock().shutdown();
+
+        let mut terminal = match TerminalSession::serial_with_graphics_and_encoding(
+            config.clone(),
+            resize.0,
+            resize.1,
+            graphics_options_from_preferences(&self.preferences),
+            self.preferences.terminal_encoding,
+            self.preferences.scrollback_lines,
+        ) {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                self.title = SharedString::from(format!(
+                    "{}: {error}",
+                    self.preferences.serial_control_labels.reconnect_failed
+                ));
+                cx.notify();
+                return;
+            }
+        };
+        let _ = terminal.set_serial_runtime_options(runtime_options);
+        if resize.2 > 0 && resize.3 > 0 {
+            let _ = terminal.resize_with_cell_size(resize.0, resize.1, resize.2, resize.3);
+        }
+        let _ = terminal.set_focused(self.focused);
+        let snapshot = terminal.snapshot();
+
+        // Serial reconnect mirrors raw socket reconnect: preserve the pane
+        // identity while replacing the transport-owned device handle.
+        self.terminal = Arc::new(Mutex::new(terminal));
+        self.serial_reconnect_config = Some(config);
+        self.serial_port_available = Some(true);
+        self.snapshot = self.stamp_snapshot(snapshot);
+        self.terminal_exited = false;
+        self.input_locked = false;
+        self.title = SharedString::from("OxideTerm");
+        self.selection = None;
+        self.pending_paste = None;
+        self.context_menu = None;
+        self.context_action_requested = None;
+        self.marked_text = None;
+        self.privilege_prompt_inline_hint = None;
+        self.privilege_prompt_submit_requested = false;
+        self.search_query = None;
+        self.selected_search_match = None;
+        self.hovered_link = None;
+        self.hovered_command_mark_id = None;
+        self.selecting = false;
+        self.last_mouse_report_point = None;
+        self.command_marks.clear();
+        self.selected_command_mark_id = None;
+        self.command_mark_id_aliases.clear();
+        self.input_tracker.reset();
+        self.privilege_prompt_tracker = PrivilegePromptTracker::default();
+        self.command_fact_ledger = CommandFactLedger::default();
+        self.last_pty_resize = Some(resize);
+        self.pending_pty_resize = None;
+        self.last_drain_budget_exhausted = false;
+        self.clear_smooth_scroll_remainder();
+        self.reset_cursor_blink();
+        cx.notify();
+    }
+
+    fn refresh_serial_port_presence(&mut self, cx: &mut Context<Self>) {
+        let Some(config) = self.serial_reconnect_config.as_ref() else {
+            return;
+        };
+        let expected = config.port_path.trim().to_ascii_lowercase();
+        self.serial_port_available = serial_list_ports().ok().map(|ports| {
+            ports
+                .iter()
+                .any(|port| port.port_path.trim().to_ascii_lowercase() == expected)
+        });
+        cx.notify();
+    }
+
+    fn set_serial_control_line(
+        &mut self,
+        line: SerialControlLine,
+        asserted: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .terminal
+            .lock()
+            .set_serial_control_line(line, asserted)
+            .is_ok()
+        {
+            cx.notify();
+        }
+    }
+
+    fn send_serial_break(&mut self, cx: &mut Context<Self>) {
+        if self.terminal.lock().send_serial_break().is_ok() {
+            cx.notify();
+        }
+    }
+
+    fn set_serial_runtime_options(
+        &mut self,
+        options: SerialRuntimeOptions,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .terminal
+            .lock()
+            .set_serial_runtime_options(options)
+            .is_ok()
+        {
+            cx.notify();
+        }
+    }
+
+    fn cycle_serial_send_mode(&mut self, cx: &mut Context<Self>) {
+        let Some(mut options) = self.terminal.lock().serial_runtime_options() else {
+            return;
+        };
+        options.send_mode = match options.send_mode {
+            SerialSendMode::Text => SerialSendMode::Hex,
+            SerialSendMode::Hex => SerialSendMode::Text,
+        };
+        self.set_serial_runtime_options(options, cx);
+    }
+
+    fn cycle_serial_display_mode(&mut self, cx: &mut Context<Self>) {
+        let Some(mut options) = self.terminal.lock().serial_runtime_options() else {
+            return;
+        };
+        options.display_mode = match options.display_mode {
+            SerialDisplayMode::Text => SerialDisplayMode::Hex,
+            SerialDisplayMode::Hex => SerialDisplayMode::Mixed,
+            SerialDisplayMode::Mixed => SerialDisplayMode::Text,
+        };
+        self.set_serial_runtime_options(options, cx);
+    }
+
+    fn cycle_serial_line_ending(&mut self, cx: &mut Context<Self>) {
+        let Some(mut options) = self.terminal.lock().serial_runtime_options() else {
+            return;
+        };
+        options.line_ending = match options.line_ending {
+            SerialLineEnding::None => SerialLineEnding::Lf,
+            SerialLineEnding::Lf => SerialLineEnding::CrLf,
+            SerialLineEnding::CrLf => SerialLineEnding::Cr,
+            SerialLineEnding::Cr => SerialLineEnding::None,
+        };
+        self.set_serial_runtime_options(options, cx);
+    }
+
+    fn toggle_serial_local_echo(&mut self, cx: &mut Context<Self>) {
+        let Some(mut options) = self.terminal.lock().serial_runtime_options() else {
+            return;
+        };
+        options.local_echo = !options.local_echo;
+        self.set_serial_runtime_options(options, cx);
     }
 
     fn reconnect_raw_tcp(&mut self, cx: &mut Context<Self>) {

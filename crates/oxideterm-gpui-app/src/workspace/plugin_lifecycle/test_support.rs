@@ -307,6 +307,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             proxy_chain: Vec::new(),
             upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
             color: None,
+            icon: None,
             tags: Vec::new(),
             agent_forwarding: false,
             legacy_ssh_compatibility: false,

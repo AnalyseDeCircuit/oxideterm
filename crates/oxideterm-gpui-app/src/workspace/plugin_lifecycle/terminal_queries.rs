@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use super::{TabKind, TerminalSessionId, WorkspaceApp};
 use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
-use oxideterm_terminal::{RawTcpSessionConfig, RawUdpSessionConfig};
+use oxideterm_terminal::{RawTcpSessionConfig, RawUdpSessionConfig, SerialSessionConfig};
 
 // Terminal read APIs project pane state into the plugin contract. Keeping search
 // and scroll-buffer code here prevents lifecycle from owning terminal query rules.
@@ -73,6 +73,9 @@ pub(super) fn native_plugin_active_terminal_target(
     }
     if let Some(config) = workspace.raw_udp_terminal_configs.get(&session_id) {
         return native_plugin_raw_udp_terminal_target(session_id, config);
+    }
+    if let Some(config) = workspace.serial_terminal_configs.get(&session_id) {
+        return native_plugin_serial_terminal_target(session_id, config);
     }
     let terminal_type = workspace
         .active_tab()
@@ -182,6 +185,32 @@ fn native_plugin_raw_udp_terminal_target(
     })
 }
 
+fn native_plugin_serial_terminal_target(
+    session_id: TerminalSessionId,
+    config: &SerialSessionConfig,
+) -> Value {
+    // Serial panes are local device transports, not shell-backed terminals.
+    // Plugins need explicit metadata so SSH/local-shell tools stay gated.
+    json!({
+        "sessionId": session_id.0.to_string(),
+        "terminalType": "serial",
+        "terminalTransport": "serial",
+        "nodeId": null,
+        "connectionId": null,
+        "connectionState": "active",
+        "label": format!("Serial {}", config.port_path),
+        "transport": {
+            "type": "serial",
+            "portPath": config.port_path,
+            "baudRate": config.baud_rate,
+            "dataBits": config.data_bits,
+            "stopBits": config.stop_bits,
+            "parity": format!("{:?}", config.parity).to_lowercase(),
+            "flowControl": format!("{:?}", config.flow_control).to_lowercase(),
+        },
+    })
+}
+
 fn native_plugin_terminal_state_label(state: &Value) -> Value {
     if let Some(state) = state.as_str() {
         return json!(state);
@@ -198,6 +227,7 @@ mod tests {
     use oxideterm_terminal::{
         RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpTlsConfig,
         RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpSendMode,
+        SerialFlowControl, SerialParity,
     };
 
     #[test]
@@ -262,5 +292,31 @@ mod tests {
         assert_eq!(target["transport"]["lineEnding"], "none");
         assert_eq!(target["transport"]["displayMode"], "mixed");
         assert_eq!(target["transport"]["sendMode"], "hex");
+    }
+
+    #[test]
+    fn serial_active_target_exposes_transport_metadata() {
+        let target = native_plugin_serial_terminal_target(
+            TerminalSessionId(44),
+            &SerialSessionConfig {
+                port_path: "/dev/cu.usbserial-test".to_string(),
+                baud_rate: 115_200,
+                data_bits: 8,
+                stop_bits: 1,
+                parity: SerialParity::None,
+                flow_control: SerialFlowControl::Hardware,
+            },
+        );
+
+        assert_eq!(target["terminalType"], "serial");
+        assert_eq!(target["terminalTransport"], "serial");
+        assert_eq!(target["label"], "Serial /dev/cu.usbserial-test");
+        assert_eq!(target["transport"]["type"], "serial");
+        assert_eq!(target["transport"]["portPath"], "/dev/cu.usbserial-test");
+        assert_eq!(target["transport"]["baudRate"], 115_200);
+        assert_eq!(target["transport"]["dataBits"], 8);
+        assert_eq!(target["transport"]["stopBits"], 1);
+        assert_eq!(target["transport"]["parity"], "none");
+        assert_eq!(target["transport"]["flowControl"], "hardware");
     }
 }

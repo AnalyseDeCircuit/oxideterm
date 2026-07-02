@@ -107,6 +107,8 @@
       "agent_hint": "System-SSH-Agent zur Authentifizierung verwenden.",
       "group": "Gruppe",
       "ungrouped": "Ohne Gruppe",
+      "icon": "Symbol",
+      "default_icon": "Standardsymbol",
       "color": "Farbe",
       "clear_color": "Löschen",
       "cancel": "Abbrechen",

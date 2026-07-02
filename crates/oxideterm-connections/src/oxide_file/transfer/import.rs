@@ -503,6 +503,7 @@ fn encrypted_connection_to_saved(
             last_used_at: None,
             updated_at: Some(now),
             color: conn.color,
+            icon: conn.icon,
             tags: conn.tags,
             post_connect_command: None,
             privilege_credentials: import_privilege_credentials(
@@ -860,6 +861,7 @@ fn merge_saved_connection(
         existing.options.post_connect_command = legacy_post_connect_command;
     }
     existing.color = imported.color.or(existing.color);
+    existing.icon = imported.icon.or(existing.icon);
     existing.tags = merge_tags(existing.tags, imported.tags);
     existing.post_connect_command = None;
     existing

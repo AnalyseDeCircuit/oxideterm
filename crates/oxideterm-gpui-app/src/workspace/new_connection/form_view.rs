@@ -24,6 +24,7 @@ use crate::workspace::WorkspaceApp;
 use crate::workspace::{
     browser_behavior,
     ime::{WorkspaceImeTarget, keystroke_uses_text_edit_modifier},
+    session_icons::{SESSION_ICON_CHOICES, session_icon_from_id},
 };
 use gpui::Div;
 use oxideterm_connections::SavedUpstreamProxyProtocol;

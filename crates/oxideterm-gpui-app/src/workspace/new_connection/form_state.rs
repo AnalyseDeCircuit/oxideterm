@@ -302,6 +302,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) post_connect_command: String,
     pub(in crate::workspace) color: String,
+    pub(in crate::workspace) icon: String,
     pub(in crate::workspace) tags: Vec<String>,
     pub(in crate::workspace) proxy_hops: Vec<NewConnectionProxyHop>,
     pub(in crate::workspace) proxy_chain_expanded: bool,
@@ -377,6 +378,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("group", &self.group)
             .field("post_connect_command", &self.post_connect_command)
             .field("color", &self.color)
+            .field("icon", &self.icon)
             .field("tags", &self.tags)
             .field("proxy_hops", &self.proxy_hops)
             .field("proxy_chain_expanded", &self.proxy_chain_expanded)
@@ -453,6 +455,7 @@ impl Default for NewConnectionForm {
             group: String::new(),
             post_connect_command: String::new(),
             color: String::new(),
+            icon: String::new(),
             tags: Vec::new(),
             proxy_hops: Vec::new(),
             proxy_chain_expanded: false,
@@ -1495,6 +1498,7 @@ mod tests {
             created_at: "2026-06-15T00:00:00Z".to_string(),
             last_used_at: None,
             color: None,
+            icon: None,
             tags: Vec::new(),
             agent_forwarding: true,
             legacy_ssh_compatibility: true,

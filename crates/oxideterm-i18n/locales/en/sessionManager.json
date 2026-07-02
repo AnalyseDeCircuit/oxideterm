@@ -107,6 +107,8 @@
       "agent_hint": "Use system SSH Agent for authentication.",
       "group": "Group",
       "ungrouped": "Ungrouped",
+      "icon": "Icon",
+      "default_icon": "Default icon",
       "color": "Color",
       "clear_color": "Clear",
       "cancel": "Cancel",

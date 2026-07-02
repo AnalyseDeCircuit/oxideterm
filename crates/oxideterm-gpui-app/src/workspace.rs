@@ -27,6 +27,7 @@ mod plugin_ui;
 mod quick_commands;
 mod remote_desktop;
 mod selectable_text;
+mod session_icons;
 mod session_manager;
 mod settings;
 mod sftp;
@@ -137,8 +138,8 @@ use oxideterm_gpui_terminal::{
     TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice,
     TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPaneEvent,
     TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
-    TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
-    detect_custom_privilege_prompt, detect_privilege_prompt,
+    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
+    TerminalWorkingDirectorySource, detect_custom_privilege_prompt, detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{

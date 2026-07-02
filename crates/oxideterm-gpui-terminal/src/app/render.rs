@@ -13,8 +13,11 @@ use oxideterm_gpui_ui::context_menu::{
 };
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
 use oxideterm_gpui_ui::progress::progress;
+use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_terminal::{
-    DetectedModemProtocol, ModemTransferDirection, TerminalCommandMark, TerminalSnapshot,
+    DetectedModemProtocol, ModemTransferDirection, SerialControlLine, SerialDisplayMode,
+    SerialFlowControl, SerialLineEnding, SerialParity, SerialSendMode, SerialSessionConfig,
+    TerminalCommandMark, TerminalLifecycle, TerminalSnapshot,
 };
 
 use super::{
@@ -32,6 +35,8 @@ const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
 const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 20.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
+const SERIAL_CONTROL_BAR_HEIGHT: f32 = 34.0;
+const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
 
 fn clamp_terminal_context_menu_position(
     pointer_x: f32,
@@ -127,6 +132,11 @@ impl Render for TerminalPane {
         .scroll_y_offset(smooth_scroll_y_offset)
         .command_mark_gutter_width(self.command_mark_gutter_width())
         .layout_cache(self.layout_cache.clone());
+        let terminal_top = if self.is_serial_transport() {
+            SERIAL_CONTROL_BAR_HEIGHT
+        } else {
+            0.0
+        };
 
         div()
             .id("terminal-pane")
@@ -207,12 +217,15 @@ impl Render for TerminalPane {
             .child(
                 div()
                     .absolute()
-                    .top_0()
+                    .top(px(terminal_top))
                     .left_0()
                     .right_0()
                     .bottom_0()
                     .child(terminal_element),
             )
+            .when(self.is_serial_transport(), |pane| {
+                pane.child(self.render_serial_control_bar(cx))
+            })
             .when_some(self.pending_paste.clone(), |pane, paste| {
                 pane.child(self.render_paste_confirm_overlay(&paste, cx))
             })
@@ -249,6 +262,391 @@ impl TerminalPane {
             cx.drop_image(image, Some(window));
         }
     }
+
+    fn render_serial_control_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(status) = self.serial_status() else {
+            return div().into_any_element();
+        };
+        let labels = &self.preferences.serial_control_labels;
+        let running = status.lifecycle.is_running();
+        let lifecycle = serial_lifecycle_label(&status.lifecycle, labels);
+        let port_state = match status.port_available {
+            Some(true) => labels.port_available.clone(),
+            Some(false) => labels.port_missing.clone(),
+            None => labels.port_unknown.clone(),
+        };
+        let dtr_label = format!(
+            "{} {}",
+            labels.dtr,
+            if status.control_state.data_terminal_ready {
+                &labels.on
+            } else {
+                &labels.off
+            }
+        );
+        let rts_label = format!(
+            "{} {}",
+            labels.rts,
+            if status.control_state.request_to_send {
+                &labels.on
+            } else {
+                &labels.off
+            }
+        );
+        let send_mode_label = format!(
+            "{} {}",
+            labels.send_mode,
+            serial_send_mode_label(status.runtime_options.send_mode, labels)
+        );
+        let display_mode_label = format!(
+            "{} {}",
+            labels.display_mode,
+            serial_display_mode_label(status.runtime_options.display_mode, labels)
+        );
+        let line_ending_label = format!(
+            "{} {}",
+            labels.line_ending,
+            serial_line_ending_label(status.runtime_options.line_ending, labels)
+        );
+        let local_echo_label = format!(
+            "{} {}",
+            labels.local_echo,
+            if status.runtime_options.local_echo {
+                &labels.on
+            } else {
+                &labels.off
+            }
+        );
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(SERIAL_CONTROL_BAR_HEIGHT))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(10.0))
+            .overflow_x_scrollbar()
+            .border_b_1()
+            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x33)))
+            .bg(rgba(serial_color_alpha(self.theme.background, 0xf0)))
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx: &mut App| {
+                cx.stop_propagation();
+            })
+            .child(
+                div()
+                    .min_w(px(180.0))
+                    .flex_1()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .truncate()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.theme.foreground))
+                    .child(format!(
+                        "{} · {} · {} · {}",
+                        labels.serial,
+                        status.config.port_path,
+                        serial_config_summary(&status.config, labels),
+                        lifecycle
+                    )),
+            )
+            .child(self.render_serial_status_chip(port_state))
+            .child(
+                self.render_serial_control_button(
+                    send_mode_label,
+                    true,
+                    matches!(status.runtime_options.send_mode, SerialSendMode::Hex),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_send_mode(cx);
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    display_mode_label,
+                    true,
+                    !matches!(status.runtime_options.display_mode, SerialDisplayMode::Text),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_display_mode(cx);
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    line_ending_label,
+                    true,
+                    !matches!(status.runtime_options.line_ending, SerialLineEnding::None),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_line_ending(cx);
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    local_echo_label,
+                    true,
+                    status.runtime_options.local_echo,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.toggle_serial_local_echo(cx);
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(labels.refresh.clone(), true, false)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.refresh_serial_port_presence(cx);
+                        }),
+                    ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    labels.reconnect.clone(),
+                    status.can_reconnect,
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.reconnect_serial(cx);
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(labels.send_break.clone(), running, false)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.send_serial_break(cx);
+                        }),
+                    ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    dtr_label,
+                    running,
+                    status.control_state.data_terminal_ready,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        let Some(status) = this.serial_status() else {
+                            return;
+                        };
+                        this.set_serial_control_line(
+                            SerialControlLine::DataTerminalReady,
+                            !status.control_state.data_terminal_ready,
+                            cx,
+                        );
+                    }),
+                ),
+            )
+            .child(
+                self.render_serial_control_button(
+                    rts_label,
+                    running,
+                    status.control_state.request_to_send,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        let Some(status) = this.serial_status() else {
+                            return;
+                        };
+                        this.set_serial_control_line(
+                            SerialControlLine::RequestToSend,
+                            !status.control_state.request_to_send,
+                            cx,
+                        );
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_serial_status_chip(&self, label: String) -> AnyElement {
+        div()
+            .flex_none()
+            .rounded(px(SERIAL_CONTROL_BUTTON_RADIUS))
+            .border_1()
+            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x26)))
+            .px(px(9.0))
+            .h(px(22.0))
+            .flex()
+            .items_center()
+            .text_size(px(11.0))
+            .text_color(rgba(serial_color_alpha(self.theme.foreground, 0xb8)))
+            .child(label)
+            .into_any_element()
+    }
+
+    fn render_serial_control_button(
+        &self,
+        label: String,
+        enabled: bool,
+        active: bool,
+    ) -> gpui::Div {
+        let foreground = if active {
+            self.theme.tokens.ui.accent_text
+        } else {
+            self.theme.foreground
+        };
+        let background = if active {
+            self.theme.tokens.ui.accent
+        } else {
+            self.theme.background
+        };
+        let hover_background = if active {
+            self.theme.tokens.ui.accent_hover
+        } else {
+            background
+        };
+        div()
+            .flex_none()
+            .rounded(px(SERIAL_CONTROL_BUTTON_RADIUS))
+            .border_1()
+            .border_color(rgba(serial_color_alpha(self.theme.foreground, 0x2d)))
+            .bg(rgba(serial_color_alpha(
+                background,
+                if active { 0xff } else { 0x00 },
+            )))
+            .px(px(9.0))
+            .h(px(22.0))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .text_size(px(11.0))
+            .text_color(rgba(serial_color_alpha(
+                foreground,
+                if enabled { 0xff } else { 0x66 },
+            )))
+            .when(!enabled, |button| button.opacity(0.45))
+            .hover(move |button| {
+                if enabled {
+                    button.bg(rgba(serial_color_alpha(
+                        hover_background,
+                        if active { 0xff } else { 0x22 },
+                    )))
+                } else {
+                    button
+                }
+            })
+            .child(label)
+    }
+}
+
+fn serial_lifecycle_label(
+    lifecycle: &TerminalLifecycle,
+    labels: &TerminalSerialControlLabels,
+) -> String {
+    match lifecycle {
+        TerminalLifecycle::Running => labels.connected.clone(),
+        TerminalLifecycle::Exited(_) => labels.disconnected.clone(),
+        TerminalLifecycle::Closed => labels.closed.clone(),
+    }
+}
+
+fn serial_config_summary(
+    config: &SerialSessionConfig,
+    labels: &TerminalSerialControlLabels,
+) -> String {
+    format!(
+        "{} {}{}{} · {}",
+        config.baud_rate,
+        config.data_bits,
+        serial_parity_letter(config.parity),
+        config.stop_bits,
+        serial_flow_label(config.flow_control, labels)
+    )
+}
+
+fn serial_parity_letter(parity: SerialParity) -> &'static str {
+    match parity {
+        SerialParity::None => "N",
+        SerialParity::Odd => "O",
+        SerialParity::Even => "E",
+    }
+}
+
+fn serial_flow_label<'a>(
+    flow_control: SerialFlowControl,
+    labels: &'a TerminalSerialControlLabels,
+) -> &'a str {
+    match flow_control {
+        SerialFlowControl::None => labels.flow_none.as_str(),
+        SerialFlowControl::Software => labels.flow_software.as_str(),
+        SerialFlowControl::Hardware => labels.flow_hardware.as_str(),
+    }
+}
+
+fn serial_send_mode_label<'a>(
+    send_mode: SerialSendMode,
+    labels: &'a TerminalSerialControlLabels,
+) -> &'a str {
+    match send_mode {
+        SerialSendMode::Text => labels.text_mode.as_str(),
+        SerialSendMode::Hex => labels.hex_mode.as_str(),
+    }
+}
+
+fn serial_display_mode_label<'a>(
+    display_mode: SerialDisplayMode,
+    labels: &'a TerminalSerialControlLabels,
+) -> &'a str {
+    match display_mode {
+        SerialDisplayMode::Text => labels.text_mode.as_str(),
+        SerialDisplayMode::Hex => labels.hex_mode.as_str(),
+        SerialDisplayMode::Mixed => labels.mixed_mode.as_str(),
+    }
+}
+
+fn serial_line_ending_label<'a>(
+    line_ending: SerialLineEnding,
+    labels: &'a TerminalSerialControlLabels,
+) -> &'a str {
+    match line_ending {
+        SerialLineEnding::Lf => labels.line_ending_lf.as_str(),
+        SerialLineEnding::CrLf => labels.line_ending_crlf.as_str(),
+        SerialLineEnding::Cr => labels.line_ending_cr.as_str(),
+        SerialLineEnding::None => labels.line_ending_none.as_str(),
+    }
+}
+
+fn serial_color_alpha(rgb_color: u32, alpha: u8) -> u32 {
+    (rgb_color << 8) | u32::from(alpha)
 }
 
 impl TerminalPane {

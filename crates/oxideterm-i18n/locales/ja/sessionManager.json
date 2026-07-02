@@ -107,6 +107,8 @@
       "agent_hint": "システムSSH Agentで認証します。",
       "group": "グループ",
       "ungrouped": "未分類",
+      "icon": "アイコン",
+      "default_icon": "既定のアイコン",
       "color": "色",
       "clear_color": "クリア",
       "cancel": "キャンセル",

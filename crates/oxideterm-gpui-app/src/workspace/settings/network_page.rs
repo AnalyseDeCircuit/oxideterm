@@ -1,7 +1,6 @@
 const SETTINGS_NETWORK_MAX_WIDTH: f32 = 672.0; // Tauri max-w-2xl
 const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0; // Desktop preference for normal proxy fields.
 const SETTINGS_NETWORK_PORT_FIELD_WIDTH: f32 = 140.0; // Ports should stay compact instead of sharing a full row.
-const SETTINGS_NETWORK_CONTROL_FILL_WIDTH: f32 = SETTINGS_NETWORK_MAX_WIDTH; // Parent field slots clamp shared controls with max-w-full.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NetworkProxyAuthMode {
@@ -114,6 +113,7 @@ impl WorkspaceApp {
                                     .map(|proxy| proxy.port.to_string())
                                     .unwrap_or_else(|| "1080".to_string()),
                                 "1080".to_string(),
+                                SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                                 proxy.is_some(),
                                 cx,
                             ),
@@ -284,6 +284,7 @@ impl WorkspaceApp {
                             SettingsInput::NetworkProxyTestHost,
                             host_value,
                             "server.example.com".to_string(),
+                            SETTINGS_NETWORK_FIELD_WIDTH,
                             proxy_enabled,
                             cx,
                         ),
@@ -296,6 +297,7 @@ impl WorkspaceApp {
                             SettingsInput::NetworkProxyTestPort,
                             port_value,
                             "22".to_string(),
+                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                             proxy_enabled,
                             cx,
                         ),
@@ -448,6 +450,7 @@ impl WorkspaceApp {
         input: SettingsInput,
         value: String,
         placeholder: String,
+        control_width: f32,
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -463,7 +466,7 @@ impl WorkspaceApp {
                     input,
                     value,
                     placeholder,
-                    SETTINGS_NETWORK_CONTROL_FILL_WIDTH,
+                    control_width,
                     cx,
                 )
                 .into_any_element(),
@@ -489,15 +492,69 @@ impl WorkspaceApp {
             .grid()
             .gap(px(8.0))
             .child(self.network_field_label(label_key, hint_key))
-            .child(self.settings_text_input_control(
-                input,
-                value,
-                placeholder,
-                SETTINGS_NETWORK_MAX_WIDTH,
-                cx,
-            ))
+            .child(self.network_full_width_text_input_control(input, value, placeholder, cx))
             .when(!enabled, |field| field.opacity(0.5))
             .into_any_element()
+    }
+
+    fn network_full_width_text_input_control(
+        &self,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let focused = self.focused_settings_input == Some(input);
+        let display_value = if focused {
+            self.settings_input_draft.as_str()
+        } else {
+            value.as_str()
+        };
+        let target = WorkspaceImeTarget::Settings(input);
+        let workspace = cx.entity();
+        text_input_anchor_probe(
+            target.anchor_id(),
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: display_value,
+                    placeholder,
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target),
+                    marked_text: self.marked_text_for_target(target),
+                },
+            )
+            .w_full()
+            .min_w(px(0.0))
+            // Full-width proxy fields must size from their parent column, not
+            // from the desktop max width used by other settings controls.
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    let current = this.current_settings_input_value(input);
+                    this.focus_settings_input(input, current, cx);
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle);
+                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                }),
+            ),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
     }
 
     fn network_password_field(
@@ -549,7 +606,7 @@ impl WorkspaceApp {
                                 } else {
                                     String::new()
                                 },
-                                SETTINGS_NETWORK_CONTROL_FILL_WIDTH,
+                                SETTINGS_NETWORK_FIELD_WIDTH,
                                 cx,
                             )),
                     )

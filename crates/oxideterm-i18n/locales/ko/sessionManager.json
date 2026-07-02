@@ -107,6 +107,8 @@
       "agent_hint": "시스템 SSH Agent로 인증합니다.",
       "group": "그룹",
       "ungrouped": "그룹 없음",
+      "icon": "아이콘",
+      "default_icon": "기본 아이콘",
       "color": "색상",
       "clear_color": "삭제",
       "cancel": "취소",

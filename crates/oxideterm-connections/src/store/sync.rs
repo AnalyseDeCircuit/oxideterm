@@ -305,6 +305,7 @@ fn build_saved_connection_from_sync_payload(
             .transpose()?,
         updated_at: Some(record_updated_at),
         color: payload.color.clone(),
+        icon: payload.icon.clone(),
         tags: payload.tags.clone(),
         post_connect_command: None,
         privilege_credentials: existing

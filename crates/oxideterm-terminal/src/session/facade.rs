@@ -267,6 +267,30 @@ impl TerminalSession {
         self.backend.set_raw_udp_runtime_options(options)
     }
 
+    pub fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {
+        self.backend.serial_runtime_options()
+    }
+
+    pub fn set_serial_runtime_options(&mut self, options: SerialRuntimeOptions) -> Result<()> {
+        self.backend.set_serial_runtime_options(options)
+    }
+
+    pub fn serial_control_state(&self) -> Option<SerialControlState> {
+        self.backend.serial_control_state()
+    }
+
+    pub fn set_serial_control_line(
+        &mut self,
+        line: SerialControlLine,
+        asserted: bool,
+    ) -> Result<()> {
+        self.backend.set_serial_control_line(line, asserted)
+    }
+
+    pub fn send_serial_break(&mut self) -> Result<()> {
+        self.backend.send_serial_break()
+    }
+
     pub fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
         self.backend.set_trzsz_policy(policy);
     }

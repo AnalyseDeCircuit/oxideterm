@@ -188,6 +188,10 @@ impl ConnectionStore {
             let command = command.trim().to_string();
             (!command.is_empty()).then_some(command)
         });
+        let icon = request.icon.and_then(|icon| {
+            let icon = icon.trim().to_string();
+            (!icon.is_empty()).then_some(icon)
+        });
         // Tauri stores this command under options; the top-level field remains
         // readable for old native plaintext stores but is no longer emitted.
         options.post_connect_command = post_connect_command.clone();
@@ -214,6 +218,7 @@ impl ConnectionStore {
             },
             updated_at: Some(now),
             color: request.color,
+            icon,
             tags: request.tags,
             post_connect_command: None,
             privilege_credentials: existing

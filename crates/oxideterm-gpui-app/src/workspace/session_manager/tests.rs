@@ -61,6 +61,32 @@ mod tests {
         }
     }
 
+    fn connection_info_fixture(icon: Option<&str>) -> ConnectionInfo {
+        ConnectionInfo {
+            id: "conn-1".to_string(),
+            name: "Home".to_string(),
+            group: Some("Ungrouped".to_string()),
+            host: "192.168.1.2".to_string(),
+            port: 22,
+            username: "me".to_string(),
+            auth_type: AuthType::Agent,
+            key_path: None,
+            cert_path: None,
+            managed_key_id: None,
+            managed_key_name: None,
+            proxy_chain: Vec::new(),
+            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+            created_at: "2026-06-15T00:00:00Z".to_string(),
+            last_used_at: None,
+            color: None,
+            icon: icon.map(ToOwned::to_owned),
+            tags: Vec::new(),
+            agent_forwarding: false,
+            legacy_ssh_compatibility: false,
+            post_connect_command: None,
+        }
+    }
+
     #[test]
     fn session_manager_table_width_matches_tauri_connection_table_columns() {
         // This locks the Tauri ConnectionTable min-w-fit contract that keeps
@@ -91,6 +117,31 @@ mod tests {
         assert_eq!(item.port_sort_key(), 443);
         assert_eq!(item.subtitle(), "device.local:443 · TLS");
         assert!(matches!(item.icon(), LucideIcon::Cable));
+    }
+
+    #[test]
+    fn connection_display_item_uses_custom_icon_when_present() {
+        let item = SessionManagerDisplayItem::Connection(connection_info_fixture(Some("cloud")));
+
+        assert!(matches!(item.icon(), LucideIcon::Cloud));
+    }
+
+    #[test]
+    fn connection_display_item_falls_back_to_server_icon() {
+        let item = SessionManagerDisplayItem::Connection(connection_info_fixture(Some("missing")));
+
+        assert!(matches!(item.icon(), LucideIcon::Server));
+    }
+
+    #[test]
+    fn save_request_from_form_preserves_custom_icon() {
+        let form = NewConnectionForm {
+            icon: "cloud".to_string(),
+            ..base_form()
+        };
+        let request = save_request_from_form(&form, Some("conn-1".to_string())).unwrap();
+
+        assert_eq!(request.icon.as_deref(), Some("cloud"));
     }
 
     #[test]

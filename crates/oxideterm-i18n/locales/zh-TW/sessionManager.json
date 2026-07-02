@@ -107,6 +107,8 @@
       "agent_hint": "使用系統 SSH Agent 進行驗證。",
       "group": "群組",
       "ungrouped": "未分組",
+      "icon": "圖示",
+      "default_icon": "預設圖示",
       "color": "顏色",
       "clear_color": "清除",
       "cancel": "取消",

@@ -10,7 +10,8 @@ mod trzsz_worker;
 pub use app::{
     SharedTerminalSession, TerminalContextAction, TerminalCursorAnchor,
     TerminalCwdShellIntegrationStatus, TerminalInputInterceptor, TerminalInputInterceptorResult,
-    TerminalPane, TerminalPaneEvent, TerminalSearchStatus, TerminalWorkingDirectorySource,
+    TerminalPane, TerminalPaneEvent, TerminalSearchStatus, TerminalSerialStatus,
+    TerminalWorkingDirectorySource,
 };
 pub use background_cache::BackgroundImageRenderCache;
 pub use command_facts::{
@@ -26,6 +27,6 @@ pub use privilege_prompt::{
 pub use terminal_ui::{
     TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalCommandSelectionLabels,
     TerminalHighlightRenderMode, TerminalHighlightRule, TerminalModemLabels, TerminalNotice,
-    TerminalNoticeVariant, TerminalPasteLabels, TerminalTrzszLabels, TerminalUiPreferences,
-    TerminalUiTheme,
+    TerminalNoticeVariant, TerminalPasteLabels, TerminalSerialControlLabels, TerminalTrzszLabels,
+    TerminalUiPreferences, TerminalUiTheme,
 };

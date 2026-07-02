@@ -94,11 +94,8 @@ impl WorkspaceApp {
     fn render_host_tools_context_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut tabs = div()
             .id("host-tools-tab-scroll-viewport")
-            .flex_none()
-            .w_full()
-            .h(px(HOST_TOOLS_TAB_STRIP_HEIGHT))
+            .size_full()
             .min_w_0()
-            .relative()
             .flex()
             .flex_row()
             .items_center()
@@ -114,9 +111,7 @@ impl WorkspaceApp {
             .track_scroll(&self.host_tools_tab_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_host_tools_tab_scroll(event, window, cx);
-            }))
-            .border_b_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA));
+            }));
 
         tabs = tabs
             .child(self.render_host_tools_context_tab(
@@ -189,20 +184,26 @@ impl WorkspaceApp {
                 "sidebar.panels.packages",
                 true,
                 cx,
-            ))
-            .child(self.render_host_tools_tab_scrollbar(cx));
+            ));
 
-        tabs.into_any_element()
+        div()
+            .id("host-tools-tab-strip")
+            .flex_none()
+            .w_full()
+            .h(px(HOST_TOOLS_TAB_STRIP_HEIGHT))
+            .min_w_0()
+            .relative()
+            .border_b_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+            .child(tabs)
+            .child(self.render_host_tools_tab_scrollbar(cx))
+            .into_any_element()
     }
 
     fn render_host_tools_tab_scrollbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
             return div().into_any_element();
         };
-        // The thumb is painted inside the scrollable strip, so compensate for
-        // the strip's content offset to keep the visible thumb aligned with the
-        // viewport track.
-        let content_thumb_left = geometry.thumb_left + self.current_host_tools_tab_scroll_x();
 
         // Tauri's tab-strip scrollbar uses a 3px thin thumb; the GPUI component
         // `Always` mode paints a 16px hit area, so this surface keeps the thin
@@ -233,7 +234,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .absolute()
-                    .left(px(content_thumb_left))
+                    .left(px(geometry.thumb_left))
                     .bottom_0()
                     .w(px(geometry.thumb_width))
                     .h(px(HOST_TOOLS_TAB_SCROLLBAR_HEIGHT))

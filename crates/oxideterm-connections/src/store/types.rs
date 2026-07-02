@@ -283,6 +283,8 @@ pub struct SavedConnection {
     pub updated_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -341,6 +343,8 @@ pub struct ConnectionInfo {
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
     pub legacy_ssh_compatibility: bool,
@@ -402,6 +406,7 @@ impl From<&SavedConnection> for ConnectionInfo {
             created_at: conn.created_at.to_rfc3339(),
             last_used_at: conn.last_used_at.map(|time| time.to_rfc3339()),
             color: conn.color.clone(),
+            icon: conn.icon.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
             legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
@@ -913,6 +918,7 @@ pub struct SaveConnectionRequest {
     pub proxy_chain: Vec<SavedProxyHop>,
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     pub color: Option<String>,
+    pub icon: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
     pub legacy_ssh_compatibility: bool,

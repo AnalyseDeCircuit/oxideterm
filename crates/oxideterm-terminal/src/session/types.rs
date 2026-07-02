@@ -10,6 +10,65 @@ pub enum TerminalSessionKind {
 
 pub type TerminalOutputProcessor = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SerialControlState {
+    pub data_terminal_ready: bool,
+    pub request_to_send: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SerialControlLine {
+    DataTerminalReady,
+    RequestToSend,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SerialLineEnding {
+    Lf,
+    CrLf,
+    Cr,
+    None,
+}
+
+impl Default for SerialLineEnding {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SerialDisplayMode {
+    Text,
+    Hex,
+    Mixed,
+}
+
+impl Default for SerialDisplayMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SerialSendMode {
+    Text,
+    Hex,
+}
+
+impl Default for SerialSendMode {
+    fn default() -> Self {
+        Self::Text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SerialRuntimeOptions {
+    pub line_ending: SerialLineEnding,
+    pub display_mode: SerialDisplayMode,
+    pub send_mode: SerialSendMode,
+    pub local_echo: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RawTcpLineEnding {
     Lf,
@@ -153,6 +212,25 @@ pub trait TerminalSessionBackend: Send {
     }
     fn set_raw_udp_runtime_options(&mut self, _options: RawUdpRuntimeOptions) -> Result<()> {
         bail!("Raw UDP runtime options are only supported by Raw UDP sessions")
+    }
+    fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {
+        None
+    }
+    fn set_serial_runtime_options(&mut self, _options: SerialRuntimeOptions) -> Result<()> {
+        bail!("Serial runtime options are only supported by serial sessions")
+    }
+    fn serial_control_state(&self) -> Option<SerialControlState> {
+        None
+    }
+    fn set_serial_control_line(
+        &mut self,
+        _line: SerialControlLine,
+        _asserted: bool,
+    ) -> Result<()> {
+        bail!("Serial control lines are only supported by serial sessions")
+    }
+    fn send_serial_break(&mut self) -> Result<()> {
+        bail!("Serial break is only supported by serial sessions")
     }
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}
     fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {

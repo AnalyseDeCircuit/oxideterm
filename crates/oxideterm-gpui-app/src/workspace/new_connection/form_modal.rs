@@ -651,6 +651,11 @@ impl WorkspaceApp {
                                             self.i18n.t("ssh.form.post_connect_command_hint"),
                                         ))
                                         .child(self.render_upstream_proxy_policy_section(form, cx))
+                                        .child(self.render_edit_icon_field(
+                                            &form.icon,
+                                            &form.color,
+                                            cx,
+                                        ))
                                         .child(self.render_edit_color_field(&form.color, cx))
                                 })
                                 .when(!prompt_mode && !edit_properties_mode, |content| {

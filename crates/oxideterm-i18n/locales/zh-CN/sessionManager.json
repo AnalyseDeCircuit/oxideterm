@@ -107,6 +107,8 @@
       "agent_hint": "使用系统 SSH Agent 进行认证。",
       "group": "分组",
       "ungrouped": "未分组",
+      "icon": "图标",
+      "default_icon": "默认图标",
       "color": "颜色",
       "clear_color": "清除",
       "cancel": "取消",

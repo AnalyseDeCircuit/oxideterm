@@ -294,6 +294,7 @@ fn export_connection(
         username: conn.username.clone(),
         auth: export_auth(store, &conn.auth, options)?,
         color: conn.color.clone(),
+        icon: conn.icon.clone(),
         tags: conn.tags.clone(),
         options: conn.options.clone(),
         upstream_proxy: export_upstream_proxy_policy(&conn.upstream_proxy),

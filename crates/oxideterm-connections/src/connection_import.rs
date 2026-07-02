@@ -682,6 +682,7 @@ fn imported_draft_to_saved_connection(
         last_used_at: None,
         updated_at: Some(Utc::now()),
         color: None,
+        icon: None,
         tags: draft.tags.clone(),
         post_connect_command: None,
         privilege_credentials: Vec::new(),

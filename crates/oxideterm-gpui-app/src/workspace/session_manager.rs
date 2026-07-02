@@ -9,6 +9,7 @@ use crate::workspace::new_connection::{
     NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
 };
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
+use crate::workspace::session_icons;
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{Div, prelude::*};
 use oxideterm_connections::{

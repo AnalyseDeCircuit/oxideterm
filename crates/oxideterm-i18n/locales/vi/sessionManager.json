@@ -107,6 +107,8 @@
       "agent_hint": "Sử dụng SSH Agent hệ thống để xác thực.",
       "group": "Nhóm",
       "ungrouped": "Chưa phân nhóm",
+      "icon": "Biểu tượng",
+      "default_icon": "Biểu tượng mặc định",
       "color": "Màu",
       "clear_color": "Xóa",
       "cancel": "Hủy",
