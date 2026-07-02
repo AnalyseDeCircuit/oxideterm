@@ -58,6 +58,8 @@ pub(super) const AI_TOOL_OUTPUT_MAX_HEIGHT: f32 = 200.0; // Tauri raw output max
 pub(super) const AI_CONTEXT_POPOVER_WIDTH: f32 = 240.0; // Tauri w-60.
 pub(super) const AI_CONTEXT_MINI_BAR_WIDTH: f32 = 64.0; // Tauri sm:w-16.
 pub(super) const AI_CONTEXT_MINI_BAR_HEIGHT: f32 = 4.0; // Tauri h-1.
+pub(super) const AI_STATUS_INDICATOR_MAX_WIDTH: f32 = 76.0; // Keep compact footer pills inside crowded sidebars.
+pub(super) const AI_SAFETY_INDICATOR_MAX_WIDTH: f32 = 92.0; // Localized safety labels need a little more room than tool status.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AiTone {

@@ -1,5 +1,7 @@
 const SETTINGS_NETWORK_MAX_WIDTH: f32 = 672.0; // Tauri max-w-2xl
 const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0;
+const SETTINGS_NETWORK_FIELD_MIN_WIDTH: f32 = 220.0; // Proxy fields wrap before localized labels and controls collide.
+const SETTINGS_NETWORK_PORT_FIELD_MIN_WIDTH: f32 = 140.0; // Port fields can stay narrower than host/protocol fields.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NetworkProxyAuthMode {
@@ -42,6 +44,7 @@ impl WorkspaceApp {
             0 => div()
                 .w_full()
                 .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+                .min_w(px(0.0))
                 .flex()
                 .flex_col()
                 .gap(px(20.0))
@@ -63,6 +66,8 @@ impl WorkspaceApp {
                 ))
                 .into_any_element(),
             1 => div()
+                .w_full()
+                .min_w(px(0.0))
                 .flex()
                 .flex_col()
                 .gap(px(24.0))
@@ -78,32 +83,40 @@ impl WorkspaceApp {
                     div()
                         .w_full()
                         .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+                        .min_w(px(0.0))
                         .flex()
-                        .flex_row()
+                        .flex_wrap()
+                        .items_start()
                         .gap(px(32.0))
-                        .child(self.network_select_field(
-                            "settings_view.network.protocol",
-                            "settings_view.network.protocol_hint",
-                            SettingsSelect::NetworkProxyProtocol,
-                            network_proxy_protocol_label(
-                                proxy
-                                    .map(|proxy| proxy.protocol)
-                                    .unwrap_or(SettingsUpstreamProxyProtocol::Socks5),
-                                &self.i18n,
+                        .child(self.network_responsive_field(
+                            SETTINGS_NETWORK_FIELD_MIN_WIDTH,
+                            self.network_select_field(
+                                "settings_view.network.protocol",
+                                "settings_view.network.protocol_hint",
+                                SettingsSelect::NetworkProxyProtocol,
+                                network_proxy_protocol_label(
+                                    proxy
+                                        .map(|proxy| proxy.protocol)
+                                        .unwrap_or(SettingsUpstreamProxyProtocol::Socks5),
+                                    &self.i18n,
+                                ),
+                                proxy.is_some(),
+                                cx,
                             ),
-                            proxy.is_some(),
-                            cx,
                         ))
-                        .child(self.network_input_field(
-                            "settings_view.network.port",
-                            "settings_view.network.port_hint",
-                            SettingsInput::NetworkProxyPort,
-                            proxy
-                                .map(|proxy| proxy.port.to_string())
-                                .unwrap_or_else(|| "1080".to_string()),
-                            "1080".to_string(),
-                            proxy.is_some(),
-                            cx,
+                        .child(self.network_responsive_field(
+                            SETTINGS_NETWORK_PORT_FIELD_MIN_WIDTH,
+                            self.network_input_field(
+                                "settings_view.network.port",
+                                "settings_view.network.port_hint",
+                                SettingsInput::NetworkProxyPort,
+                                proxy
+                                    .map(|proxy| proxy.port.to_string())
+                                    .unwrap_or_else(|| "1080".to_string()),
+                                "1080".to_string(),
+                                proxy.is_some(),
+                                cx,
+                            ),
                         )),
                 )
                 .child(self.network_full_width_input(
@@ -162,6 +175,8 @@ impl WorkspaceApp {
         });
 
         let mut section = div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(24.0))
@@ -170,16 +185,21 @@ impl WorkspaceApp {
                 div()
                     .w_full()
                     .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+                    .min_w(px(0.0))
                     .flex()
-                    .flex_row()
+                    .flex_wrap()
+                    .items_start()
                     .gap(px(32.0))
-                    .child(self.network_select_field(
-                        "settings_view.network.auth",
-                        "settings_view.network.auth_hint",
-                        SettingsSelect::NetworkProxyAuth,
-                        network_proxy_auth_label(auth_mode, &self.i18n),
-                        proxy.is_some(),
-                        cx,
+                    .child(self.network_responsive_field(
+                        SETTINGS_NETWORK_FIELD_MIN_WIDTH,
+                        self.network_select_field(
+                            "settings_view.network.auth",
+                            "settings_view.network.auth_hint",
+                            SettingsSelect::NetworkProxyAuth,
+                            network_proxy_auth_label(auth_mode, &self.i18n),
+                            proxy.is_some(),
+                            cx,
+                        ),
                     )),
             );
 
@@ -225,12 +245,14 @@ impl WorkspaceApp {
         div()
             .w_full()
             .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(16.0))
             .opacity(if proxy_enabled { 1.0 } else { 0.4 })
             .child(
                 div()
+                    .min_w(px(0.0))
                     .grid()
                     .gap(px(4.0))
                     .child(
@@ -249,67 +271,76 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
-                    .flex_row()
+                    .flex_wrap()
                     .gap(px(16.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(self.network_input_field(
-                                "settings_view.network.test_host",
-                                "settings_view.network.host_hint",
-                                SettingsInput::NetworkProxyTestHost,
-                                host_value,
-                                "server.example.com".to_string(),
-                                proxy_enabled,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w(px(SETTINGS_NETWORK_FIELD_WIDTH / 2.0))
-                            .child(self.network_input_field(
-                                "settings_view.network.test_port",
-                                "settings_view.network.port_hint",
-                                SettingsInput::NetworkProxyTestPort,
-                                port_value,
-                                "22".to_string(),
-                                proxy_enabled,
-                                cx,
-                            )),
-                    ),
+                    .child(self.network_responsive_field(
+                        SETTINGS_NETWORK_FIELD_MIN_WIDTH,
+                        self.network_input_field(
+                            "settings_view.network.test_host",
+                            "settings_view.network.host_hint",
+                            SettingsInput::NetworkProxyTestHost,
+                            host_value,
+                            "server.example.com".to_string(),
+                            proxy_enabled,
+                            cx,
+                        ),
+                    ))
+                    .child(self.network_responsive_field(
+                        SETTINGS_NETWORK_PORT_FIELD_MIN_WIDTH,
+                        self.network_input_field(
+                            "settings_view.network.test_port",
+                            "settings_view.network.port_hint",
+                            SettingsInput::NetworkProxyTestPort,
+                            port_value,
+                            "22".to_string(),
+                            proxy_enabled,
+                            cx,
+                        ),
+                    )),
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(12.0))
-                    .child(self.workspace_toolbar_action_button(
-                        if self.settings_network_proxy_test_pending {
-                            self.i18n.t("settings_view.network.testing")
-                        } else {
-                            self.i18n.t("settings_view.network.test_button")
-                        },
-                        None,
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Default,
-                                radius: ButtonRadius::Md,
-                                disabled: test_disabled,
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.start_settings_network_proxy_test(cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
+                    .child(
+                        div()
+                            .flex_none()
+                            .child(self.workspace_toolbar_action_button(
+                                if self.settings_network_proxy_test_pending {
+                                    self.i18n.t("settings_view.network.testing")
+                                } else {
+                                    self.i18n.t("settings_view.network.test_button")
+                                },
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Default,
+                                        size: ButtonSize::Default,
+                                        radius: ButtonRadius::Md,
+                                        disabled: test_disabled,
+                                    },
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.start_settings_network_proxy_test(cx);
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    )
                     .when_some(
                         self.settings_network_proxy_test_status.clone(),
                         |row, status| {
                             row.child(
                                 div()
+                                    .min_w(px(0.0))
+                                    .flex_1()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(self.tokens.ui.text_muted))
                                     .child(status),
@@ -317,6 +348,17 @@ impl WorkspaceApp {
                         },
                     ),
             )
+            .into_any_element()
+    }
+
+    fn network_responsive_field(&self, min_width: f32, field: AnyElement) -> AnyElement {
+        // The width is a desktop layout preference; flex-basis plus min-width
+        // zero lets narrow settings panes wrap instead of bleeding into sidebars.
+        div()
+            .min_w(px(0.0))
+            .flex_1()
+            .flex_basis(px(min_width))
+            .child(field)
             .into_any_element()
     }
 
@@ -346,12 +388,15 @@ impl WorkspaceApp {
         div()
             .w_full()
             .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+            .min_w(px(0.0))
             .flex()
             .items_center()
             .justify_between()
             .gap(px(16.0))
             .child(
                 div()
+                    .min_w(px(0.0))
+                    .flex_1()
                     .grid()
                     .gap(px(4.0))
                     .child(
@@ -368,7 +413,7 @@ impl WorkspaceApp {
                             .child(self.i18n.t(hint_key)),
                     ),
             )
-            .child(control.into_any_element())
+            .child(div().flex_none().child(control.into_any_element()))
             .into_any_element()
     }
 
@@ -383,6 +428,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w(px(SETTINGS_NETWORK_FIELD_WIDTH))
+            .max_w_full()
             .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
@@ -403,6 +449,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w(px(SETTINGS_NETWORK_FIELD_WIDTH))
+            .max_w_full()
             .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
@@ -432,13 +479,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .w_full()
             .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+            .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
             .child(self.network_field_label(label_key, hint_key))
-            .child(
-                self.settings_text_input_control(input, value, placeholder, SETTINGS_NETWORK_MAX_WIDTH, cx),
-            )
+            .child(self.settings_text_input_control(
+                input,
+                value,
+                placeholder,
+                SETTINGS_NETWORK_MAX_WIDTH,
+                cx,
+            ))
             .when(!enabled, |field| field.opacity(0.5))
             .into_any_element()
     }
@@ -458,7 +511,9 @@ impl WorkspaceApp {
         let save_disabled = current_value.is_empty() || !enabled;
         let remove_disabled = !has_saved_password && current_value.is_empty();
         let mut row = div()
+            .w_full()
             .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+            .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
             .child(self.network_field_label(
@@ -471,20 +526,29 @@ impl WorkspaceApp {
             ))
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
-                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
                     .gap(px(8.0))
-                    .child(self.settings_secret_text_input_control(
-                        password_input,
-                        String::new(),
-                        if has_saved_password {
-                            self.i18n.t("settings_view.network.password_saved_placeholder")
-                        } else {
-                            String::new()
-                        },
-                        320.0,
-                        cx,
-                    ))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex_basis(px(SETTINGS_NETWORK_FIELD_MIN_WIDTH))
+                            .child(self.settings_secret_text_input_control(
+                                password_input,
+                                String::new(),
+                                if has_saved_password {
+                                    self.i18n.t("settings_view.network.password_saved_placeholder")
+                                } else {
+                                    String::new()
+                                },
+                                SETTINGS_NETWORK_FIELD_WIDTH,
+                                cx,
+                            )),
+                    )
                     .child(self.workspace_toolbar_action_button(
                         self.i18n.t("settings_view.network.save_password"),
                         Some(Self::render_lucide_icon(
@@ -537,6 +601,7 @@ impl WorkspaceApp {
         if let Some(status) = self.settings_network_proxy_password_status.clone() {
             row = row.child(
                 div()
+                    .min_w(px(0.0))
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(status),
@@ -548,6 +613,7 @@ impl WorkspaceApp {
 
     fn network_field_label(&self, label_key: &str, hint_key: &str) -> AnyElement {
         div()
+            .min_w(px(0.0))
             .grid()
             .gap(px(4.0))
             .child(

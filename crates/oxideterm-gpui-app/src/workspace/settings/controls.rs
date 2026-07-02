@@ -1,3 +1,5 @@
+const SETTINGS_ROW_LABEL_MIN_WIDTH: f32 = 180.0; // Keep localized labels readable before controls wrap.
+
 impl WorkspaceApp {
     fn render_settings_select_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open_select = self.open_settings_select?;
@@ -1863,7 +1865,8 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.0))
+                    .min_w(px(SETTINGS_ROW_LABEL_MIN_WIDTH))
+                    .flex_basis(px(SETTINGS_ROW_LABEL_MIN_WIDTH))
                     .flex()
                     .flex_col()
                     .gap(px(4.0))

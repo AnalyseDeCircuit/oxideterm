@@ -1,4 +1,5 @@
 const CONNECTION_IMPORT_PANEL_MAX_WIDTH: f32 = 896.0; // Tauri ConnectionImportPanel max-w-4xl.
+const CONNECTION_IDLE_TIMEOUT_CONTROL_WIDTH: f32 = 320.0; // Keep the standalone idle-timeout select from expanding into side panels.
 
 impl WorkspaceApp {
     fn settings_connections_section(
@@ -137,10 +138,17 @@ impl WorkspaceApp {
         let select_id = SettingsSelect::ConnectionIdleTimeout;
         let value =
             connection_idle_timeout_label(settings.connection_pool.idle_timeout_secs, &self.i18n);
-        let control = self.settings_select_control(select_id, value, false, None, cx);
+        let control = self.settings_select_control(
+            select_id,
+            value,
+            false,
+            Some(CONNECTION_IDLE_TIMEOUT_CONTROL_WIDTH),
+            cx,
+        );
 
         div()
-            .max_w(px(320.0))
+            .w_full()
+            .max_w(px(CONNECTION_IDLE_TIMEOUT_CONTROL_WIDTH))
             .grid()
             .gap(px(8.0))
             .child(

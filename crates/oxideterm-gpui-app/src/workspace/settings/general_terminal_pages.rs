@@ -282,13 +282,17 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w_full()
+            .min_w(px(0.0))
             .flex()
             .items_center()
             .justify_between()
             .gap(px(16.0))
             .child(
                 div()
-                    .grid()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
                     .gap(px(4.0))
                     .child(
                         div()
@@ -305,12 +309,14 @@ impl WorkspaceApp {
                     ),
             )
             .child(
-                checkbox(&self.tokens, String::new(), checked).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.edit_settings(|settings| setter(settings, !checked), cx);
-                        cx.stop_propagation();
-                    }),
+                div().flex_none().child(
+                    checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.edit_settings(|settings| setter(settings, !checked), cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
                 ),
             )
             .into_any_element()

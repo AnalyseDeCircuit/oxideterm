@@ -41,6 +41,8 @@ const TERMINAL_GIT_BRANCH_MENU_MARGIN: f32 = 12.0;
 const TERMINAL_PROJECT_MENU_WIDTH: f32 = 640.0;
 const TERMINAL_PROJECT_MENU_BODY_MAX_HEIGHT: f32 = 420.0;
 const TERMINAL_PROJECT_MENU_MARGIN: f32 = 12.0;
+const TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH: f32 = 260.0; // Keep context chips compact beside command-bar actions.
+const TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH: f32 = 240.0; // Project labels are shorter than cwd/git labels in Tauri.
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -463,6 +465,18 @@ impl WorkspaceApp {
         )
     }
 
+    fn terminal_command_context_chip_slot(max_width: f32, chip: AnyElement) -> AnyElement {
+        // Context chips are fixed-size primitives; this slot lets the command
+        // bar clip optional context before it can paint over action buttons.
+        div()
+            .min_w(px(0.0))
+            .max_w(px(max_width))
+            .flex_1()
+            .overflow_hidden()
+            .child(chip)
+            .into_any_element()
+    }
+
     fn render_terminal_target_indicator(
         &self,
         target_label: String,
@@ -546,7 +560,7 @@ impl WorkspaceApp {
             context_chip(
                 &self.tokens,
                 ContextChipOptions::new()
-                    .max_width(260.0)
+                    .max_width(TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH)
                     .border_color(if active {
                         rgba((theme.accent << 8) | 0x99)
                     } else {
@@ -1151,7 +1165,7 @@ impl WorkspaceApp {
             context_chip(
                 &self.tokens,
                 ContextChipOptions::new()
-                    .max_width(260.0)
+                    .max_width(TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH)
                     .border_color(if active {
                         rgba((self.tokens.ui.accent << 8) | 0x99)
                     } else {
@@ -1247,7 +1261,7 @@ impl WorkspaceApp {
             context_chip(
                 &self.tokens,
                 ContextChipOptions::new()
-                    .max_width(240.0)
+                    .max_width(TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH)
                     .border_color(if active {
                         rgba((theme.accent << 8) | 0x99)
                     } else {
@@ -3552,6 +3566,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .min_h(px(24.0))
                     .flex()
                     .items_center()
@@ -3564,6 +3580,7 @@ impl WorkspaceApp {
                             .gap(px(4.0))
                             .flex_1()
                             .min_w(px(0.0))
+                            .overflow_hidden()
                             .child(
                                 self.terminal_command_action_button(
                                     if input_collapsed {
@@ -3628,13 +3645,22 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .when(cwd_supported, |row| {
-                                row.child(self.render_terminal_cwd_chip(cwd_snapshot, cx))
+                                row.child(Self::terminal_command_context_chip_slot(
+                                    TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
+                                    self.render_terminal_cwd_chip(cwd_snapshot, cx),
+                                ))
                             })
                             .when_some(git_snapshot, |row, snapshot| {
-                                row.child(self.render_terminal_git_chip(snapshot, cx))
+                                row.child(Self::terminal_command_context_chip_slot(
+                                    TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
+                                    self.render_terminal_git_chip(snapshot, cx),
+                                ))
                             })
                             .when_some(project_snapshot, |row, snapshot| {
-                                row.child(self.render_terminal_project_chip(snapshot, cx))
+                                row.child(Self::terminal_command_context_chip_slot(
+                                    TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH,
+                                    self.render_terminal_project_chip(snapshot, cx),
+                                ))
                             }),
                     )
                     .child(

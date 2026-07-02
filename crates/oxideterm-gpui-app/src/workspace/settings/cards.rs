@@ -69,7 +69,10 @@ impl WorkspaceApp {
         // same paint pass, and scroll-close is owned by the settings surface.
         div()
             .relative()
-            .when_some(width, |control, width| control.w(px(width)))
+            .min_w(px(0.0))
+            .when_some(width, |control, width| {
+                control.w(px(width)).max_w_full()
+            })
             .when(width.is_none(), |control| control.w_full())
             .child(select_anchor_probe(
                 anchor_id,

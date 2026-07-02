@@ -17,6 +17,7 @@ use oxideterm_theme::ThemeTokens;
 const AI_TOOL_POLICY_CARD_BG_ALPHA: u32 = 0x4d;
 const AI_TOOL_POLICY_ROW_BG_ALPHA: u32 = 0x40;
 const AI_TOOL_POLICY_BORDER_ALPHA: u32 = 0x99;
+const AI_TOOL_POLICY_GROUP_MIN_WIDTH: f32 = 240.0; // Let policy cards wrap before checkbox pills overflow.
 const AI_CONTEXT_PROVIDER_ROW_BORDER_ALPHA: u32 = 0x4d;
 const AI_CONTEXT_PROVIDER_ROW_TOP_BORDER_ALPHA: u32 = 0x33;
 const AI_CONTEXT_PROVIDER_HOVER_ALPHA: u32 = 0x66;
@@ -280,6 +281,7 @@ pub fn settings_ai_textarea_surface(
     let theme = tokens.ui;
     let mut textarea = div()
         .w_full()
+        .min_w(px(0.0))
         .min_h(px(min_height))
         .rounded(px(tokens.radii.md))
         .border_1()
@@ -511,6 +513,8 @@ pub fn settings_ai_context_windows_header(
         .cursor_pointer()
         .child(
             div()
+                .min_w(px(0.0))
+                .flex_1()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
@@ -675,6 +679,8 @@ pub fn settings_ai_context_window_row(
     // Context rows expose current source, editable override, and an optional
     // reset action. App code still owns text input focus and reset mutation.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .flex()
         .items_center()
         .gap(px(8.0))
@@ -697,14 +703,15 @@ pub fn settings_ai_context_window_row(
                 .text_size(px(tokens.metrics.ui_text_xs))
                 .font_family(mono_font_family)
                 .text_color(rgb(tokens.ui.text_muted))
-                .overflow_hidden()
+                .truncate()
                 .child(model),
         )
-        .child(source_badge)
-        .child(input)
+        .child(div().flex_none().child(source_badge))
+        .child(div().flex_none().child(input))
         .child(
             div()
                 .w(px(AI_CONTEXT_RESET_SLOT_W))
+                .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -722,11 +729,13 @@ pub fn settings_ai_context_source_badge(
     // Badge colors come from the app/model source classification; this helper
     // owns the tiny pill geometry.
     div()
+        .flex_none()
         .rounded(px(tokens.radii.sm))
         .px(px(AI_CONTEXT_SOURCE_BADGE_PX))
         .py(px(AI_CONTEXT_SOURCE_BADGE_PY))
         .text_size(px(AI_CONTEXT_SOURCE_BADGE_TEXT_SIZE))
         .font_weight(gpui::FontWeight::MEDIUM)
+        .whitespace_nowrap()
         .text_color(text_color)
         .bg(bg_color)
         .child(label)
@@ -844,12 +853,22 @@ pub fn settings_ai_tool_expanded_body(
 }
 
 pub fn settings_ai_tool_policy_grid(groups: Vec<AnyElement>) -> AnyElement {
-    // Tool policies are grouped in the same two-column grid as the React page.
+    // Tool policies use desktop-like columns when there is room, but collapse
+    // to stacked cards before the nested approval rows lose their checkbox.
     div()
-        .grid()
-        .grid_cols(2)
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_wrap()
         .gap(px(12.0))
-        .children(groups)
+        .children(groups.into_iter().map(|group| {
+            div()
+                .min_w(px(0.0))
+                .max_w_full()
+                .flex_1()
+                .flex_basis(px(AI_TOOL_POLICY_GROUP_MIN_WIDTH))
+                .child(group)
+        }))
         .into_any_element()
 }
 
@@ -861,6 +880,8 @@ pub fn settings_ai_tool_policy_item(
     // A policy item is a label plus a caller-provided checkbox. The caller owns
     // locked/checked behavior so the model mutation stays outside this crate.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgba((tokens.ui.border << 8) | 0x4d))
@@ -873,8 +894,8 @@ pub fn settings_ai_tool_policy_item(
         .gap(px(12.0))
         .text_size(px(tokens.metrics.ui_text_xs))
         .text_color(rgb(tokens.ui.text_muted))
-        .child(label)
-        .child(control)
+        .child(div().min_w(px(0.0)).flex_1().truncate().child(label))
+        .child(div().flex_none().child(control))
         .into_any_element()
 }
 
@@ -887,6 +908,8 @@ pub fn settings_ai_tool_policy_group(
     // Policy groups own card chrome and inner spacing; item controls are passed
     // in after the app wires per-tool events.
     div()
+        .w_full()
+        .min_w(px(0.0))
         .rounded(px(tokens.radii.lg))
         .border_1()
         .border_color(rgba((tokens.ui.border << 8) | AI_TOOL_POLICY_BORDER_ALPHA))

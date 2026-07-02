@@ -15,6 +15,9 @@ pub fn ai_status_indicator(
     div()
         .flex()
         .flex_none()
+        .max_w(px(AI_STATUS_INDICATOR_MAX_WIDTH))
+        .min_w_0()
+        .overflow_hidden()
         .items_center()
         .gap(px(tokens.spacing.one))
         .rounded(px(tokens.radii.md))
@@ -34,8 +37,8 @@ pub fn ai_status_indicator(
                 .bg(bg_alpha(tokens, tokens.ui.accent, AI_CHIP_BG_ALPHA))
                 .text_color(rgb(tokens.ui.text))
         })
-        .child(icon)
-        .child(label.into())
+        .child(div().flex_none().child(icon))
+        .child(div().min_w_0().truncate().child(label.into()))
 }
 
 pub fn ai_safety_indicator(
@@ -48,6 +51,9 @@ pub fn ai_safety_indicator(
     div()
         .flex()
         .flex_none()
+        .max_w(px(AI_SAFETY_INDICATOR_MAX_WIDTH))
+        .min_w_0()
+        .overflow_hidden()
         .items_center()
         .gap(px(tokens.spacing.one))
         .rounded(px(tokens.radii.md))
@@ -73,8 +79,8 @@ pub fn ai_safety_indicator(
                     .text_color(rgb(tokens.ui.text))
             })
         })
-        .child(icon)
-        .child(label.into())
+        .child(div().flex_none().child(icon))
+        .child(div().min_w_0().truncate().child(label.into()))
 }
 
 pub fn ai_profile_button(tokens: &ThemeTokens, icon: impl IntoElement) -> Div {

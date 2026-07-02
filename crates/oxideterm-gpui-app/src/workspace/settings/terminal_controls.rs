@@ -272,6 +272,8 @@ impl WorkspaceApp {
                 align,
             )
             .w(px(width))
+            .max_w_full()
+            .min_w(px(0.0))
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,

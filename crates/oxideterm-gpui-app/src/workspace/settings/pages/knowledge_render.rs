@@ -168,12 +168,18 @@ impl WorkspaceApp {
             .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.reindex"));
         let mut rows = vec![
             div()
+                .w_full()
+                .min_w(px(0.0))
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .justify_between()
                 .gap(px(12.0))
                 .child(
                     div()
+                        .min_w(px(0.0))
+                        .flex_1()
+                        .flex_basis(px(KNOWLEDGE_DOCUMENT_HEADER_INFO_MIN_WIDTH))
                         .flex()
                         .flex_col()
                         .gap(px(2.0))
@@ -193,8 +199,14 @@ impl WorkspaceApp {
                 )
                 .child(
                     div()
+                        .min_w(px(0.0))
+                        .max_w_full()
+                        .flex_1()
+                        .flex_basis(px(KNOWLEDGE_DOCUMENT_ACTION_GROUP_MIN_WIDTH))
                         .flex()
+                        .flex_wrap()
                         .items_center()
+                        .justify_end()
                         .gap(px(8.0))
                         .child({
                             let import_disabled = self.settings_page.knowledge_import_progress.is_some();

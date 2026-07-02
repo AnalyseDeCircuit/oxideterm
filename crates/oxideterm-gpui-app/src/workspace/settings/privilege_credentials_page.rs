@@ -1,3 +1,6 @@
+const PRIVILEGE_SCOPE_LIST_WIDTH: f32 = 280.0; // Match the current scope rail width on comfortable layouts.
+const PRIVILEGE_DETAIL_MIN_WIDTH: f32 = 320.0; // Wrap the detail pane before fixed controls crush its labels.
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SettingsPrivilegeScopeRow {
     id: String,
@@ -146,12 +149,17 @@ impl WorkspaceApp {
         }
 
         let body = div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
+            .flex_wrap()
             .gap(px(16.0))
             .items_start()
             .child(
                 div()
-                    .w(px(280.0))
+                    .w(px(PRIVILEGE_SCOPE_LIST_WIDTH))
+                    .max_w_full()
+                    .min_w(px(0.0))
                     .flex_none()
                     .flex()
                     .flex_col()
@@ -169,6 +177,7 @@ impl WorkspaceApp {
                 div()
                     .min_w(px(0.0))
                     .flex_1()
+                    .flex_basis(px(PRIVILEGE_DETAIL_MIN_WIDTH))
                     .flex()
                     .flex_col()
                     .gap(px(12.0))
@@ -188,12 +197,14 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(px(12.0))
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
                     .child(
                         div()
                             .truncate()
@@ -234,7 +245,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut list = div().flex().flex_col().gap(px(8.0));
+        let mut list = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(8.0));
         if credentials.is_empty() {
             return list
                 .child(
@@ -258,7 +269,10 @@ impl WorkspaceApp {
             let delete_id = credential.id.clone();
             list = list.child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(8.0))
                     .rounded(px(self.tokens.radii.md))
@@ -353,6 +367,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
@@ -446,6 +462,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .justify_end()
                     .gap(px(8.0))
                     .when(

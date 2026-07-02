@@ -164,8 +164,8 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 unicode-width = "0.2.2"
 uuid = { version = "1.23", features = ["v4", "serde"] }
-wasmtime = "39.0.0"
-wasmtime-wasi = "39.0.0"
+wasmtime = { version = "39.0.0", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime-wasi = { version = "39.0.0", default-features = false, features = ["p1"] }
 windows = "0.61"
 windows-core = "0.61"
 whoami = "1.6"

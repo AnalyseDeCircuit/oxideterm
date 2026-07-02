@@ -2,6 +2,12 @@ const AI_TEXTAREA_SYSTEM_PROMPT_MIN_H: f32 = 80.0; // Tauri rows=4 min-h-[80px].
 const AI_TEXTAREA_MEMORY_MIN_H: f32 = 120.0; // Tauri rows=5 min-h-[120px].
 const AI_ACP_AGENT_TEXTAREA_MIN_H: f32 = 72.0; // Tauri min-h-[72px] for ACP args/env drafts.
 const AI_TOOL_NUMBER_INPUT_W: f32 = 96.0; // Tauri w-24.
+const AI_EXECUTION_PROFILE_FIELD_MIN_WIDTH: f32 = 150.0; // Wrap profile controls before localized labels collapse.
+const AI_ACP_AGENT_FIELD_MIN_WIDTH: f32 = 220.0; // Keep ACP form fields readable on narrow settings panes.
+const AI_ACP_AGENT_TEXTAREA_FIELD_MIN_WIDTH: f32 = 240.0; // Multiline command fields need more room than compact selects.
+const AI_ACP_AGENT_AUTH_TOKEN_MIN_WIDTH: f32 = 220.0; // Let token actions wrap without crushing the secret input.
+const AI_ACP_AGENT_CAPABILITY_MIN_WIDTH: f32 = 150.0; // Capability checkboxes should wrap as chips, not grid columns.
+const AI_PROFILE_READONLY_VALUE_WIDTH: f32 = 180.0; // Match the profile model input width on desktop layouts.
 
 impl WorkspaceApp {
     fn ai_execution_profiles_section(
@@ -55,6 +61,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
@@ -270,50 +277,67 @@ impl WorkspaceApp {
             )
             .child(
                 div()
-                    .grid()
-                    .grid_cols(4)
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_wrap()
                     .gap(px(8.0))
-                    .child(self.settings_select_control(
-                        SettingsSelect::AiProfileBackend(index),
-                        backend_label,
-                        false,
-                        Some(150.0),
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_EXECUTION_PROFILE_FIELD_MIN_WIDTH,
+                        self.settings_select_control(
+                            SettingsSelect::AiProfileBackend(index),
+                            backend_label,
+                            false,
+                            Some(150.0),
+                            cx,
+                        ),
                     ))
-                    .child(self.settings_select_control(
-                        if backend == "acp" {
-                            SettingsSelect::AiProfileAcpAgent(index)
-                        } else {
-                            SettingsSelect::AiProfileProvider(index)
-                        },
-                        if backend == "acp" {
-                            acp_agent_label
-                        } else {
-                            provider_label
-                        },
-                        false,
-                        Some(180.0),
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_EXECUTION_PROFILE_FIELD_MIN_WIDTH,
+                        self.settings_select_control(
+                            if backend == "acp" {
+                                SettingsSelect::AiProfileAcpAgent(index)
+                            } else {
+                                SettingsSelect::AiProfileProvider(index)
+                            },
+                            if backend == "acp" {
+                                acp_agent_label
+                            } else {
+                                provider_label
+                            },
+                            false,
+                            Some(AI_PROFILE_READONLY_VALUE_WIDTH),
+                            cx,
+                        ),
                     ))
                     .child(if backend == "acp" {
-                        self.ai_readonly_profile_value(
-                            self.i18n.t("settings_view.ai.profile_acp_model_disabled"),
+                        self.ai_responsive_field(
+                            AI_EXECUTION_PROFILE_FIELD_MIN_WIDTH,
+                            self.ai_readonly_profile_value(
+                                self.i18n.t("settings_view.ai.profile_acp_model_disabled"),
+                            ),
                         )
                     } else {
-                        self.settings_text_input_control(
-                            SettingsInput::AiProfileModel(index),
-                            self.current_settings_input_value(SettingsInput::AiProfileModel(index)),
-                            self.i18n.t("settings_view.ai.profile_inherit_model"),
-                            180.0,
-                            cx,
+                        self.ai_responsive_field(
+                            AI_EXECUTION_PROFILE_FIELD_MIN_WIDTH,
+                            self.settings_text_input_control(
+                                SettingsInput::AiProfileModel(index),
+                                self.current_settings_input_value(SettingsInput::AiProfileModel(index)),
+                                self.i18n.t("settings_view.ai.profile_inherit_model"),
+                                AI_PROFILE_READONLY_VALUE_WIDTH,
+                                cx,
+                            ),
                         )
                     })
-                    .child(self.settings_select_control(
-                        SettingsSelect::AiProfileReasoning(index),
-                        self.i18n.t(ai_reasoning_label_key(reasoning)),
-                        false,
-                        Some(160.0),
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_EXECUTION_PROFILE_FIELD_MIN_WIDTH,
+                        self.settings_select_control(
+                            SettingsSelect::AiProfileReasoning(index),
+                            self.i18n.t(ai_reasoning_label_key(reasoning)),
+                            false,
+                            Some(160.0),
+                            cx,
+                        ),
                     )),
             )
             .into_any_element()
@@ -323,7 +347,9 @@ impl WorkspaceApp {
         // Tauri disables the model input for ACP-backed profiles because the
         // selected agent owns model choice outside the provider settings path.
         div()
-            .w(px(180.0))
+            .w(px(AI_PROFILE_READONLY_VALUE_WIDTH))
+            .max_w_full()
+            .min_w(px(0.0))
             .h(px(32.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
@@ -334,7 +360,7 @@ impl WorkspaceApp {
             .items_center()
             .text_size(px(12.0))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(label)
+            .child(div().min_w(px(0.0)).truncate().child(label))
             .into_any_element()
     }
 
@@ -360,6 +386,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
@@ -370,6 +397,7 @@ impl WorkspaceApp {
                     ))
                     .child(
                         div()
+                            .min_w(px(0.0))
                             .flex()
                             .flex_wrap()
                             .justify_end()
@@ -439,15 +467,21 @@ impl WorkspaceApp {
             .gap(px(12.0))
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
                     .child(self.ai_acp_agent_enabled_toggle(index, agent.enabled, cx))
                     .child(
                         div()
+                            .min_w(px(0.0))
                             .flex()
+                            .flex_wrap()
                             .items_center()
+                            .justify_end()
                             .gap(px(8.0))
                             .when_some(agent.status.last_error_kind.as_ref(), |row, error| {
                                 let error_label = self.i18n.t(acp_agent_error_kind_key(error));
@@ -481,59 +515,89 @@ impl WorkspaceApp {
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .grid()
-                    .grid_cols(2)
+                    .flex()
+                    .flex_wrap()
                     .gap(px(10.0))
-                    .child(self.ai_labeled_text_input(
-                        "settings_view.ai.acp_agent_name",
-                        SettingsInput::AiAcpAgentDisplayName(index),
-                        self.i18n.t("settings_view.ai.acp_agent_new_name"),
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                        self.ai_labeled_text_input(
+                            "settings_view.ai.acp_agent_name",
+                            SettingsInput::AiAcpAgentDisplayName(index),
+                            self.i18n.t("settings_view.ai.acp_agent_new_name"),
+                            cx,
+                        ),
                     ))
-                    .child(self.ai_labeled_text_input(
-                        "settings_view.ai.acp_agent_command",
-                        SettingsInput::AiAcpAgentCommand(index),
-                        self.i18n.t("settings_view.ai.acp_agent_command_placeholder"),
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                        self.ai_labeled_text_input(
+                            "settings_view.ai.acp_agent_command",
+                            SettingsInput::AiAcpAgentCommand(index),
+                            self.i18n.t("settings_view.ai.acp_agent_command_placeholder"),
+                            cx,
+                        ),
                     ))
-                    .child(self.ai_labeled_text_input(
-                        "settings_view.ai.acp_agent_cwd",
-                        SettingsInput::AiAcpAgentCwd(index),
-                        self.i18n.t("settings_view.ai.acp_agent_cwd_placeholder"),
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                        self.ai_labeled_text_input(
+                            "settings_view.ai.acp_agent_cwd",
+                            SettingsInput::AiAcpAgentCwd(index),
+                            self.i18n.t("settings_view.ai.acp_agent_cwd_placeholder"),
+                            cx,
+                        ),
                     ))
-                    .child(self.ai_readonly_profile_value(self.i18n.t(
-                        acp_agent_auth_status_key(&agent.auth.status),
-                    ))),
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                        self.ai_readonly_profile_value(
+                            self.i18n.t(acp_agent_auth_status_key(&agent.auth.status)),
+                        ),
+                    )),
             )
             .child(self.ai_acp_agent_auth_token_input(index, agent, cx))
             .child(
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .grid()
-                    .grid_cols(2)
+                    .flex()
+                    .flex_wrap()
                     .gap(px(10.0))
-                    .child(self.ai_textarea_row(
-                        SettingsInput::AiAcpAgentArgs(index),
-                        self.i18n.t("settings_view.ai.acp_agent_args"),
-                        self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
-                        self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
-                        self.current_settings_input_value(SettingsInput::AiAcpAgentArgs(index)),
-                        AI_ACP_AGENT_TEXTAREA_MIN_H,
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_TEXTAREA_FIELD_MIN_WIDTH,
+                        self.ai_textarea_row(
+                            SettingsInput::AiAcpAgentArgs(index),
+                            self.i18n.t("settings_view.ai.acp_agent_args"),
+                            self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
+                            self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
+                            self.current_settings_input_value(SettingsInput::AiAcpAgentArgs(index)),
+                            AI_ACP_AGENT_TEXTAREA_MIN_H,
+                            cx,
+                        ),
                     ))
-                    .child(self.ai_textarea_row(
-                        SettingsInput::AiAcpAgentEnv(index),
-                        self.i18n.t("settings_view.ai.acp_agent_env"),
-                        self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
-                        self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
-                        self.current_settings_input_value(SettingsInput::AiAcpAgentEnv(index)),
-                        AI_ACP_AGENT_TEXTAREA_MIN_H,
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_TEXTAREA_FIELD_MIN_WIDTH,
+                        self.ai_textarea_row(
+                            SettingsInput::AiAcpAgentEnv(index),
+                            self.i18n.t("settings_view.ai.acp_agent_env"),
+                            self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
+                            self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
+                            self.current_settings_input_value(SettingsInput::AiAcpAgentEnv(index)),
+                            AI_ACP_AGENT_TEXTAREA_MIN_H,
+                            cx,
+                        ),
                     )),
             )
             .child(self.ai_acp_agent_capabilities(index, agent, cx))
+            .into_any_element()
+    }
+
+    fn ai_responsive_field(&self, min_width: f32, control: AnyElement) -> AnyElement {
+        // Flex-basis keeps desktop columns stable, while min-width zero lets the
+        // field shrink only after it has wrapped onto its own line.
+        div()
+            .min_w(px(0.0))
+            .max_w_full()
+            .flex_1()
+            .flex_basis(px(min_width))
+            .child(control)
             .into_any_element()
     }
 
@@ -605,24 +669,31 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
+                    .flex_wrap()
                     .gap(px(8.0))
-                    .child(div().flex_1().min_w(px(0.0)).child(
-                        self.ai_provider_secret_input(
-                            input,
-                            draft,
-                            if agent.auth.status
-                                == oxideterm_settings::AcpAgentAuthStatus::Authenticated
-                            {
-                                self.i18n.t("settings_view.ai.acp_agent_auth_token_saved")
-                            } else {
-                                self.i18n
-                                    .t("settings_view.ai.acp_agent_auth_token_placeholder")
-                            },
-                            focused,
-                            cx,
-                        ),
-                    ))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex_basis(px(AI_ACP_AGENT_AUTH_TOKEN_MIN_WIDTH))
+                            .child(self.ai_provider_secret_input(
+                                input,
+                                draft,
+                                if agent.auth.status
+                                    == oxideterm_settings::AcpAgentAuthStatus::Authenticated
+                                {
+                                    self.i18n.t("settings_view.ai.acp_agent_auth_token_saved")
+                                } else {
+                                    self.i18n
+                                        .t("settings_view.ai.acp_agent_auth_token_placeholder")
+                                },
+                                focused,
+                                cx,
+                            )),
+                    )
                     .child(
                         self.workspace_toolbar_action_button(
                             self.i18n.t("settings_view.ai.save"),
@@ -1063,29 +1134,38 @@ impl WorkspaceApp {
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .grid()
-                    .grid_cols(3)
+                    .flex()
+                    .flex_wrap()
                     .gap(px(8.0))
-                    .child(self.ai_acp_agent_capability_toggle(
-                        index,
-                        "settings_view.ai.acp_agent_capability_read",
-                        agent.capability_policy.fs_read_text_file,
-                        |policy| policy.fs_read_text_file = !policy.fs_read_text_file,
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_CAPABILITY_MIN_WIDTH,
+                        self.ai_acp_agent_capability_toggle(
+                            index,
+                            "settings_view.ai.acp_agent_capability_read",
+                            agent.capability_policy.fs_read_text_file,
+                            |policy| policy.fs_read_text_file = !policy.fs_read_text_file,
+                            cx,
+                        ),
                     ))
-                    .child(self.ai_acp_agent_capability_toggle(
-                        index,
-                        "settings_view.ai.acp_agent_capability_write",
-                        agent.capability_policy.fs_write_text_file,
-                        |policy| policy.fs_write_text_file = !policy.fs_write_text_file,
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_CAPABILITY_MIN_WIDTH,
+                        self.ai_acp_agent_capability_toggle(
+                            index,
+                            "settings_view.ai.acp_agent_capability_write",
+                            agent.capability_policy.fs_write_text_file,
+                            |policy| policy.fs_write_text_file = !policy.fs_write_text_file,
+                            cx,
+                        ),
                     ))
-                    .child(self.ai_acp_agent_capability_toggle(
-                        index,
-                        "settings_view.ai.acp_agent_capability_terminal",
-                        agent.capability_policy.terminal,
-                        |policy| policy.terminal = !policy.terminal,
-                        cx,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_CAPABILITY_MIN_WIDTH,
+                        self.ai_acp_agent_capability_toggle(
+                            index,
+                            "settings_view.ai.acp_agent_capability_terminal",
+                            agent.capability_policy.terminal,
+                            |policy| policy.terminal = !policy.terminal,
+                            cx,
+                        ),
                     )),
             )
             .child(
