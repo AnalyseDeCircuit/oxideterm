@@ -63,6 +63,7 @@ pub(super) enum RemoteDesktopWorkerDelivery {
     FrameRecoveryNeeded {
         tab_id: TabId,
         generation: u64,
+        dropped_visual_updates: usize,
     },
     Event {
         tab_id: TabId,
@@ -98,7 +99,7 @@ struct RemoteDesktopFrameDeliverySlot {
     frames: Arc<Mutex<VecDeque<RemoteDesktopHelperEvent>>>,
     queued: Arc<AtomicBool>,
     recovery_requested: Arc<AtomicBool>,
-    last_ready_at: Arc<Mutex<Option<Instant>>>,
+    last_presented_at: Arc<Mutex<Option<Instant>>>,
     supports_frame_recovery: bool,
 }
 
@@ -113,14 +114,20 @@ struct RemoteDesktopRenderDiagnostics {
     dirty_updates_rejected: u64,
     full_update_recoveries: u64,
     corrupted_frames: u64,
+    first_trace_id: Option<u64>,
+    last_trace_id: Option<u64>,
     dirty_rect_pixels: u64,
     dirty_frame_pixels: u64,
+    pending_texture_updates: u64,
+    pending_texture_upload_bytes: u64,
+    full_frame_texture_promotions: u64,
     dirty_tiles_refreshed: u64,
     frame_tiles_created: u64,
     retired_images: u64,
     total_apply_micros: u64,
     max_apply_micros: u64,
     recovery_requests: u64,
+    dropped_visual_updates: u64,
 }
 
 impl RemoteDesktopRenderDiagnostics {
@@ -155,12 +162,23 @@ impl RemoteDesktopRenderDiagnostics {
         self.corrupted_frames = self
             .corrupted_frames
             .saturating_add(apply_stats.corrupted_frames as u64);
+        if self.first_trace_id.is_none() {
+            self.first_trace_id = apply_stats.first_trace_id;
+        }
+        if apply_stats.last_trace_id.is_some() {
+            self.last_trace_id = apply_stats.last_trace_id;
+        }
         self.dirty_rect_pixels = self
             .dirty_rect_pixels
             .saturating_add(apply_stats.dirty_rect_pixels);
         self.dirty_frame_pixels = self
             .dirty_frame_pixels
             .saturating_add(apply_stats.dirty_frame_pixels);
+        self.pending_texture_updates = apply_stats.pending_texture_updates as u64;
+        self.pending_texture_upload_bytes = apply_stats.pending_texture_upload_bytes as u64;
+        self.full_frame_texture_promotions = self
+            .full_frame_texture_promotions
+            .saturating_add(apply_stats.full_frame_texture_promotions as u64);
         self.dirty_tiles_refreshed = self
             .dirty_tiles_refreshed
             .saturating_add(apply_stats.dirty_tiles_refreshed as u64);
@@ -173,8 +191,11 @@ impl RemoteDesktopRenderDiagnostics {
         self.max_apply_micros = self.max_apply_micros.max(apply_micros);
     }
 
-    fn record_recovery_request(&mut self) {
+    fn record_recovery_request(&mut self, dropped_visual_updates: usize) {
         self.recovery_requests = self.recovery_requests.saturating_add(1);
+        self.dropped_visual_updates = self
+            .dropped_visual_updates
+            .saturating_add(dropped_visual_updates as u64);
     }
 }
 
@@ -184,7 +205,7 @@ impl RemoteDesktopFrameDeliverySlot {
             frames: Arc::default(),
             queued: Arc::default(),
             recovery_requested: Arc::default(),
-            last_ready_at: Arc::default(),
+            last_presented_at: Arc::default(),
             supports_frame_recovery,
         }
     }
@@ -197,7 +218,7 @@ impl RemoteDesktopFrameDeliverySlot {
         delivery_tx: &mpsc::Sender<RemoteDesktopWorkerDelivery>,
         worker_wake: &RemoteDesktopWorkerWake,
     ) {
-        let mut needs_recovery = false;
+        let mut dropped_visual_updates = 0;
         {
             let Ok(mut frames) = self.frames.lock() else {
                 return;
@@ -215,17 +236,21 @@ impl RemoteDesktopFrameDeliverySlot {
                 // Dirty rectangles are relative to an existing backing frame.
                 // Once the UI is this far behind, ask the helper for a fresh
                 // full frame instead of applying a long stale delta chain.
+                dropped_visual_updates = frames.len();
                 frames.clear();
                 self.queued.store(false, Ordering::Release);
-                needs_recovery = true;
             }
         }
 
-        if needs_recovery {
+        if dropped_visual_updates > 0 {
             send_remote_desktop_worker_delivery(
                 delivery_tx,
                 worker_wake,
-                RemoteDesktopWorkerDelivery::FrameRecoveryNeeded { tab_id, generation },
+                RemoteDesktopWorkerDelivery::FrameRecoveryNeeded {
+                    tab_id,
+                    generation,
+                    dropped_visual_updates,
+                },
             );
             return;
         }
@@ -233,7 +258,6 @@ impl RemoteDesktopFrameDeliverySlot {
         // A single queued marker is enough because the slot preserves ordered
         // frame events until the UI thread catches up.
         if self.mark_frame_ready_queued() {
-            self.mark_frame_ready_sent();
             send_remote_desktop_worker_delivery(
                 delivery_tx,
                 worker_wake,
@@ -258,21 +282,21 @@ impl RemoteDesktopFrameDeliverySlot {
         !self.queued.swap(true, Ordering::AcqRel)
     }
 
-    fn mark_frame_ready_sent(&self) {
-        if let Ok(mut last_ready_at) = self.last_ready_at.lock() {
-            *last_ready_at = Some(Instant::now());
+    fn mark_frame_presented(&self) {
+        if let Ok(mut last_presented_at) = self.last_presented_at.lock() {
+            *last_presented_at = Some(Instant::now());
         }
     }
 
     fn next_frame_ready_delay(&self) -> Duration {
         let now = Instant::now();
-        let Ok(last_ready_at) = self.last_ready_at.lock() else {
+        let Ok(last_presented_at) = self.last_presented_at.lock() else {
             return Duration::ZERO;
         };
-        let Some(previous_ready_at) = *last_ready_at else {
+        let Some(previous_presented_at) = *last_presented_at else {
             return Duration::ZERO;
         };
-        let elapsed = now.saturating_duration_since(previous_ready_at);
+        let elapsed = now.saturating_duration_since(previous_presented_at);
         if elapsed >= REMOTE_DESKTOP_FRAME_READY_INTERVAL {
             Duration::ZERO
         } else {
@@ -729,10 +753,16 @@ impl WorkspaceApp {
                         changed = true;
                     }
                 }
-                RemoteDesktopWorkerDelivery::FrameRecoveryNeeded { tab_id, generation } => {
+                RemoteDesktopWorkerDelivery::FrameRecoveryNeeded {
+                    tab_id,
+                    generation,
+                    dropped_visual_updates,
+                } => {
                     if self.remote_desktop_worker_generation_matches(tab_id, generation) {
                         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
-                            session.render_diagnostics.record_recovery_request();
+                            session
+                                .render_diagnostics
+                                .record_recovery_request(dropped_visual_updates);
                         }
                         self.send_remote_desktop_request(
                             tab_id,
@@ -1442,10 +1472,21 @@ impl WorkspaceApp {
         if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
             return false;
         }
+        let Some(frame_slot) = self
+            .remote_desktop_sessions
+            .get(&tab_id)
+            .map(|session| session.frame_slot.clone())
+        else {
+            return false;
+        };
+        let delay = frame_slot.next_frame_ready_delay();
+        if !delay.is_zero() {
+            self.schedule_remote_desktop_pending_frame_ready(tab_id, generation, delay, cx);
+            return false;
+        }
         let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
             return false;
         };
-        let frame_slot = session.frame_slot.clone();
         let mut changed = false;
         let mut events = Vec::new();
         let started_at = Instant::now();
@@ -1464,6 +1505,11 @@ impl WorkspaceApp {
             changed = true;
         }
         let drained_events = events.len();
+        if drained_events == 0 {
+            frame_slot.complete_delivery();
+            return false;
+        }
+        frame_slot.mark_frame_presented();
         let apply_started_at = Instant::now();
         let apply_stats = session.state.apply_frame_events(events);
         let apply_elapsed = apply_started_at.elapsed();
@@ -1479,7 +1525,9 @@ impl WorkspaceApp {
         );
         if remote_desktop_diagnostics_enabled() {
             eprintln!(
-                "[oxideterm:remote-desktop-render] tab={tab_id:?} gen={generation} drained={drained_events} budget_hit={budget_hit} apply_us={} full={} updates={} dirty_applied={} dirty_rejected={} dirty_px={} dirty_frame_px={} tiles_refreshed={} tiles_created={} retired={} recoveries={} totals={:?}",
+                "[oxideterm:remote-desktop-render] tab={tab_id:?} gen={generation} trace={:?}->{:?} drained={drained_events} budget_hit={budget_hit} apply_us={} full={} updates={} dirty_applied={} dirty_rejected={} dirty_px={} dirty_frame_px={} pending_texture_updates={} pending_texture_bytes={} full_texture_promotions={} texture_updates={} textures_created={} retired={} recoveries={} dropped_visual={} totals={:?}",
+                apply_stats.first_trace_id,
+                apply_stats.last_trace_id,
                 duration_micros_u64(apply_elapsed),
                 apply_stats.full_frames,
                 apply_stats.frame_updates,
@@ -1487,10 +1535,14 @@ impl WorkspaceApp {
                 apply_stats.dirty_updates_rejected,
                 apply_stats.dirty_rect_pixels,
                 apply_stats.dirty_frame_pixels,
+                apply_stats.pending_texture_updates,
+                apply_stats.pending_texture_upload_bytes,
+                apply_stats.full_frame_texture_promotions,
                 apply_stats.dirty_tiles_refreshed,
                 apply_stats.frame_tiles_created,
                 retired_image_count,
                 apply_stats.full_update_recoveries,
+                session.render_diagnostics.dropped_visual_updates,
                 session.render_diagnostics,
             );
         }
@@ -1500,6 +1552,30 @@ impl WorkspaceApp {
             self.schedule_remote_desktop_followup_frame_ready(tab_id, generation, frame_slot, cx);
         }
         changed
+    }
+
+    fn schedule_remote_desktop_pending_frame_ready(
+        &self,
+        tab_id: TabId,
+        generation: u64,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        // The slot is already marked as queued. This timer only delays the
+        // existing ready notification until the next visual presentation tick.
+        cx.spawn(async move |workspace, cx| {
+            Timer::after(delay).await;
+            let _ = workspace.update(cx, |this, cx| {
+                if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
+                    return;
+                }
+                let _ = this
+                    .remote_desktop_worker_tx
+                    .send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn schedule_remote_desktop_followup_frame_ready(
@@ -1516,7 +1592,6 @@ impl WorkspaceApp {
         let delay = frame_slot.next_frame_ready_delay();
         let delivery_tx = self.remote_desktop_worker_tx.clone();
         if delay.is_zero() {
-            frame_slot.mark_frame_ready_sent();
             let _ =
                 delivery_tx.send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
             cx.notify();
@@ -1531,7 +1606,6 @@ impl WorkspaceApp {
                 }
                 // The queued flag stays set while this timer waits, so new
                 // frame bursts coalesce into the existing delivery slot.
-                frame_slot.mark_frame_ready_sent();
                 let _ = this
                     .remote_desktop_worker_tx
                     .send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
@@ -3082,7 +3156,10 @@ mod tests {
             Ok(RemoteDesktopWorkerDelivery::FrameRecoveryNeeded {
                 tab_id: recovered_tab,
                 generation: recovered_generation,
-            }) if recovered_tab == tab_id && recovered_generation == generation
+                dropped_visual_updates,
+            }) if recovered_tab == tab_id
+                && recovered_generation == generation
+                && dropped_visual_updates > 0
         ));
         assert!(slot.take().is_none());
     }
@@ -3114,6 +3191,26 @@ mod tests {
             Err(mpsc::TryRecvError::Empty)
         ));
         assert!(slot.take().is_some());
+    }
+
+    #[test]
+    fn frame_slot_delays_ready_after_recent_presentation() {
+        let slot = RemoteDesktopFrameDeliverySlot::new(true);
+
+        slot.mark_frame_presented();
+
+        let delay = slot.next_frame_ready_delay();
+        assert!(delay > Duration::ZERO);
+        assert!(delay <= REMOTE_DESKTOP_FRAME_READY_INTERVAL);
+    }
+
+    #[test]
+    fn frame_slot_allows_ready_after_presentation_interval() {
+        let slot = RemoteDesktopFrameDeliverySlot::new(true);
+        *slot.last_presented_at.lock().unwrap() =
+            Some(Instant::now() - REMOTE_DESKTOP_FRAME_READY_INTERVAL);
+
+        assert_eq!(slot.next_frame_ready_delay(), Duration::ZERO);
     }
 
     #[test]

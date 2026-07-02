@@ -213,6 +213,7 @@ fn paint_remote_desktop_surface(
     image_bounds: Bounds<Pixels>,
     surface: &RemoteDesktopFrameSurface,
 ) {
+    debug_assert!(surface.generation > 0);
     if let Ok(mut pending_updates) = surface.pending_texture_updates.lock() {
         for update in pending_updates.drain(..) {
             let update_bounds = Bounds::new(

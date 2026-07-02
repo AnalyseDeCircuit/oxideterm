@@ -82,9 +82,12 @@ impl PlatformAtlas for DirectXAtlas {
             let Some((size, bytes)) = build()? else {
                 return Ok(None);
             };
-            let tile = lock
-                .allocate(size, key.texture_kind())
-                .ok_or_else(|| anyhow::anyhow!("failed to allocate"))?;
+            let tile = if matches!(key, AtlasKey::DynamicTexture(_)) {
+                lock.allocate_dedicated(size, key.texture_kind())
+            } else {
+                lock.allocate(size, key.texture_kind())
+            }
+            .ok_or_else(|| anyhow::anyhow!("failed to allocate"))?;
             let texture = lock.texture(tile.texture_id);
             texture.upload(&lock.device_context, tile.bounds, &bytes);
             lock.tiles_by_key.insert(key.clone(), tile.clone());
@@ -140,6 +143,25 @@ impl PlatformAtlas for DirectXAtlas {
 }
 
 impl DirectXAtlasState {
+    fn allocate_dedicated(
+        &mut self,
+        size: Size<DevicePixels>,
+        texture_kind: AtlasTextureKind,
+    ) -> Option<AtlasTile> {
+        const MAX_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(16384),
+            height: DevicePixels(16384),
+        };
+        if size.width > MAX_ATLAS_SIZE.width || size.height > MAX_ATLAS_SIZE.height {
+            return None;
+        }
+        // Remote desktop dynamic textures are large mutable framebuffers.
+        // Give each one a dedicated backing texture so frequent dirty uploads
+        // do not contend with ordinary image, icon, and glyph atlas entries.
+        let texture = self.push_texture_with_size(size, texture_kind)?;
+        texture.allocate(size)
+    }
+
     fn allocate(
         &mut self,
         size: Size<DevicePixels>,
@@ -180,6 +202,14 @@ impl DirectXAtlasState {
             height: DevicePixels(16384),
         };
         let size = min_size.min(&MAX_ATLAS_SIZE).max(&DEFAULT_ATLAS_SIZE);
+        self.push_texture_with_size(size, kind)
+    }
+
+    fn push_texture_with_size(
+        &mut self,
+        size: Size<DevicePixels>,
+        kind: AtlasTextureKind,
+    ) -> Option<&mut DirectXAtlasTexture> {
         let pixel_format;
         let bind_flag;
         let bytes_per_pixel;

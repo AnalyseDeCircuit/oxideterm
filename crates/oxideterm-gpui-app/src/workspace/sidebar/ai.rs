@@ -58,8 +58,7 @@ use oxideterm_gpui_ui::{
     modal::overlay_content_boundary,
     tauri_ui_font_family as settings_ui_font_family,
     text_input::{
-        text_caret, text_caret_overlay_at_text_end, text_input, text_input_anchor_probe,
-        text_input_value_segments_with_color,
+        text_caret, text_input, text_input_anchor_probe, text_input_value_segments_with_color,
     },
 };
 

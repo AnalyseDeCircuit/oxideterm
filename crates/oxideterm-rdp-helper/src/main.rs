@@ -3,7 +3,7 @@
 
 use std::{
     collections::VecDeque,
-    fmt,
+    fmt, future,
     io::{self, BufRead, BufReader},
     sync::{
         Arc, Mutex,
@@ -11,7 +11,7 @@ use std::{
         mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use ironrdp::{
@@ -39,7 +39,10 @@ use ironrdp::{
         geometry::InclusiveRectangle,
         input::fast_path::FastPathInputEvent,
         rdp::{
-            capability_sets::{MajorPlatformType, client_codecs_capabilities},
+            capability_sets::{
+                BitmapCodecs, CODEC_ID_NONE, CODEC_ID_QOI, CODEC_ID_QOIZ, CODEC_ID_REMOTEFX,
+                CodecId, MajorPlatformType, client_codecs_capabilities,
+            },
             client_info::{CompressionType, PerformanceFlags, TimezoneInfo},
         },
     },
@@ -81,6 +84,15 @@ const RDP_CLIENT_LOOP_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const RDP_CLIENT_REQUEST_DRAIN_LIMIT: usize = 128;
 const RDP_CLIENT_OUTPUT_DRAIN_LIMIT: usize = 32;
 const RDP_CLIENT_OUTPUT_QUEUE_CAPACITY: usize = 64;
+const RDP_GRAPHICS_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
+const RDP_GRAPHICS_DIAGNOSTICS_REPORT_INTERVAL: Duration = Duration::from_secs(2);
+// Keep the default bitmap codec configuration delegated to IronRDP. In the
+// pinned version this advertises RemoteFX while still allowing raw/RDP6 bitmap
+// fallback when the server does not select that codec.
+const RDP_CLIENT_BITMAP_CODECS: &[&str] = &[];
+// IronRDP writes BgrA32 as BGRA bytes. Using it as the decoded desktop format
+// lets OxideTerm pass RDP frames to GPUI without an RGBA-to-BGRA channel swap.
+const RDP_DECODED_FRAME_PIXEL_FORMAT: PixelFormat = PixelFormat::BgrA32;
 const RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 0;
 const RDP_DISPLAYCONTROL_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 100;
 const RDP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
@@ -829,19 +841,133 @@ enum ClientRdpControlFlow {
 #[derive(Debug)]
 struct ClientRdpFrameState {
     graphics_sync: RdpGraphicsSyncState,
+    graphics_accumulator: RdpGraphicsFrameAccumulator,
     pending_base_frame: bool,
     pending_base_frame_can_publish_ready: bool,
     published_first_desktop_frame: bool,
+    next_graphics_trace_id: u64,
+    graphics_diagnostics: RdpGraphicsDiagnostics,
 }
 
 impl Default for ClientRdpFrameState {
     fn default() -> Self {
         Self {
             graphics_sync: RdpGraphicsSyncState::default(),
+            graphics_accumulator: RdpGraphicsFrameAccumulator::default(),
             pending_base_frame: false,
             pending_base_frame_can_publish_ready: false,
             published_first_desktop_frame: false,
+            next_graphics_trace_id: 0,
+            graphics_diagnostics: RdpGraphicsDiagnostics::from_env(),
         }
+    }
+}
+
+impl ClientRdpFrameState {
+    fn next_graphics_trace_id(&mut self) -> u64 {
+        self.next_graphics_trace_id = self.next_graphics_trace_id.saturating_add(1).max(1);
+        self.next_graphics_trace_id
+    }
+}
+
+#[derive(Debug)]
+struct RdpGraphicsDiagnostics {
+    enabled: bool,
+    last_report: Instant,
+    graphics_updates: u64,
+    skipped_updates: u64,
+    base_frames: u64,
+    dirty_updates: u64,
+    copied_bytes: u64,
+    base_frame_bytes: u64,
+    dirty_update_bytes: u64,
+    dirty_pixels: u64,
+    dirty_frame_pixels: u64,
+    last_trace_id: u64,
+}
+
+impl RdpGraphicsDiagnostics {
+    fn from_env() -> Self {
+        Self {
+            enabled: std::env::var_os(RDP_GRAPHICS_DIAGNOSTICS_ENV).is_some(),
+            last_report: Instant::now(),
+            graphics_updates: 0,
+            skipped_updates: 0,
+            base_frames: 0,
+            dirty_updates: 0,
+            copied_bytes: 0,
+            base_frame_bytes: 0,
+            dirty_update_bytes: 0,
+            dirty_pixels: 0,
+            dirty_frame_pixels: 0,
+            last_trace_id: 0,
+        }
+    }
+
+    fn record_graphics_update(&mut self) {
+        if self.enabled {
+            self.graphics_updates = self.graphics_updates.saturating_add(1);
+        }
+    }
+
+    fn record_skipped_update(&mut self) {
+        if self.enabled {
+            self.skipped_updates = self.skipped_updates.saturating_add(1);
+            self.maybe_report();
+        }
+    }
+
+    fn record_base_frame(&mut self, trace_id: u64, size: RemoteDesktopSize, byte_len: usize) {
+        if !self.enabled {
+            return;
+        }
+        self.last_trace_id = trace_id;
+        self.base_frames = self.base_frames.saturating_add(1);
+        let byte_len = byte_len as u64;
+        self.copied_bytes = self.copied_bytes.saturating_add(byte_len);
+        self.base_frame_bytes = self.base_frame_bytes.saturating_add(byte_len);
+        self.dirty_frame_pixels = self.dirty_frame_pixels.saturating_add(frame_pixels(size));
+        self.maybe_report();
+    }
+
+    fn record_dirty_update(
+        &mut self,
+        trace_id: u64,
+        size: RemoteDesktopSize,
+        rect: oxideterm_remote_desktop::RemoteDesktopRect,
+        byte_len: usize,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        self.last_trace_id = trace_id;
+        self.dirty_updates = self.dirty_updates.saturating_add(1);
+        let byte_len = byte_len as u64;
+        self.copied_bytes = self.copied_bytes.saturating_add(byte_len);
+        self.dirty_update_bytes = self.dirty_update_bytes.saturating_add(byte_len);
+        self.dirty_pixels = self.dirty_pixels.saturating_add(rect_pixels(rect));
+        self.dirty_frame_pixels = self.dirty_frame_pixels.saturating_add(frame_pixels(size));
+        self.maybe_report();
+    }
+
+    fn maybe_report(&mut self) {
+        if self.last_report.elapsed() < RDP_GRAPHICS_DIAGNOSTICS_REPORT_INTERVAL {
+            return;
+        }
+        let dirty_ratio = ratio_per_mille(self.dirty_pixels, self.dirty_frame_pixels);
+        eprintln!(
+            "[oxideterm:rdp-helper-graphics] trace={} graphics_updates={} skipped={} base_frames={} dirty_updates={} copied_bytes={} base_bytes={} dirty_bytes={} dirty_ratio_per_mille={}",
+            self.last_trace_id,
+            self.graphics_updates,
+            self.skipped_updates,
+            self.base_frames,
+            self.dirty_updates,
+            self.copied_bytes,
+            self.base_frame_bytes,
+            self.dirty_update_bytes,
+            dirty_ratio,
+        );
+        self.last_report = Instant::now();
     }
 }
 
@@ -884,6 +1010,7 @@ async fn connect_native_rdp(
         None,
     )
     .await?;
+    log_rdp_negotiated_graphics(&config.connector, &connection_result);
 
     Ok((connection_result, upgraded_framed))
 }
@@ -911,7 +1038,7 @@ async fn run_native_rdp_active_session(
 ) -> SessionResult<ClientRdpControlFlow> {
     let (mut reader, mut writer) = split_tokio_framed(framed);
     let mut image = DecodedImage::new(
-        PixelFormat::RgbA32,
+        RDP_DECODED_FRAME_PIXEL_FORMAT,
         connection_result.desktop_size.width,
         connection_result.desktop_size.height,
     );
@@ -921,8 +1048,14 @@ async fn run_native_rdp_active_session(
 
     let disconnect_reason = 'session: loop {
         flush_pending_rdp_base_frame(output_tx, &image, &mut frame_state)?;
+        flush_pending_rdp_graphics_updates(output_tx, &image, &mut frame_state)?;
+        let graphics_flush_delay = frame_state.graphics_accumulator.next_flush_delay();
 
         let outputs = tokio::select! {
+            _ = wait_for_graphics_accumulator_flush(graphics_flush_delay) => {
+                flush_pending_rdp_graphics_updates(output_tx, &image, &mut frame_state)?;
+                Vec::new()
+            }
             frame = reader.read_pdu() => {
                 let (action, payload) = frame
                     .map_err(|error| {
@@ -1060,6 +1193,7 @@ async fn run_native_rdp_active_session(
 
 fn reset_graphics_base_after_reactivation(frame_state: &mut ClientRdpFrameState) {
     frame_state.graphics_sync.mark_needs_base();
+    frame_state.graphics_accumulator.clear();
     frame_state.pending_base_frame = false;
     frame_state.pending_base_frame_can_publish_ready = false;
 }
@@ -1077,13 +1211,77 @@ fn flush_pending_rdp_base_frame(
     send_client_rdp_base_frame(output_tx, image, frame_state, publish_ready)
 }
 
+async fn wait_for_graphics_accumulator_flush(delay: Option<Duration>) {
+    match delay {
+        Some(delay) => tokio::time::sleep(delay).await,
+        None => future::pending::<()>().await,
+    }
+}
+
+fn flush_pending_rdp_graphics_updates(
+    output_tx: &ClientRdpOutputSender,
+    image: &DecodedImage,
+    frame_state: &mut ClientRdpFrameState,
+) -> SessionResult<()> {
+    flush_rdp_graphics_updates(output_tx, image, frame_state, false)
+}
+
+fn flush_queued_rdp_graphics_updates(
+    output_tx: &ClientRdpOutputSender,
+    image: &DecodedImage,
+    frame_state: &mut ClientRdpFrameState,
+) -> SessionResult<()> {
+    flush_rdp_graphics_updates(output_tx, image, frame_state, true)
+}
+
+fn flush_rdp_graphics_updates(
+    output_tx: &ClientRdpOutputSender,
+    image: &DecodedImage,
+    frame_state: &mut ClientRdpFrameState,
+    force: bool,
+) -> SessionResult<()> {
+    let rect = if force {
+        frame_state.graphics_accumulator.take_rect()
+    } else {
+        frame_state.graphics_accumulator.take_ready_rect()
+    };
+    let Some(rect) = rect else {
+        return Ok(());
+    };
+    if frame_state.pending_base_frame
+        || frame_state.graphics_sync.needs_base()
+        || rect_covers_image(rect, image)
+    {
+        return send_client_rdp_base_frame(output_tx, image, frame_state, true);
+    }
+
+    let trace_id = frame_state.next_graphics_trace_id();
+    let event = attach_graphics_trace_id(accumulated_graphics_event(image, rect), trace_id);
+    if let RemoteDesktopHelperEvent::FrameUpdate { update } = &event {
+        frame_state.graphics_diagnostics.record_dirty_update(
+            trace_id,
+            update.size,
+            update.rect,
+            update.bytes.len(),
+        );
+    }
+    send_client_rdp_graphics_event(output_tx, event, frame_state)
+}
+
 fn send_client_rdp_base_frame(
     output_tx: &ClientRdpOutputSender,
     image: &DecodedImage,
     frame_state: &mut ClientRdpFrameState,
     publish_ready: bool,
 ) -> SessionResult<()> {
-    let event = base_frame_event(image);
+    let trace_id = frame_state.next_graphics_trace_id();
+    frame_state.graphics_accumulator.clear();
+    let event = attach_graphics_trace_id(base_frame_event(image), trace_id);
+    if let RemoteDesktopHelperEvent::Frame { frame } = &event {
+        frame_state
+            .graphics_diagnostics
+            .record_base_frame(trace_id, frame.size, frame.bytes.len());
+    }
     match output_tx.try_send_graphics(ClientRdpOutput::Event(event)) {
         Ok(()) => {
             frame_state.pending_base_frame = false;
@@ -1119,18 +1317,36 @@ fn send_client_rdp_graphics_update(
     region: InclusiveRectangle,
     frame_state: &mut ClientRdpFrameState,
 ) -> SessionResult<()> {
-    let Some(event) = graphics_update_event(image, region, &mut frame_state.graphics_sync)? else {
+    frame_state.graphics_diagnostics.record_graphics_update();
+    let Some(rect) =
+        graphics_update_rect_for_accumulator(image, region, frame_state.graphics_sync)?
+    else {
+        frame_state.graphics_diagnostics.record_skipped_update();
         return Ok(());
     };
 
-    if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
+    if frame_state.graphics_sync.needs_base() || rect_covers_image(rect, image) {
         // Base frames are the synchronization boundary. Queue them through the
         // dedicated path so the first real desktop frame can publish Connected
         // only after the UI has a complete framebuffer.
         return send_client_rdp_base_frame(output_tx, image, frame_state, true);
     }
 
-    send_client_rdp_graphics_event(output_tx, event, frame_state)
+    frame_state.graphics_accumulator.queue_rect(rect);
+    if frame_state
+        .graphics_accumulator
+        .should_promote_to_base(image)
+    {
+        let pending_regions = frame_state.graphics_accumulator.pending_regions();
+        frame_state.graphics_accumulator.clear();
+        if remote_rdp_helper_graphics_diagnostics_enabled() {
+            eprintln!(
+                "[oxideterm:rdp-helper-graphics] pending_regions={pending_regions} promoted_to_base=true"
+            );
+        }
+        return send_client_rdp_base_frame(output_tx, image, frame_state, true);
+    }
+    flush_pending_rdp_graphics_updates(output_tx, image, frame_state)
 }
 
 fn send_client_rdp_graphics_event(
@@ -1175,6 +1391,40 @@ fn send_client_rdp_graphics_event(
             Err(session::general_err!("RDP output channel closed"))
         }
     }
+}
+
+fn attach_graphics_trace_id(
+    event: RemoteDesktopHelperEvent,
+    trace_id: u64,
+) -> RemoteDesktopHelperEvent {
+    match event {
+        RemoteDesktopHelperEvent::Frame { frame } => RemoteDesktopHelperEvent::Frame {
+            frame: frame.with_trace_id(trace_id),
+        },
+        RemoteDesktopHelperEvent::FrameUpdate { update } => RemoteDesktopHelperEvent::FrameUpdate {
+            update: update.with_trace_id(trace_id),
+        },
+        event => event,
+    }
+}
+
+fn frame_pixels(size: RemoteDesktopSize) -> u64 {
+    u64::from(size.width).saturating_mul(u64::from(size.height))
+}
+
+fn rect_pixels(rect: oxideterm_remote_desktop::RemoteDesktopRect) -> u64 {
+    u64::from(rect.width).saturating_mul(u64::from(rect.height))
+}
+
+fn ratio_per_mille(numerator: u64, denominator: u64) -> u64 {
+    if denominator == 0 {
+        return 0;
+    }
+    numerator.saturating_mul(1000) / denominator
+}
+
+fn remote_rdp_helper_graphics_diagnostics_enabled() -> bool {
+    std::env::var_os(RDP_GRAPHICS_DIAGNOSTICS_ENV).is_some()
 }
 
 fn send_client_rdp_event(
@@ -1538,8 +1788,11 @@ where
         {
             // The server can assign new channel IDs after reactivation; reset
             // both the decoded image and active stage before accepting pixels.
-            *image =
-                DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
+            *image = DecodedImage::new(
+                RDP_DECODED_FRAME_PIXEL_FORMAT,
+                desktop_size.width,
+                desktop_size.height,
+            );
             active_stage.set_fastpath_processor(
                 fast_path::ProcessorBuilder {
                     io_channel_id,
@@ -1562,7 +1815,7 @@ fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<ClientRdpConfig, 
     let requested_size = normalized_rdp_desktop_size(config.size);
     let width = u16::try_from(requested_size.width).unwrap_or(u16::MAX);
     let height = u16::try_from(requested_size.height).unwrap_or(u16::MAX);
-    let codecs = client_codecs_capabilities(&[])
+    let codecs = client_codecs_capabilities(RDP_CLIENT_BITMAP_CODECS)
         .map_err(|error| format!("RDP bitmap codec setup failed: {error}"))?;
     let password = config.password.expose_secret().to_string();
 
@@ -1609,11 +1862,84 @@ fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<ClientRdpConfig, 
         performance_flags: PerformanceFlags::default(),
         timezone_info: TimezoneInfo::default(),
     };
+    log_rdp_client_graphics_config(&connector);
 
     Ok(ClientRdpConfig {
         destination: ClientRdpDestination::from_parts(&config.endpoint.host, config.endpoint.port),
         connector,
     })
+}
+
+fn log_rdp_client_graphics_config(config: &connector::Config) {
+    if !remote_rdp_helper_graphics_diagnostics_enabled() {
+        return;
+    }
+
+    let codec_labels = config
+        .bitmap
+        .as_ref()
+        .map(|bitmap| rdp_bitmap_codec_labels(&bitmap.codecs))
+        .unwrap_or_else(|| "bitmap-capabilities-disabled".to_string());
+    let bitmap_summary = config.bitmap.as_ref().map(|bitmap| {
+        format!(
+            "color_depth={} lossy_compression={}",
+            bitmap.color_depth, bitmap.lossy_compression
+        )
+    });
+
+    eprintln!(
+        "[oxideterm:rdp-helper-capabilities] requested_size={}x{} scale={} compression={:?} bitmap={} codecs={}",
+        config.desktop_size.width,
+        config.desktop_size.height,
+        config.desktop_scale_factor,
+        config.compression_type,
+        bitmap_summary.unwrap_or_else(|| "disabled".to_string()),
+        codec_labels,
+    );
+}
+
+fn log_rdp_negotiated_graphics(config: &connector::Config, result: &ConnectionResult) {
+    if !remote_rdp_helper_graphics_diagnostics_enabled() {
+        return;
+    }
+
+    let codec_labels = config
+        .bitmap
+        .as_ref()
+        .map(|bitmap| rdp_bitmap_codec_labels(&bitmap.codecs))
+        .unwrap_or_else(|| "bitmap-capabilities-disabled".to_string());
+    eprintln!(
+        "[oxideterm:rdp-helper-capabilities] negotiated_size={}x{} compression={:?} server_pointer={} pointer_software={} advertised_codecs={}",
+        result.desktop_size.width,
+        result.desktop_size.height,
+        result.compression_type,
+        result.enable_server_pointer,
+        result.pointer_software_rendering,
+        codec_labels,
+    );
+}
+
+fn rdp_bitmap_codec_labels(codecs: &BitmapCodecs) -> String {
+    if codecs.0.is_empty() {
+        return "raw-bitmap-fallback".to_string();
+    }
+
+    codecs
+        .0
+        .iter()
+        .map(|codec| rdp_bitmap_codec_label(codec.id))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn rdp_bitmap_codec_label(codec_id: u8) -> &'static str {
+    match CodecId::from_u8(codec_id) {
+        Some(id) if id == CODEC_ID_NONE => "none",
+        Some(id) if id == CODEC_ID_REMOTEFX => "remotefx",
+        Some(id) if id == CODEC_ID_QOI => "qoi",
+        Some(id) if id == CODEC_ID_QOIZ => "qoiz",
+        _ => "unknown",
+    }
 }
 
 fn forward_client_rdp_request(
@@ -2941,6 +3267,14 @@ mod tests {
         let bitmap = client_config.connector.bitmap.as_ref().unwrap();
         assert!(bitmap.lossy_compression);
         assert_eq!(bitmap.color_depth, 32);
+        assert_eq!(rdp_bitmap_codec_labels(&bitmap.codecs), "remotefx");
+    }
+
+    #[test]
+    fn rdp_bitmap_codec_labels_describe_advertised_codecs() {
+        let codecs = client_codecs_capabilities(&["remotefx:on"]).unwrap();
+
+        assert_eq!(rdp_bitmap_codec_labels(&codecs), "remotefx");
     }
 
     #[test]
@@ -3206,12 +3540,94 @@ mod tests {
         )
         .expect("synced graphics updates should use dirty rectangles");
 
+        assert!(output_rx.graphics_rx.try_recv().is_err());
+        flush_queued_rdp_graphics_updates(&output_tx, &image, &mut frame_state)
+            .expect("queued dirty update should flush");
+
         match output_rx.graphics_rx.try_recv() {
             Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::FrameUpdate { update })) => {
                 assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 1, 1));
             }
             other => panic!("expected dirty frame update, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn graphics_accumulator_merges_dirty_updates_before_copying_pixels() {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let image = DecodedImage::new(PixelFormat::RgbA32, 8, 4);
+        let mut frame_state = ClientRdpFrameState {
+            graphics_sync: RdpGraphicsSyncState::Synced,
+            published_first_desktop_frame: true,
+            ..ClientRdpFrameState::default()
+        };
+
+        send_client_rdp_graphics_update(
+            &output_tx,
+            &image,
+            InclusiveRectangle {
+                left: 1,
+                top: 1,
+                right: 1,
+                bottom: 1,
+            },
+            &mut frame_state,
+        )
+        .expect("first dirty update should queue");
+        send_client_rdp_graphics_update(
+            &output_tx,
+            &image,
+            InclusiveRectangle {
+                left: 2,
+                top: 1,
+                right: 2,
+                bottom: 1,
+            },
+            &mut frame_state,
+        )
+        .expect("second dirty update should queue");
+
+        assert!(output_rx.graphics_rx.try_recv().is_err());
+        flush_queued_rdp_graphics_updates(&output_tx, &image, &mut frame_state)
+            .expect("queued dirty updates should flush");
+
+        match output_rx.graphics_rx.try_recv() {
+            Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::FrameUpdate { update })) => {
+                assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 2, 1));
+            }
+            other => panic!("expected merged dirty frame update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn graphics_accumulator_promotes_large_dirty_area_to_base_frame() {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
+        let mut frame_state = ClientRdpFrameState {
+            graphics_sync: RdpGraphicsSyncState::Synced,
+            published_first_desktop_frame: true,
+            ..ClientRdpFrameState::default()
+        };
+
+        send_client_rdp_graphics_update(
+            &output_tx,
+            &image,
+            InclusiveRectangle {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            },
+            &mut frame_state,
+        )
+        .expect("large dirty update should promote to base frame");
+
+        assert!(matches!(
+            output_rx.graphics_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Frame { .. }
+            ))
+        ));
     }
 
     #[test]
@@ -3246,6 +3662,7 @@ mod tests {
                 width: 2,
                 height: 2,
             },
+            RemoteDesktopFrameFormat::Rgba8,
         );
 
         assert_eq!(
@@ -3340,6 +3757,7 @@ mod tests {
             pending_base_frame: true,
             pending_base_frame_can_publish_ready: true,
             published_first_desktop_frame: true,
+            ..ClientRdpFrameState::default()
         };
 
         reset_graphics_base_after_reactivation(&mut frame_state);
@@ -3394,8 +3812,21 @@ mod tests {
     }
 
     #[test]
+    fn base_frame_event_uses_bgra_for_rdp_decoded_image() {
+        let image = DecodedImage::new(RDP_DECODED_FRAME_PIXEL_FORMAT, 2, 1);
+
+        match base_frame_event(&image) {
+            RemoteDesktopHelperEvent::Frame { frame } => {
+                assert_eq!(frame.format, RemoteDesktopFrameFormat::Bgra8);
+                assert_eq!(frame.bytes, vec![0, 0, 0, 0xff, 0, 0, 0, 0xff]);
+            }
+            other => panic!("expected base frame, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn full_frame_copy_sets_alpha_opaque() {
-        let bytes = opaque_rgba_bytes(&[1, 2, 3, 0, 4, 5, 6, 7]);
+        let bytes = opaque_frame_bytes(&[1, 2, 3, 0, 4, 5, 6, 7], RemoteDesktopFrameFormat::Rgba8);
 
         assert_eq!(bytes, vec![1, 2, 3, 0xff, 4, 5, 6, 0xff]);
     }

@@ -261,6 +261,8 @@ impl Default for RemoteDesktopFrameCompression {
 pub struct RemoteDesktopFrame {
     pub size: RemoteDesktopSize,
     pub format: RemoteDesktopFrameFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<u64>,
     #[serde(with = "base64_frame_bytes")]
     pub bytes: Vec<u8>,
 }
@@ -270,8 +272,14 @@ impl RemoteDesktopFrame {
         Self {
             size,
             format,
+            trace_id: None,
             bytes,
         }
+    }
+
+    pub fn with_trace_id(mut self, trace_id: u64) -> Self {
+        self.trace_id = Some(trace_id);
+        self
     }
 
     pub fn expected_len(size: RemoteDesktopSize) -> Option<usize> {
@@ -313,6 +321,8 @@ pub struct RemoteDesktopFrameUpdate {
     pub size: RemoteDesktopSize,
     pub rect: RemoteDesktopRect,
     pub format: RemoteDesktopFrameFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<u64>,
     #[serde(default)]
     pub compression: RemoteDesktopFrameCompression,
     #[serde(with = "base64_frame_bytes")]
@@ -330,9 +340,15 @@ impl RemoteDesktopFrameUpdate {
             size,
             rect,
             format,
+            trace_id: None,
             compression: RemoteDesktopFrameCompression::None,
             bytes,
         }
+    }
+
+    pub fn with_trace_id(mut self, trace_id: u64) -> Self {
+        self.trace_id = Some(trace_id);
+        self
     }
 
     pub fn expected_len(&self) -> Option<usize> {
@@ -397,6 +413,7 @@ impl RemoteDesktopFrameUpdate {
             return false;
         }
         self.rect = union;
+        self.trace_id = incoming.trace_id.or(self.trace_id);
         self.bytes = bytes;
         true
     }

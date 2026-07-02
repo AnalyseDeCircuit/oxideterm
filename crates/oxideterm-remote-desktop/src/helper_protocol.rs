@@ -302,6 +302,7 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .debug_struct("Frame")
                 .field("size", &frame.size)
                 .field("format", &frame.format)
+                .field("trace_id", &frame.trace_id)
                 .field("bytes", &format_args!("<{} bytes>", frame.bytes.len()))
                 .finish(),
             Self::FrameUpdate { update } => formatter
@@ -309,6 +310,7 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("size", &update.size)
                 .field("rect", &update.rect)
                 .field("format", &update.format)
+                .field("trace_id", &update.trace_id)
                 .field("compression", &update.compression)
                 .field("bytes", &format_args!("<{} bytes>", update.bytes.len()))
                 .finish(),
