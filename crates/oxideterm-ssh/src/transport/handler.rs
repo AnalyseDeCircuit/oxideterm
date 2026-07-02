@@ -142,6 +142,26 @@ impl NativeClientHandler {
 impl client::Handler for NativeClientHandler {
     type Error = SshTransportError;
 
+    fn kex_done(
+        &mut self,
+        _shared_secret: Option<&[u8]>,
+        names: &russh::Names,
+        _session: &mut client::Session,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        tracing::debug!(
+            kex = names.kex.as_ref(),
+            host_key_algorithm = names.key.as_str(),
+            cipher = names.cipher.as_ref(),
+            client_mac = names.client_mac.as_ref(),
+            server_mac = names.server_mac.as_ref(),
+            client_compression = compression_algorithm_label(&names.client_compression),
+            server_compression = compression_algorithm_label(&names.server_compression),
+            strict_kex = names.strict_kex(),
+            "SSH key exchange completed"
+        );
+        async { Ok(()) }
+    }
+
     async fn auth_banner(
         &mut self,
         banner: &str,
@@ -286,6 +306,14 @@ impl client::Handler for NativeClientHandler {
             registration.handler.handle_x11_forward(event).await;
         });
         Ok(())
+    }
+}
+
+fn compression_algorithm_label(compression: &russh::compression::Compression) -> &'static str {
+    match compression {
+        russh::compression::Compression::None => "none",
+        russh::compression::Compression::Zlib => "zlib",
+        russh::compression::Compression::ZlibOpenSSH => "zlib@openssh.com",
     }
 }
 

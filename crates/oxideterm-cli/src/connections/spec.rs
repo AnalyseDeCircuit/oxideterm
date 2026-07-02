@@ -173,6 +173,7 @@ pub(super) fn connection_request_from_spec(
         color: spec
             .color
             .unwrap_or_else(|| existing.and_then(|connection| connection.color.clone())),
+        icon: existing.and_then(|connection| connection.icon.clone()),
         tags: spec.tags.unwrap_or_else(|| {
             existing
                 .map(|connection| connection.tags.clone())

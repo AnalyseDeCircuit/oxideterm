@@ -19,6 +19,7 @@ oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = fa
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }
 serde.workspace = true
 serde_json.workspace = true

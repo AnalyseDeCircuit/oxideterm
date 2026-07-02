@@ -6983,6 +6983,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-quick-commands",
  "oxideterm-settings",
+ "oxideterm-ssh",
  "oxideterm-ssh-launch",
  "serde",
  "serde_json",

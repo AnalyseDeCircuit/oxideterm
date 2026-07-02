@@ -9,6 +9,10 @@ use std::{
 
 use oxideterm_cloud_sync::state::CloudSyncStateStore;
 use oxideterm_connections::ConnectionStore;
+use oxideterm_ssh::{
+    SshAlgorithmOffer, SshCapabilityLayer, SshCapabilityLimitation, SshCapabilityReport,
+    SshCapabilityStatus, ssh_capability_report,
+};
 use serde::Serialize;
 
 use crate::{
@@ -24,6 +28,7 @@ struct DiagnoseResponse {
     paths: CliPaths,
     files: Vec<FileDiagnostic>,
     loads: Vec<LoadDiagnostic>,
+    ssh: SshCapabilityReport,
 }
 
 #[derive(Serialize)]
@@ -62,6 +67,7 @@ pub fn diagnose(args: OutputArgs) -> CliResult<()> {
     let response = DiagnoseResponse {
         files: file_diagnostics(&paths),
         loads: load_diagnostics(&paths),
+        ssh: ssh_capability_report(),
         paths,
     };
 
@@ -214,6 +220,31 @@ fn format_diagnose_text(response: &DiagnoseResponse) -> String {
     for load in &response.loads {
         lines.push(format_load_text(load));
     }
+    lines.push("ssh:".to_string());
+    lines.push(format_ssh_offer_text(
+        "defaultOffer",
+        &response.ssh.default_offer,
+    ));
+    lines.push(format_ssh_offer_text(
+        "legacyCompatibilityOffer",
+        &response.ssh.legacy_compatibility_offer,
+    ));
+    lines.push(format!(
+        "  authMethods: {}",
+        response.ssh.integration.auth_methods.join(", ")
+    ));
+    lines.push(format!(
+        "  channelFeatures: {}",
+        response.ssh.integration.channel_features.join(", ")
+    ));
+    lines.push(format!(
+        "  opensshExtensions: {}",
+        response.ssh.integration.openssh_extensions.join(", ")
+    ));
+    lines.push("  limitations:".to_string());
+    for limitation in &response.ssh.limitations {
+        lines.push(format_ssh_limitation_text(limitation));
+    }
     lines.join("\n")
 }
 
@@ -232,6 +263,46 @@ fn format_file_text(file: &FileDiagnostic) -> String {
 fn format_load_text(load: &LoadDiagnostic) -> String {
     let error = load.error.as_deref().unwrap_or("-");
     format!("  {}: ok={} error={}", load.name, load.ok, error)
+}
+
+fn format_ssh_offer_text(name: &str, offer: &SshAlgorithmOffer) -> String {
+    [
+        format!("  {name}:"),
+        format!("    kex: {}", offer.kex.join(", ")),
+        format!(
+            "    hostKeyAlgorithms: {}",
+            offer.host_key_algorithms.join(", ")
+        ),
+        format!("    ciphers: {}", offer.ciphers.join(", ")),
+        format!("    macs: {}", offer.macs.join(", ")),
+        format!("    compression: {}", offer.compression.join(", ")),
+    ]
+    .join("\n")
+}
+
+fn format_ssh_limitation_text(limitation: &SshCapabilityLimitation) -> String {
+    format!(
+        "    {}: layer={} status={} note={}",
+        limitation.capability,
+        format_ssh_capability_layer(limitation.layer),
+        format_ssh_capability_status(limitation.status),
+        limitation.note
+    )
+}
+
+fn format_ssh_capability_layer(layer: SshCapabilityLayer) -> &'static str {
+    match layer {
+        SshCapabilityLayer::RusshCore => "russh-core",
+        SshCapabilityLayer::OxideTermIntegration => "oxideterm-integration",
+    }
+}
+
+fn format_ssh_capability_status(status: SshCapabilityStatus) -> &'static str {
+    match status {
+        SshCapabilityStatus::Unsupported => "unsupported",
+        SshCapabilityStatus::Partial => "partial",
+        SshCapabilityStatus::OptIn => "opt-in",
+    }
 }
 
 #[cfg(test)]
@@ -259,5 +330,22 @@ mod tests {
         };
 
         assert_eq!(format_load_text(&load), "  settingsJson: ok=true error=-");
+    }
+
+    #[test]
+    fn formats_ssh_offer_with_algorithm_categories() {
+        let offer = SshAlgorithmOffer {
+            kex: vec!["curve25519-sha256".to_string()],
+            host_key_algorithms: vec!["ssh-ed25519".to_string()],
+            ciphers: vec!["chacha20-poly1305@openssh.com".to_string()],
+            macs: vec!["hmac-sha2-256-etm@openssh.com".to_string()],
+            compression: vec!["none".to_string()],
+        };
+
+        let text = format_ssh_offer_text("defaultOffer", &offer);
+
+        assert!(text.contains("defaultOffer"));
+        assert!(text.contains("kex: curve25519-sha256"));
+        assert!(text.contains("hostKeyAlgorithms: ssh-ed25519"));
     }
 }

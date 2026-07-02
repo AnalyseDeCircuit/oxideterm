@@ -8,6 +8,7 @@
 //! and reconnect orchestration. The actual russh PTY transport plugs into this
 //! crate without leaking SSH state into GPUI views.
 
+mod capability;
 mod config;
 mod connection_registry;
 mod host_key;
@@ -17,6 +18,10 @@ mod router;
 mod transport;
 mod upstream_proxy;
 
+pub use capability::{
+    SshAlgorithmOffer, SshCapabilityLayer, SshCapabilityLimitation, SshCapabilityReport,
+    SshCapabilityStatus, SshIntegrationCapabilities, ssh_capability_report,
+};
 pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,

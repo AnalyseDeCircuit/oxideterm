@@ -498,6 +498,7 @@ fn write_connection_secret(
             proxy_chain: connection.proxy_chain,
             upstream_proxy: connection.upstream_proxy,
             color: connection.color,
+            icon: connection.icon,
             tags: connection.tags,
             agent_forwarding: connection.options.agent_forwarding,
             legacy_ssh_compatibility: connection.options.legacy_ssh_compatibility,
