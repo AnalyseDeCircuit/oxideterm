@@ -59,6 +59,7 @@ pub struct RemoteDesktopViewState {
     message: Option<String>,
     error_category: Option<RemoteDesktopErrorCategory>,
     frame_image: Option<CachedRemoteDesktopFrameImage>,
+    texture_generation: u64,
     corrupted_frame: Option<CorruptedRemoteDesktopFrame>,
     cursor: RemoteDesktopCursorState,
     cursor_image: Option<Arc<RenderImage>>,
@@ -76,6 +77,7 @@ impl PartialEq for RemoteDesktopViewState {
             && self.size == other.size
             && self.message == other.message
             && self.error_category == other.error_category
+            && self.texture_generation == other.texture_generation
             && self.frame_image.as_ref().map(|frame| frame.size)
                 == other.frame_image.as_ref().map(|frame| frame.size)
             && self.corrupted_frame == other.corrupted_frame
@@ -90,6 +92,7 @@ impl PartialEq for RemoteDesktopViewState {
 #[derive(Clone)]
 struct CachedRemoteDesktopFrameImage {
     size: RemoteDesktopSize,
+    generation: u64,
     bytes: Vec<u8>,
     texture: Arc<DynamicTexture>,
     pending_texture_updates: Arc<Mutex<Vec<RemoteDesktopTextureUpdate>>>,
@@ -107,6 +110,8 @@ pub struct RemoteDesktopFrameApplyStats {
     pub events: usize,
     pub full_frames: usize,
     pub frame_updates: usize,
+    pub first_trace_id: Option<u64>,
+    pub last_trace_id: Option<u64>,
     pub dirty_updates_applied: usize,
     pub dirty_updates_rejected: usize,
     pub full_update_recoveries: usize,
@@ -115,11 +120,15 @@ pub struct RemoteDesktopFrameApplyStats {
     pub dirty_frame_pixels: u64,
     pub dirty_tiles_refreshed: usize,
     pub frame_tiles_created: usize,
+    pub pending_texture_updates: usize,
+    pub pending_texture_upload_bytes: usize,
+    pub full_frame_texture_promotions: usize,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct RemoteDesktopFrameSurface {
     pub(crate) size: RemoteDesktopSize,
+    pub(crate) generation: u64,
     pub(crate) texture: Arc<DynamicTexture>,
     pub(crate) pending_texture_updates: Arc<Mutex<Vec<RemoteDesktopTextureUpdate>>>,
 }
@@ -130,11 +139,19 @@ pub(crate) struct RemoteDesktopTextureUpdate {
     pub(crate) bytes: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct CachedRemoteDesktopTextureApplyStats {
+    pending_texture_updates: usize,
+    pending_texture_upload_bytes: usize,
+    promoted_to_full_frame: bool,
+}
+
 impl fmt::Debug for CachedRemoteDesktopFrameImage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CachedRemoteDesktopFrameImage")
             .field("size", &self.size)
+            .field("generation", &self.generation)
             .field(
                 "pending_texture_updates",
                 &self
@@ -148,7 +165,7 @@ impl fmt::Debug for CachedRemoteDesktopFrameImage {
 }
 
 impl CachedRemoteDesktopFrameImage {
-    fn from_frame(frame: &RemoteDesktopFrame) -> Option<Self> {
+    fn from_frame(frame: &RemoteDesktopFrame, generation: u64) -> Option<Self> {
         if !frame.is_complete() {
             return None;
         }
@@ -165,6 +182,7 @@ impl CachedRemoteDesktopFrameImage {
         }]));
         Some(Self {
             size: frame.size,
+            generation,
             bytes,
             texture,
             pending_texture_updates,
@@ -172,21 +190,28 @@ impl CachedRemoteDesktopFrameImage {
     }
 
     fn apply_update(&mut self, update: &RemoteDesktopFrameUpdate) -> bool {
+        self.apply_update_with_stats(update).is_some()
+    }
+
+    fn apply_update_with_stats(
+        &mut self,
+        update: &RemoteDesktopFrameUpdate,
+    ) -> Option<CachedRemoteDesktopTextureApplyStats> {
         if update.size != self.size
             || update.compression != RemoteDesktopFrameCompression::None
             || !update.is_complete()
         {
-            return false;
+            return None;
         }
 
         // Keep the CPU-side backing buffer in GPUI's BGRA order. The paint
         // phase drains the pending queue into one stable GPU texture.
         if !copy_update_to_bgra_backing(&mut self.bytes, self.size.width, update) {
-            return false;
+            return None;
         }
 
         let Ok(mut pending_updates) = self.pending_texture_updates.lock() else {
-            return false;
+            return None;
         };
         if pending_updates
             .iter()
@@ -196,7 +221,7 @@ impl CachedRemoteDesktopFrameImage {
             // be folded into that upload. This avoids bursty login/animation
             // periods from turning one pending base frame into many GPU writes.
             replace_pending_updates_with_full_frame(&mut pending_updates, self.size, &self.bytes);
-            return true;
+            return Some(pending_texture_stats(&pending_updates, true));
         }
 
         let pending_dirty_pixels = pending_updates
@@ -213,22 +238,23 @@ impl CachedRemoteDesktopFrameImage {
 
         if should_promote_to_full_frame {
             replace_pending_updates_with_full_frame(&mut pending_updates, self.size, &self.bytes);
-            return true;
+            return Some(pending_texture_stats(&pending_updates, true));
         }
 
         let Some(bytes) = convert_update_to_gpui_bgra(update) else {
-            return false;
+            return None;
         };
         pending_updates.push(RemoteDesktopTextureUpdate {
             rect: update.rect,
             bytes,
         });
-        true
+        Some(pending_texture_stats(&pending_updates, false))
     }
 
     fn surface(&self) -> RemoteDesktopFrameSurface {
         RemoteDesktopFrameSurface {
             size: self.size,
+            generation: self.generation,
             texture: Arc::clone(&self.texture),
             pending_texture_updates: Arc::clone(&self.pending_texture_updates),
         }
@@ -245,6 +271,7 @@ impl RemoteDesktopViewState {
             message: None,
             error_category: None,
             frame_image: None,
+            texture_generation: 0,
             corrupted_frame: None,
             cursor: RemoteDesktopCursorState::default(),
             cursor_image: None,
@@ -278,7 +305,8 @@ impl RemoteDesktopViewState {
                 self.status = RemoteDesktopSessionStatus::Connected;
                 self.size = Some(frame.size);
                 self.retire_frame_image();
-                self.frame_image = CachedRemoteDesktopFrameImage::from_frame(&frame);
+                let generation = self.advance_texture_generation();
+                self.frame_image = CachedRemoteDesktopFrameImage::from_frame(&frame, generation);
                 self.corrupted_frame =
                     self.frame_image
                         .is_none()
@@ -376,23 +404,39 @@ impl RemoteDesktopViewState {
             stats.events += 1;
             match event {
                 RemoteDesktopHelperEvent::Frame { frame } => {
+                    record_frame_trace(&mut stats, frame.trace_id);
                     self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
                     stats.full_frames += 1;
                     if self.frame_image.is_some() {
                         stats.frame_tiles_created += 1;
+                        if let Some(frame_image) = self.frame_image.as_ref()
+                            && let Ok(updates) = frame_image.pending_texture_updates.lock()
+                        {
+                            let pending = pending_texture_stats(&updates, false);
+                            stats.pending_texture_updates = pending.pending_texture_updates;
+                            stats.pending_texture_upload_bytes =
+                                pending.pending_texture_upload_bytes;
+                        }
                     } else {
                         stats.corrupted_frames += 1;
                     }
                 }
                 RemoteDesktopHelperEvent::FrameUpdate { update } => {
                     stats.frame_updates += 1;
+                    record_frame_trace(&mut stats, update.trace_id);
                     if let Some(frame_image) = self.frame_image.as_mut()
-                        && frame_image.apply_update(&update)
+                        && let Some(texture_stats) = frame_image.apply_update_with_stats(&update)
                     {
                         stats.dirty_updates_applied += 1;
                         stats.dirty_rect_pixels += frame_rect_pixels(update.rect);
                         stats.dirty_frame_pixels += frame_size_pixels(update.size);
                         stats.dirty_tiles_refreshed += 1;
+                        stats.pending_texture_updates = texture_stats.pending_texture_updates;
+                        stats.pending_texture_upload_bytes =
+                            texture_stats.pending_texture_upload_bytes;
+                        if texture_stats.promoted_to_full_frame {
+                            stats.full_frame_texture_promotions += 1;
+                        }
                         self.status = RemoteDesktopSessionStatus::Connected;
                         self.size = Some(update.size);
                         self.message = None;
@@ -401,10 +445,19 @@ impl RemoteDesktopViewState {
                         self.pending_resize = None;
                     } else if let Some(frame) = frame_from_full_update(&update) {
                         stats.full_update_recoveries += 1;
+                        record_frame_trace(&mut stats, frame.trace_id);
                         self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
                         stats.full_frames += 1;
                         if self.frame_image.is_some() {
                             stats.frame_tiles_created += 1;
+                            if let Some(frame_image) = self.frame_image.as_ref()
+                                && let Ok(updates) = frame_image.pending_texture_updates.lock()
+                            {
+                                let pending = pending_texture_stats(&updates, false);
+                                stats.pending_texture_updates = pending.pending_texture_updates;
+                                stats.pending_texture_upload_bytes =
+                                    pending.pending_texture_upload_bytes;
+                            }
                         } else {
                             stats.corrupted_frames += 1;
                         }
@@ -473,6 +526,10 @@ impl RemoteDesktopViewState {
         self.frame_image.as_ref().map(|cached| cached.surface())
     }
 
+    pub fn texture_generation(&self) -> u64 {
+        self.texture_generation
+    }
+
     pub fn cursor(&self) -> &RemoteDesktopCursorState {
         &self.cursor
     }
@@ -487,6 +544,13 @@ impl RemoteDesktopViewState {
         if let Some(image) = self.cursor_image.take() {
             self.retired_images.push(image);
         }
+    }
+
+    fn advance_texture_generation(&mut self) -> u64 {
+        // Texture generations are diagnostic and synchronization boundaries,
+        // so wrapping would make stale and current surfaces indistinguishable.
+        self.texture_generation = self.texture_generation.saturating_add(1);
+        self.texture_generation
     }
 }
 
@@ -518,11 +582,35 @@ fn frame_from_full_update(update: &RemoteDesktopFrameUpdate) -> Option<RemoteDes
         return None;
     }
 
-    Some(RemoteDesktopFrame::new(
-        update.size,
-        update.format,
-        update.bytes.clone(),
-    ))
+    let frame = RemoteDesktopFrame::new(update.size, update.format, update.bytes.clone());
+    Some(match update.trace_id {
+        Some(trace_id) => frame.with_trace_id(trace_id),
+        None => frame,
+    })
+}
+
+fn pending_texture_stats(
+    updates: &[RemoteDesktopTextureUpdate],
+    promoted_to_full_frame: bool,
+) -> CachedRemoteDesktopTextureApplyStats {
+    CachedRemoteDesktopTextureApplyStats {
+        pending_texture_updates: updates.len(),
+        pending_texture_upload_bytes: updates
+            .iter()
+            .map(|update| update.bytes.len())
+            .sum::<usize>(),
+        promoted_to_full_frame,
+    }
+}
+
+fn record_frame_trace(stats: &mut RemoteDesktopFrameApplyStats, trace_id: Option<u64>) {
+    let Some(trace_id) = trace_id else {
+        return;
+    };
+    if stats.first_trace_id.is_none() {
+        stats.first_trace_id = Some(trace_id);
+    }
+    stats.last_trace_id = Some(trace_id);
 }
 
 fn convert_update_to_gpui_bgra(update: &RemoteDesktopFrameUpdate) -> Option<Vec<u8>> {
@@ -539,9 +627,9 @@ fn convert_update_to_gpui_bgra(update: &RemoteDesktopFrameUpdate) -> Option<Vec<
             }
         }
         RemoteDesktopFrameFormat::Bgra8 => {
-            for pixel in update.bytes.chunks_exact(4) {
-                bytes.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 0xff]);
-            }
+            // RDP helper normalizes BGRA frame alpha before publishing updates,
+            // so this path can avoid a second per-pixel rewrite.
+            return Some(update.bytes.clone());
         }
     }
     Some(bytes)
@@ -698,6 +786,14 @@ mod tests {
         )
     }
 
+    fn frame_generation(state: &RemoteDesktopViewState) -> u64 {
+        state
+            .frame_image
+            .as_ref()
+            .expect("frame should be cached")
+            .generation
+    }
+
     fn pending_texture_update_count(state: &RemoteDesktopViewState) -> usize {
         state
             .frame_image
@@ -761,6 +857,69 @@ mod tests {
         assert!(state.snapshot().has_frame);
         assert_eq!(state.frame_size(), Some(size));
         assert!(state.frame_surface().is_some());
+        assert_eq!(state.texture_generation(), 1);
+        assert_eq!(frame_generation(&state), 1);
+    }
+
+    #[test]
+    fn base_frame_replacement_advances_texture_generation() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let size = RemoteDesktopSize {
+            width: 1,
+            height: 1,
+        };
+
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![0, 0, 0, 0xff],
+            ),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 1, 1, 0xff],
+            ),
+        });
+
+        let surface = state.frame_surface().expect("frame should be cached");
+        assert_eq!(state.texture_generation(), 2);
+        assert_eq!(frame_generation(&state), 2);
+        assert_eq!(surface.generation, 2);
+    }
+
+    #[test]
+    fn corrupted_frame_advances_texture_generation_before_recovery() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let size = RemoteDesktopSize {
+            width: 1,
+            height: 1,
+        };
+
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![0, 0, 0, 0xff],
+            ),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(size, RemoteDesktopFrameFormat::Rgba8, vec![0]),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(0, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![2, 2, 2, 0xff],
+            ),
+        });
+
+        assert_eq!(state.texture_generation(), 3);
+        assert_eq!(frame_generation(&state), 3);
+        assert_eq!(state.corrupted_frame(), None);
     }
 
     #[test]

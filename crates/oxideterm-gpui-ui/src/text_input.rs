@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, Div, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div,
-    prelude::*, px, rgb, rgba,
+    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Styled, StyledText, Window,
+    div, fill, point, prelude::*, px, rgb, rgba, size,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -157,15 +157,32 @@ pub fn text_input_with_content_align(
         marked.to_string()
     };
     let visually_empty = empty && marked.is_empty();
-    let input_range = if view.focused && !empty && marked.is_empty() {
+    let raw_input_range = if view.focused {
         view.selected_range.or_else(|| {
             view.selected_all
                 .then_some(0..view.value.encode_utf16().count())
         })
     } else {
         None
-    }
-    .map(|range| text_input_visual_range(view.value, view.secret, range));
+    };
+    let input_range = if !empty && marked.is_empty() {
+        raw_input_range
+            .clone()
+            .map(|range| text_input_visual_range(view.value, view.secret, range))
+    } else {
+        None
+    };
+    let marked_range = if view.focused && !marked.is_empty() {
+        let end = view.value.encode_utf16().count();
+        let range = raw_input_range.clone().unwrap_or(end..end);
+        Some(text_input_visual_range(
+            view.value,
+            view.secret,
+            range.start.min(end)..range.end.min(end),
+        ))
+    } else {
+        None
+    };
     let selection_range = input_range.clone().filter(|range| range.start < range.end);
     let caret_offset = input_range
         .as_ref()
@@ -173,6 +190,7 @@ pub fn text_input_with_content_align(
         .map(|range| range.start);
     let show_selection = selection_range.is_some();
     let show_positioned_caret = caret_offset.is_some() && !show_selection;
+    let show_marked_text = marked_range.is_some();
 
     div()
         .h(px(tokens.metrics.ui_control_height))
@@ -210,24 +228,31 @@ pub fn text_input_with_content_align(
             row.when(view.focused && visually_empty, |row| {
                 row.child(text_caret(tokens, view.caret_visible))
             })
-            .child(text_input_value_segments(
-                tokens,
-                &display,
-                visually_empty,
-                selection_range,
-                caret_offset,
-                view.caret_visible,
-            ))
-            .when(view.focused && !marked.is_empty(), |row| {
-                row.child(
-                    div()
-                        .underline()
-                        .text_color(rgb(theme.text))
-                        .child(marked_display),
-                )
+            .child({
+                if let Some(marked_range) = marked_range {
+                    text_input_value_segments_with_marked_text(
+                        tokens,
+                        &display,
+                        &marked_display,
+                        marked_range,
+                    )
+                } else {
+                    text_input_value_segments(
+                        tokens,
+                        &display,
+                        visually_empty,
+                        selection_range,
+                        caret_offset,
+                        view.caret_visible,
+                    )
+                }
             })
             .when(
-                view.focused && !visually_empty && !show_selection && !show_positioned_caret,
+                view.focused
+                    && !visually_empty
+                    && !show_selection
+                    && !show_positioned_caret
+                    && !show_marked_text,
                 |row| row.child(text_caret(tokens, view.caret_visible)),
             )
         })
@@ -253,20 +278,6 @@ pub fn text_caret(tokens: &ThemeTokens, visible: bool) -> Div {
         )
 }
 
-pub fn text_caret_overlay_at_text_end(tokens: &ThemeTokens, visible: bool) -> Div {
-    // Browser carets are a paint overlay at the text insertion point. This
-    // helper anchors the bar to the end of an already-laid-out text segment so
-    // the caret itself never changes the text row's measured width.
-    div()
-        .absolute()
-        .top_0()
-        .right(px(0.0))
-        .w(px(tokens.metrics.form_caret_width))
-        .h(px(tokens.metrics.form_caret_height))
-        .bg(rgb(tokens.ui.accent))
-        .opacity(if visible { 1.0 } else { 0.0 })
-}
-
 pub fn text_input_value_segments(
     tokens: &ThemeTokens,
     display: &str,
@@ -286,6 +297,40 @@ pub fn text_input_value_segments(
     )
 }
 
+fn text_input_value_segments_with_marked_text(
+    tokens: &ThemeTokens,
+    display: &str,
+    marked_display: &str,
+    marked_range: Range<usize>,
+) -> Div {
+    let theme = tokens.ui;
+    let (before, after) = text_input_marked_display_parts(display, marked_range);
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .text_color(rgb(theme.text))
+        .when(!before.is_empty(), |row| row.child(before))
+        .child(
+            div()
+                .underline()
+                .text_color(rgb(theme.text))
+                .child(marked_display.to_string()),
+        )
+        .when(!after.is_empty(), |row| row.child(after))
+}
+
+fn text_input_marked_display_parts(display: &str, marked_range: Range<usize>) -> (String, String) {
+    let len = display.encode_utf16().count();
+    let start = marked_range.start.min(len);
+    let end = marked_range.end.min(len);
+    (
+        utf16_slice(display, 0..start),
+        utf16_slice(display, end..len),
+    )
+}
+
 pub fn text_input_value_segments_with_color(
     tokens: &ThemeTokens,
     display: &str,
@@ -301,70 +346,189 @@ pub fn text_input_value_segments_with_color(
     } else {
         rgb(text_color.unwrap_or(theme.text))
     });
-
-    let Some(range) = selection_range else {
-        if let Some(offset) = caret_offset {
-            return text_input_value_with_caret(tokens, base, display, offset, caret_visible);
-        }
-        return base.child(display.to_string());
-    };
-
     let len = display.encode_utf16().count();
-    let start = range.start.min(len);
-    let end = range.end.min(len);
-    if start >= end {
+    let selection_range = selection_range.and_then(|range| text_input_clamped_range(len, range));
+    let caret_offset = caret_offset.map(|offset| offset.min(len));
+
+    if selection_range.is_none() && caret_offset.is_none() {
         return base.child(display.to_string());
     }
+    let has_selection = selection_range.is_some();
+    let caret_offset = if has_selection { None } else { caret_offset };
 
-    let before = utf16_slice(display, 0..start);
-    let selected = utf16_slice(display, start..end);
-    let after = utf16_slice(display, end..len);
-
-    base.flex()
-        .flex_row()
-        .items_center()
-        .when(!before.is_empty(), |row| row.child(before))
-        .child(
-            div()
-                .bg(rgba((theme.accent << 8) | TEXT_INPUT_SELECTION_BG_ALPHA))
-                .text_color(rgb(theme.text))
-                .child(selected),
-        )
-        .when(!after.is_empty(), |row| row.child(after))
+    text_input_value_with_overlays(
+        tokens,
+        base,
+        display,
+        selection_range,
+        caret_offset,
+        caret_visible,
+    )
 }
 
-fn text_input_value_with_caret(
+fn text_input_value_with_overlays(
     tokens: &ThemeTokens,
     base: Div,
     display: &str,
-    offset: usize,
+    selection_range: Option<Range<usize>>,
+    caret_offset: Option<usize>,
     caret_visible: bool,
 ) -> Div {
-    let len = display.encode_utf16().count();
-    let offset = offset.min(len);
-    let before = utf16_slice(display, 0..offset);
-    let after = utf16_slice(display, offset..len);
-    let before_empty = before.is_empty();
+    base.min_w_0().child(TextInputOverlayValue::new(
+        tokens,
+        display,
+        selection_range,
+        caret_offset,
+        caret_visible,
+    ))
+}
 
-    let row = base
-        .flex()
-        .flex_row()
-        .items_center()
-        .when(!before_empty, |row| {
-            row.child(
-                div()
-                    .relative()
-                    .child(before)
-                    .child(text_caret_overlay_at_text_end(tokens, caret_visible)),
-            )
-        });
+struct TextInputOverlayValue {
+    display: String,
+    text: StyledText,
+    selection_range: Option<Range<usize>>,
+    caret_offset: Option<usize>,
+    caret_visible: bool,
+    accent: u32,
+    caret_width: f32,
+    caret_height: f32,
+}
 
-    if before_empty {
-        row.child(text_caret(tokens, caret_visible))
-            .when(!after.is_empty(), |row| row.child(after))
-    } else {
-        row.when(!after.is_empty(), |row| row.child(after))
+impl TextInputOverlayValue {
+    fn new(
+        tokens: &ThemeTokens,
+        display: &str,
+        selection_range: Option<Range<usize>>,
+        caret_offset: Option<usize>,
+        caret_visible: bool,
+    ) -> Self {
+        Self {
+            display: display.to_string(),
+            text: StyledText::new(display.to_string()),
+            selection_range,
+            caret_offset,
+            caret_visible,
+            accent: tokens.ui.accent,
+            caret_width: tokens.metrics.form_caret_width,
+            caret_height: tokens.metrics.form_caret_height,
+        }
     }
+
+    fn byte_index_for_offset(&self, offset: usize) -> usize {
+        byte_index_for_utf16(&self.display, offset)
+    }
+}
+
+impl IntoElement for TextInputOverlayValue {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for TextInputOverlayValue {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        self.text.request_layout(id, inspector_id, window, cx)
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        self.text
+            .prepaint(id, inspector_id, bounds, request_layout, window, cx)
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let layout = self.text.layout();
+        let line_height = layout.line_height();
+        let overlay_height = px(self.caret_height).min(line_height);
+        let overlay_y = bounds.origin.y + (line_height - overlay_height) / 2.0;
+
+        if let Some(range) = self.selection_range.as_ref() {
+            let start_index = self.byte_index_for_offset(range.start);
+            let end_index = self.byte_index_for_offset(range.end);
+            if let (Some(start), Some(end)) = (
+                layout.position_for_index(start_index),
+                layout.position_for_index(end_index),
+            ) {
+                let left = start.x.min(end.x);
+                let width = (end.x - start.x).abs().max(px(self.caret_width));
+                // Selection is painted beneath the shaped text so it never
+                // changes layout width or kerning.
+                window.paint_quad(fill(
+                    Bounds {
+                        origin: point(left, overlay_y),
+                        size: size(width, overlay_height),
+                    },
+                    rgba((self.accent << 8) | TEXT_INPUT_SELECTION_BG_ALPHA),
+                ));
+            }
+        }
+
+        let caret_bounds = if self.caret_visible {
+            self.caret_offset
+                .and_then(|offset| layout.position_for_index(self.byte_index_for_offset(offset)))
+                .map(|position| Bounds {
+                    origin: point(position.x, overlay_y),
+                    size: size(px(self.caret_width), overlay_height),
+                })
+        } else {
+            None
+        };
+
+        self.text.paint(
+            id,
+            inspector_id,
+            bounds,
+            request_layout,
+            prepaint,
+            window,
+            cx,
+        );
+
+        if let Some(caret_bounds) = caret_bounds {
+            window.paint_quad(fill(caret_bounds, rgb(self.accent)));
+        }
+    }
+}
+
+fn text_input_clamped_range(len: usize, range: Range<usize>) -> Option<Range<usize>> {
+    let start = range.start.min(len);
+    let end = range.end.min(len);
+    (start < end).then_some(start..end)
 }
 
 fn utf16_slice(value: &str, range: Range<usize>) -> String {
@@ -419,7 +583,7 @@ fn secret_mask_offset_for_utf16(raw_value: &str, offset: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{text_input_secret_mask, text_input_visual_range};
+    use super::{text_input_marked_display_parts, text_input_secret_mask, text_input_visual_range};
 
     #[test]
     fn secret_mask_uses_one_visible_glyph_per_scalar() {
@@ -435,5 +599,21 @@ mod tests {
         assert_eq!(text_input_visual_range(value, true, 1..3), 1..2);
         assert_eq!(text_input_visual_range(value, true, 3..3), 2..2);
         assert_eq!(text_input_visual_range(value, false, 1..3), 1..3);
+    }
+
+    #[test]
+    fn marked_display_parts_insert_at_utf16_position() {
+        assert_eq!(
+            text_input_marked_display_parts("abcd", 2..2),
+            ("ab".to_string(), "cd".to_string())
+        );
+    }
+
+    #[test]
+    fn marked_display_parts_replace_selected_utf16_range() {
+        assert_eq!(
+            text_input_marked_display_parts("a🔒b", 1..3),
+            ("a".to_string(), "b".to_string())
+        );
     }
 }

@@ -94,7 +94,11 @@ impl PlatformAtlas for BladeAtlas {
             let Some((size, bytes)) = build()? else {
                 return Ok(None);
             };
-            let tile = lock.allocate(size, key.texture_kind());
+            let tile = if matches!(key, AtlasKey::DynamicTexture(_)) {
+                lock.allocate_dedicated(size, key.texture_kind())
+            } else {
+                lock.allocate(size, key.texture_kind())
+            };
             lock.upload_texture(tile.texture_id, tile.bounds, &bytes);
             lock.tiles_by_key.insert(key.clone(), tile.clone());
             Ok(Some(tile))
@@ -140,6 +144,18 @@ impl PlatformAtlas for BladeAtlas {
 }
 
 impl BladeAtlasState {
+    fn allocate_dedicated(
+        &mut self,
+        size: Size<DevicePixels>,
+        texture_kind: AtlasTextureKind,
+    ) -> AtlasTile {
+        // Remote desktop dynamic textures are large mutable framebuffers.
+        // Give each one a dedicated backing texture so frequent dirty uploads
+        // do not contend with ordinary image, icon, and glyph atlas entries.
+        let texture = self.push_texture_with_size(size, texture_kind);
+        texture.allocate(size).unwrap()
+    }
+
     fn allocate(&mut self, size: Size<DevicePixels>, texture_kind: AtlasTextureKind) -> AtlasTile {
         {
             let textures = &mut self.storage[texture_kind];
@@ -168,6 +184,14 @@ impl BladeAtlasState {
         };
 
         let size = min_size.max(&DEFAULT_ATLAS_SIZE);
+        self.push_texture_with_size(size, kind)
+    }
+
+    fn push_texture_with_size(
+        &mut self,
+        size: Size<DevicePixels>,
+        kind: AtlasTextureKind,
+    ) -> &mut BladeAtlasTexture {
         let format;
         let usage;
         match kind {

@@ -851,7 +851,7 @@ pub(crate) struct WorkspaceApp {
     selectable_text_autoscroll_scheduled: bool,
     selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,
     mermaid_zoom: Option<MermaidZoomState>,
-    ime_marked_text: Option<String>,
+    ime_marked_text: Option<ime::WorkspaceImeMarkedText>,
     pending_platform_text_commit: Option<ime::PendingPlatformTextCommit>,
     next_platform_text_commit_generation: u64,
     selected_ime_target: Option<WorkspaceImeTarget>,

@@ -126,9 +126,6 @@ impl WorkspaceApp {
                             line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
                         },
                     )
-                    .when(focused && is_last_line && !showing_placeholder && !marked_text.is_empty(), |line| {
-                        line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                    }),
             );
         }
         if focused && !marked_text.is_empty() {
@@ -1248,52 +1245,21 @@ fn ai_input_line_segments(
     caret_offset: Option<usize>,
     caret_visible: bool,
 ) -> Div {
-    // The shared caret is a zero-width anchor with an absolutely painted 1px
-    // bar. Keep clipping on the editor/frame, not on this text segment, or a
-    // caret placed after the final character can be clipped away.
-    let base = div().min_w_0().max_w_full().flex().items_center();
-    let len = line.encode_utf16().count();
-    if let Some(range) = selection_range {
-        let start = range.start.min(len);
-        let end = range.end.min(len);
-        if start < end {
-            let before = ai_utf16_slice(line, 0..start);
-            let selected = ai_utf16_slice(line, start..end);
-            let after = ai_utf16_slice(line, end..len);
-            return base
-                .when(!before.is_empty(), |row| row.child(before))
-                .child(
-                    div()
-                        .bg(rgba((tokens.ui.accent << 8) | AI_INPUT_SELECTION_BG_ALPHA))
-                        .text_color(rgb(tokens.ui.text))
-                        .child(selected),
-                )
-                .when(!after.is_empty(), |row| row.child(after));
-        }
-    }
-
-    if let Some(offset) = caret_offset {
-        let offset = offset.min(len);
-        let before = ai_utf16_slice(line, 0..offset);
-        let after = ai_utf16_slice(line, offset..len);
-        let before_empty = before.is_empty();
-        let row = base.when(!before_empty, |row| {
-            row.child(
-                div()
-                    .relative()
-                    .child(before)
-                    .child(text_caret_overlay_at_text_end(tokens, caret_visible)),
-            )
-        });
-        return if before_empty {
-            row.child(text_caret(tokens, caret_visible))
-                .when(!after.is_empty(), |row| row.child(after))
-        } else {
-            row.when(!after.is_empty(), |row| row.child(after))
-        };
-    }
-
-    base.child(line.to_string())
+    // Reuse the shared input renderer so caret and selection overlays never
+    // split the editable line into separate layout text runs.
+    text_input_value_segments_with_color(
+        tokens,
+        line,
+        false,
+        selection_range,
+        caret_offset,
+        caret_visible,
+        Some(tokens.ui.text),
+    )
+    .min_w_0()
+    .max_w_full()
+    .flex()
+    .items_center()
 }
 
 #[derive(Clone, Copy)]
@@ -1394,25 +1360,6 @@ fn ai_input_char_columns(ch: char) -> usize {
         2
     }
 }
-
-fn ai_utf16_slice(value: &str, range: std::ops::Range<usize>) -> String {
-    let start = ai_byte_index_for_utf16(value, range.start);
-    let end = ai_byte_index_for_utf16(value, range.end);
-    value[start..end].to_string()
-}
-
-fn ai_byte_index_for_utf16(value: &str, offset: usize) -> usize {
-    let mut utf16_count = 0;
-    for (byte_index, ch) in value.char_indices() {
-        if utf16_count >= offset {
-            return byte_index;
-        }
-        utf16_count += ch.len_utf16();
-    }
-    value.len()
-}
-
-const AI_INPUT_SELECTION_BG_ALPHA: u32 = 0x40; // Mirrors the shared Tauri-style text selection tint.
 
 fn ai_format_tokens(tokens: usize) -> String {
     if tokens >= 1000 {

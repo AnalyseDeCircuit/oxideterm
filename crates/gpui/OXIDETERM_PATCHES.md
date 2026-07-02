@@ -32,7 +32,7 @@ dynamic texture capability needed by the remote desktop renderer:
 remote framebuffer backing buffer
   -> dirty rectangle accumulator
   -> GPUI DynamicTexture
-  -> platform atlas sub-region upload
+  -> dedicated platform texture sub-region upload
   -> one painted desktop sprite
 ```
 
@@ -58,17 +58,26 @@ Keep these patches when updating GPUI:
   - Add `Window::paint_dynamic_texture(...)`.
   - Add `Window::drop_dynamic_texture(...)`.
 - `src/platform/mac/metal_atlas.rs`
+  - Allocate each `DynamicTexture` into its own Metal texture instead of a
+    shared sprite atlas page.
   - Implement `PlatformAtlas::update(...)` using the existing Metal region
     upload path.
 - `src/platform/windows/directx_atlas.rs`
+  - Allocate each `DynamicTexture` into its own DirectX texture instead of a
+    shared sprite atlas page.
   - Implement `PlatformAtlas::update(...)` using the existing DirectX
     `UpdateSubresource` path.
 - `src/platform/blade/blade_atlas.rs`
+  - Allocate each `DynamicTexture` into its own Blade texture instead of a
+    shared sprite atlas page.
   - Implement `PlatformAtlas::update(...)` by enqueueing a region upload on the
     existing Blade atlas upload belt.
 - `src/platform/test/window.rs`
   - Implement the test atlas `update(...)` method as a no-op so GPUI tests and
     downstream unit tests can compile without a real GPU backend.
+- `examples/image.rs` and `examples/image_gallery.rs`
+  - Use `gpui_http_client`'s fake test client so the vendored examples compile
+    in the OxideTerm workspace without Zed's `reqwest_client` crate.
 
 ## API Contract
 
@@ -83,6 +92,9 @@ The patched dynamic texture path has these constraints:
   polychrome sprite.
 - If an update arrives before the texture is first painted, GPUI creates a
   blank atlas entry and then applies the update.
+- Dynamic textures use the same sprite drawing primitive as ordinary images,
+  but they get a dedicated platform texture allocation so remote desktop uploads
+  do not share texture pages with icons, images, glyphs, or other atlas users.
 
 These checks are deliberately strict. Remote desktop corruption should fail
 early instead of silently uploading malformed data into the GPU atlas.
@@ -126,6 +138,7 @@ After changing this vendor fork or the remote desktop renderer, run:
 
 ```sh
 cargo fmt --check
+cargo test -p gpui
 cargo check -p oxideterm-gpui-app
 cargo test -p oxideterm-gpui-remote-desktop
 cargo test -p oxideterm-gpui-app remote_desktop

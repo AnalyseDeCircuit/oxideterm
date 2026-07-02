@@ -86,6 +86,22 @@ pub(super) struct PendingPlatformTextCommit {
     consumed: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct WorkspaceImeMarkedText {
+    // IME marked text is rendered in a virtual text buffer but commits into the
+    // original value range that was selected when composition started.
+    target: WorkspaceImeTarget,
+    replacement_range: Range<usize>,
+    text: String,
+}
+
+impl WorkspaceImeMarkedText {
+    fn virtual_range(&self) -> Range<usize> {
+        let marked_len = self.text.encode_utf16().count();
+        self.replacement_range.start..self.replacement_range.start + marked_len
+    }
+}
+
 impl WorkspaceImeTarget {
     pub(super) fn anchor_id(self) -> TextInputAnchorId {
         let id = match self {
@@ -293,14 +309,9 @@ impl InputHandler for WorkspaceInputHandler {
 
     fn marked_text_range(&mut self, _window: &mut Window, cx: &mut App) -> Option<Range<usize>> {
         self.view.update(cx, |view, _cx| {
-            let text_len = view.active_ime_text()?.encode_utf16().count();
-            let marked_len = view
-                .ime_marked_text
-                .as_deref()
-                .map(str::encode_utf16)
-                .map(Iterator::count)
-                .unwrap_or_default();
-            (marked_len > 0).then_some(text_len..text_len + marked_len)
+            let target = view.active_ime_target()?;
+            let marked = view.marked_text_state_for_target(target)?;
+            (!marked.text.is_empty()).then(|| marked.virtual_range())
         })
     }
 
@@ -312,7 +323,7 @@ impl InputHandler for WorkspaceInputHandler {
         cx: &mut App,
     ) -> Option<String> {
         self.view.update(cx, |view, _cx| {
-            let text = view.active_ime_text()?;
+            let text = view.active_ime_text_with_marked_text()?;
             let end = text.encode_utf16().count();
             let clamped = range_utf16.start.min(end)..range_utf16.end.min(end);
             *adjusted_range = Some(clamped.clone());
@@ -334,14 +345,34 @@ impl InputHandler for WorkspaceInputHandler {
 
     fn replace_and_mark_text_in_range(
         &mut self,
-        _range_utf16: Option<Range<usize>>,
+        range_utf16: Option<Range<usize>>,
         new_text: &str,
         _new_selected_range: Option<Range<usize>>,
         _window: &mut Window,
         cx: &mut App,
     ) {
         let _ = self.view.update(cx, |view, cx| {
-            view.ime_marked_text = (!new_text.is_empty()).then(|| new_text.to_string());
+            let Some(target) = view.active_ime_target() else {
+                return;
+            };
+            if new_text.is_empty() {
+                if view.ime_marked_text.take().is_some() {
+                    cx.notify();
+                }
+                return;
+            }
+            let replacement_range =
+                view.marked_text_replacement_range_for_platform_range(target, range_utf16);
+            view.ime_marked_text = Some(WorkspaceImeMarkedText {
+                target,
+                replacement_range: replacement_range.clone(),
+                text: new_text.to_string(),
+            });
+            view.set_ime_selection_from_anchor(
+                target,
+                replacement_range.start,
+                replacement_range.end,
+            );
             cx.notify();
         });
     }
@@ -401,7 +432,9 @@ impl WorkspaceApp {
         let Some(target) = self.active_ime_target() else {
             return false;
         };
-        if self.ime_marked_text.is_some() && ime_composition_control_key(keystroke) {
+        if self.marked_text_state_for_target(target).is_some()
+            && ime_composition_control_key(keystroke)
+        {
             return true;
         }
         let Some(text) = keystroke_platform_text(keystroke) else {
@@ -656,9 +689,19 @@ impl WorkspaceApp {
     }
 
     pub(super) fn marked_text_for_target(&self, target: WorkspaceImeTarget) -> Option<&str> {
-        (self.active_ime_target() == Some(target))
-            .then_some(self.ime_marked_text.as_deref())
-            .flatten()
+        self.marked_text_state_for_target(target)
+            .map(|marked| marked.text.as_str())
+    }
+
+    fn marked_text_state_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+    ) -> Option<&WorkspaceImeMarkedText> {
+        self.ime_marked_text.as_ref().filter(|marked| {
+            marked.target == target
+                && self.active_ime_target() == Some(target)
+                && !marked.text.is_empty()
+        })
     }
 
     pub(super) fn ime_selected_range_for_target(
@@ -1089,9 +1132,45 @@ impl WorkspaceApp {
         position_x - centered_text_left
     }
 
-    fn active_ime_text(&self) -> Option<String> {
+    fn active_ime_text_with_marked_text(&self) -> Option<String> {
         let target = self.active_ime_target()?;
-        self.text_for_ime_target(target)
+        let mut text = self.text_for_ime_target(target)?;
+        if let Some(marked) = self.marked_text_state_for_target(target) {
+            replace_utf16(
+                &mut text,
+                Some(marked.replacement_range.clone()),
+                &marked.text,
+            );
+        }
+        Some(text)
+    }
+
+    fn marked_text_replacement_range_for_platform_range(
+        &self,
+        target: WorkspaceImeTarget,
+        platform_range: Option<Range<usize>>,
+    ) -> Range<usize> {
+        let fallback = || {
+            self.ime_selection_range_for_target(target)
+                .or_else(|| {
+                    self.text_for_ime_target(target).map(|text| {
+                        let end = text.encode_utf16().count();
+                        end..end
+                    })
+                })
+                .unwrap_or(0..0)
+        };
+        let Some(platform_range) = platform_range else {
+            return fallback();
+        };
+        if let Some(marked) = self.marked_text_state_for_target(target)
+            && platform_range == marked.virtual_range()
+        {
+            // Platform IME callbacks may address the marked substring in the
+            // virtual composed text. Map that back to the original value range.
+            return marked.replacement_range.clone();
+        }
+        platform_range
     }
 
     fn new_connection_field_accepts_ime(&self, field: NewConnectionField) -> bool {
@@ -1394,6 +1473,20 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             return;
         }
+        if text.is_empty()
+            && replacement_range.as_ref().is_none_or(|range| {
+                self.marked_text_state_for_target(target)
+                    .is_some_and(|marked| *range == marked.virtual_range())
+            })
+        {
+            self.ime_marked_text = None;
+            return;
+        }
+        let replacement_range = effective_platform_text_replacement_range(
+            replacement_range,
+            || self.ime_selection_range_for_target(target),
+            self.marked_text_state_for_target(target),
+        );
         let caret = replacement_range
             .as_ref()
             .map(|range| range.start + text.encode_utf16().count());
@@ -1538,7 +1631,7 @@ impl WorkspaceApp {
         let desired_selection = selection_from_anchor(target, anchor, index);
         if desired_selection == selection
             && self.selected_ime_target.is_none()
-            && self.ime_marked_text.is_none()
+            && self.marked_text_state_for_target(target).is_none()
             && self.ime_drag_selection.is_none()
         {
             // Boundary navigation is a consumed browser input event, but an
@@ -2908,6 +3001,25 @@ fn platform_text_commit_is_duplicate(
     false
 }
 
+fn effective_platform_text_replacement_range(
+    platform_range: Option<Range<usize>>,
+    current_selection: impl FnOnce() -> Option<Range<usize>>,
+    marked_text: Option<&WorkspaceImeMarkedText>,
+) -> Option<Range<usize>> {
+    if let Some(platform_range) = platform_range {
+        if let Some(marked_text) = marked_text
+            && platform_range == marked_text.virtual_range()
+        {
+            return Some(marked_text.replacement_range.clone());
+        }
+        return Some(platform_range);
+    }
+    // GPUI may deliver plain printable text without an explicit replacement
+    // range. Browser inputs still insert at the live caret, so fall back to the
+    // selection state maintained from mouse clicks and keyboard navigation.
+    current_selection()
+}
+
 fn previous_char_start(value: &str, byte_index: usize) -> usize {
     value[..byte_index]
         .char_indices()
@@ -2922,9 +3034,10 @@ mod tests {
 
     use super::{
         CopyShortcutOwner, PendingPlatformTextCommit, SettingsInput, TextInputContentAlign,
-        WorkspaceApp, WorkspaceImeTarget, active_ime_should_defer_input_key,
-        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
-        copy_shortcut_owner_for_target, ime_target_should_blink_caret,
+        WorkspaceApp, WorkspaceImeMarkedText, WorkspaceImeTarget,
+        active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
+        control_k_delete_end, copy_shortcut_owner_for_target,
+        effective_platform_text_replacement_range, ime_target_should_blink_caret,
         keystroke_commits_platform_text, keystroke_uses_text_edit_modifier,
         line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
         next_utf16_boundary, next_word_boundary, platform_text_commit_is_duplicate,
@@ -3170,6 +3283,45 @@ mod tests {
             "b",
         ));
         assert!(pending.is_some());
+    }
+
+    #[test]
+    fn platform_text_commit_without_range_uses_current_caret() {
+        let range = effective_platform_text_replacement_range(None, || Some(2..2), None);
+
+        assert_eq!(range, Some(2..2));
+    }
+
+    #[test]
+    fn platform_text_commit_without_range_uses_current_selection() {
+        let range = effective_platform_text_replacement_range(None, || Some(1..4), None);
+
+        assert_eq!(range, Some(1..4));
+    }
+
+    #[test]
+    fn platform_text_commit_keeps_explicit_platform_range() {
+        let range = effective_platform_text_replacement_range(Some(5..6), || Some(1..4), None);
+
+        assert_eq!(range, Some(5..6));
+    }
+
+    #[test]
+    fn platform_text_commit_maps_marked_virtual_range_to_original_range() {
+        let marked = WorkspaceImeMarkedText {
+            target: WorkspaceImeTarget::CommandPalette,
+            replacement_range: 2..2,
+            text: "拼".to_string(),
+        };
+        let virtual_range = marked.virtual_range();
+
+        let range = effective_platform_text_replacement_range(
+            Some(virtual_range),
+            || Some(9..9),
+            Some(&marked),
+        );
+
+        assert_eq!(range, Some(2..2));
     }
 
     #[test]

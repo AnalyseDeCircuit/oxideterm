@@ -8,7 +8,7 @@ use gpui::{
     MenuItem, Point, SharedString, SharedUri, TitlebarOptions, Window, WindowBounds, WindowOptions,
     actions, div, img, prelude::*, px, rgb, size,
 };
-use reqwest_client::ReqwestClient;
+use http_client::FakeHttpClient;
 
 struct Assets {
     base: PathBuf,
@@ -155,8 +155,8 @@ fn main() {
             base: manifest_dir.join("examples"),
         })
         .run(move |cx: &mut App| {
-            let http_client = ReqwestClient::user_agent("gpui example").unwrap();
-            cx.set_http_client(Arc::new(http_client));
+            // Keep the vendored example buildable without Zed's reqwest_client crate.
+            cx.set_http_client(FakeHttpClient::with_404_response());
 
             cx.activate(true);
             cx.on_action(|_: &Quit, cx| cx.quit());
