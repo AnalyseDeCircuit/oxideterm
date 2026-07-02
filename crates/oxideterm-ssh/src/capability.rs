@@ -146,12 +146,6 @@ fn known_limitations() -> Vec<SshCapabilityLimitation> {
             note: "The method name is represented, but OxideTerm has no usable client auth flow.",
         },
         SshCapabilityLimitation {
-            capability: "sntrup761x25519-sha512",
-            layer: SshCapabilityLayer::RusshCore,
-            status: SshCapabilityStatus::Unsupported,
-            note: "ML-KEM hybrid KEX is available, but OpenSSH sntrup hybrids are not.",
-        },
-        SshCapabilityLimitation {
             capability: "umac",
             layer: SshCapabilityLayer::RusshCore,
             status: SshCapabilityStatus::Unsupported,
@@ -193,6 +187,12 @@ mod tests {
                 .contains(&"curve25519-sha256".to_string())
         );
         assert!(
+            report
+                .default_offer
+                .kex
+                .contains(&"sntrup761x25519-sha512".to_string())
+        );
+        assert!(
             !report
                 .default_offer
                 .kex
@@ -218,5 +218,11 @@ mod tests {
             limitation.capability == "direct-fido-security-key"
                 && limitation.layer == SshCapabilityLayer::OxideTermIntegration
         }));
+        assert!(
+            report
+                .limitations
+                .iter()
+                .all(|limitation| !limitation.capability.starts_with("sntrup761x25519"))
+        );
     }
 }

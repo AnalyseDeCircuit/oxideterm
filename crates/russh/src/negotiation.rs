@@ -104,6 +104,8 @@ impl Preferred {
 
 const SAFE_KEX_ORDER: &[kex::Name] = &[
     kex::MLKEM768X25519_SHA256,
+    kex::SNTRUP761X25519_SHA512,
+    kex::SNTRUP761X25519_SHA512_OPENSSH,
     kex::CURVE25519,
     kex::CURVE25519_PRE_RFC_8731,
     kex::DH_GEX_SHA256,
@@ -252,6 +254,32 @@ mod tests {
         assert!(preferred.mac.contains(&mac::HMAC_SHA1));
         assert!(!Preferred::DEFAULT.cipher.contains(&cipher::AES_256_CBC));
         assert!(!Preferred::DEFAULT.mac.contains(&mac::HMAC_SHA1));
+    }
+
+    #[test]
+    fn client_can_negotiate_when_peer_only_offers_sntrup() {
+        let (_, selected) = Client::select(
+            &Preferred::DEFAULT.kex,
+            &[kex::SNTRUP761X25519_SHA512_OPENSSH],
+            AlgorithmKind::Kex,
+        )
+        .expect("sntrup OpenSSH alias should be negotiable");
+
+        assert_eq!(selected, kex::SNTRUP761X25519_SHA512_OPENSSH);
+    }
+
+    #[test]
+    fn default_kex_keeps_mlkem_before_sntrup_and_curve25519() {
+        let index_of = |name: kex::Name| {
+            Preferred::DEFAULT
+                .kex
+                .iter()
+                .position(|candidate| *candidate == name)
+                .expect("algorithm should be in the default KEX list")
+        };
+
+        assert!(index_of(kex::MLKEM768X25519_SHA256) < index_of(kex::SNTRUP761X25519_SHA512));
+        assert!(index_of(kex::SNTRUP761X25519_SHA512) < index_of(kex::CURVE25519));
     }
 }
 

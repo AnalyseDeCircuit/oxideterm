@@ -118,6 +118,10 @@ name = "test_mlkem_kex"
 path = "tests/test_mlkem_kex.rs"
 
 [[test]]
+name = "test_sntrup_kex"
+path = "tests/test_sntrup_kex.rs"
+
+[[test]]
 name = "test_rekey_strict_kex"
 path = "tests/test_rekey_strict_kex.rs"
 
@@ -245,6 +249,9 @@ version = "0.3"
 
 [dependencies.module-lattice]
 version = "0.2"
+
+[dependencies.sntrup761]
+version = "0.4"
 
 [dependencies.num-bigint]
 version = "=0.5.0"
