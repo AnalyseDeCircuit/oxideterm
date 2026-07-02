@@ -47,6 +47,7 @@ const REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
 const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER: f32 = 100.0;
 const REMOTE_DESKTOP_SCROLL_PIXEL_STEP: f32 = 120.0;
+const REMOTE_DESKTOP_FRAME_READY_INTERVAL: Duration = Duration::from_millis(16);
 const REMOTE_DESKTOP_FRAME_RECOVERY_THRESHOLD: usize = 24;
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 32;
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET: Duration = Duration::from_millis(6);
@@ -97,6 +98,7 @@ struct RemoteDesktopFrameDeliverySlot {
     frames: Arc<Mutex<VecDeque<RemoteDesktopHelperEvent>>>,
     queued: Arc<AtomicBool>,
     recovery_requested: Arc<AtomicBool>,
+    last_ready_at: Arc<Mutex<Option<Instant>>>,
     supports_frame_recovery: bool,
 }
 
@@ -182,6 +184,7 @@ impl RemoteDesktopFrameDeliverySlot {
             frames: Arc::default(),
             queued: Arc::default(),
             recovery_requested: Arc::default(),
+            last_ready_at: Arc::default(),
             supports_frame_recovery,
         }
     }
@@ -229,7 +232,8 @@ impl RemoteDesktopFrameDeliverySlot {
 
         // A single queued marker is enough because the slot preserves ordered
         // frame events until the UI thread catches up.
-        if !self.queued.swap(true, Ordering::AcqRel) {
+        if self.mark_frame_ready_queued() {
+            self.mark_frame_ready_sent();
             send_remote_desktop_worker_delivery(
                 delivery_tx,
                 worker_wake,
@@ -242,21 +246,37 @@ impl RemoteDesktopFrameDeliverySlot {
         self.frames.lock().ok()?.pop_front()
     }
 
-    fn complete_delivery(
-        &self,
-        tab_id: TabId,
-        generation: u64,
-        delivery_tx: &mpsc::Sender<RemoteDesktopWorkerDelivery>,
-    ) {
+    fn complete_delivery(&self) -> bool {
         self.queued.store(false, Ordering::Release);
-        let has_pending_frame = self
-            .frames
+        self.frames
             .lock()
             .map(|frames| !frames.is_empty())
-            .unwrap_or(false);
-        if has_pending_frame && !self.queued.swap(true, Ordering::AcqRel) {
-            let _ =
-                delivery_tx.send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
+            .unwrap_or(false)
+    }
+
+    fn mark_frame_ready_queued(&self) -> bool {
+        !self.queued.swap(true, Ordering::AcqRel)
+    }
+
+    fn mark_frame_ready_sent(&self) {
+        if let Ok(mut last_ready_at) = self.last_ready_at.lock() {
+            *last_ready_at = Some(Instant::now());
+        }
+    }
+
+    fn next_frame_ready_delay(&self) -> Duration {
+        let now = Instant::now();
+        let Ok(last_ready_at) = self.last_ready_at.lock() else {
+            return Duration::ZERO;
+        };
+        let Some(previous_ready_at) = *last_ready_at else {
+            return Duration::ZERO;
+        };
+        let elapsed = now.saturating_duration_since(previous_ready_at);
+        if elapsed >= REMOTE_DESKTOP_FRAME_READY_INTERVAL {
+            Duration::ZERO
+        } else {
+            REMOTE_DESKTOP_FRAME_READY_INTERVAL.saturating_sub(elapsed)
         }
     }
 }
@@ -1183,7 +1203,7 @@ impl WorkspaceApp {
             initial_request_size,
             scale_factor,
         );
-        self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake, cx);
+        self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake.clone(), cx);
 
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             let old_images = session.state.take_all_images();
@@ -1247,7 +1267,7 @@ impl WorkspaceApp {
             initial_request_size,
             scale_factor,
         );
-        self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake, cx);
+        self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake.clone(), cx);
 
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             session.request_tx = Some(request_tx);
@@ -1422,7 +1442,6 @@ impl WorkspaceApp {
         if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
             return false;
         }
-        let delivery_tx = self.remote_desktop_worker_tx.clone();
         let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
             return false;
         };
@@ -1477,8 +1496,49 @@ impl WorkspaceApp {
         }
         Self::drop_remote_desktop_images(retired_images, window, cx);
         Self::drop_remote_desktop_textures(retired_textures, window);
-        frame_slot.complete_delivery(tab_id, generation, &delivery_tx);
+        if frame_slot.complete_delivery() {
+            self.schedule_remote_desktop_followup_frame_ready(tab_id, generation, frame_slot, cx);
+        }
         changed
+    }
+
+    fn schedule_remote_desktop_followup_frame_ready(
+        &self,
+        tab_id: TabId,
+        generation: u64,
+        frame_slot: RemoteDesktopFrameDeliverySlot,
+        cx: &mut Context<Self>,
+    ) {
+        if !frame_slot.mark_frame_ready_queued() {
+            return;
+        }
+
+        let delay = frame_slot.next_frame_ready_delay();
+        let delivery_tx = self.remote_desktop_worker_tx.clone();
+        if delay.is_zero() {
+            frame_slot.mark_frame_ready_sent();
+            let _ =
+                delivery_tx.send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
+            cx.notify();
+            return;
+        }
+
+        cx.spawn(async move |workspace, cx| {
+            Timer::after(delay).await;
+            let _ = workspace.update(cx, |this, cx| {
+                if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
+                    return;
+                }
+                // The queued flag stays set while this timer waits, so new
+                // frame bursts coalesce into the existing delivery slot.
+                frame_slot.mark_frame_ready_sent();
+                let _ = this
+                    .remote_desktop_worker_tx
+                    .send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn drop_remote_desktop_images(
