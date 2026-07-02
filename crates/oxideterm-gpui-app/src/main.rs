@@ -128,11 +128,10 @@ fn main() {
     });
 
     application.run(move |cx: &mut App| {
-        app_icon::install_runtime_app_icon();
-
         let startup_settings = SettingsStore::load_default()
             .map(|store| store.settings().clone())
             .unwrap_or_default();
+        app_icon::install_runtime_app_icon(startup_settings.appearance.app_icon);
         if let Err(error) =
             bundled_fonts::load_terminal_font_open_critical(&startup_settings, &cx.text_system())
         {

@@ -382,6 +382,9 @@
     "appearance": {
       "title": "外観",
       "description": "アプリケーションテーマをカスタマイズします。",
+      "app_icon": "アプリアイコン",
+      "app_icon_variant": "アイコンカラー",
+      "app_icon_variant_hint": "Dock やタスクバーに表示するアイコンの色を選びます。対応環境では実行中に反映されます。",
       "theme": "テーマ",
       "color_theme": "カラーテーマ",
       "color_theme_hint": "ターミナルの配色",

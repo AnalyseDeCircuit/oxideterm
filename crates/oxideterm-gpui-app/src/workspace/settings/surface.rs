@@ -340,6 +340,9 @@ impl WorkspaceApp {
             SettingsTab::Sftp => {
                 settings.sftp.speed_limit_enabled.hash(&mut hasher);
             }
+            SettingsTab::Appearance => {
+                settings.appearance.app_icon.hash(&mut hasher);
+            }
             SettingsTab::Network => {
                 settings.network.upstream_proxy.is_some().hash(&mut hasher);
                 settings
@@ -813,6 +816,7 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
+        crate::app_icon::install_runtime_app_icon(settings.appearance.app_icon);
         if let Err(error) =
             bundled_fonts::load_terminal_font_open_critical(settings, &cx.text_system())
         {

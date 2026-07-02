@@ -382,6 +382,9 @@
     "appearance": {
       "title": "外观",
       "description": "自定义应用程序主题。",
+      "app_icon": "应用图标",
+      "app_icon_variant": "图标颜色",
+      "app_icon_variant_hint": "选择 Dock 或任务栏图标颜色。支持运行时切换的平台会立即生效。",
       "theme": "主题",
       "color_theme": "颜色主题",
       "color_theme_hint": "终端配色方案",

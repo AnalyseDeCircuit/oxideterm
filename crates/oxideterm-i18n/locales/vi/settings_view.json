@@ -382,6 +382,9 @@
     "appearance": {
       "title": "Giao diện",
       "description": "Tùy chỉnh giao diện ứng dụng.",
+      "app_icon": "Biểu tượng ứng dụng",
+      "app_icon_variant": "Màu biểu tượng",
+      "app_icon_variant_hint": "Chọn màu biểu tượng trên Dock hoặc thanh tác vụ. Nền tảng hỗ trợ sẽ áp dụng ngay khi đang chạy.",
       "theme": "Giao diện",
       "color_theme": "Chủ đề màu",
       "color_theme_hint": "Bảng màu terminal",

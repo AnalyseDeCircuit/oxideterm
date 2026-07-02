@@ -382,6 +382,9 @@
     "appearance": {
       "title": "外觀",
       "description": "自訂應用程式主題。",
+      "app_icon": "應用程式圖示",
+      "app_icon_variant": "圖示顏色",
+      "app_icon_variant_hint": "選擇 Dock 或工作列圖示顏色。支援執行期間切換的平台會立即生效。",
       "theme": "主題",
       "color_theme": "色彩主題",
       "color_theme_hint": "終端機配色方案",

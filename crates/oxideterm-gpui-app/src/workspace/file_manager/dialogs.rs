@@ -641,6 +641,7 @@ impl WorkspaceApp {
                         entry,
                         rounded_shell_child_radius(self.tokens.radii.lg),
                         has_background,
+                        window,
                         cx,
                     )),
             )

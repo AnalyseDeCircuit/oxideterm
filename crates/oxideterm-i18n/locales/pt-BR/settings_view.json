@@ -382,6 +382,9 @@
     "appearance": {
       "title": "Aparência",
       "description": "Personalize o tema da aplicação.",
+      "app_icon": "Ícone do aplicativo",
+      "app_icon_variant": "Cor do ícone",
+      "app_icon_variant_hint": "Escolha a cor do ícone no Dock ou na barra de tarefas. A troca em tempo de execução é aplicada nas plataformas compatíveis.",
       "theme": "Tema",
       "color_theme": "Tema de cor",
       "color_theme_hint": "Esquema de cores do terminal",

@@ -12,7 +12,7 @@ use oxideterm_remote_desktop::{
     RemoteDesktopSize,
 };
 
-const REMOTE_DESKTOP_TILE_SIZE: u32 = 256;
+const REMOTE_DESKTOP_TILE_SIZE: u32 = 128;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemoteDesktopCursorState {
@@ -54,9 +54,11 @@ pub struct RemoteDesktopViewState {
     size: Option<RemoteDesktopSize>,
     message: Option<String>,
     error_category: Option<RemoteDesktopErrorCategory>,
-    frame: Option<RemoteDesktopFrame>,
     frame_image: Option<CachedRemoteDesktopFrameImage>,
+    corrupted_frame: Option<CorruptedRemoteDesktopFrame>,
     cursor: RemoteDesktopCursorState,
+    cursor_image: Option<Arc<RenderImage>>,
+    retired_images: Vec<Arc<RenderImage>>,
     read_only: bool,
     pending_resize: Option<RemoteDesktopSize>,
 }
@@ -69,8 +71,12 @@ impl PartialEq for RemoteDesktopViewState {
             && self.size == other.size
             && self.message == other.message
             && self.error_category == other.error_category
-            && self.frame == other.frame
+            && self.frame_image.as_ref().map(|frame| frame.size)
+                == other.frame_image.as_ref().map(|frame| frame.size)
+            && self.corrupted_frame == other.corrupted_frame
             && self.cursor == other.cursor
+            && self.cursor_image.as_ref().map(|image| image.id)
+                == other.cursor_image.as_ref().map(|image| image.id)
             && self.read_only == other.read_only
             && self.pending_resize == other.pending_resize
     }
@@ -81,6 +87,13 @@ struct CachedRemoteDesktopFrameImage {
     size: RemoteDesktopSize,
     bytes: Vec<u8>,
     tiles: Vec<RemoteDesktopFrameTile>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CorruptedRemoteDesktopFrame {
+    pub size: RemoteDesktopSize,
+    pub format: RemoteDesktopFrameFormat,
+    pub byte_len: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -115,7 +128,11 @@ impl CachedRemoteDesktopFrameImage {
         })
     }
 
-    fn apply_update(&mut self, update: &RemoteDesktopFrameUpdate) -> bool {
+    fn apply_update(
+        &mut self,
+        update: &RemoteDesktopFrameUpdate,
+        retired_images: &mut Vec<Arc<RenderImage>>,
+    ) -> bool {
         if update.size != self.size
             || update.compression != RemoteDesktopFrameCompression::None
             || !update.is_complete()
@@ -129,10 +146,14 @@ impl CachedRemoteDesktopFrameImage {
         if !copy_update_to_bgra_backing(&mut self.bytes, self.size.width, update) {
             return false;
         }
-        self.refresh_tiles_in_rect(update.rect)
+        self.refresh_tiles_in_rect(update.rect, retired_images)
     }
 
-    fn refresh_tiles_in_rect(&mut self, rect: RemoteDesktopRect) -> bool {
+    fn refresh_tiles_in_rect(
+        &mut self,
+        rect: RemoteDesktopRect,
+        retired_images: &mut Vec<Arc<RenderImage>>,
+    ) -> bool {
         for tile in &mut self.tiles {
             if !rects_intersect(tile.rect, rect) {
                 continue;
@@ -141,9 +162,13 @@ impl CachedRemoteDesktopFrameImage {
             else {
                 return false;
             };
-            tile.image = image;
+            retired_images.push(std::mem::replace(&mut tile.image, image));
         }
         true
+    }
+
+    fn into_images(self) -> impl Iterator<Item = Arc<RenderImage>> {
+        self.tiles.into_iter().map(|tile| tile.image)
     }
 }
 
@@ -156,9 +181,11 @@ impl RemoteDesktopViewState {
             size: None,
             message: None,
             error_category: None,
-            frame: None,
             frame_image: None,
+            corrupted_frame: None,
             cursor: RemoteDesktopCursorState::default(),
+            cursor_image: None,
+            retired_images: Vec::new(),
             read_only: false,
             pending_resize: None,
         }
@@ -186,25 +213,29 @@ impl RemoteDesktopViewState {
             RemoteDesktopHelperEvent::Frame { frame } => {
                 self.status = RemoteDesktopSessionStatus::Connected;
                 self.size = Some(frame.size);
+                self.retire_frame_image();
                 self.frame_image = CachedRemoteDesktopFrameImage::from_frame(&frame);
-                self.frame = Some(frame);
+                self.corrupted_frame =
+                    self.frame_image
+                        .is_none()
+                        .then(|| CorruptedRemoteDesktopFrame {
+                            size: frame.size,
+                            format: frame.format,
+                            byte_len: frame.bytes.len(),
+                        });
                 self.message = None;
                 self.error_category = None;
                 self.pending_resize = None;
             }
             RemoteDesktopHelperEvent::FrameUpdate { update } => {
-                if let Some(frame) = self.frame.as_mut()
-                    && frame.apply_update(&update)
+                if let Some(frame_image) = self.frame_image.as_mut()
+                    && frame_image.apply_update(&update, &mut self.retired_images)
                 {
                     self.status = RemoteDesktopSessionStatus::Connected;
                     self.size = Some(update.size);
-                    if let Some(frame_image) = self.frame_image.as_mut()
-                        && !frame_image.apply_update(&update)
-                    {
-                        self.frame_image = CachedRemoteDesktopFrameImage::from_frame(frame);
-                    }
                     self.message = None;
                     self.error_category = None;
+                    self.corrupted_frame = None;
                     self.pending_resize = None;
                 } else if let Some(frame) = frame_from_full_update(&update) {
                     // Full-frame updates carry a complete backing buffer. Use
@@ -217,24 +248,32 @@ impl RemoteDesktopViewState {
                 self.status = RemoteDesktopSessionStatus::Failed;
                 self.message = Some(message);
                 self.error_category = category;
+                self.retire_frame_image();
+                self.retire_cursor_image();
+                self.corrupted_frame = None;
             }
             RemoteDesktopHelperEvent::Disconnected { reason } => {
                 self.status = RemoteDesktopSessionStatus::Disconnected;
                 self.message = reason;
                 self.error_category = None;
-                self.frame = None;
-                self.frame_image = None;
+                self.retire_frame_image();
+                self.retire_cursor_image();
+                self.corrupted_frame = None;
             }
             RemoteDesktopHelperEvent::Terminated { exit_code } => {
-                if self.status == RemoteDesktopSessionStatus::Disconnected && self.message.is_some()
+                if matches!(
+                    self.status,
+                    RemoteDesktopSessionStatus::Disconnected | RemoteDesktopSessionStatus::Failed
+                ) && self.message.is_some()
                 {
                     return;
                 }
                 self.status = RemoteDesktopSessionStatus::Disconnected;
                 self.message = exit_code.map(|code| format!("Helper exited with code {code}."));
                 self.error_category = None;
-                self.frame = None;
-                self.frame_image = None;
+                self.retire_frame_image();
+                self.retire_cursor_image();
+                self.corrupted_frame = None;
             }
             RemoteDesktopHelperEvent::Cursor { x, y, .. } => {
                 self.cursor.x = x;
@@ -242,11 +281,14 @@ impl RemoteDesktopViewState {
             }
             RemoteDesktopHelperEvent::CursorShape { shape } => {
                 if shape.is_complete() {
+                    self.retire_cursor_image();
+                    self.cursor_image = render_image_for_cursor_shape(&shape);
                     self.cursor.shape = Some(shape);
                     self.cursor.visible = true;
                 }
             }
             RemoteDesktopHelperEvent::CursorDefault => {
+                self.retire_cursor_image();
                 self.cursor.shape = None;
                 self.cursor.visible = true;
             }
@@ -273,14 +315,32 @@ impl RemoteDesktopViewState {
             size: self.size,
             message: self.message.clone(),
             error_category: self.error_category,
-            has_frame: self.frame.is_some(),
+            has_frame: self.frame_image.is_some(),
             read_only: self.read_only,
             pending_resize: self.pending_resize,
         }
     }
 
-    pub fn frame(&self) -> Option<&RemoteDesktopFrame> {
-        self.frame.as_ref()
+    pub fn frame_size(&self) -> Option<RemoteDesktopSize> {
+        self.frame_image.as_ref().map(|frame| frame.size)
+    }
+
+    pub fn corrupted_frame(&self) -> Option<CorruptedRemoteDesktopFrame> {
+        self.corrupted_frame
+    }
+
+    pub fn cursor_image(&self) -> Option<Arc<RenderImage>> {
+        self.cursor_image.clone()
+    }
+
+    pub fn take_retired_images(&mut self) -> Vec<Arc<RenderImage>> {
+        std::mem::take(&mut self.retired_images)
+    }
+
+    pub fn take_all_images(&mut self) -> Vec<Arc<RenderImage>> {
+        self.retire_frame_image();
+        self.retire_cursor_image();
+        self.take_retired_images()
     }
 
     pub(crate) fn frame_tiles(&self) -> Option<Vec<RemoteDesktopFrameTile>> {
@@ -290,6 +350,35 @@ impl RemoteDesktopViewState {
     pub fn cursor(&self) -> &RemoteDesktopCursorState {
         &self.cursor
     }
+
+    fn retire_frame_image(&mut self) {
+        if let Some(frame_image) = self.frame_image.take() {
+            self.retired_images.extend(frame_image.into_images());
+        }
+    }
+
+    fn retire_cursor_image(&mut self) {
+        if let Some(image) = self.cursor_image.take() {
+            self.retired_images.push(image);
+        }
+    }
+}
+
+fn render_image_for_cursor_shape(shape: &RemoteDesktopCursorShape) -> Option<Arc<RenderImage>> {
+    if !shape.is_complete() {
+        return None;
+    }
+
+    let mut bytes = shape.bytes.clone();
+    if shape.format == RemoteDesktopFrameFormat::Rgba8 {
+        // Cursor images carry real transparency, so preserve the alpha channel
+        // unlike opaque framebuffer padding.
+        for pixel in bytes.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+    }
+    let buffer = RgbaImage::from_raw(shape.size.width, shape.size.height, bytes)?;
+    Some(Arc::new(RenderImage::new(vec![ImageFrame::new(buffer)])))
 }
 
 fn frame_from_full_update(update: &RemoteDesktopFrameUpdate) -> Option<RemoteDesktopFrame> {
@@ -545,7 +634,7 @@ mod tests {
         });
 
         assert!(state.snapshot().has_frame);
-        assert!(state.frame().unwrap().is_complete());
+        assert_eq!(state.frame_size(), Some(size));
         assert!(state.frame_tiles().is_some());
     }
 
@@ -573,7 +662,7 @@ mod tests {
             ),
         });
 
-        assert_eq!(state.frame().unwrap().bytes, vec![1, 1, 1, 1, 9, 9, 9, 9]);
+        assert_eq!(state.frame_size(), Some(size));
         let tiles = state.frame_tiles().unwrap();
         assert_eq!(
             tiles[0].image.as_bytes(0),
@@ -598,10 +687,7 @@ mod tests {
             ),
         });
 
-        assert_eq!(
-            state.frame().map(|frame| frame.bytes.as_slice()),
-            Some([0x30, 0x20, 0x10, 0xff, 0x60, 0x50, 0x40, 0xff].as_slice())
-        );
+        assert_eq!(state.frame_size(), Some(size));
         assert_eq!(
             state.frame_tiles().unwrap()[0].image.as_bytes(0),
             Some([0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff].as_slice())
@@ -637,7 +723,7 @@ mod tests {
 
         assert_eq!(state.snapshot().size, Some(new_size));
         assert_eq!(
-            state.frame().map(|frame| frame.bytes.as_slice()),
+            state.frame_tiles().unwrap()[0].image.as_bytes(0),
             Some([2, 2, 2, 0xff, 3, 3, 3, 0xff].as_slice())
         );
     }
@@ -701,7 +787,7 @@ mod tests {
             ),
         });
         let before = state.frame_tiles().expect("base frame should create tiles");
-        assert_eq!(before.len(), 4);
+        assert_eq!(before.len(), 9);
 
         state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
             update: RemoteDesktopFrameUpdate::new(
@@ -831,6 +917,32 @@ mod tests {
     }
 
     #[test]
+    fn failure_event_retires_existing_frame_images() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                RemoteDesktopSize {
+                    width: 1,
+                    height: 1,
+                },
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![0, 0, 0, 255],
+            ),
+        });
+        let frame_image = state.frame_tiles().unwrap()[0].image.clone();
+
+        state.apply_event(RemoteDesktopHelperEvent::ConnectionFailure {
+            message: "transport failed".to_string(),
+            category: Some(RemoteDesktopErrorCategory::Unknown),
+        });
+
+        let retired = state.take_retired_images();
+        assert_eq!(retired.len(), 1);
+        assert!(Arc::ptr_eq(&retired[0], &frame_image));
+        assert!(!state.snapshot().has_frame);
+    }
+
+    #[test]
     fn terminated_event_does_not_hide_disconnect_reason() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
 
@@ -842,6 +954,21 @@ mod tests {
         let snapshot = state.snapshot();
         assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Disconnected);
         assert_eq!(snapshot.message.as_deref(), Some("RDP session closed."));
+    }
+
+    #[test]
+    fn terminated_event_does_not_hide_failure_reason() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+
+        state.apply_event(RemoteDesktopHelperEvent::ConnectionFailure {
+            message: "RDP transport failed".to_string(),
+            category: Some(RemoteDesktopErrorCategory::Unknown),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::Terminated { exit_code: Some(0) });
+
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.status, RemoteDesktopSessionStatus::Failed);
+        assert_eq!(snapshot.message.as_deref(), Some("RDP transport failed"));
     }
 
     #[test]
@@ -879,5 +1006,55 @@ mod tests {
         state.apply_event(RemoteDesktopHelperEvent::CursorDefault);
         assert!(state.cursor().visible);
         assert!(state.cursor().shape.is_none());
+    }
+
+    #[test]
+    fn cursor_shape_caches_image_and_retires_replaced_images() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let first_shape = RemoteDesktopCursorShape::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            0,
+            0,
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![0x30, 0x20, 0x10, 0x40],
+        );
+        let second_shape = RemoteDesktopCursorShape::new(
+            RemoteDesktopSize {
+                width: 1,
+                height: 1,
+            },
+            0,
+            0,
+            RemoteDesktopFrameFormat::Rgba8,
+            vec![0x60, 0x50, 0x40, 0x70],
+        );
+
+        state.apply_event(RemoteDesktopHelperEvent::CursorShape { shape: first_shape });
+        let first_image = state
+            .cursor_image()
+            .expect("cursor shape should create a cached image");
+        assert_eq!(
+            first_image.as_bytes(0),
+            Some([0x10, 0x20, 0x30, 0x40].as_slice())
+        );
+
+        state.apply_event(RemoteDesktopHelperEvent::CursorShape {
+            shape: second_shape,
+        });
+        let retired = state.take_retired_images();
+        assert_eq!(retired.len(), 1);
+        assert!(Arc::ptr_eq(&retired[0], &first_image));
+
+        let second_image = state
+            .cursor_image()
+            .expect("replacement cursor should stay cached");
+        state.apply_event(RemoteDesktopHelperEvent::CursorDefault);
+        let retired = state.take_retired_images();
+        assert_eq!(retired.len(), 1);
+        assert!(Arc::ptr_eq(&retired[0], &second_image));
+        assert!(state.cursor_image().is_none());
     }
 }

@@ -14,9 +14,35 @@ impl Default for BufferSettings {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppIconVariant {
+    #[default]
+    Default,
+    WhiteBlue,
+    WhiteGraphite,
+    WhiteGreen,
+    WhitePurple,
+    WhiteRed,
+    #[serde(alias = "orange")]
+    FilledOrange,
+    #[serde(alias = "blue")]
+    FilledBlue,
+    #[serde(alias = "graphite")]
+    FilledGraphite,
+    #[serde(alias = "green")]
+    FilledGreen,
+    #[serde(alias = "purple")]
+    FilledPurple,
+    #[serde(alias = "red")]
+    FilledRed,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
+    #[serde(default)]
+    pub app_icon: AppIconVariant,
     pub sidebar_collapsed_default: bool,
     pub ui_density: UiDensity,
     pub border_radius: i64,
@@ -31,6 +57,7 @@ pub struct AppearanceSettings {
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
+            app_icon: AppIconVariant::default(),
             sidebar_collapsed_default: false,
             ui_density: UiDensity::Comfortable,
             border_radius: 6,

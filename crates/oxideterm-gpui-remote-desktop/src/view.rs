@@ -7,11 +7,9 @@ use gpui::{
     AnyElement, Bounds, Corners, CursorStyle, DevicePixels, Div, ObjectFit, ParentElement, Pixels,
     RenderImage, Styled, Window, canvas, div, fill, point, prelude::*, px, rgb, rgba, size,
 };
-use image::{Frame as ImageFrame, RgbaImage};
 use oxideterm_gpui_ui::{empty_state, error_state};
 use oxideterm_remote_desktop::{
-    RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopFrameFormat,
-    RemoteDesktopSessionStatus,
+    RemoteDesktopCursorShape, RemoteDesktopFrameFormat, RemoteDesktopSessionStatus,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -69,19 +67,15 @@ fn frame_body(
     state: &RemoteDesktopViewState,
     geometry: Option<SharedRemoteDesktopGeometry>,
 ) -> AnyElement {
-    if let Some(frame) = state.frame() {
+    if let Some(frame_size) = state.frame_size() {
         let Some(tiles) = state.frame_tiles() else {
             if let Some(geometry) = geometry {
                 geometry.clear();
             }
-            return corrupted_frame_body(tokens, frame).into_any_element();
+            return corrupted_frame_body(tokens, state).into_any_element();
         };
-        let frame_size = frame.size;
         let cursor = state.cursor().clone();
-        let cursor_image = cursor
-            .shape
-            .as_ref()
-            .and_then(render_image_for_cursor_shape);
+        let cursor_image = state.cursor_image();
 
         return div()
             .size_full()
@@ -116,11 +110,20 @@ fn frame_body(
         .into_any_element()
 }
 
-fn corrupted_frame_body(tokens: &ThemeTokens, frame: &RemoteDesktopFrame) -> Div {
-    let format_label = match frame.format {
-        RemoteDesktopFrameFormat::Rgba8 => "RGBA",
-        RemoteDesktopFrameFormat::Bgra8 => "BGRA",
-    };
+fn corrupted_frame_body(tokens: &ThemeTokens, state: &RemoteDesktopViewState) -> Div {
+    let details = state
+        .corrupted_frame()
+        .map(|frame| {
+            let format_label = match frame.format {
+                RemoteDesktopFrameFormat::Rgba8 => "RGBA",
+                RemoteDesktopFrameFormat::Bgra8 => "BGRA",
+            };
+            format!(
+                "{} x {}, {format_label}, {} bytes",
+                frame.size.width, frame.size.height, frame.byte_len
+            )
+        })
+        .unwrap_or_else(|| "The framebuffer cache was not available.".to_string());
 
     div()
         .size_full()
@@ -146,12 +149,7 @@ fn corrupted_frame_body(tokens: &ThemeTokens, frame: &RemoteDesktopFrame) -> Div
         .child(
             div()
                 .text_size(px(tokens.metrics.ui_text_xs))
-                .child(format!(
-                    "{} x {}, {format_label}, {} bytes",
-                    frame.size.width,
-                    frame.size.height,
-                    frame.bytes.len()
-                )),
+                .child(details),
         )
 }
 
@@ -280,23 +278,6 @@ fn remote_desktop_viewport_probe(geometry: SharedRemoteDesktopGeometry) -> impl 
     .inset_0()
 }
 
-fn render_image_for_cursor_shape(shape: &RemoteDesktopCursorShape) -> Option<Arc<RenderImage>> {
-    if !shape.is_complete() {
-        return None;
-    }
-
-    let mut bytes = shape.bytes.clone();
-    if shape.format == RemoteDesktopFrameFormat::Rgba8 {
-        // Cursor images carry real transparency, so preserve the alpha channel
-        // unlike opaque framebuffer padding.
-        for pixel in bytes.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-        }
-    }
-    let buffer = RgbaImage::from_raw(shape.size.width, shape.size.height, bytes)?;
-    Some(Arc::new(RenderImage::new(vec![ImageFrame::new(buffer)])))
-}
-
 fn cursor_bounds(
     image_bounds: Bounds<Pixels>,
     frame_width: u32,
@@ -362,27 +343,7 @@ fn error_body(tokens: &ThemeTokens, message: Option<String>) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_remote_desktop::{RemoteDesktopCursorShape, RemoteDesktopSize};
-
     use super::*;
-
-    #[test]
-    fn cursor_shape_preserves_alpha_while_swapping_rgba_to_bgra() {
-        let shape = RemoteDesktopCursorShape::new(
-            RemoteDesktopSize {
-                width: 1,
-                height: 1,
-            },
-            0,
-            0,
-            RemoteDesktopFrameFormat::Rgba8,
-            vec![0x30, 0x20, 0x10, 0x40],
-        );
-
-        let image = render_image_for_cursor_shape(&shape).expect("cursor shape should render");
-
-        assert_eq!(image.as_bytes(0), Some([0x10, 0x20, 0x30, 0x40].as_slice()));
-    }
 
     #[test]
     fn reconnecting_session_keeps_last_frame_visible() {

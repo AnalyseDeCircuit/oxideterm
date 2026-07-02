@@ -20,6 +20,7 @@ pub(crate) struct TerminalRenderedImage {
 pub(crate) struct ImageRenderCache {
     entries: HashMap<ImageCacheKey, CachedRenderImage>,
     order: VecDeque<ImageCacheKey>,
+    retired_images: Vec<Arc<RenderImage>>,
     bytes: usize,
     byte_limit: usize,
 }
@@ -45,6 +46,7 @@ impl Default for ImageRenderCache {
         Self {
             entries: HashMap::new(),
             order: VecDeque::new(),
+            retired_images: Vec::new(),
             bytes: 0,
             byte_limit: DEFAULT_RENDER_IMAGE_CACHE_BYTES,
         }
@@ -55,6 +57,10 @@ impl ImageRenderCache {
     pub(crate) fn set_byte_limit(&mut self, byte_limit: usize) {
         self.byte_limit = byte_limit;
         self.evict_over_budget();
+    }
+
+    pub(crate) fn take_retired_images(&mut self) -> Vec<Arc<RenderImage>> {
+        std::mem::take(&mut self.retired_images)
     }
 
     pub(crate) fn render_images(
@@ -138,6 +144,7 @@ impl ImageRenderCache {
             };
             if let Some(entry) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(entry.bytes);
+                self.retired_images.push(entry.image);
             }
         }
     }
@@ -442,5 +449,48 @@ mod tests {
 
         assert!(rendered[0].render_image.is_none());
         assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn render_cache_tracks_evicted_images_for_gpui_drop() {
+        let mut cache = ImageRenderCache::default();
+        cache.set_byte_limit(4);
+        let snapshot = TerminalImageSnapshot {
+            id: TerminalImageId(13),
+            protocol: TerminalImageProtocol::Kitty,
+            row: 0,
+            col: 0,
+            cols: 1,
+            rows: 1,
+            pixel_width: 2,
+            pixel_height: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 2,
+            source_height: 1,
+            z_index: 0,
+            placeholder: true,
+            version: 1,
+            data: Some(Arc::new(TerminalImageData {
+                id: TerminalImageId(13),
+                protocol: TerminalImageProtocol::Kitty,
+                version: 1,
+                width: 2,
+                height: 1,
+                rgba: vec![0, 0, 0, 255, 255, 255, 255, 255].into(),
+                frames: Vec::new(),
+                animation: TerminalImageAnimationState::default(),
+                name: None,
+            })),
+        };
+
+        let rendered = cache.render_images(&[snapshot], true);
+        let evicted = cache.take_retired_images();
+
+        assert_eq!(evicted.len(), 1);
+        assert!(Arc::ptr_eq(
+            &evicted[0],
+            rendered[0].render_image.as_ref().unwrap()
+        ));
     }
 }

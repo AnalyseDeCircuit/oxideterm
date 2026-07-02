@@ -73,6 +73,7 @@ impl Render for TerminalPane {
                 .terminal_graphics
                 .decode_images,
         );
+        self.drop_retired_images(window, cx);
         let row_timestamps = self
             .terminal_timestamps_enabled
             .then(|| Arc::new(self.row_timestamps.clone()));
@@ -86,6 +87,7 @@ impl Render for TerminalPane {
                 self.background_image_cache.render_blurred_image(background),
             )
         });
+        self.drop_retired_images(window, cx);
         let terminal_element = TerminalElement::new_with_images_and_bidi(
             snapshot,
             rendered_images,
@@ -232,6 +234,20 @@ impl Render for TerminalPane {
                     })
                 },
             )
+    }
+}
+
+impl TerminalPane {
+    fn drop_retired_images(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for image in self.image_cache.take_retired_images() {
+            // GPUI keeps painted RenderImage values in the window sprite atlas
+            // until the owner explicitly drops the image id.
+            cx.drop_image(image, Some(window));
+        }
+        for image in self.background_image_cache.take_retired_images() {
+            // Background blur images use the same atlas path as terminal images.
+            cx.drop_image(image, Some(window));
+        }
     }
 }
 

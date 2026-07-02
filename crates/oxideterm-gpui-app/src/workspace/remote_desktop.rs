@@ -617,7 +617,7 @@ impl WorkspaceApp {
 
     pub(super) fn poll_remote_desktop_worker_results(
         &mut self,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
@@ -625,7 +625,7 @@ impl WorkspaceApp {
         while let Ok(delivery) = self.remote_desktop_worker_rx.try_recv() {
             match delivery {
                 RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation } => {
-                    if self.apply_remote_desktop_frame_ready(tab_id, generation) {
+                    if self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx) {
                         changed = true;
                     }
                 }
@@ -658,6 +658,11 @@ impl WorkspaceApp {
                             _ => {}
                         }
                         session.state.apply_event(event);
+                        Self::drop_remote_desktop_images(
+                            session.state.take_retired_images(),
+                            window,
+                            cx,
+                        );
                         changed = true;
                     }
                 }
@@ -669,7 +674,7 @@ impl WorkspaceApp {
                     if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
                         continue;
                     }
-                    if self.apply_remote_desktop_frame_ready(tab_id, generation) {
+                    if self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx) {
                         changed = true;
                     }
                     if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
@@ -679,6 +684,11 @@ impl WorkspaceApp {
                                 message,
                                 category: Some(RemoteDesktopErrorCategory::Unknown),
                             });
+                        Self::drop_remote_desktop_images(
+                            session.state.take_retired_images(),
+                            window,
+                            cx,
+                        );
                         changed = true;
                     }
                 }
@@ -690,8 +700,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn close_remote_desktop_tab(&mut self, tab_id: TabId) {
-        if let Some(session) = self.remote_desktop_sessions.remove(&tab_id) {
+    pub(super) fn close_remote_desktop_tab(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(mut session) = self.remote_desktop_sessions.remove(&tab_id) {
+            Self::drop_remote_desktop_images(session.state.take_all_images(), window, cx);
             // The helper owns external resources. Always send a protocol-level
             // close before dropping the channel so real helpers can disconnect.
             if let Some(request_tx) = session.request_tx {
@@ -891,8 +907,8 @@ impl WorkspaceApp {
                             font_size: Some(self.tokens.metrics.ui_text_xs),
                             ..ToolbarButtonOptions::default()
                         },
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.force_recover_remote_desktop(tab_id, cx);
+                        cx.listener(move |this, _event, window, cx| {
+                            this.force_recover_remote_desktop(tab_id, window, cx);
                             cx.notify();
                         }),
                     ))
@@ -915,8 +931,8 @@ impl WorkspaceApp {
                             font_size: Some(self.tokens.metrics.ui_text_xs),
                             ..ToolbarButtonOptions::default()
                         },
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.reconnect_remote_desktop(tab_id, cx);
+                        cx.listener(move |this, _event, window, cx| {
+                            this.reconnect_remote_desktop(tab_id, window, cx);
                             cx.notify();
                         }),
                     ))
@@ -939,12 +955,9 @@ impl WorkspaceApp {
                             font_size: Some(self.tokens.metrics.ui_text_xs),
                             ..ToolbarButtonOptions::default()
                         },
-                        cx.listener(move |this, _event, _window, cx| {
+                        cx.listener(move |this, _event, window, cx| {
                             this.release_remote_desktop_inputs_for_tab(tab_id);
-                            this.send_remote_desktop_request(
-                                tab_id,
-                                RemoteDesktopHelperRequest::Close,
-                            );
+                            this.disconnect_remote_desktop(tab_id, window, cx);
                             cx.notify();
                         }),
                     )),
@@ -952,7 +965,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn force_recover_remote_desktop(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+    fn force_recover_remote_desktop(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.release_remote_desktop_inputs_for_tab(tab_id);
         let has_live_worker = self
             .remote_desktop_sessions
@@ -961,7 +979,7 @@ impl WorkspaceApp {
         if has_live_worker {
             self.send_remote_desktop_request(tab_id, RemoteDesktopHelperRequest::RequestFrame);
         }
-        self.restart_remote_desktop_worker(tab_id, cx);
+        self.restart_remote_desktop_worker(tab_id, window, cx);
     }
 
     fn send_remote_desktop_request(&mut self, tab_id: TabId, request: RemoteDesktopHelperRequest) {
@@ -979,7 +997,34 @@ impl WorkspaceApp {
         }
     }
 
-    fn reconnect_remote_desktop(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+    fn disconnect_remote_desktop(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
+            return;
+        };
+        if let Some(request_tx) = session.request_tx.as_ref() {
+            let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
+            return;
+        }
+
+        // When the helper channel is already gone, apply the same disconnected
+        // state locally and release any frame images retired by the transition.
+        session
+            .state
+            .apply_event(RemoteDesktopHelperEvent::Disconnected { reason: None });
+        Self::drop_remote_desktop_images(session.state.take_retired_images(), window, cx);
+    }
+
+    fn reconnect_remote_desktop(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(status) = self
             .remote_desktop_sessions
             .get(&tab_id)
@@ -995,13 +1040,18 @@ impl WorkspaceApp {
             }
             Some(RemoteDesktopReconnectMode::RestartHelper) => {
                 self.release_remote_desktop_inputs_for_tab(tab_id);
-                self.restart_remote_desktop_worker(tab_id, cx);
+                self.restart_remote_desktop_worker(tab_id, window, cx);
             }
             None => {}
         }
     }
 
-    fn restart_remote_desktop_worker(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
+    fn restart_remote_desktop_worker(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((
             profile,
             provider,
@@ -1049,12 +1099,14 @@ impl WorkspaceApp {
         self.schedule_remote_desktop_worker_wake_poll(tab_id, generation, worker_wake, cx);
 
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
+            let old_images = session.state.take_all_images();
             session.state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
                 .with_read_only(profile.read_only);
             session.state.apply_event(RemoteDesktopHelperEvent::Status {
                 status: RemoteDesktopSessionStatus::Reconnecting,
                 message: None,
             });
+            Self::drop_remote_desktop_images(old_images, window, cx);
             session.frame_slot = frame_slot;
             session.request_tx = Some(request_tx);
             session.worker_generation = generation;
@@ -1271,7 +1323,13 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn apply_remote_desktop_frame_ready(&mut self, tab_id: TabId, generation: u64) -> bool {
+    fn apply_remote_desktop_frame_ready(
+        &mut self,
+        tab_id: TabId,
+        generation: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
             return false;
         }
@@ -1288,10 +1346,23 @@ impl WorkspaceApp {
             // Apply a bounded batch so stale dirty updates do not add a full
             // poll interval each while still yielding before large uploads.
             session.state.apply_event(event);
+            Self::drop_remote_desktop_images(session.state.take_retired_images(), window, cx);
             changed = true;
         }
         frame_slot.complete_delivery(tab_id, generation, &delivery_tx);
         changed
+    }
+
+    fn drop_remote_desktop_images(
+        images: Vec<Arc<gpui::RenderImage>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for image in images {
+            // Remote desktop tiles are replaced continuously; GPUI keeps painted
+            // images in the sprite atlas until the app explicitly drops them.
+            cx.drop_image(image, Some(window));
+        }
     }
 
     fn map_remote_desktop_pointer_position(
@@ -2131,62 +2202,78 @@ fn run_remote_desktop_worker(
     request_rx: mpsc::Receiver<RemoteDesktopHelperRequest>,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
 ) {
-    if let Ok((mut child, mut stdin)) = spawn_remote_desktop_helper(&provider) {
-        let stdout = child.stdout.take();
-        let connect = connect_request(&profile, password, initial_size, scale_factor);
-        if let Err(error) = write_request_line(&mut stdin, &connect) {
+    match spawn_remote_desktop_helper(&provider) {
+        Ok((mut child, mut stdin)) => {
+            let stdout = child.stdout.take();
+            let connect = connect_request(&profile, password, initial_size, scale_factor);
+            if let Err(error) = write_request_line(&mut stdin, &connect) {
+                send_remote_desktop_worker_delivery(
+                    &delivery_tx,
+                    &worker_wake,
+                    RemoteDesktopWorkerDelivery::TransportFailed {
+                        tab_id,
+                        generation,
+                        message: error.to_string(),
+                    },
+                );
+                return;
+            }
+            if let Some(stdout) = stdout {
+                let reader_tx = delivery_tx.clone();
+                let reader_frame_slot = frame_slot.clone();
+                let reader_worker_wake = worker_wake.clone();
+                thread::Builder::new()
+                    .name(format!("remote-desktop-reader-{}", tab_id.0))
+                    .spawn(move || {
+                        read_remote_desktop_events(
+                            tab_id,
+                            generation,
+                            stdout,
+                            reader_tx,
+                            reader_frame_slot,
+                            reader_worker_wake,
+                        )
+                    })
+                    .ok();
+            }
+
+            run_remote_desktop_writer(
+                tab_id,
+                generation,
+                &mut stdin,
+                request_rx,
+                delivery_tx.clone(),
+                worker_wake.clone(),
+            );
+            drop(stdin);
+            let exit_code = child.wait().ok().and_then(|status| status.code());
+            send_remote_desktop_worker_delivery(
+                &delivery_tx,
+                &worker_wake,
+                RemoteDesktopWorkerDelivery::Event {
+                    tab_id,
+                    generation,
+                    event: RemoteDesktopHelperEvent::Terminated { exit_code },
+                },
+            );
+            return;
+        }
+        Err(error) if !remote_desktop_provider_uses_fake_backend(&provider) => {
             send_remote_desktop_worker_delivery(
                 &delivery_tx,
                 &worker_wake,
                 RemoteDesktopWorkerDelivery::TransportFailed {
                     tab_id,
                     generation,
-                    message: error.to_string(),
+                    message: format!("Remote desktop helper failed to start: {error}"),
                 },
             );
             return;
         }
-        if let Some(stdout) = stdout {
-            let reader_tx = delivery_tx.clone();
-            let reader_frame_slot = frame_slot.clone();
-            let reader_worker_wake = worker_wake.clone();
-            thread::Builder::new()
-                .name(format!("remote-desktop-reader-{}", tab_id.0))
-                .spawn(move || {
-                    read_remote_desktop_events(
-                        tab_id,
-                        generation,
-                        stdout,
-                        reader_tx,
-                        reader_frame_slot,
-                        reader_worker_wake,
-                    )
-                })
-                .ok();
-        }
-
-        run_remote_desktop_writer(
-            tab_id,
-            generation,
-            &mut stdin,
-            request_rx,
-            delivery_tx.clone(),
-            worker_wake.clone(),
-        );
-        drop(stdin);
-        let exit_code = child.wait().ok().and_then(|status| status.code());
-        send_remote_desktop_worker_delivery(
-            &delivery_tx,
-            &worker_wake,
-            RemoteDesktopWorkerDelivery::Event {
-                tab_id,
-                generation,
-                event: RemoteDesktopHelperEvent::Terminated { exit_code },
-            },
-        );
-        return;
+        Err(_) => {}
     }
 
+    // Only preview providers may fall back to the in-process fake helper.
     run_in_process_fake_remote_desktop(
         tab_id,
         generation,
@@ -2198,6 +2285,10 @@ fn run_remote_desktop_worker(
         request_rx,
         delivery_tx,
     );
+}
+
+fn remote_desktop_provider_uses_fake_backend(provider: &RemoteDesktopProviderManifest) -> bool {
+    provider.entry.args.iter().any(|arg| arg == "--fake")
 }
 
 fn spawn_remote_desktop_helper(
@@ -2925,6 +3016,26 @@ mod tests {
         assert_eq!(next_remote_desktop_worker_generation(0), 1);
         assert_eq!(next_remote_desktop_worker_generation(7), 8);
         assert_eq!(next_remote_desktop_worker_generation(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn real_remote_desktop_provider_does_not_use_fake_backend() {
+        let registry = builtin_provider_registry().unwrap();
+        let provider = registry
+            .get_for_protocol(RemoteDesktopProtocol::Rdp)
+            .expect("built-in RDP provider should exist");
+
+        assert!(!remote_desktop_provider_uses_fake_backend(provider));
+    }
+
+    #[test]
+    fn preview_remote_desktop_provider_uses_fake_backend() {
+        let registry = builtin_preview_provider_registry().unwrap();
+        let provider = registry
+            .get_for_protocol(RemoteDesktopProtocol::Rdp)
+            .expect("preview RDP provider should exist");
+
+        assert!(remote_desktop_provider_uses_fake_backend(provider));
     }
 
     #[test]

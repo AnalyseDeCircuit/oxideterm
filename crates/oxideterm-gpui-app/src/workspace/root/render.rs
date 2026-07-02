@@ -120,6 +120,7 @@ impl Render for WorkspaceApp {
         let content = self.wrap_content_background(
             content,
             self.active_tab().map(|tab| tab_background_key(&tab.kind)),
+            window,
             cx,
         );
         let toast_layer = self.render_workspace_toasts(cx);

@@ -1,10 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{
-    AnchoredPositionMode, Corner, Div, PathPromptOptions, Rgba, anchored, deferred, point, relative,
+    AnchoredPositionMode, Corner, Div, ObjectFit, PathPromptOptions, Rgba, anchored, deferred, img,
+    point, relative,
 };
 use oxideterm_settings::{
-    FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
+    AppIconVariant, FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
     PersistedSettings, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
     SettingsUpstreamProxyProtocol, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
     create_default_highlight_rule, reindex_highlight_rules,

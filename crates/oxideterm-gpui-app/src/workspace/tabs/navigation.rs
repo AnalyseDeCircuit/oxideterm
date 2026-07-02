@@ -796,7 +796,7 @@ impl WorkspaceApp {
             self.shutdown_graphics_session();
         }
         if tab.kind == TabKind::RemoteDesktop {
-            self.close_remote_desktop_tab(tab.id);
+            self.close_remote_desktop_tab(tab.id, window, cx);
         }
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
         // only a view over the node-owned ConnectionEntry session.

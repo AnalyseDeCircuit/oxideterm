@@ -18,6 +18,7 @@ pub struct BackgroundImageRenderCache {
     key_cache: HashMap<BackgroundImageRequestKey, CachedBackgroundImageKey>,
     order: VecDeque<BackgroundImageCacheKey>,
     pending: HashSet<BackgroundImageCacheKey>,
+    retired_images: Vec<Arc<RenderImage>>,
     sender: mpsc::Sender<BackgroundImageLoadResult>,
     receiver: mpsc::Receiver<BackgroundImageLoadResult>,
     bytes: usize,
@@ -63,6 +64,10 @@ impl BackgroundImageRenderCache {
     pub fn set_byte_limit(&mut self, byte_limit: usize) {
         self.byte_limit = byte_limit;
         self.evict_over_budget();
+    }
+
+    pub fn take_retired_images(&mut self) -> Vec<Arc<RenderImage>> {
+        std::mem::take(&mut self.retired_images)
     }
 
     pub fn render_blurred_image(
@@ -128,6 +133,7 @@ impl BackgroundImageRenderCache {
                     self.pending.remove(&key);
                     if let Some(existing) = self.entries.remove(&key) {
                         self.bytes = self.bytes.saturating_sub(existing.bytes);
+                        self.retired_images.push(existing.image);
                     }
                     self.entries.insert(
                         key.clone(),
@@ -168,6 +174,7 @@ impl BackgroundImageRenderCache {
             };
             if let Some(entry) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(entry.bytes);
+                self.retired_images.push(entry.image);
             }
         }
     }
@@ -181,6 +188,7 @@ impl Default for BackgroundImageRenderCache {
             key_cache: HashMap::new(),
             order: VecDeque::new(),
             pending: HashSet::new(),
+            retired_images: Vec::new(),
             sender,
             receiver,
             bytes: 0,
@@ -243,4 +251,40 @@ fn load_blurred_background_image(
     convert_rgba_pixels_to_gpui_bgra(&mut pixels);
     let buffer = RgbaImage::from_raw(width, height, pixels)?;
     Some((Arc::new(RenderImage::new(vec![Frame::new(buffer)])), bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn background_cache_tracks_evicted_images_for_gpui_drop() {
+        let mut cache = BackgroundImageRenderCache::default();
+        let key = BackgroundImageCacheKey {
+            path: PathBuf::from("/tmp/background.png"),
+            blur_millis: 1000,
+            modified_millis: Some(1),
+            len: Some(8),
+        };
+        let buffer = RgbaImage::from_raw(2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255])
+            .expect("test image should be valid");
+        let image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
+        cache.entries.insert(
+            key.clone(),
+            CachedBackgroundImage {
+                image: image.clone(),
+                bytes: 8,
+            },
+        );
+        cache.order.push_back(key);
+        cache.bytes = 8;
+
+        cache.set_byte_limit(4);
+        let retired = cache.take_retired_images();
+
+        assert_eq!(retired.len(), 1);
+        assert!(Arc::ptr_eq(&retired[0], &image));
+    }
 }

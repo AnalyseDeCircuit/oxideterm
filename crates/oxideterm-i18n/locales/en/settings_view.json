@@ -382,6 +382,9 @@
     "appearance": {
       "title": "Appearance",
       "description": "Customize the application theme.",
+      "app_icon": "App Icon",
+      "app_icon_variant": "Icon Color",
+      "app_icon_variant_hint": "Choose the Dock/taskbar icon color. Runtime switching is applied where the platform supports it.",
       "theme": "Theme",
       "color_theme": "Color Theme",
       "color_theme_hint": "Terminal color scheme",

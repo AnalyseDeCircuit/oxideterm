@@ -18,7 +18,8 @@ impl WorkspaceApp {
         match section_index {
             0 => self.appearance_theme_card(settings, cx),
             1 => self.appearance_layout_card(settings, cx),
-            2 => self.appearance_background_card(settings, cx),
+            2 => self.appearance_app_icon_card(settings, cx),
+            3 => self.appearance_background_card(settings, cx),
             _ => div().into_any_element(),
         }
     }
@@ -151,6 +152,137 @@ impl WorkspaceApp {
                 ),
             ],
         )
+    }
+
+    fn appearance_app_icon_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.appearance_card_with_icon(
+            LucideIcon::AppWindow,
+            self.i18n.t("settings_view.appearance.app_icon"),
+            vec![self.appearance_app_icon_row(settings.appearance.app_icon, cx)],
+        )
+    }
+
+    fn appearance_app_icon_row(
+        &self,
+        selected: AppIconVariant,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // The icon picker can wrap into multiple rows. Keep its label above the
+        // grid so narrow settings panes do not squeeze localized copy vertically.
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("settings_view.appearance.app_icon_variant")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("settings_view.appearance.app_icon_variant_hint")),
+                    ),
+            )
+            .child(self.appearance_app_icon_picker(selected, cx))
+            .into_any_element()
+    }
+
+    fn appearance_app_icon_picker(
+        &self,
+        selected: AppIconVariant,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut picker = div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_start()
+            .gap(px(10.0))
+            .min_w(px(0.0))
+            .flex_wrap();
+
+        for variant in crate::app_icon::APP_ICON_VARIANTS {
+            picker = picker.child(self.appearance_app_icon_option(*variant, *variant == selected, cx));
+        }
+
+        picker.into_any_element()
+    }
+
+    fn appearance_app_icon_option(
+        &self,
+        variant: AppIconVariant,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let icon_path = crate::app_icon::app_icon_variant_resource_path(variant);
+        let border_color = if selected {
+            self.tokens.ui.accent
+        } else {
+            self.tokens.ui.border
+        };
+        let image = img(icon_path)
+            .size(px(42.0))
+            .object_fit(ObjectFit::Contain)
+            .rounded(px(self.tokens.radii.md));
+
+        div()
+            .relative()
+            .size(px(58.0))
+            .flex_none()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(border_color))
+            .bg(rgb(self.tokens.ui.bg_sunken))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
+            .child(image)
+            .when(selected, |button| {
+                button.child(
+                    div()
+                        .absolute()
+                        .right(px(4.0))
+                        .bottom(px(4.0))
+                        .size(px(16.0))
+                        .rounded_full()
+                        .bg(rgb(self.tokens.ui.accent))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Check,
+                            11.0,
+                            rgb(self.tokens.ui.bg),
+                        )),
+                )
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.edit_settings(|settings| settings.appearance.app_icon = variant, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
     }
 
     fn appearance_background_card(

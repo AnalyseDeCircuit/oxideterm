@@ -3,6 +3,7 @@ impl WorkspaceApp {
         &mut self,
         content: AnyElement,
         background_key: Option<&str>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(background_key) = background_key else {
@@ -17,6 +18,7 @@ impl WorkspaceApp {
         let blurred_image = self
             .background_image_cache
             .render_blurred_image(&background);
+        self.drop_workspace_background_retired_images(Some(window), cx);
         if self.background_image_cache.has_pending() {
             self.schedule_background_cache_poll(cx);
         }
@@ -42,6 +44,7 @@ impl WorkspaceApp {
                 this.settings_page
                     .set_background_cache_poll_scheduled(false);
                 if this.background_image_cache.drain_completed() {
+                    this.drop_workspace_background_retired_images(None, cx);
                     cx.notify();
                 }
                 if this.background_image_cache.has_pending() {
@@ -50,6 +53,22 @@ impl WorkspaceApp {
             });
         })
         .detach();
+    }
+
+    fn drop_workspace_background_retired_images(
+        &mut self,
+        mut window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        for image in self.background_image_cache.take_retired_images() {
+            // RenderImage entries painted by gpui::img also stay in the atlas
+            // until the app explicitly drops their image id.
+            if let Some(window) = window.as_mut() {
+                cx.drop_image(image, Some(*window));
+            } else {
+                cx.drop_image(image, None);
+            }
+        }
     }
 }
 

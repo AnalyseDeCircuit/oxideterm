@@ -382,6 +382,9 @@
     "appearance": {
       "title": "Erscheinungsbild",
       "description": "Anwendungsdesign anpassen.",
+      "app_icon": "App-Symbol",
+      "app_icon_variant": "Symbolfarbe",
+      "app_icon_variant_hint": "Wähle die Farbe des Dock- oder Taskleistensymbols. Laufzeitwechsel werden auf unterstützten Plattformen sofort angewendet.",
       "theme": "Design",
       "color_theme": "Farbschema",
       "color_theme_hint": "Terminal-Farbschema",

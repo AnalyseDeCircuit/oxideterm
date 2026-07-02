@@ -19,6 +19,7 @@ impl WorkspaceApp {
         entry: LocalFileEntry,
         shell_radius: f32,
         has_background: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let previewable = sorted_local_files(
@@ -240,6 +241,7 @@ impl WorkspaceApp {
                     .child(self.render_file_manager_preview_content(
                         entry.clone(),
                         has_background,
+                        window,
                         cx,
                     )),
             )
@@ -272,6 +274,7 @@ impl WorkspaceApp {
         &self,
         entry: LocalFileEntry,
         has_background: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match self.file_manager.preview.as_ref() {
@@ -312,7 +315,7 @@ impl WorkspaceApp {
                 self.render_file_manager_preview_markdown(content, &entry.path, cx)
             }
             Some(LocalPreview::Image { path, mime_type }) => self
-                .render_file_manager_preview_image(path, mime_type.clone())
+                .render_file_manager_preview_image(path, mime_type.clone(), window, cx)
                 .into_any_element(),
             Some(LocalPreview::Video { path, mime_type }) => {
                 self.render_file_manager_preview_video(entry.name, path, mime_type, cx)
@@ -361,7 +364,13 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_file_manager_preview_image(&self, path: &str, fallback_label: String) -> AnyElement {
+    fn render_file_manager_preview_image(
+        &self,
+        path: &str,
+        fallback_label: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let zoom = self
             .file_manager
             .preview_image_zoom
@@ -369,10 +378,13 @@ impl WorkspaceApp {
         let height = 560.0 * zoom;
         let rotation = self.file_manager.preview_image_rotation.rem_euclid(360);
         let image = if rotation == 0 {
+            self.clear_rotated_file_manager_preview_image(window, cx);
             gpui::img(std::path::PathBuf::from(path))
-        } else if let Some(render_image) = rotated_local_preview_image(path, rotation) {
+        } else if let Some(render_image) = self.rotated_file_manager_preview_image(path, rotation) {
+            self.drop_file_manager_preview_retired_images(window, cx);
             gpui::img(render_image)
         } else {
+            self.clear_rotated_file_manager_preview_image(window, cx);
             gpui::img(std::path::PathBuf::from(path))
         };
         image
@@ -391,6 +403,72 @@ impl WorkspaceApp {
                     .into_any_element()
             })
             .into_any_element()
+    }
+
+    fn rotated_file_manager_preview_image(
+        &self,
+        path: &str,
+        rotation: i32,
+    ) -> Option<Arc<RenderImage>> {
+        let rotation = rotation.rem_euclid(360);
+        if let Some(cached) = self
+            .file_manager
+            .preview_rotated_image_cache
+            .borrow()
+            .as_ref()
+            && cached.path == path
+            && cached.rotation == rotation
+        {
+            return Some(cached.image.clone());
+        }
+
+        let image = rotated_local_preview_image(path, rotation)?;
+        let previous = self.file_manager.preview_rotated_image_cache.replace(Some(
+            FileManagerRotatedPreviewImage {
+                path: path.to_string(),
+                rotation,
+                image: image.clone(),
+            },
+        ));
+        if let Some(previous) = previous {
+            self.file_manager
+                .preview_retired_images
+                .borrow_mut()
+                .push(previous.image);
+        }
+        Some(image)
+    }
+
+    fn clear_rotated_file_manager_preview_image(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self.file_manager.preview_rotated_image_cache.replace(None);
+        if let Some(previous) = previous {
+            self.file_manager
+                .preview_retired_images
+                .borrow_mut()
+                .push(previous.image);
+        }
+        self.drop_file_manager_preview_retired_images(window, cx);
+    }
+
+    fn drop_file_manager_preview_retired_images(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for image in self
+            .file_manager
+            .preview_retired_images
+            .borrow_mut()
+            .drain(..)
+        {
+            // Rotated local previews are rendered as GPUI atlas images; release
+            // old rotations when the preview path or angle changes.
+            cx.drop_image(image, Some(window));
+        }
     }
 
     fn render_file_manager_preview_audio(

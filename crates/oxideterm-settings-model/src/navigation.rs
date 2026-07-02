@@ -25,7 +25,7 @@ pub fn settings_tab_section_count(
         SettingsTab::General => 3,
         SettingsTab::Portable => 1,
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
-        SettingsTab::Appearance => 3,
+        SettingsTab::Appearance => 4,
         SettingsTab::Local => 6,
         SettingsTab::Connections => 5,
         SettingsTab::Privilege => 1,

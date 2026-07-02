@@ -494,7 +494,15 @@ impl WorkspaceApp {
                     }
                 }
                 IdeSurfaceEvent::TransientFolderPickerCancelled => {
-                    this.close_transient_ide_tab_after_folder_cancel(tab_id, cx);
+                    // Closing the temporary IDE tab drops the surface subscription.
+                    // Defer it so we do not tear down the current subscription
+                    // while GPUI is still dispatching this surface event.
+                    cx.spawn(async move |weak, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.close_transient_ide_tab_after_folder_cancel(tab_id, cx);
+                        });
+                    })
+                    .detach();
                 }
                 IdeSurfaceEvent::ReconnectRestoreProjectOpened { reconnect_node_id } => {
                     this.complete_pending_ide_reconnect_restore(

@@ -382,6 +382,9 @@
     "appearance": {
       "title": "Apparence",
       "description": "Personnaliser le thème de l'application.",
+      "app_icon": "Icône de l’application",
+      "app_icon_variant": "Couleur de l’icône",
+      "app_icon_variant_hint": "Choisissez la couleur de l’icône du Dock ou de la barre des tâches. Le changement à chaud s’applique sur les plateformes compatibles.",
       "theme": "Thème",
       "color_theme": "Thème de couleurs",
       "color_theme_hint": "Schéma de couleurs du terminal",

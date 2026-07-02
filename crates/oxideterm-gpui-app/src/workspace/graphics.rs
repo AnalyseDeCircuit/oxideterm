@@ -142,6 +142,7 @@ pub(super) struct GraphicsState {
     vnc_stop: Option<tokio::sync::oneshot::Sender<()>>,
     vnc_frame: Option<GraphicsVncFrame>,
     vnc_render_image: Option<Arc<RenderImage>>,
+    vnc_retired_images: Vec<Arc<RenderImage>>,
     vnc_geometry: SharedGraphicsVncGeometry,
     vnc_button_mask: u8,
     worker_tx: mpsc::Sender<GraphicsWorkerResult>,
@@ -169,6 +170,7 @@ impl GraphicsState {
             vnc_stop: None,
             vnc_frame: None,
             vnc_render_image: None,
+            vnc_retired_images: Vec::new(),
             vnc_geometry: SharedGraphicsVncGeometry::default(),
             vnc_button_mask: 0,
             worker_tx,
@@ -216,7 +218,7 @@ impl WorkspaceApp {
 
     pub(super) fn poll_graphics_worker_results(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
@@ -346,6 +348,7 @@ impl WorkspaceApp {
                 }
             }
         }
+        self.drop_graphics_vnc_retired_images(window, cx);
         if changed {
             self.ensure_graphics_vnc_worker();
             cx.notify();
@@ -991,6 +994,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         self.ensure_graphics_vnc_worker();
+        self.drop_graphics_vnc_retired_images(window, cx);
         let frame = self.graphics.vnc_frame.clone();
         let render_image = self.graphics.vnc_render_image.clone();
         let geometry = self.graphics.vnc_geometry.clone();
@@ -1703,7 +1707,10 @@ impl WorkspaceApp {
                 if !self.graphics_session_matches(&session_id) {
                     return false;
                 }
-                self.graphics.vnc_render_image = frame.render_image();
+                if let Some(render_image) = frame.render_image() {
+                    let old_image = self.graphics.vnc_render_image.replace(render_image);
+                    self.retire_graphics_vnc_image(old_image);
+                }
                 self.graphics.vnc_frame = Some(frame);
                 self.graphics.status = GraphicsStatus::Active;
                 self.graphics.error = None;
@@ -1717,6 +1724,8 @@ impl WorkspaceApp {
                 self.graphics.vnc_input = None;
                 self.graphics.vnc_stop = None;
                 self.graphics.vnc_button_mask = 0;
+                let old_image = self.graphics.vnc_render_image.take();
+                self.retire_graphics_vnc_image(old_image);
                 if let Some(reason) = reason {
                     self.graphics.status = GraphicsStatus::Error;
                     self.graphics.error = Some(normalize_graphics_error(reason));
@@ -1725,6 +1734,21 @@ impl WorkspaceApp {
                 }
                 true
             }
+        }
+    }
+
+    fn retire_graphics_vnc_image(&mut self, image: Option<Arc<RenderImage>>) {
+        if let Some(image) = image {
+            self.graphics.vnc_retired_images.push(image);
+        }
+    }
+
+    fn drop_graphics_vnc_retired_images(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for image in std::mem::take(&mut self.graphics.vnc_retired_images) {
+            // The WSL graphics VNC preview replaces full-frame RenderImage
+            // values frequently; dropping the Arc alone does not evict GPUI's
+            // sprite atlas entry.
+            cx.drop_image(image, Some(window));
         }
     }
 
@@ -1748,7 +1772,8 @@ impl WorkspaceApp {
         self.graphics.vnc_geometry.clear();
         if clear_frame {
             self.graphics.vnc_frame = None;
-            self.graphics.vnc_render_image = None;
+            let image = self.graphics.vnc_render_image.take();
+            self.retire_graphics_vnc_image(image);
         }
     }
 

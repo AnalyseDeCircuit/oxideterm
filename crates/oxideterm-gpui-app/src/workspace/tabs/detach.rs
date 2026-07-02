@@ -563,7 +563,8 @@ impl WorkspaceApp {
         window.set_window_title(&SharedString::from(title.clone()));
 
         let content = self.render_detached_tab_content(tab_id, &tab.kind, tab.root_pane.as_ref(), window, cx);
-        let content = self.wrap_content_background(content, Some(tab_background_key(&tab.kind)), cx);
+        let content =
+            self.wrap_content_background(content, Some(tab_background_key(&tab.kind)), window, cx);
 
         div()
             .size_full()
