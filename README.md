@@ -26,6 +26,10 @@
   <a href="README.md">English</a> | <a href="docs/readme/README.zh-Hans.md">简体中文</a> | <a href="docs/readme/README.zh-Hant.md">繁體中文</a> | <a href="docs/readme/README.ja.md">日本語</a> | <a href="docs/readme/README.ko.md">한국어</a> | <a href="docs/readme/README.fr.md">Français</a> | <a href="docs/readme/README.de.md">Deutsch</a> | <a href="docs/readme/README.es.md">Español</a> | <a href="docs/readme/README.it.md">Italiano</a> | <a href="docs/readme/README.pt-BR.md">Português</a> | <a href="docs/readme/README.vi.md">Tiếng Việt</a>
 </p>
 
+<p align="center">
+  <img src="docs/media/oxideterm-native-hero.png" alt="OxideTerm Native feature overview" width="920">
+</p>
+
 <div align="center">
 
 <a href="docs/media/ai-terminal-demo.mp4">
