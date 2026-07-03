@@ -98,6 +98,12 @@ It is **not** a hosted cloud agent platform or a benchmark-only terminal rendere
 
 Download the latest release from [GitHub Releases](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest).
 
+macOS users can also install from the OxideTerm Homebrew tap:
+
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
 ---
 
 ## Feature Overview
