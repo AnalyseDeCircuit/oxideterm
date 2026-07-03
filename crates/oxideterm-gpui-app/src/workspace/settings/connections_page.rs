@@ -2532,6 +2532,8 @@ fn connection_import_source_options() -> &'static [ConnectionImportSource] {
         ConnectionImportSource::SecureCrt,
         ConnectionImportSource::Xshell,
         ConnectionImportSource::Termius,
+        ConnectionImportSource::MobaXterm,
+        ConnectionImportSource::WindTerm,
     ]
 }
 
@@ -2545,6 +2547,12 @@ fn connection_import_source_label(source: ConnectionImportSource, i18n: &I18n) -
         }
         ConnectionImportSource::Termius => {
             i18n.t("settings_view.connections.importers.sources.termius")
+        }
+        ConnectionImportSource::MobaXterm => {
+            i18n.t("settings_view.connections.importers.sources.mobaxterm")
+        }
+        ConnectionImportSource::WindTerm => {
+            i18n.t("settings_view.connections.importers.sources.windterm")
         }
     }
 }

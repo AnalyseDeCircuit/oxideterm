@@ -1,10 +1,12 @@
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
+    io::Read,
     path::Path,
 };
 
 use chrono::Utc;
+use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -24,6 +26,10 @@ pub enum ConnectionImportSource {
     SecureCrt,
     Xshell,
     Termius,
+    #[serde(rename = "mobaxterm")]
+    MobaXterm,
+    #[serde(rename = "windterm")]
+    WindTerm,
 }
 
 impl ConnectionImportSource {
@@ -32,6 +38,8 @@ impl ConnectionImportSource {
             Self::SecureCrt => "securecrt",
             Self::Xshell => "xshell",
             Self::Termius => "termius",
+            Self::MobaXterm => "mobaxterm",
+            Self::WindTerm => "windterm",
         }
     }
 
@@ -40,6 +48,8 @@ impl ConnectionImportSource {
             Self::SecureCrt => "Imported/SecureCRT",
             Self::Xshell => "Imported/Xshell",
             Self::Termius => "Imported/Termius",
+            Self::MobaXterm => "Imported/MobaXterm",
+            Self::WindTerm => "Imported/WindTerm",
         }
     }
 }
@@ -275,6 +285,8 @@ fn parse_import_path(
         ConnectionImportSource::SecureCrt => parse_securecrt_path(path),
         ConnectionImportSource::Xshell => parse_xshell_path(path),
         ConnectionImportSource::Termius => parse_termius_path(path),
+        ConnectionImportSource::MobaXterm => parse_mobaxterm_path(path),
+        ConnectionImportSource::WindTerm => parse_windterm_path(path),
     }
 }
 
@@ -291,6 +303,12 @@ fn parse_xshell_path(path: &Path) -> Result<Vec<ImportedConnectionDraft>, Connec
     if path.is_dir() {
         return parse_directory(path, |file, root| parse_xshell_file(file, Some(root)));
     }
+    if path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("xts"))
+    {
+        return parse_xshell_archive(path);
+    }
     parse_xshell_file(path, None).map(|draft| vec![draft])
 }
 
@@ -301,6 +319,26 @@ fn parse_termius_path(path: &Path) -> Result<Vec<ImportedConnectionDraft>, Conne
         ));
     }
     parse_termius_file(path)
+}
+
+fn parse_mobaxterm_path(
+    path: &Path,
+) -> Result<Vec<ImportedConnectionDraft>, ConnectionImportError> {
+    if path.is_dir() {
+        return Err(ConnectionImportError::InvalidPath(
+            path.display().to_string(),
+        ));
+    }
+    parse_mobaxterm_file(path)
+}
+
+fn parse_windterm_path(path: &Path) -> Result<Vec<ImportedConnectionDraft>, ConnectionImportError> {
+    if path.is_dir() {
+        return Err(ConnectionImportError::InvalidPath(
+            path.display().to_string(),
+        ));
+    }
+    parse_windterm_file(path)
 }
 
 fn parse_directory<F>(
@@ -345,10 +383,26 @@ where
 }
 
 fn read_text_file(path: &Path) -> Result<String, ConnectionImportError> {
-    fs::read_to_string(path).map_err(|error| ConnectionImportError::Read {
+    let bytes = fs::read(path).map_err(|error| ConnectionImportError::Read {
         path: path.display().to_string(),
         message: error.to_string(),
-    })
+    })?;
+    Ok(decode_import_text(&bytes))
+}
+
+fn decode_import_text(bytes: &[u8]) -> String {
+    if let Some((encoding, bom_len)) = Encoding::for_bom(bytes) {
+        let (decoded, _, _) = encoding.decode(&bytes[bom_len..]);
+        return decoded.into_owned();
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(value) => value.to_string(),
+        Err(_) => {
+            // Several Windows terminal tools export Chinese paths or sessions as GBK.
+            let (decoded, _, _) = encoding_rs::GBK.decode(bytes);
+            decoded.into_owned()
+        }
+    }
 }
 
 fn parse_securecrt_file(
@@ -393,6 +447,14 @@ fn parse_xshell_file(
     root: Option<&Path>,
 ) -> Result<ImportedConnectionDraft, ConnectionImportError> {
     let content = read_text_file(path)?;
+    parse_xshell_content(&content, path, root)
+}
+
+fn parse_xshell_content(
+    content: &str,
+    path: &Path,
+    root: Option<&Path>,
+) -> Result<ImportedConnectionDraft, ConnectionImportError> {
     let mut fields = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut unsupported_fields = Vec::new();
@@ -415,6 +477,15 @@ fn parse_xshell_file(
         fields.insert(normalized, value);
     }
 
+    if let Some(protocol) = pick_field(&fields, &["protocol"]) {
+        if !protocol.eq_ignore_ascii_case("ssh") {
+            return Err(ConnectionImportError::Parse {
+                path: path.display().to_string(),
+                message: format!("Unsupported Xshell protocol: {protocol}"),
+            });
+        }
+    }
+
     draft_from_fields(
         ConnectionImportSource::Xshell,
         path,
@@ -423,6 +494,66 @@ fn parse_xshell_file(
         warnings,
         unsupported_fields,
     )
+}
+
+fn parse_xshell_archive(
+    path: &Path,
+) -> Result<Vec<ImportedConnectionDraft>, ConnectionImportError> {
+    let file = fs::File::open(path).map_err(|error| ConnectionImportError::Read {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| ConnectionImportError::Parse {
+        path: path.display().to_string(),
+        message: format!("Invalid Xshell archive: {error}"),
+    })?;
+
+    let mut drafts = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| ConnectionImportError::Parse {
+                path: path.display().to_string(),
+                message: format!("Failed to read Xshell archive entry: {error}"),
+            })?;
+        if entry.is_dir() {
+            continue;
+        }
+
+        let entry_path = decode_import_text(entry.name_raw()).replace('\\', "/");
+        if !entry_path.to_ascii_lowercase().ends_with(".xsh") {
+            continue;
+        }
+
+        let mut bytes = Vec::new();
+        entry
+            .read_to_end(&mut bytes)
+            .map_err(|error| ConnectionImportError::Read {
+                path: format!("{}:{entry_path}", path.display()),
+                message: error.to_string(),
+            })?;
+        let content = decode_import_text(&bytes);
+        let virtual_path = Path::new(&entry_path);
+        match parse_xshell_content(&content, virtual_path, Some(Path::new("Xshell/Sessions"))) {
+            Ok(mut draft) => {
+                draft.source_path = format!("{}:{entry_path}", path.display());
+                draft.group = xshell_archive_group(&entry_path)
+                    .or_else(|| Some(DEFAULT_IMPORTED_GROUP.to_string()));
+                draft.id = draft_id(&draft);
+                drafts.push(draft);
+            }
+            Err(ConnectionImportError::Parse { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    if drafts.is_empty() {
+        return Err(ConnectionImportError::Parse {
+            path: path.display().to_string(),
+            message: "No SSH sessions found in Xshell archive".to_string(),
+        });
+    }
+    Ok(drafts)
 }
 
 fn parse_termius_file(path: &Path) -> Result<Vec<ImportedConnectionDraft>, ConnectionImportError> {
@@ -439,6 +570,171 @@ fn parse_termius_file(path: &Path) -> Result<Vec<ImportedConnectionDraft>, Conne
         return Err(ConnectionImportError::Parse {
             path: path.display().to_string(),
             message: "No hosts found in Termius export".to_string(),
+        });
+    }
+    Ok(drafts)
+}
+
+fn parse_mobaxterm_file(
+    path: &Path,
+) -> Result<Vec<ImportedConnectionDraft>, ConnectionImportError> {
+    let content = read_text_file(path)?;
+    let sections = parse_ini_sections(&content);
+    let mut drafts = Vec::new();
+
+    for (section_name, entries) in sections {
+        if !section_name.starts_with("Bookmarks") {
+            continue;
+        }
+        let group = entries
+            .get("SubRep")
+            .and_then(|value| group_from_segments(value.split('\\')));
+        let mut group_warnings = Vec::new();
+        let mut group_unsupported_fields = Vec::new();
+        if entries.contains_key("ImgNum") {
+            group_warnings.push("MobaXterm icon number was not imported".to_string());
+            group_unsupported_fields.push("ImgNum".to_string());
+        }
+
+        for (name, value) in entries {
+            if name == "SubRep" || name == "ImgNum" {
+                continue;
+            }
+            if let Some(mut draft) = parse_mobaxterm_entry(
+                path,
+                &section_name,
+                &name,
+                &value,
+                group.clone(),
+                group_warnings.clone(),
+                group_unsupported_fields.clone(),
+            ) {
+                draft.id = draft_id(&draft);
+                drafts.push(draft);
+            }
+        }
+    }
+
+    if drafts.is_empty() {
+        return Err(ConnectionImportError::Parse {
+            path: path.display().to_string(),
+            message: "No SSH bookmarks found in MobaXterm export".to_string(),
+        });
+    }
+    Ok(drafts)
+}
+
+fn parse_mobaxterm_entry(
+    path: &Path,
+    section_name: &str,
+    name: &str,
+    value: &str,
+    group: Option<String>,
+    warnings: Vec<String>,
+    unsupported_fields: Vec<String>,
+) -> Option<ImportedConnectionDraft> {
+    let body = value.trim().strip_prefix('#')?;
+    let (type_marker, rest) = body.split_once('%')?;
+    if !type_marker.starts_with("109") {
+        return None;
+    }
+    let fields = rest.split('%').collect::<Vec<_>>();
+    if fields.len() < 3 {
+        return None;
+    }
+    let host = fields[0].trim();
+    if host.is_empty() {
+        return None;
+    }
+    let port = fields[1].trim().parse::<u16>().unwrap_or(22);
+    let username = fields
+        .get(2)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("root");
+
+    Some(ImportedConnectionDraft {
+        id: String::new(),
+        source: ConnectionImportSource::MobaXterm,
+        source_path: format!("{}:{section_name}/{name}", path.display()),
+        name: name.to_string(),
+        group: group.or_else(|| Some(DEFAULT_IMPORTED_GROUP.to_string())),
+        host: host.to_string(),
+        port,
+        username: username.to_string(),
+        auth_type: ImportedConnectionAuthType::Password,
+        key_path: None,
+        cert_path: None,
+        proxy_chain: Vec::new(),
+        tags: vec![ConnectionImportSource::MobaXterm.tag().to_string()],
+        warnings: dedupe(warnings),
+        unsupported_fields: dedupe(unsupported_fields),
+        duplicate: false,
+        importable: true,
+    })
+}
+
+fn parse_windterm_file(path: &Path) -> Result<Vec<ImportedConnectionDraft>, ConnectionImportError> {
+    let content = read_text_file(path)?;
+    let values: Vec<serde_json::Value> =
+        serde_json::from_str(&content).map_err(|error| ConnectionImportError::Parse {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    let mut drafts = Vec::new();
+
+    for value in values {
+        let serde_json::Value::Object(map) = value else {
+            continue;
+        };
+        let protocol = pick_json_string(&map, &["session.protocol"]).unwrap_or_default();
+        if !protocol.eq_ignore_ascii_case("ssh") {
+            continue;
+        }
+        let target = pick_json_string(&map, &["session.target"]).unwrap_or_default();
+        let (host, username) = parse_windterm_target(&target);
+        if host.is_empty() {
+            continue;
+        }
+        let name = pick_json_string(&map, &["session.label"]).unwrap_or_else(|| host.clone());
+        let port = pick_json_u16(&map, &["session.port"]).unwrap_or(22);
+        let group = pick_json_string(&map, &["session.group"])
+            .and_then(|value| group_from_segments(value.split('>')));
+
+        let mut unsupported_fields = Vec::new();
+        collect_secret_json_keys(&map, &mut unsupported_fields);
+        let warnings = if unsupported_fields.is_empty() {
+            Vec::new()
+        } else {
+            vec!["Password was not imported".to_string()]
+        };
+        let mut draft = ImportedConnectionDraft {
+            id: String::new(),
+            source: ConnectionImportSource::WindTerm,
+            source_path: path.display().to_string(),
+            name,
+            group: group.or_else(|| Some(DEFAULT_IMPORTED_GROUP.to_string())),
+            host,
+            port,
+            username,
+            auth_type: ImportedConnectionAuthType::Password,
+            key_path: None,
+            cert_path: None,
+            proxy_chain: Vec::new(),
+            tags: vec![ConnectionImportSource::WindTerm.tag().to_string()],
+            warnings: dedupe(warnings),
+            unsupported_fields: dedupe(unsupported_fields),
+            duplicate: false,
+            importable: true,
+        };
+        draft.id = draft_id(&draft);
+        drafts.push(draft);
+    }
+
+    if drafts.is_empty() {
+        return Err(ConnectionImportError::Parse {
+            path: path.display().to_string(),
+            message: "No SSH sessions found in WindTerm export".to_string(),
         });
     }
     Ok(drafts)
@@ -740,6 +1036,30 @@ fn parse_plain_setting(line: &str) -> Option<(String, String)> {
     Some((key.trim().to_string(), unquote(value.trim())))
 }
 
+fn parse_ini_sections(content: &str) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    let mut current_section = String::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            current_section = trimmed[1..trimmed.len() - 1].trim().to_string();
+            sections.entry(current_section.clone()).or_default();
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        sections
+            .entry(current_section.clone())
+            .or_default()
+            .insert(key.trim().to_string(), unquote(value.trim()));
+    }
+    sections
+}
+
 fn normalize_key(key: &str) -> String {
     key.chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
@@ -827,6 +1147,42 @@ fn group_from_path(path: &Path, root: Option<&Path>) -> Option<String> {
     ))
 }
 
+fn group_from_segments<'a>(segments: impl Iterator<Item = &'a str>) -> Option<String> {
+    let normalized = segments
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}/{}",
+        DEFAULT_IMPORTED_GROUP,
+        normalized.join("/")
+    ))
+}
+
+fn xshell_archive_group(entry_path: &str) -> Option<String> {
+    let parent = Path::new(entry_path).parent()?.to_string_lossy();
+    let stripped = parent
+        .strip_prefix("Xshell/Sessions/")
+        .or_else(|| parent.strip_prefix("Xshell/"))
+        .unwrap_or(&parent);
+    group_from_segments(stripped.split('/'))
+}
+
+fn parse_windterm_target(target: &str) -> (String, String) {
+    let trimmed = target.trim();
+    if let Some((username, host)) = trimmed.rsplit_once('@') {
+        let username = username.trim();
+        let host = host.trim();
+        if !username.is_empty() && !host.is_empty() {
+            return (host.to_string(), username.to_string());
+        }
+    }
+    (trimmed.to_string(), "root".to_string())
+}
+
 fn file_stem(path: &Path) -> String {
     path.file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
@@ -867,6 +1223,7 @@ fn draft_id(draft: &ImportedConnectionDraft) -> String {
 #[cfg(test)]
 mod tests {
     use std::{
+        io::Write,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -937,6 +1294,41 @@ mod tests {
     }
 
     #[test]
+    fn previews_xshell_archive_sessions_with_entry_groups() {
+        let path = temp_import_file("xts", "");
+        {
+            let file = std::fs::File::create(&path).unwrap();
+            let mut archive = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default();
+            archive
+                .start_file("Xshell/Sessions/Production/GPU/model.xsh", options)
+                .unwrap();
+            archive
+                .write_all(
+                    b"[CONNECTION]\nProtocol=SSH\nHost=archive.example.com\nPort=2201\n\n[AUTHENTICATION]\nUserName=ops\n",
+                )
+                .unwrap();
+            archive.finish().unwrap();
+        }
+
+        let preview = preview_connection_import(
+            ConnectionImportSource::Xshell,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let draft = &preview.drafts[0];
+        assert_eq!(preview.total, 1);
+        assert_eq!(draft.name, "model");
+        assert_eq!(draft.host, "archive.example.com");
+        assert_eq!(draft.username, "ops");
+        assert_eq!(draft.group.as_deref(), Some("Imported/Production/GPU"));
+        assert!(draft.source_path.contains("Production/GPU/model.xsh"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn previews_termius_export_hosts() {
         let path = fixture_path("termius/export.json");
         let preview = preview_connection_import(
@@ -960,6 +1352,45 @@ mod tests {
                 .any(|draft| draft.host == "gpu-b.example.com")
         );
         assert_eq!(preview.warnings, 1);
+    }
+
+    #[test]
+    fn previews_mobaxterm_ssh_bookmarks_with_groups() {
+        let path = fixture_path("mobaxterm/bookmarks.mxtsessions");
+        let preview = preview_connection_import(
+            ConnectionImportSource::MobaXterm,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let draft = &preview.drafts[0];
+        assert_eq!(preview.total, 1);
+        assert_eq!(draft.name, "Prod GPU");
+        assert_eq!(draft.host, "prod-gpu.example.com");
+        assert_eq!(draft.port, 2200);
+        assert_eq!(draft.username, "deploy");
+        assert_eq!(draft.group.as_deref(), Some("Imported/Production/GPU"));
+        assert_eq!(draft.unsupported_fields, vec!["ImgNum".to_string()]);
+    }
+
+    #[test]
+    fn previews_windterm_ssh_sessions_with_groups() {
+        let path = fixture_path("windterm/user.sessions");
+        let preview = preview_connection_import(
+            ConnectionImportSource::WindTerm,
+            &[path.display().to_string()],
+            &HashSet::new(),
+        )
+        .unwrap();
+
+        let draft = &preview.drafts[0];
+        assert_eq!(preview.total, 1);
+        assert_eq!(draft.name, "Wind Prod");
+        assert_eq!(draft.host, "wind.example.com");
+        assert_eq!(draft.port, 2222);
+        assert_eq!(draft.username, "admin");
+        assert_eq!(draft.group.as_deref(), Some("Imported/Production/Edge"));
     }
 
     #[test]

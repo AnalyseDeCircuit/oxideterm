@@ -11,6 +11,7 @@ base64.workspace = true
 chacha20poly1305.workspace = true
 chrono.workspace = true
 dirs.workspace = true
+encoding_rs.workspace = true
 rand.workspace = true
 rmp-serde.workspace = true
 serde.workspace = true
@@ -23,6 +24,7 @@ thiserror.workspace = true
 uuid.workspace = true
 whoami.workspace = true
 zeroize.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 rand10.workspace = true

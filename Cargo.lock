@@ -7037,6 +7037,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "dirs 5.0.1",
+ "encoding_rs",
  "keyring",
  "objc2",
  "objc2-foundation",
@@ -7052,6 +7053,7 @@ dependencies = [
  "uuid",
  "whoami",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

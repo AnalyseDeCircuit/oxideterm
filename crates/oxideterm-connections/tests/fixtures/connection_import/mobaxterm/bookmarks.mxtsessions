@@ -1,0 +1,6 @@
+[Bookmarks]
+SubRep=Production\GPU
+ImgNum=42
+Prod GPU=#109#0%prod-gpu.example.com%2200%deploy%
+Ignored RDP=#91#0%desktop.example.com%3389%user%
+

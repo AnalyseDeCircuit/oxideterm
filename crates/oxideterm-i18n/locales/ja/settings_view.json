@@ -533,12 +533,14 @@
       },
       "importers": {
         "title": "他のクライアントからインポート",
-        "description": "SecureCRT、Xshell、Termius の接続ファイルをプレビューしてインポートします。パスワードとシークレット項目はインポートされません。",
+        "description": "SecureCRT、Xshell、Termius、MobaXterm、WindTerm の接続ファイルをプレビューしてインポートします。パスワードとシークレット項目はインポートされません。",
         "source": "ソース",
         "sources": {
           "securecrt": "SecureCRT session ファイル",
-          "xshell": "Xshell .xsh ファイル",
-          "termius": "Termius エクスポート"
+          "xshell": "Xshell .xsh/.xts ファイル",
+          "termius": "Termius エクスポート",
+          "mobaxterm": "MobaXterm セッション",
+          "windterm": "WindTerm セッション"
         },
         "paths": "ファイルまたはフォルダー",
         "choose_files": "ファイルを選択",

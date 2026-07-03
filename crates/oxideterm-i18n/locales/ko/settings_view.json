@@ -533,12 +533,14 @@
       },
       "importers": {
         "title": "다른 클라이언트에서 가져오기",
-        "description": "SecureCRT, Xshell, Termius 연결 파일을 미리 보고 가져옵니다. 비밀번호와 secret 필드는 가져오지 않습니다.",
+        "description": "SecureCRT, Xshell, Termius, MobaXterm, WindTerm 연결 파일을 미리 보고 가져옵니다. 비밀번호와 secret 필드는 가져오지 않습니다.",
         "source": "소스",
         "sources": {
           "securecrt": "SecureCRT session 파일",
-          "xshell": "Xshell .xsh 파일",
-          "termius": "Termius 내보내기"
+          "xshell": "Xshell .xsh/.xts 파일",
+          "termius": "Termius 내보내기",
+          "mobaxterm": "MobaXterm 세션",
+          "windterm": "WindTerm 세션"
         },
         "paths": "파일 또는 폴더",
         "choose_files": "파일 선택",

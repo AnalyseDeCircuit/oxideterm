@@ -533,12 +533,14 @@
       },
       "importers": {
         "title": "Aus anderen Clients importieren",
-        "description": "SecureCRT-, Xshell- oder Termius-Verbindungsdateien vorab prüfen und importieren. Passwörter und Secret-Felder werden nie importiert.",
+        "description": "SecureCRT-, Xshell-, Termius-, MobaXterm- oder WindTerm-Verbindungsdateien vorab prüfen und importieren. Passwörter und Secret-Felder werden nie importiert.",
         "source": "Quelle",
         "sources": {
           "securecrt": "SecureCRT session-Dateien",
-          "xshell": "Xshell .xsh-Dateien",
-          "termius": "Termius-Export"
+          "xshell": "Xshell .xsh/.xts-Dateien",
+          "termius": "Termius-Export",
+          "mobaxterm": "MobaXterm-Sitzungen",
+          "windterm": "WindTerm-Sitzungen"
         },
         "paths": "Dateien oder Ordner",
         "choose_files": "Dateien wählen",

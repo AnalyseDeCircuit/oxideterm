@@ -14,6 +14,9 @@ pub(super) fn quick_command_lucide_icon(icon: QuickCommandIcon) -> LucideIcon {
 
 const QUICK_COMMANDS_POPOVER_MAX_WIDTH: f32 = 860.0;
 const QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN: f32 = 12.0;
+const QUICK_COMMANDS_LIST_MAX_HEIGHT: f32 = 360.0;
+const QUICK_COMMANDS_CONTENT_MIN_HEIGHT: f32 = 300.0;
+const QUICK_COMMANDS_BODY_HEADER_HEIGHT: f32 = 49.0;
 
 pub(super) fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
     format!("terminal.quick_commands.icon_{}", icon.as_source_id())
@@ -93,6 +96,16 @@ fn quick_command_category_draft_can_save(draft: &QuickCommandCategoryDraft) -> b
 fn quick_commands_popover_width_for_bar(command_bar_width: f32) -> f32 {
     let available_width = command_bar_width - QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN * 2.0;
     available_width.max(0.0).min(QUICK_COMMANDS_POPOVER_MAX_WIDTH)
+}
+
+fn quick_command_list_height(row_count: usize) -> f32 {
+    (row_count.max(1) as f32 * QUICK_COMMAND_LIST_ESTIMATED_HEIGHT)
+        .min(QUICK_COMMANDS_LIST_MAX_HEIGHT)
+}
+
+fn quick_commands_content_height(row_count: usize) -> f32 {
+    (QUICK_COMMANDS_BODY_HEADER_HEIGHT + quick_command_list_height(row_count))
+        .max(QUICK_COMMANDS_CONTENT_MIN_HEIGHT)
 }
 
 fn select_quick_command_category_state(
@@ -516,9 +529,19 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             });
 
+        let content_height = quick_commands_content_height(visible_commands.len());
         let sidebar = self.render_quick_command_category_sidebar(cx);
         let body = self.render_quick_command_body(visible_commands, cx);
-        popover = popover.child(sidebar).child(body);
+        popover = popover.child(
+            div()
+                // command_panel is column-oriented; quick commands need their
+                // sidebar and body to share one explicit row-height owner.
+                .h(px(content_height))
+                .min_h(px(0.0))
+                .flex()
+                .child(sidebar)
+                .child(body),
+        );
         popover.into_any_element()
     }
 
@@ -526,6 +549,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let mut sidebar = div()
             .w(px(160.0))
+            .h_full()
             .flex_none()
             .overflow_hidden()
             .rounded_l(px(rounded_shell_child_radius(self.tokens.radii.lg)))
@@ -737,6 +761,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .flex_1()
+            .h_full()
             .min_w(px(0.0))
             .overflow_hidden()
             .rounded_r(px(rounded_shell_child_radius(self.tokens.radii.lg)))

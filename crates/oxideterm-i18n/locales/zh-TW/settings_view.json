@@ -533,12 +533,14 @@
       },
       "importers": {
         "title": "從其他客戶端匯入",
-        "description": "預覽並匯入 SecureCRT、Xshell 或 Termius 的連線檔。密碼與 secret 欄位永遠不會被匯入。",
+        "description": "預覽並匯入 SecureCRT、Xshell、Termius、MobaXterm 或 WindTerm 的連線檔。密碼與 secret 欄位永遠不會被匯入。",
         "source": "來源",
         "sources": {
           "securecrt": "SecureCRT session 檔",
-          "xshell": "Xshell .xsh 檔",
-          "termius": "Termius 匯出"
+          "xshell": "Xshell .xsh/.xts 檔",
+          "termius": "Termius 匯出",
+          "mobaxterm": "MobaXterm 工作階段",
+          "windterm": "WindTerm 工作階段"
         },
         "paths": "檔案或資料夾",
         "choose_files": "選擇檔案",

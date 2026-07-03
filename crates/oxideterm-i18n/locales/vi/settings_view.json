@@ -533,12 +533,14 @@
       },
       "importers": {
         "title": "Nhập từ client khác",
-        "description": "Xem trước và nhập tệp kết nối SecureCRT, Xshell hoặc Termius. Mật khẩu và trường secret không bao giờ được nhập.",
+        "description": "Xem trước và nhập tệp kết nối SecureCRT, Xshell, Termius, MobaXterm hoặc WindTerm. Mật khẩu và trường secret không bao giờ được nhập.",
         "source": "Nguồn",
         "sources": {
           "securecrt": "Tệp session SecureCRT",
-          "xshell": "Tệp Xshell .xsh",
-          "termius": "Bản xuất Termius"
+          "xshell": "Tệp Xshell .xsh/.xts",
+          "termius": "Bản xuất Termius",
+          "mobaxterm": "Phiên MobaXterm",
+          "windterm": "Phiên WindTerm"
         },
         "paths": "Tệp hoặc thư mục",
         "choose_files": "Chọn tệp",

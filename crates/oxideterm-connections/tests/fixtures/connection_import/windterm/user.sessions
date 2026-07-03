@@ -1,0 +1,15 @@
+[
+  {
+    "session.protocol": "SSH",
+    "session.target": "admin@wind.example.com",
+    "session.label": "Wind Prod",
+    "session.port": 2222,
+    "session.group": "Production>Edge"
+  },
+  {
+    "session.protocol": "Telnet",
+    "session.target": "ignored.example.com",
+    "session.label": "Ignored Telnet"
+  }
+]
+
