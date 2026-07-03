@@ -141,6 +141,7 @@ impl WorkspaceApp {
             ))
             .child(
                 div()
+                    .flex_1()
                     .min_w(px(0.0))
                     .flex()
                     .flex_col()
@@ -152,6 +153,7 @@ impl WorkspaceApp {
                             .gap(px(6.0))
                             .child(
                                 div()
+                                    .min_w(px(0.0))
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(self.tokens.ui.text))
