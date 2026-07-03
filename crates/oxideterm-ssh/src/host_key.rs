@@ -20,6 +20,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     SshTransportError,
+    local_paths::default_ssh_dir,
     upstream_proxy::{UpstreamProxyConfig, dial_initial_tcp},
 };
 
@@ -497,11 +498,12 @@ pub fn remove_host_key(
 }
 
 fn default_known_hosts_path() -> Result<PathBuf, SshTransportError> {
-    Ok(known_hosts_path_from_home(std::env::home_dir()))
+    Ok(known_hosts_path_from_ssh_dir(default_ssh_dir()))
 }
 
-fn known_hosts_path_from_home(home: Option<PathBuf>) -> PathBuf {
-    home.map(|home| home.join(".ssh").join("known_hosts"))
+fn known_hosts_path_from_ssh_dir(ssh_dir: Option<PathBuf>) -> PathBuf {
+    ssh_dir
+        .map(|ssh_dir| ssh_dir.join("known_hosts"))
         .unwrap_or_else(|| PathBuf::from("~/.ssh/known_hosts"))
 }
 
@@ -826,7 +828,7 @@ mod tests {
     #[test]
     fn default_known_hosts_path_falls_back_like_tauri_when_home_is_missing() {
         assert_eq!(
-            known_hosts_path_from_home(None),
+            known_hosts_path_from_ssh_dir(None),
             PathBuf::from("~/.ssh/known_hosts")
         );
     }

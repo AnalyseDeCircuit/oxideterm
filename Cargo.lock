@@ -7641,7 +7641,9 @@ version = "2.0.0-gpui-preview.11"
 dependencies = [
  "base64",
  "dashmap",
+ "dirs 5.0.1",
  "oxideterm-connection-monitor",
+ "oxideterm-portable-runtime",
  "oxideterm-sftp",
  "oxideterm-topology",
  "oxideterm-x11-forwarding",

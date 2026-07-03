@@ -5,6 +5,7 @@ pub mod oxide_file;
 mod secret;
 mod ssh_config;
 mod ssh_keys;
+mod ssh_paths;
 mod store;
 #[cfg(target_os = "macos")]
 mod touch_id;

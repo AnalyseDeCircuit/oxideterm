@@ -798,10 +798,7 @@ fn extract_embedded_file(
             .decode(encoded.as_bytes())
             .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?,
     );
-    let imported_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ssh")
-        .join("imported");
+    let imported_dir = crate::ssh_paths::default_ssh_dir().join("imported");
     fs::create_dir_all(&imported_dir)?;
     let base = Path::new(original_path)
         .file_name()

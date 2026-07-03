@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use zeroize::Zeroizing;
 
+use crate::ssh_paths::default_ssh_dir;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SshKeyInfo {
     pub name: String,
@@ -11,10 +13,7 @@ pub struct SshKeyInfo {
 }
 
 pub fn list_available_ssh_keys() -> Vec<SshKeyInfo> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    default_private_key_paths_in_home(home)
+    default_private_key_paths_in_ssh_dir(default_ssh_dir())
         .into_iter()
         .filter_map(|path| {
             let status = default_private_key_status(&path, None)?;
@@ -35,8 +34,12 @@ pub(crate) enum DefaultPrivateKeyStatus {
     RequiresPassphrase,
 }
 
+#[cfg(test)]
 pub(crate) fn default_private_key_paths_in_home(home: PathBuf) -> Vec<PathBuf> {
-    let ssh = home.join(".ssh");
+    default_private_key_paths_in_ssh_dir(home.join(".ssh"))
+}
+
+pub(crate) fn default_private_key_paths_in_ssh_dir(ssh: PathBuf) -> Vec<PathBuf> {
     let preferred_names = ["id_ed25519", "id_ecdsa", "id_rsa"];
     let mut paths = preferred_names
         .iter()

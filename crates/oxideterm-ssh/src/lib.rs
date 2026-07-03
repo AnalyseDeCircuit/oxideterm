@@ -12,6 +12,7 @@ mod capability;
 mod config;
 mod connection_registry;
 mod host_key;
+mod local_paths;
 mod monitor;
 mod reconnect;
 mod router;

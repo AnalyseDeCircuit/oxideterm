@@ -7,9 +7,13 @@ use crate::{
     ConnectionOptions, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop,
     SavedUpstreamProxyPolicy, SecretString, SshConfigHost,
     ssh_keys::{
-        DefaultPrivateKeyStatus, default_private_key_paths_in_home, default_private_key_status,
+        DefaultPrivateKeyStatus, default_private_key_paths_in_ssh_dir, default_private_key_status,
     },
+    ssh_paths::default_ssh_dir,
 };
+
+#[cfg(test)]
+use crate::ssh_keys::default_private_key_paths_in_home;
 
 pub const IMPORTED_GROUP: &str = "Imported";
 pub const SSH_CONFIG_TAG: &str = "ssh-config";
@@ -286,13 +290,16 @@ fn current_username() -> String {
 }
 
 pub fn first_available_default_key_path() -> Result<String> {
-    first_available_default_key_path_in_home(
-        std::env::home_dir().unwrap_or_else(|| PathBuf::from(".")),
-    )
+    first_available_default_key_path_in_ssh_dir(default_ssh_dir())
 }
 
+#[cfg(test)]
 fn first_available_default_key_path_in_home(home: PathBuf) -> Result<String> {
-    for path in default_private_key_paths_in_home(home) {
+    first_available_default_key_path_in_ssh_dir(home.join(".ssh"))
+}
+
+fn first_available_default_key_path_in_ssh_dir(ssh_dir: PathBuf) -> Result<String> {
+    for path in default_private_key_paths_in_ssh_dir(ssh_dir) {
         match default_private_key_status(&path, None) {
             Some(
                 DefaultPrivateKeyStatus::Loadable | DefaultPrivateKeyStatus::RequiresPassphrase,
@@ -306,17 +313,22 @@ fn first_available_default_key_path_in_home(home: PathBuf) -> Result<String> {
 }
 
 fn first_loadable_default_key_path(passphrase: &str) -> Result<String> {
-    first_loadable_default_key_path_in_home(
-        std::env::home_dir().unwrap_or_else(|| PathBuf::from(".")),
-        passphrase,
-    )
+    first_loadable_default_key_path_in_ssh_dir(default_ssh_dir(), passphrase)
 }
 
+#[cfg(test)]
 fn first_loadable_default_key_path_in_home(home: PathBuf, passphrase: &str) -> Result<String> {
+    first_loadable_default_key_path_in_ssh_dir(home.join(".ssh"), passphrase)
+}
+
+fn first_loadable_default_key_path_in_ssh_dir(
+    ssh_dir: PathBuf,
+    passphrase: &str,
+) -> Result<String> {
     let passphrase = (!passphrase.is_empty()).then_some(passphrase);
     let mut saw_encrypted_key = false;
 
-    for path in default_private_key_paths_in_home(home) {
+    for path in default_private_key_paths_in_ssh_dir(ssh_dir) {
         match default_private_key_status(&path, passphrase) {
             Some(DefaultPrivateKeyStatus::Loadable) => {
                 return Ok(path.to_string_lossy().into_owned());

@@ -6,6 +6,8 @@ use std::{
 
 use anyhow::{Context, Result};
 
+use crate::ssh_paths::{default_ssh_dir, expand_home_path};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SshConfigHost {
     pub alias: String,
@@ -46,11 +48,7 @@ struct SshHostOptions {
 }
 
 pub fn default_ssh_config_path() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ssh")
-        .join("config")
+    default_ssh_dir().join("config")
 }
 
 pub fn list_ssh_config_hosts(existing_names: &HashSet<String>) -> Result<Vec<SshConfigHost>> {
@@ -280,12 +278,7 @@ fn expand_include_path(base_dir: &Path, pattern: &str) -> Vec<PathBuf> {
 }
 
 fn expand_home(value: &str) -> String {
-    if let Some(rest) = value.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
-    {
-        return PathBuf::from(home).join(rest).display().to_string();
-    }
-    value.to_string()
+    expand_home_path(value)
 }
 
 fn alias_contains_pattern(alias: &str) -> bool {

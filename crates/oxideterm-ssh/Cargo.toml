@@ -7,7 +7,9 @@ version.workspace = true
 [dependencies]
 base64.workspace = true
 dashmap.workspace = true
+dirs.workspace = true
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-topology = { path = "../oxideterm-topology" }
 oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding" }

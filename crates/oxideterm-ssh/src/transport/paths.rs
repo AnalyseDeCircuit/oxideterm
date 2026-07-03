@@ -1,12 +1,16 @@
 fn default_key_paths() -> Vec<PathBuf> {
-    let Some(home) = std::env::home_dir() else {
+    let Some(ssh_dir) = crate::local_paths::default_ssh_dir() else {
         return Vec::new();
     };
-    default_key_paths_in_home(home)
+    default_key_paths_in_ssh_dir(ssh_dir)
 }
 
+#[cfg(test)]
 fn default_key_paths_in_home(home: PathBuf) -> Vec<PathBuf> {
-    let ssh = home.join(".ssh");
+    default_key_paths_in_ssh_dir(home.join(".ssh"))
+}
+
+fn default_key_paths_in_ssh_dir(ssh: PathBuf) -> Vec<PathBuf> {
     let preferred_names = ["id_ed25519", "id_ecdsa", "id_rsa"];
     let mut paths = preferred_names
         .iter()
@@ -85,10 +89,10 @@ fn default_key_candidate_name(path: &PathBuf) -> Option<&str> {
 
 fn expand_tilde_path(path: &str) -> PathBuf {
     if path == "~" {
-        return std::env::home_dir().unwrap_or_else(|| PathBuf::from(path));
+        return crate::local_paths::local_home_dir().unwrap_or_else(|| PathBuf::from(path));
     }
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = std::env::home_dir() {
+        if let Some(home) = crate::local_paths::local_home_dir() {
             return home.join(rest);
         }
     }

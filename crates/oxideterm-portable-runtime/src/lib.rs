@@ -13,6 +13,7 @@ pub use detection::{
     PORTABLE_MARKER_FILENAME, PortableActivationKind, PortableError, PortableHostKind,
     PortableInfo, detect_portable_info_from_exe, detect_portable_info_from_exe_with_appimage,
     is_portable_mode, portable_data_dir, portable_info, portable_keystore_file_path,
+    portable_ssh_dir,
 };
 pub use lock::{acquire_portable_instance_lock, portable_instance_lock_path};
 pub use status::{

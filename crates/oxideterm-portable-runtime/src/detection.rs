@@ -262,6 +262,13 @@ pub fn portable_data_dir() -> Result<Option<PathBuf>, PortableError> {
     Ok(info.is_portable.then(|| info.data_dir.clone()))
 }
 
+pub fn portable_ssh_dir() -> Result<Option<PathBuf>, PortableError> {
+    let info = portable_info()?;
+    // SSH files are runtime data in portable mode, not resources copied into
+    // the executable directory. Keeping them under data preserves portability.
+    Ok(info.is_portable.then(|| info.data_dir.join(".ssh")))
+}
+
 pub fn portable_keystore_file_path() -> Result<Option<PathBuf>, PortableError> {
     let info = portable_info()?;
     Ok(info.is_portable.then(|| info.keystore_path.clone()))
