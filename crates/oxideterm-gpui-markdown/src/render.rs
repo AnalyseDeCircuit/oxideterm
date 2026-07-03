@@ -6,7 +6,7 @@
 //! This module converts OxideTerm-owned markdown model nodes into composed
 //! GPUI `Div` / `AnyElement` trees using only semantic theme tokens.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{ops::Range, path::PathBuf, sync::Arc};
 
 use gpui::{
     AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, Image,
@@ -126,42 +126,35 @@ fn render_document_windowed_with_code_actions(
         return render_document_with_code_actions(document, tokens, opts, code_actions);
     }
 
-    let window_top = (viewport_top - overdraw).max(0.0);
-    let window_bottom = (viewport_top + viewport_height + overdraw).min(total_height);
-    let mut cursor_y = 0.0;
-    let mut top_spacer = 0.0;
-    let mut bottom_spacer = 0.0;
+    let Some(virtual_window) = markdown_virtual_window(
+        &item_sizes,
+        opts.block_gap,
+        viewport_top,
+        viewport_height,
+        overdraw,
+    ) else {
+        return render_document_with_code_actions(document, tokens, opts, code_actions);
+    };
     let mut rendered = Vec::new();
 
-    for (index, item) in items.iter().enumerate() {
-        let item_height = item_sizes
-            .get(index)
-            .map(|size| f32::from(size.height))
-            .unwrap_or_default();
-        let item_top = cursor_y;
-        let item_bottom = item_top + item_height;
-        if item_bottom >= window_top && item_top <= window_bottom {
-            if rendered.is_empty() {
-                top_spacer = item_top;
+    for (_index, item) in items
+        .iter()
+        .enumerate()
+        .skip(virtual_window.range.start)
+        .take(virtual_window.range.len())
+    {
+        match item {
+            MarkdownLayoutItem::Block(block) => {
+                rendered.push(render_block_with_code_actions(
+                    block,
+                    tokens,
+                    opts,
+                    code_actions,
+                ));
             }
-            match item {
-                MarkdownLayoutItem::Block(block) => {
-                    rendered.push(render_block_with_code_actions(
-                        block,
-                        tokens,
-                        opts,
-                        code_actions,
-                    ));
-                }
-                MarkdownLayoutItem::Footnotes(footnotes) => {
-                    rendered.push(render_footnotes(footnotes, tokens, opts));
-                }
+            MarkdownLayoutItem::Footnotes(footnotes) => {
+                rendered.push(render_footnotes(footnotes, tokens, opts));
             }
-            bottom_spacer = (total_height - item_bottom).max(0.0);
-        }
-        cursor_y = item_bottom;
-        if index + 1 < items.len() {
-            cursor_y += opts.block_gap;
         }
     }
 
@@ -182,15 +175,19 @@ fn render_document_windowed_with_code_actions(
         .flex()
         .flex_col()
         .gap(px(opts.block_gap));
-    if top_spacer > 0.0 {
-        content = content.child(div().w_full().h(px((top_spacer - opts.block_gap).max(0.0))));
-    }
-    content = content.children(rendered);
-    if bottom_spacer > 0.0 {
+    if virtual_window.top_spacer > 0.0 {
         content = content.child(
             div()
                 .w_full()
-                .h(px((bottom_spacer - opts.block_gap).max(0.0))),
+                .h(px((virtual_window.top_spacer - opts.block_gap).max(0.0))),
+        );
+    }
+    content = content.children(rendered);
+    if virtual_window.bottom_spacer > 0.0 {
+        content = content.child(
+            div()
+                .w_full()
+                .h(px((virtual_window.bottom_spacer - opts.block_gap).max(0.0))),
         );
     }
 
@@ -304,44 +301,43 @@ pub fn render_document_windowed_selectable_with_code_actions(
         );
     }
 
-    let window_top = (viewport_top - overdraw).max(0.0);
-    let window_bottom = (viewport_top + viewport_height + overdraw).min(total_height);
-    let mut cursor_y = 0.0;
-    let mut top_spacer = 0.0;
-    let mut bottom_spacer = 0.0;
+    let Some(virtual_window) = markdown_virtual_window(
+        &item_sizes,
+        opts.block_gap,
+        viewport_top,
+        viewport_height,
+        overdraw,
+    ) else {
+        return render_document_selectable_with_code_actions(
+            document,
+            tokens,
+            opts,
+            code_actions,
+            render_text,
+        );
+    };
     let mut rendered = Vec::new();
 
-    for (index, item) in items.iter().enumerate() {
-        let item_height = item_sizes
-            .get(index)
-            .map(|size| f32::from(size.height))
-            .unwrap_or_default();
-        let item_top = cursor_y;
-        let item_bottom = item_top + item_height;
-        if item_bottom >= window_top && item_top <= window_bottom {
-            if rendered.is_empty() {
-                top_spacer = item_top;
+    for (index, item) in items
+        .iter()
+        .enumerate()
+        .skip(virtual_window.range.start)
+        .take(virtual_window.range.len())
+    {
+        match item {
+            MarkdownLayoutItem::Block(block) => {
+                rendered.push(render_selectable_block(
+                    block,
+                    tokens,
+                    opts,
+                    code_actions,
+                    &format!("w:{index}"),
+                    render_text,
+                ));
             }
-            match item {
-                MarkdownLayoutItem::Block(block) => {
-                    rendered.push(render_selectable_block(
-                        block,
-                        tokens,
-                        opts,
-                        code_actions,
-                        &format!("w:{index}"),
-                        render_text,
-                    ));
-                }
-                MarkdownLayoutItem::Footnotes(footnotes) => {
-                    rendered.push(render_footnotes(footnotes, tokens, opts));
-                }
+            MarkdownLayoutItem::Footnotes(footnotes) => {
+                rendered.push(render_footnotes(footnotes, tokens, opts));
             }
-            bottom_spacer = (total_height - item_bottom).max(0.0);
-        }
-        cursor_y = item_bottom;
-        if index + 1 < items.len() {
-            cursor_y += opts.block_gap;
         }
     }
 
@@ -362,15 +358,19 @@ pub fn render_document_windowed_selectable_with_code_actions(
         .flex()
         .flex_col()
         .gap(px(opts.block_gap));
-    if top_spacer > 0.0 {
-        content = content.child(div().w_full().h(px((top_spacer - opts.block_gap).max(0.0))));
-    }
-    content = content.children(rendered);
-    if bottom_spacer > 0.0 {
+    if virtual_window.top_spacer > 0.0 {
         content = content.child(
             div()
                 .w_full()
-                .h(px((bottom_spacer - opts.block_gap).max(0.0))),
+                .h(px((virtual_window.top_spacer - opts.block_gap).max(0.0))),
+        );
+    }
+    content = content.children(rendered);
+    if virtual_window.bottom_spacer > 0.0 {
+        content = content.child(
+            div()
+                .w_full()
+                .h(px((virtual_window.bottom_spacer - opts.block_gap).max(0.0))),
         );
     }
 
@@ -419,7 +419,7 @@ where
     V: Render,
 {
     let layout = MarkdownBlockLayout::from_document(document, opts);
-    let viewport_top = f32::from(scroll_handle.offset().y);
+    let viewport_top = markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y);
     let viewport_height = f32::from(scroll_handle.bounds().size.height);
     let content = render_document_windowed_with_code_actions(
         document,
@@ -446,6 +446,98 @@ where
 fn estimated_markdown_height(item_sizes: &[gpui::Size<gpui::Pixels>], block_gap: f32) -> f32 {
     let items_height: f32 = item_sizes.iter().map(|size| f32::from(size.height)).sum();
     items_height + block_gap * item_sizes.len().saturating_sub(1) as f32
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct MarkdownVirtualWindow {
+    range: Range<usize>,
+    top_spacer: f32,
+    bottom_spacer: f32,
+}
+
+fn markdown_virtual_window(
+    item_sizes: &[gpui::Size<gpui::Pixels>],
+    block_gap: f32,
+    viewport_top: f32,
+    viewport_height: f32,
+    overdraw: f32,
+) -> Option<MarkdownVirtualWindow> {
+    if item_sizes.is_empty() {
+        return None;
+    }
+
+    let total_height = estimated_markdown_height(item_sizes, block_gap);
+    if total_height <= 0.0 {
+        return None;
+    }
+
+    let viewport_top = finite_non_negative(viewport_top);
+    let viewport_height = finite_non_negative(viewport_height);
+    let overdraw = finite_non_negative(overdraw);
+    let block_gap = finite_non_negative(block_gap);
+    let max_viewport_top = (total_height - viewport_height).max(0.0);
+    let clamped_viewport_top = viewport_top.min(max_viewport_top);
+    let window_top = (clamped_viewport_top - overdraw).max(0.0);
+    let window_bottom = (clamped_viewport_top + viewport_height + overdraw).min(total_height);
+
+    // Keep the item origins as the source of truth, like a variable-height
+    // list. This prevents an empty render window when the scroll offset and
+    // estimated markdown height drift apart.
+    let mut item_bounds = Vec::with_capacity(item_sizes.len());
+    let mut cursor_y = 0.0;
+    for (index, size) in item_sizes.iter().enumerate() {
+        let item_top = cursor_y;
+        let item_bottom = item_top + finite_non_negative(f32::from(size.height));
+        item_bounds.push((item_top, item_bottom));
+        cursor_y = item_bottom;
+        if index + 1 < item_sizes.len() {
+            cursor_y += block_gap;
+        }
+    }
+
+    let mut first_index = None;
+    let mut last_index_exclusive = 0;
+    for (index, (item_top, item_bottom)) in item_bounds.iter().copied().enumerate() {
+        if item_bottom >= window_top && item_top <= window_bottom {
+            first_index.get_or_insert(index);
+            last_index_exclusive = index + 1;
+        }
+    }
+
+    let (first_index, last_index_exclusive) = match first_index {
+        Some(first_index) => (first_index, last_index_exclusive),
+        None => {
+            let fallback_index = item_bounds
+                .iter()
+                .position(|(_, item_bottom)| *item_bottom >= clamped_viewport_top)
+                .unwrap_or_else(|| item_bounds.len().saturating_sub(1));
+            (fallback_index, fallback_index + 1)
+        }
+    };
+
+    let (first_item_top, _) = item_bounds[first_index];
+    let (_, last_item_bottom) = item_bounds[last_index_exclusive - 1];
+    let scroll_overflow = (viewport_top - clamped_viewport_top).max(0.0);
+
+    Some(MarkdownVirtualWindow {
+        range: first_index..last_index_exclusive,
+        top_spacer: first_item_top + scroll_overflow,
+        bottom_spacer: (total_height - last_item_bottom).max(0.0),
+    })
+}
+
+fn finite_non_negative(value: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+fn markdown_scroll_top_from_gpui_offset(offset_y: gpui::Pixels) -> f32 {
+    // GPUI scroll offsets move the child upward, so scrolling down makes the
+    // y offset negative. Markdown virtualization needs a positive scroll top.
+    finite_non_negative(-f32::from(offset_y))
 }
 
 /// Render a list of blocks into a vertical GPUI container.
@@ -2415,6 +2507,52 @@ fn collect_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn virtual_test_sizes(count: usize, height: f32) -> Vec<gpui::Size<gpui::Pixels>> {
+        (0..count)
+            .map(|_| gpui::size(px(100.0), px(height)))
+            .collect()
+    }
+
+    #[test]
+    fn markdown_virtual_window_keeps_a_non_empty_range_for_normal_scroll() {
+        let item_sizes = virtual_test_sizes(80, 24.0);
+        let window = markdown_virtual_window(&item_sizes, 8.0, 320.0, 180.0, 64.0).unwrap();
+
+        assert!(window.range.start < window.range.end);
+        assert!(window.range.end <= item_sizes.len());
+        assert!(window.top_spacer > 0.0);
+    }
+
+    #[test]
+    fn markdown_virtual_window_renders_tail_when_scroll_offset_is_stale() {
+        let item_sizes = virtual_test_sizes(80, 24.0);
+        let total_height = estimated_markdown_height(&item_sizes, 8.0);
+        let stale_scroll_top = total_height * 3.0;
+        let window =
+            markdown_virtual_window(&item_sizes, 8.0, stale_scroll_top, 180.0, 64.0).unwrap();
+
+        assert!(window.range.start < window.range.end);
+        assert_eq!(window.range.end, item_sizes.len());
+        assert!(window.top_spacer > total_height);
+        assert!(window.bottom_spacer >= 0.0);
+    }
+
+    #[test]
+    fn markdown_virtual_window_sanitizes_invalid_scroll_inputs() {
+        let item_sizes = virtual_test_sizes(8, 24.0);
+        let window =
+            markdown_virtual_window(&item_sizes, 8.0, f32::NAN, -10.0, f32::INFINITY).unwrap();
+
+        assert_eq!(window.range.start, 0);
+        assert!(window.range.start < window.range.end);
+    }
+
+    #[test]
+    fn markdown_scroll_top_converts_gpui_negative_offsets() {
+        assert_eq!(markdown_scroll_top_from_gpui_offset(px(-128.0)), 128.0);
+        assert_eq!(markdown_scroll_top_from_gpui_offset(px(32.0)), 0.0);
+    }
 
     #[test]
     fn classifies_local_image_paths() {

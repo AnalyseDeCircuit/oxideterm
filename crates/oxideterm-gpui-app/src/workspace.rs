@@ -871,6 +871,7 @@ pub(crate) struct WorkspaceApp {
     native_update_polling: bool,
     native_update_cancel: Option<Arc<AtomicBool>>,
     native_update_release_notes_scroll: MarkdownVirtualListScrollHandle,
+    settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     desktop_presence_rx: Option<oxideterm_desktop_presence::DesktopPresenceReceiver>,
     desktop_presence_polling: bool,
     portable_current_password: String,

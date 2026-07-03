@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "Contraseña",
+      "key": "Clave",
+      "key_source": "Origen de la clave",
+      "key_source_default": "Clave predeterminada",
+      "key_source_file": "Archivo de clave",
+      "key_source_managed": "Clave gestionada",
+      "key_source_certificate": "Certificado",
       "default_key": "Clave predeterminada",
       "ssh_key": "Clave SSH",
       "certificate": "Certificado",

@@ -531,12 +531,20 @@ impl WorkspaceApp {
                 (self.open_new_connection_select, anchor.id),
                 (Some(NewConnectionSelect::Group), SelectAnchorId::NewConnectionGroup)
                     | (
+                        Some(NewConnectionSelect::KeyAuthSource),
+                        SelectAnchorId::NewConnectionKeyAuthSource
+                    )
+                    | (
                         Some(NewConnectionSelect::ManagedKey),
                         SelectAnchorId::NewConnectionManagedKey
                     )
                     | (
                         Some(NewConnectionSelect::JumpSavedConnection),
                         SelectAnchorId::NewConnectionJumpSavedConnection
+                    )
+                    | (
+                        Some(NewConnectionSelect::JumpKeyAuthSource),
+                        SelectAnchorId::NewConnectionJumpKeyAuthSource
                     )
                     | (
                         Some(NewConnectionSelect::JumpManagedKey),
@@ -1388,8 +1396,10 @@ fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
             | SelectAnchorId::AiSafetyMenu
             | SelectAnchorId::AiContextPopover
             | SelectAnchorId::NewConnectionGroup
+            | SelectAnchorId::NewConnectionKeyAuthSource
             | SelectAnchorId::NewConnectionManagedKey
             | SelectAnchorId::NewConnectionJumpSavedConnection
+            | SelectAnchorId::NewConnectionJumpKeyAuthSource
             | SelectAnchorId::NewConnectionJumpManagedKey
             | SelectAnchorId::NewConnectionSerialPort
             | SelectAnchorId::NewConnectionSerialDataBits

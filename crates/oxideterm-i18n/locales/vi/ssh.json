@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "Mật khẩu",
+      "key": "Khóa",
+      "key_source": "Nguồn khóa",
+      "key_source_default": "Khóa mặc định",
+      "key_source_file": "Tệp khóa",
+      "key_source_managed": "Khóa được quản lý",
+      "key_source_certificate": "Chứng chỉ",
       "default_key": "Khóa mặc định",
       "ssh_key": "Khóa SSH",
       "certificate": "Chứng chỉ",

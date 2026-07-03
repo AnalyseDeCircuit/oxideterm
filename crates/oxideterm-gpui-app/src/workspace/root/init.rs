@@ -472,6 +472,7 @@ impl WorkspaceApp {
             native_update_polling: false,
             native_update_cancel: None,
             native_update_release_notes_scroll: MarkdownVirtualListScrollHandle::new(),
+            settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
             desktop_presence_rx,
             desktop_presence_polling: false,
             portable_current_password: String::new(),

@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "パスワード",
+      "key": "鍵",
+      "key_source": "鍵の取得元",
+      "key_source_default": "デフォルト鍵",
+      "key_source_file": "鍵ファイル",
+      "key_source_managed": "管理対象鍵",
+      "key_source_certificate": "証明書",
       "default_key": "デフォルトキー",
       "ssh_key": "SSHキー",
       "certificate": "証明書",

@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "비밀번호",
+      "key": "키",
+      "key_source": "키 출처",
+      "key_source_default": "기본 키",
+      "key_source_file": "키 파일",
+      "key_source_managed": "관리형 키",
+      "key_source_certificate": "인증서",
       "default_key": "기본 키",
       "ssh_key": "SSH 키",
       "certificate": "인증서",

@@ -6,15 +6,17 @@ use gpui::{
 
 use super::{
     form_state::{
-        NewConnectionField, NewConnectionForm, NewConnectionSelect, NewConnectionSubmitAction,
-        NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthTab,
+        NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionSelect,
+        NewConnectionSubmitAction, NewConnectionTransport, NewConnectionUpstreamProxyAuth,
+        NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
+        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
         TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_transport_default_port,
-        apply_transport_default_username, backspace_current_connection_field,
-        clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
-        current_connection_field, insert_text_into_current_connection_field,
-        new_connection_form_mode, next_connection_field, next_jump_connection_field,
-        select_current_connection_field, text_from_keystroke,
+        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
+        backspace_current_connection_field, clear_connection_selection,
+        clear_current_connection_field, connection_field_is_selected, current_connection_field,
+        default_auth_tab_for_family, insert_text_into_current_connection_field,
+        key_source_from_tab, new_connection_form_mode, next_connection_field,
+        next_jump_connection_field, select_current_connection_field, text_from_keystroke,
     },
     ssh_flow::SshConnectionIntent,
 };
@@ -36,9 +38,7 @@ use oxideterm_gpui_ui::{
     },
     checkbox, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
-    modal_body, modal_container, modal_footer, modal_header,
-    radio_group::{radio_group, radio_group_item},
-    segmented_tab, segmented_tabs,
+    modal_body, modal_container, modal_footer, modal_header, segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
         select_overlay_popup_with_max_height, select_trigger_with_focus_visible,

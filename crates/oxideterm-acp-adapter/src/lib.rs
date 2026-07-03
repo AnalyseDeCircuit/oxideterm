@@ -1004,12 +1004,14 @@ fn emit_codex_item_started(
         return Ok(());
     };
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or("tool");
-    let (title, kind) = codex_item_title_and_kind(item_type, item);
+    let Some(visible_tool) = codex_visible_item_tool_metadata(item_type, item) else {
+        return Ok(());
+    };
     connection.send_notification(SessionNotification::new(
         session_id.clone(),
         SessionUpdate::ToolCall(
-            ToolCall::new(item_id.to_string(), title)
-                .kind(kind)
+            ToolCall::new(item_id.to_string(), visible_tool.title)
+                .kind(visible_tool.kind)
                 .status(ToolCallStatus::InProgress)
                 .raw_input(Some(item.clone())),
         ),
@@ -1028,6 +1030,10 @@ fn emit_codex_item_completed(
     let Some(item_id) = item.get("id").and_then(Value::as_str) else {
         return Ok(());
     };
+    let item_type = item.get("type").and_then(Value::as_str).unwrap_or("tool");
+    if codex_visible_item_tool_metadata(item_type, item).is_none() {
+        return Ok(());
+    }
     let status = codex_item_completion_status(item);
     connection.send_notification(SessionNotification::new(
         session_id.clone(),
@@ -1066,28 +1072,41 @@ fn emit_codex_tool_output(
     Ok(())
 }
 
-fn codex_item_title_and_kind(item_type: &str, item: &Value) -> (String, ToolKind) {
-    match item_type {
-        "commandExecution" => (
-            item.get("command")
+struct CodexVisibleToolMetadata {
+    title: String,
+    kind: ToolKind,
+}
+
+fn codex_visible_item_tool_metadata(
+    item_type: &str,
+    item: &Value,
+) -> Option<CodexVisibleToolMetadata> {
+    let (title, kind) = match item_type {
+        "commandExecution" => {
+            let title = item
+                .get("command")
                 .and_then(Value::as_str)
                 .unwrap_or("Command")
-                .to_string(),
-            ToolKind::Execute,
-        ),
+                .to_string();
+            (title, ToolKind::Execute)
+        }
         "fileChange" => ("File change".to_string(), ToolKind::Edit),
-        "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => (
-            item.get("tool")
+        "mcpToolCall" | "dynamicToolCall" | "collabAgentToolCall" => {
+            let title = item
+                .get("tool")
                 .or_else(|| item.get("toolName"))
                 .and_then(Value::as_str)
                 .unwrap_or("Tool call")
-                .to_string(),
-            ToolKind::Other,
-        ),
+                .to_string();
+            (title, ToolKind::Other)
+        }
         "webSearch" => ("Web search".to_string(), ToolKind::Search),
-        "reasoning" => ("Reasoning".to_string(), ToolKind::Think),
-        _ => (item_type.to_string(), ToolKind::Other),
-    }
+        // Reasoning and message lifecycle items already stream as thought/text
+        // chunks. Surfacing their opaque ids as tool calls exposes protocol
+        // plumbing without adding useful user-facing state.
+        _ => return None,
+    };
+    Some(CodexVisibleToolMetadata { title, kind })
 }
 
 fn codex_item_completion_status(item: &Value) -> ToolCallStatus {
@@ -1369,4 +1388,51 @@ fn prompt_text(blocks: &[ContentBlock]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_visible_item_tool_metadata_keeps_user_visible_tools() {
+        let command = json!({
+            "id": "cmd-1",
+            "type": "commandExecution",
+            "command": "cargo check",
+        });
+        let command_metadata =
+            codex_visible_item_tool_metadata("commandExecution", &command).unwrap();
+
+        assert_eq!(command_metadata.title, "cargo check");
+        assert!(matches!(command_metadata.kind, ToolKind::Execute));
+
+        let mcp_tool = json!({
+            "id": "tool-1",
+            "type": "mcpToolCall",
+            "toolName": "github.create_issue",
+        });
+        let mcp_metadata = codex_visible_item_tool_metadata("mcpToolCall", &mcp_tool).unwrap();
+
+        assert_eq!(mcp_metadata.title, "github.create_issue");
+        assert!(matches!(mcp_metadata.kind, ToolKind::Other));
+    }
+
+    #[test]
+    fn codex_visible_item_tool_metadata_hides_protocol_lifecycle_items() {
+        for item_type in [
+            "reasoning",
+            "message",
+            "agentMessage",
+            "response",
+            "session",
+        ] {
+            let item = json!({
+                "id": "rs_01b6844a641c7cd6016a47d9816d00819",
+                "type": item_type,
+            });
+
+            assert!(codex_visible_item_tool_metadata(item_type, &item).is_none());
+        }
+    }
 }

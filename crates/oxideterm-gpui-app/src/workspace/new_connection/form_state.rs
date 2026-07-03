@@ -17,6 +17,64 @@ pub(in crate::workspace) enum SshAuthTab {
     TwoFactor,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SshAuthFamily {
+    Password,
+    Key,
+    Agent,
+    TwoFactor,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SshKeyAuthSource {
+    DefaultKey,
+    SshKey,
+    ManagedKey,
+    Certificate,
+}
+
+pub(in crate::workspace) fn auth_family_from_tab(tab: SshAuthTab) -> SshAuthFamily {
+    match tab {
+        SshAuthTab::Password => SshAuthFamily::Password,
+        SshAuthTab::DefaultKey
+        | SshAuthTab::SshKey
+        | SshAuthTab::ManagedKey
+        | SshAuthTab::Certificate => SshAuthFamily::Key,
+        SshAuthTab::Agent => SshAuthFamily::Agent,
+        SshAuthTab::TwoFactor => SshAuthFamily::TwoFactor,
+    }
+}
+
+pub(in crate::workspace) fn key_source_from_tab(tab: SshAuthTab) -> Option<SshKeyAuthSource> {
+    match tab {
+        SshAuthTab::DefaultKey => Some(SshKeyAuthSource::DefaultKey),
+        SshAuthTab::SshKey => Some(SshKeyAuthSource::SshKey),
+        SshAuthTab::ManagedKey => Some(SshKeyAuthSource::ManagedKey),
+        SshAuthTab::Certificate => Some(SshKeyAuthSource::Certificate),
+        SshAuthTab::Password | SshAuthTab::Agent | SshAuthTab::TwoFactor => None,
+    }
+}
+
+pub(in crate::workspace) fn auth_tab_from_key_source(source: SshKeyAuthSource) -> SshAuthTab {
+    match source {
+        SshKeyAuthSource::DefaultKey => SshAuthTab::DefaultKey,
+        SshKeyAuthSource::SshKey => SshAuthTab::SshKey,
+        SshKeyAuthSource::ManagedKey => SshAuthTab::ManagedKey,
+        SshKeyAuthSource::Certificate => SshAuthTab::Certificate,
+    }
+}
+
+pub(in crate::workspace) fn default_auth_tab_for_family(family: SshAuthFamily) -> SshAuthTab {
+    match family {
+        SshAuthFamily::Password => SshAuthTab::Password,
+        // The grouped Key entry opens the file-key form first. Other key
+        // sources are explicit choices inside the secondary selector.
+        SshAuthFamily::Key => SshAuthTab::SshKey,
+        SshAuthFamily::Agent => SshAuthTab::Agent,
+        SshAuthFamily::TwoFactor => SshAuthTab::TwoFactor,
+    }
+}
+
 pub(in crate::workspace) const SSH_DEFAULT_PORT_TEXT: &str = "22";
 pub(in crate::workspace) const TELNET_DEFAULT_PORT_TEXT: &str = "23";
 pub(in crate::workspace) const RAW_TCP_DEFAULT_PORT_TEXT: &str = "";
@@ -85,8 +143,10 @@ pub(in crate::workspace) fn new_connection_form_mode(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionSelect {
     Group,
+    KeyAuthSource,
     ManagedKey,
     JumpSavedConnection,
+    JumpKeyAuthSource,
     JumpManagedKey,
     UpstreamProxyPolicy,
     UpstreamProxyProtocol,
@@ -1119,11 +1179,12 @@ mod tests {
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
         NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
-        SavedConnectionPromptAction, SshAuthTab, TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
-        apply_transport_default_port, apply_transport_default_username,
-        backspace_current_connection_field, insert_text_into_current_connection_field,
-        new_connection_form_mode, next_connection_field, select_current_connection_field,
-        text_from_keystroke,
+        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
+        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_transport_default_port,
+        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
+        backspace_current_connection_field, default_auth_tab_for_family,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, select_current_connection_field, text_from_keystroke,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1483,6 +1544,54 @@ mod tests {
     }
 
     #[test]
+    fn auth_family_groups_all_key_tabs() {
+        for tab in [
+            SshAuthTab::DefaultKey,
+            SshAuthTab::SshKey,
+            SshAuthTab::ManagedKey,
+            SshAuthTab::Certificate,
+        ] {
+            assert_eq!(auth_family_from_tab(tab), SshAuthFamily::Key);
+        }
+        assert_eq!(
+            auth_family_from_tab(SshAuthTab::Password),
+            SshAuthFamily::Password
+        );
+        assert_eq!(
+            auth_family_from_tab(SshAuthTab::Agent),
+            SshAuthFamily::Agent
+        );
+        assert_eq!(
+            auth_family_from_tab(SshAuthTab::TwoFactor),
+            SshAuthFamily::TwoFactor
+        );
+    }
+
+    #[test]
+    fn default_key_family_selection_uses_file_key_tab() {
+        assert_eq!(
+            default_auth_tab_for_family(SshAuthFamily::Key),
+            SshAuthTab::SshKey
+        );
+    }
+
+    #[test]
+    fn key_source_round_trips_to_auth_tab() {
+        for (source, tab) in [
+            (SshKeyAuthSource::DefaultKey, SshAuthTab::DefaultKey),
+            (SshKeyAuthSource::SshKey, SshAuthTab::SshKey),
+            (SshKeyAuthSource::ManagedKey, SshAuthTab::ManagedKey),
+            (SshKeyAuthSource::Certificate, SshAuthTab::Certificate),
+        ] {
+            assert_eq!(auth_tab_from_key_source(source), tab);
+            assert_eq!(key_source_from_tab(tab), Some(source));
+        }
+        assert_eq!(key_source_from_tab(SshAuthTab::Password), None);
+        assert_eq!(key_source_from_tab(SshAuthTab::Agent), None);
+        assert_eq!(key_source_from_tab(SshAuthTab::TwoFactor), None);
+    }
+
+    #[test]
     fn jump_hop_uses_saved_connection_metadata_without_secrets() {
         let connection = ConnectionInfo {
             id: "conn-1".to_string(),
@@ -1518,6 +1627,11 @@ mod tests {
         assert_eq!(hop.port, "2222");
         assert_eq!(hop.username, "jump");
         assert_eq!(hop.auth_tab, SshAuthTab::Certificate);
+        assert_eq!(auth_family_from_tab(hop.auth_tab), SshAuthFamily::Key);
+        assert_eq!(
+            key_source_from_tab(hop.auth_tab),
+            Some(SshKeyAuthSource::Certificate)
+        );
         assert_eq!(hop.key_path, "~/.ssh/id_ed25519");
         assert_eq!(hop.cert_path, "~/.ssh/id_ed25519-cert.pub");
         assert!(hop.password.is_empty());

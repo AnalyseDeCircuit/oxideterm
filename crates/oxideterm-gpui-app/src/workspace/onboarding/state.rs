@@ -13,8 +13,6 @@ pub(in crate::workspace) const ONBOARDING_ACCENT_BORDER_ALPHA: u32 = 0x33; // Ta
 pub(in crate::workspace) const ONBOARDING_ACCENT_STRONG_BORDER_ALPHA: u32 = 0x66; // Tauri accent/40.
 pub(in crate::workspace) const ONBOARDING_CARD_ALPHA: u32 = 0xcc; // Browser panels sit over the dialog backdrop but stay readable.
 pub(in crate::workspace) const ONBOARDING_DISABLED_OPACITY: f32 = 0.45;
-pub(in crate::workspace) const ONBOARDING_DISCLAIMER_URL: &str =
-    "https://github.com/AnalyseDeCircuit/oxideterm/blob/main/DISCLAIMER.md";
 
 pub(in crate::workspace) const ONBOARDING_THEME_IDS: [&str; 8] = [
     "default",

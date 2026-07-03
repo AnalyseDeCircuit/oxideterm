@@ -312,6 +312,9 @@ impl Render for WorkspaceApp {
                     this.handle_keybinding_recording_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_help_legal_notice_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.terminal_quick_commands_open
                     && this.quick_commands.focused_input.is_some()
                 {
@@ -908,6 +911,9 @@ impl Render for WorkspaceApp {
             })
             .when(self.onboarding.open, |root| {
                 root.child(self.render_onboarding_modal(window, cx))
+            })
+            .when(self.settings_page.legal_notice_open, |root| {
+                root.child(self.render_help_legal_notice_dialog(cx))
             })
             .when(self.shortcuts_modal.open, |root| {
                 root.child(self.render_shortcuts_modal(cx))

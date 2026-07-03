@@ -120,6 +120,42 @@ impl WorkspaceApp {
                     );
                 }
             }
+            NewConnectionSelect::KeyAuthSource | NewConnectionSelect::JumpKeyAuthSource => {
+                let context = match select_id {
+                    NewConnectionSelect::KeyAuthSource => {
+                        self.current_main_auth_selector_context()
+                    }
+                    NewConnectionSelect::JumpKeyAuthSource => AuthSelectorContext::Jump,
+                    _ => unreachable!("matched only key auth source selects"),
+                };
+                let active_tab = self
+                    .new_connection_form
+                    .as_ref()
+                    .and_then(|form| match select_id {
+                        NewConnectionSelect::KeyAuthSource => Some(form.auth_tab),
+                        NewConnectionSelect::JumpKeyAuthSource => form
+                            .jump_server_form
+                            .as_ref()
+                            .map(|jump_form| jump_form.auth_tab),
+                        _ => None,
+                    })
+                    .unwrap_or(SshAuthTab::SshKey);
+                let active_source = Self::normalized_key_source_for_context(active_tab, context);
+                for source in Self::key_auth_source_choices(context).iter().copied() {
+                    let label = self.key_auth_source_label(source);
+                    popup = popup.child(
+                        select_option_action(
+                            select_option(&self.tokens, label, source == active_source),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.set_new_connection_key_auth_source(select_id, source, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    );
+                }
+            }
             NewConnectionSelect::ManagedKey | NewConnectionSelect::JumpManagedKey => {
                 let current_key_id = self
                     .new_connection_form
@@ -716,7 +752,12 @@ impl WorkspaceApp {
                                 self.i18n.t("ssh.form.proxy_jump_kbi_hint"),
                             ),
                         )
-                        .child(self.render_jump_auth_tabs(jump_form.auth_tab, cx))
+                        .child(self.render_auth_selector(
+                            jump_form.auth_tab,
+                            AuthSelectorContext::Jump,
+                            true,
+                            cx,
+                        ))
                         .when(jump_form.auth_tab == SshAuthTab::DefaultKey, |content| {
                             content.child(
                                 self.render_connection_hint(
@@ -1204,59 +1245,6 @@ impl WorkspaceApp {
             cx,
         )
             .into_any_element()
-    }
-
-    fn render_jump_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {
-        let tabs = [
-            (SshAuthTab::DefaultKey, "ssh.auth.default_key"),
-            (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
-            (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
-            (SshAuthTab::Certificate, "ssh.auth.certificate"),
-            (SshAuthTab::Password, "ssh.auth.password"),
-            (SshAuthTab::Agent, "ssh.auth.agent"),
-        ];
-        let mut first_row = self.render_auth_tab_row();
-        let mut second_row = self.render_auth_tab_row();
-        for (index, (tab, key)) in tabs.into_iter().enumerate() {
-            let item = segmented_tab(&self.tokens, self.i18n.t(key), tab == active_tab)
-                .min_h(px(self.tokens.metrics.ui_tabs_list_height))
-                .whitespace_normal()
-                .text_align(gpui::TextAlign::Center)
-                .line_height(px(self.tokens.metrics.ui_text_sm + 2.0))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if let Some(form) = this.new_connection_form.as_mut()
-                            && let Some(jump_form) = form.jump_server_form.as_mut()
-                        {
-                            jump_form.auth_tab = tab;
-                            form.focused_field = match tab {
-                                SshAuthTab::Password => NewConnectionField::JumpPassword,
-                                SshAuthTab::ManagedKey => NewConnectionField::JumpManagedKeyId,
-                                SshAuthTab::SshKey | SshAuthTab::Certificate => {
-                                    NewConnectionField::JumpKeyPath
-                                }
-                                _ => NewConnectionField::JumpHost,
-                            };
-                            clear_connection_selection(form);
-                        }
-                        cx.notify();
-                    }),
-                );
-            if index < 3 {
-                first_row = first_row.child(item);
-            } else {
-                second_row = second_row.child(item);
-            }
-        }
-        // Mirrors Tauri AddJumpServerDialog's two-row wrap for translated auth labels.
-        let rows = div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.spacing.one))
-            .child(first_row)
-            .child(second_row);
-        form_field(&self.tokens, self.i18n.t("ssh.form.proxy_jump_auth"), rows)
     }
 
     fn add_pending_jump_server(&mut self, cx: &mut Context<Self>) {

@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "Password",
+      "key": "Key",
+      "key_source": "Key source",
+      "key_source_default": "Default key",
+      "key_source_file": "Key file",
+      "key_source_managed": "Managed key",
+      "key_source_certificate": "Certificate",
       "default_key": "Default Key",
       "ssh_key": "SSH Key",
       "certificate": "Certificate",

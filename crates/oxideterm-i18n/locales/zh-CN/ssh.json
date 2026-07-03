@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "密码",
+      "key": "密钥",
+      "key_source": "密钥来源",
+      "key_source_default": "默认密钥",
+      "key_source_file": "密钥文件",
+      "key_source_managed": "托管密钥",
+      "key_source_certificate": "证书",
       "default_key": "默认密钥",
       "ssh_key": "SSH 密钥",
       "certificate": "证书",

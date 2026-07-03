@@ -2,8 +2,9 @@ const HELP_WEBSITE_URL: &str = "https://oxideterm.app";
 const HELP_DOCUMENTATION_URL: &str = "https://oxideterm.app/docs";
 const HELP_GITHUB_URL: &str = "https://github.com/AnalyseDeCircuit/oxideterm";
 const HELP_ISSUES_URL: &str = "https://github.com/AnalyseDeCircuit/oxideterm/issues";
-const HELP_DISCLAIMER_URL: &str =
-    "https://github.com/AnalyseDeCircuit/oxideterm/blob/main/DISCLAIMER.md";
+// Keep the in-app legal link aligned with the repository-level multilingual notice.
+const HELP_LEGAL_URL: &str = "https://github.com/AnalyseDeCircuit/oxideterm/blob/main/LEGAL.md";
+const HELP_LEGAL_MARKDOWN: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LEGAL.md"));
 
 const HELP_TECH_BADGES: [(&str, u32); 6] = [
     ("Rust", 0xf97316),
@@ -25,6 +26,8 @@ const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
 const HELP_PORTABLE_NOTICE_BG_ALPHA: f32 = 0.70;
 const HELP_PORTABLE_NOTICE_BORDER_ALPHA: f32 = 0.60;
 const HELP_RELEASE_NOTES_VIEWPORT_HEIGHT: f32 = 280.0;
+const HELP_LEGAL_NOTICE_WIDTH: f32 = 760.0;
+const HELP_LEGAL_NOTICE_HEIGHT: f32 = 720.0;
 
 impl WorkspaceApp {
     fn settings_help_section(&mut self, section_index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -33,7 +36,8 @@ impl WorkspaceApp {
             1 => self.help_diagnostics_card(cx),
             2 => self.help_tech_stack_card(),
             3 => self.help_resources_card(cx),
-            4 => self.help_legal_card(cx),
+            4 => self.help_safety_card(),
+            5 => self.help_legal_card(cx),
             _ => div().into_any_element(),
         }
     }
@@ -165,11 +169,55 @@ impl WorkspaceApp {
             ),
             self.help_resource_link(
                 "settings_view.help.disclaimer",
-                HELP_DISCLAIMER_URL,
+                HELP_LEGAL_URL,
                 LucideIcon::Shield,
                 cx,
             ),
         ])
+    }
+
+    fn help_safety_card(&self) -> AnyElement {
+        // Keep product guardrails visible without turning them into a blocking legal agreement.
+        let safety_items = [
+            "settings_view.help.safety_authorized",
+            "settings_view.help.safety_connections",
+            "settings_view.help.safety_prohibited",
+            "settings_view.help.safety_privacy",
+            "settings_view.help.safety_secrets",
+            "settings_view.help.safety_ai",
+        ];
+        let mut safety_rows = div().flex().flex_col().gap(px(10.0));
+        for key in safety_items {
+            safety_rows = safety_rows.child(self.help_safety_row(key));
+        }
+
+        self.plain_settings_card(vec![
+            self.card_title("settings_view.help.safety_title"),
+            safety_rows.into_any_element(),
+        ])
+    }
+
+    fn help_safety_row(&self, key: &str) -> AnyElement {
+        div()
+            .flex()
+            .items_start()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .mt(px(7.0))
+                    .size(px(5.0))
+                    .rounded_full()
+                    .bg(rgb(self.tokens.ui.accent)),
+            )
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .line_height(px(20.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(key)),
+            )
+            .into_any_element()
     }
 
     fn help_legal_card(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -858,7 +906,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.open_help_url(url, cx);
+                    if url == HELP_LEGAL_URL {
+                        this.open_help_legal_notice(cx);
+                    } else {
+                        this.open_help_url(url, cx);
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -883,6 +935,99 @@ impl WorkspaceApp {
                 LucideIcon::ExternalLink,
                 14.0,
                 rgb(self.tokens.ui.text_muted),
+            ))
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn open_help_legal_notice(&mut self, cx: &mut Context<Self>) {
+        self.settings_page.legal_notice_open = true;
+        self.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
+        cx.notify();
+    }
+
+    fn close_help_legal_notice(&mut self, cx: &mut Context<Self>) {
+        self.settings_page.legal_notice_open = false;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn handle_help_legal_notice_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.settings_page.legal_notice_open
+            || event.keystroke.key.as_str() != "escape"
+            || event.keystroke.modifiers.platform
+        {
+            return false;
+        }
+        self.close_help_legal_notice(cx);
+        true
+    }
+
+    pub(in crate::workspace) fn render_help_legal_notice_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut options = self.localized_markdown_options();
+        options.base_font_size = self.tokens.metrics.ui_text_sm;
+        options.block_gap = 8.0;
+        let code_actions = self.markdown_mermaid_actions(cx);
+
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_help_legal_notice(cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(overlay_content_boundary(
+                dialog_content(&self.tokens)
+                    .flex()
+                    .flex_col()
+                    .w(px(HELP_LEGAL_NOTICE_WIDTH))
+                    .max_w(relative(0.92))
+                    .h(px(HELP_LEGAL_NOTICE_HEIGHT))
+                    .max_h(relative(0.90))
+                    .child(
+                        dialog_header(&self.tokens)
+                            .child(dialog_title(
+                                &self.tokens,
+                                self.i18n.t("settings_view.help.disclaimer"),
+                            ))
+                            .child(dialog_description(
+                                &self.tokens,
+                                self.i18n.t("settings_view.help.legal_notice_description"),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .p(px(16.0))
+                            .bg(rgb(self.tokens.ui.bg))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(markdown_virtual_with_code_actions(
+                                cx.entity(),
+                                "settings-help-legal-notice-markdown",
+                                &self.tokens,
+                                HELP_LEGAL_MARKDOWN,
+                                &options,
+                                &self.settings_legal_notice_scroll,
+                                &code_actions,
+                            )),
+                    )
+                    .child(dialog_footer(&self.tokens).child(self.standard_footer_action_button(
+                        self.i18n.t("settings_view.help.legal_notice_close"),
+                        ButtonVariant::Secondary,
+                        ConfirmDialogAction::Cancel,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.close_help_legal_notice(cx);
+                        },
+                        cx,
+                    ))),
             ))
             .into_any_element()
     }

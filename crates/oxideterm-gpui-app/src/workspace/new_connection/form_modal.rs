@@ -355,17 +355,20 @@ impl WorkspaceApp {
                                         content.child(self.render_prompt_error_box(error))
                                     },
                                 )
-                                .child(if prompt_mode {
-                                    self.render_prompt_auth_radios(form.auth_tab, cx)
-                                } else if drill_down_mode {
-                                    self.render_drill_auth_tabs(form.auth_tab, cx)
-                                } else {
-                                    self.render_auth_tabs(
-                                        form.auth_tab,
-                                        edit_properties_mode,
-                                        cx,
-                                    )
-                                })
+                                .child(self.render_auth_selector(
+                                    form.auth_tab,
+                                    if prompt_mode {
+                                        AuthSelectorContext::Prompt
+                                    } else if drill_down_mode {
+                                        AuthSelectorContext::DrillDown
+                                    } else if mode == NewConnectionFormMode::EditProperties {
+                                        AuthSelectorContext::EditProperties
+                                    } else {
+                                        AuthSelectorContext::Standard
+                                    },
+                                    false,
+                                    cx,
+                                ))
                                 .when(form.auth_tab == SshAuthTab::Password, |content| {
                                     if edit_properties_mode {
                                         content

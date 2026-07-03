@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "密碼",
+      "key": "金鑰",
+      "key_source": "金鑰來源",
+      "key_source_default": "預設金鑰",
+      "key_source_file": "金鑰檔案",
+      "key_source_managed": "託管金鑰",
+      "key_source_certificate": "憑證",
       "default_key": "預設金鑰",
       "ssh_key": "SSH 金鑰",
       "certificate": "憑證",

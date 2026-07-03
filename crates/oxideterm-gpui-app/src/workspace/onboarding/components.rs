@@ -523,10 +523,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_onboarding_disclaimer(&mut self, cx: &mut Context<Self>) {
-        if let Err(error) = open_onboarding_external_url(ONBOARDING_DISCLAIMER_URL) {
-            self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
-            cx.notify();
-        }
+        self.open_help_legal_notice(cx);
     }
 }
 
@@ -558,31 +555,4 @@ pub(in crate::workspace) fn format_theme_label(theme_id: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-pub(in crate::workspace) fn open_onboarding_external_url(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(url)
-            .spawn()?
-            .wait()?;
-        return Ok(());
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()?
-            .wait()?;
-        return Ok(());
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn()?
-            .wait()?;
-        Ok(())
-    }
 }

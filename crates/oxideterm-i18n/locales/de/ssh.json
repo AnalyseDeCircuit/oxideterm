@@ -89,6 +89,12 @@
     },
     "auth": {
       "password": "Passwort",
+      "key": "Schlüssel",
+      "key_source": "Schlüsselquelle",
+      "key_source_default": "Standardschlüssel",
+      "key_source_file": "Schlüsseldatei",
+      "key_source_managed": "Verwalteter Schlüssel",
+      "key_source_certificate": "Zertifikat",
       "default_key": "Standardschlüssel",
       "ssh_key": "SSH-Schlüssel",
       "certificate": "Zertifikat",

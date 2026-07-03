@@ -97,8 +97,10 @@ pub enum SelectAnchorId {
     AiSafetyMenu,
     AiContextPopover,
     NewConnectionGroup,
+    NewConnectionKeyAuthSource,
     NewConnectionManagedKey,
     NewConnectionJumpSavedConnection,
+    NewConnectionJumpKeyAuthSource,
     NewConnectionJumpManagedKey,
     NewConnectionPrivilegeKind,
     NewConnectionUpstreamProxyPolicy,
@@ -193,8 +195,10 @@ impl SelectAnchorId {
         matches!(
             self,
             Self::NewConnectionGroup
+                | Self::NewConnectionKeyAuthSource
                 | Self::NewConnectionManagedKey
                 | Self::NewConnectionJumpSavedConnection
+                | Self::NewConnectionJumpKeyAuthSource
                 | Self::NewConnectionJumpManagedKey
                 | Self::NewConnectionPrivilegeKind
                 | Self::NewConnectionUpstreamProxyPolicy
@@ -747,7 +751,9 @@ mod tests {
     #[test]
     fn new_connection_select_anchor_ids_are_tracked_as_trigger_anchors() {
         assert!(SelectAnchorId::NewConnectionGroup.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionKeyAuthSource.is_new_connection_select_trigger());
         assert!(SelectAnchorId::NewConnectionPrivilegeKind.is_new_connection_select_trigger());
+        assert!(SelectAnchorId::NewConnectionJumpKeyAuthSource.is_new_connection_select_trigger());
         assert!(
             SelectAnchorId::NewConnectionUpstreamProxyPolicy.is_new_connection_select_trigger()
         );

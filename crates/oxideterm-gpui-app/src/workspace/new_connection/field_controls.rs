@@ -1,10 +1,23 @@
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthSelectorContext {
+    Standard,
+    EditProperties,
+    Prompt,
+    DrillDown,
+    Jump,
+}
+
 impl WorkspaceApp {
     fn new_connection_select_anchor_id(select_id: NewConnectionSelect) -> SelectAnchorId {
         match select_id {
             NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
+            NewConnectionSelect::KeyAuthSource => SelectAnchorId::NewConnectionKeyAuthSource,
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
             NewConnectionSelect::JumpSavedConnection => {
                 SelectAnchorId::NewConnectionJumpSavedConnection
+            }
+            NewConnectionSelect::JumpKeyAuthSource => {
+                SelectAnchorId::NewConnectionJumpKeyAuthSource
             }
             NewConnectionSelect::JumpManagedKey => SelectAnchorId::NewConnectionJumpManagedKey,
             NewConnectionSelect::UpstreamProxyPolicy => {
@@ -78,9 +91,13 @@ impl WorkspaceApp {
         // overlay cannot reuse pre-scroll coordinates.
         self.select_anchors.remove(&SelectAnchorId::NewConnectionGroup);
         self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionKeyAuthSource);
+        self.select_anchors
             .remove(&SelectAnchorId::NewConnectionManagedKey);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionJumpSavedConnection);
+        self.select_anchors
+            .remove(&SelectAnchorId::NewConnectionJumpKeyAuthSource);
         self.select_anchors
             .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
         self.select_anchors
@@ -491,7 +508,9 @@ impl WorkspaceApp {
                     form.focused_field = NewConnectionField::JumpManagedKeyId;
                 }
                 NewConnectionSelect::Group
+                | NewConnectionSelect::KeyAuthSource
                 | NewConnectionSelect::JumpSavedConnection
+                | NewConnectionSelect::JumpKeyAuthSource
                 | NewConnectionSelect::UpstreamProxyPolicy
                 | NewConnectionSelect::UpstreamProxyProtocol
                 | NewConnectionSelect::UpstreamProxyAuth
@@ -761,187 +780,284 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_prompt_auth_radios(
+    fn render_auth_selector(
         &self,
         active_tab: SshAuthTab,
+        context: AuthSelectorContext,
+        jump_form: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let choices = [
-            (SshAuthTab::Password, "ssh.auth.password"),
-            (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
-            (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
-            (SshAuthTab::Agent, "ssh.auth.agent"),
-            (SshAuthTab::Certificate, "ssh.auth.certificate"),
-        ];
-        let mut group = radio_group(&self.tokens).flex().flex_row().gap_4();
-        for (tab, key) in choices {
-            let selected = tab == active_tab
-                || (tab == SshAuthTab::SshKey && active_tab == SshAuthTab::DefaultKey);
-            group = group.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .cursor_pointer()
-                    .child(radio_group_item(&self.tokens, selected, false))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(key)),
-                    )
+        let active_family = auth_family_from_tab(active_tab);
+        let label = match context {
+            AuthSelectorContext::EditProperties => self.i18n.t("sessionManager.edit_properties.auth_type"),
+            AuthSelectorContext::DrillDown => self.i18n.t("ssh.drill_down.auth_method"),
+            AuthSelectorContext::Jump => self.i18n.t("ssh.form.proxy_jump_auth"),
+            AuthSelectorContext::Standard | AuthSelectorContext::Prompt => {
+                self.i18n.t("ssh.form.authentication")
+            }
+        };
+        let mut row = segmented_tabs(&self.tokens);
+        for (family, label_key) in Self::auth_family_choices(context) {
+            row = row.child(
+                segmented_tab(&self.tokens, self.i18n.t(label_key), *family == active_family)
+                    .min_h(px(self.tokens.metrics.ui_tabs_list_height))
+                    .whitespace_normal()
+                    .text_align(gpui::TextAlign::Center)
+                    .line_height(px(self.tokens.metrics.ui_text_sm + 2.0))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            if let Some(form) = this.new_connection_form.as_mut() {
-                                form.auth_tab = tab;
-                                clear_connection_selection(form);
-                            }
-                            this.close_new_connection_select();
-                            cx.notify();
+                            this.set_new_connection_auth_family(*family, context, jump_form, cx);
                         }),
                     ),
             );
         }
-        form_field(
-            &self.tokens,
-            self.i18n.t("sessionManager.edit_properties.auth_type"),
-            group,
-        )
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.three))
+            .child(form_field(&self.tokens, label, row))
+            .when(
+                active_family == SshAuthFamily::Key && context != AuthSelectorContext::DrillDown,
+                |content| content.child(self.render_key_auth_source_select(active_tab, context, jump_form, cx)),
+            )
+            .into_any_element()
     }
 
-    fn render_auth_tabs(
+    fn auth_family_choices(context: AuthSelectorContext) -> &'static [(SshAuthFamily, &'static str)] {
+        match context {
+            AuthSelectorContext::DrillDown => &[
+                (SshAuthFamily::Agent, "ssh.drill_down.auth_agent"),
+                (SshAuthFamily::Key, "ssh.drill_down.auth_key"),
+                (SshAuthFamily::Password, "ssh.drill_down.auth_password"),
+            ],
+            AuthSelectorContext::Jump => &[
+                (SshAuthFamily::Password, "ssh.auth.password"),
+                (SshAuthFamily::Key, "ssh.auth.key"),
+                (SshAuthFamily::Agent, "ssh.auth.agent"),
+            ],
+            AuthSelectorContext::EditProperties | AuthSelectorContext::Prompt => &[
+                (SshAuthFamily::Password, "ssh.auth.password"),
+                (SshAuthFamily::Key, "ssh.auth.key"),
+                (SshAuthFamily::Agent, "ssh.auth.agent"),
+            ],
+            AuthSelectorContext::Standard => &[
+                (SshAuthFamily::Password, "ssh.auth.password"),
+                (SshAuthFamily::Key, "ssh.auth.key"),
+                (SshAuthFamily::Agent, "ssh.auth.agent"),
+                (SshAuthFamily::TwoFactor, "ssh.auth.two_factor"),
+            ],
+        }
+    }
+
+    fn key_auth_source_choices(context: AuthSelectorContext) -> &'static [SshKeyAuthSource] {
+        match context {
+            AuthSelectorContext::Standard | AuthSelectorContext::Jump => &[
+                SshKeyAuthSource::DefaultKey,
+                SshKeyAuthSource::SshKey,
+                SshKeyAuthSource::ManagedKey,
+                SshKeyAuthSource::Certificate,
+            ],
+            AuthSelectorContext::EditProperties | AuthSelectorContext::Prompt => &[
+                SshKeyAuthSource::SshKey,
+                SshKeyAuthSource::ManagedKey,
+                SshKeyAuthSource::Certificate,
+            ],
+            AuthSelectorContext::DrillDown => &[SshKeyAuthSource::SshKey],
+        }
+    }
+
+    fn current_main_auth_selector_context(&self) -> AuthSelectorContext {
+        let mode = new_connection_form_mode(
+            self.editing_saved_connection_id.as_deref(),
+            self.duplicating_saved_connection_id.as_deref(),
+            self.saved_connection_prompt_action,
+        );
+        if self.drill_down_parent_node_id.is_some() {
+            AuthSelectorContext::DrillDown
+        } else if mode == NewConnectionFormMode::SavedConnectionPrompt {
+            AuthSelectorContext::Prompt
+        } else if mode == NewConnectionFormMode::EditProperties {
+            AuthSelectorContext::EditProperties
+        } else {
+            AuthSelectorContext::Standard
+        }
+    }
+
+    fn key_auth_source_label(&self, source: SshKeyAuthSource) -> String {
+        let key = match source {
+            SshKeyAuthSource::DefaultKey => "ssh.auth.key_source_default",
+            SshKeyAuthSource::SshKey => "ssh.auth.key_source_file",
+            SshKeyAuthSource::ManagedKey => "ssh.auth.key_source_managed",
+            SshKeyAuthSource::Certificate => "ssh.auth.key_source_certificate",
+        };
+        self.i18n.t(key)
+    }
+
+    fn normalized_key_source_for_context(
+        active_tab: SshAuthTab,
+        context: AuthSelectorContext,
+    ) -> SshKeyAuthSource {
+        let choices = Self::key_auth_source_choices(context);
+        let source = key_source_from_tab(active_tab).unwrap_or(SshKeyAuthSource::SshKey);
+        if choices.contains(&source) {
+            source
+        } else {
+            SshKeyAuthSource::SshKey
+        }
+    }
+
+    fn render_key_auth_source_select(
         &self,
         active_tab: SshAuthTab,
-        edit_properties_mode: bool,
+        context: AuthSelectorContext,
+        jump_form: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let tabs: Vec<(SshAuthTab, &str)> = if edit_properties_mode {
-            vec![
-                (
-                    SshAuthTab::Password,
-                    "sessionManager.edit_properties.auth_password",
-                ),
-                (
-                    SshAuthTab::SshKey,
-                    "sessionManager.edit_properties.auth_key",
-                ),
-                (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
-                (SshAuthTab::Certificate, "ssh.auth.certificate"),
-                (
-                    SshAuthTab::Agent,
-                    "sessionManager.edit_properties.auth_agent",
-                ),
-            ]
+        let source = Self::normalized_key_source_for_context(active_tab, context);
+        let select_id = if jump_form {
+            NewConnectionSelect::JumpKeyAuthSource
         } else {
-            vec![
-                (SshAuthTab::Password, "ssh.auth.password"),
-                (SshAuthTab::DefaultKey, "ssh.auth.default_key"),
-                (SshAuthTab::SshKey, "ssh.auth.ssh_key"),
-                (SshAuthTab::ManagedKey, "ssh.auth.managed_key"),
-                (SshAuthTab::Certificate, "ssh.auth.certificate"),
-                (SshAuthTab::Agent, "ssh.auth.agent"),
-                (SshAuthTab::TwoFactor, "ssh.auth.two_factor"),
-            ]
+            NewConnectionSelect::KeyAuthSource
         };
-        let build_tab = |this: &Self,
-                         tab: SshAuthTab,
-                         key: &str,
-                         active_tab: SshAuthTab,
-                         disabled: bool,
-                         cx: &mut Context<Self>| {
-            let selected = tab == active_tab
-                || (edit_properties_mode
-                    && tab == SshAuthTab::SshKey
-                    && active_tab == SshAuthTab::DefaultKey);
-            let item = segmented_tab(&this.tokens, this.i18n.t(key), selected)
-                .min_h(px(this.tokens.metrics.ui_tabs_list_height))
-                .whitespace_normal()
-                .text_align(gpui::TextAlign::Center)
-                .line_height(px(this.tokens.metrics.ui_text_sm + 2.0))
-                .opacity(if disabled { 0.45 } else { 1.0 });
-            if disabled {
-                item
-            } else {
-                item.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if let Some(form) = this.new_connection_form.as_mut() {
-                            form.auth_tab = tab;
-                            clear_connection_selection(form);
-                        }
-                        this.close_new_connection_select();
-                        cx.notify();
-                    }),
-                )
-            }
-        };
+        let anchor_id = Self::new_connection_select_anchor_id(select_id);
+        let workspace = cx.entity();
+        let trigger = self
+            .new_connection_select_trigger(select_id, self.key_auth_source_label(source), false, false)
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if let Some(form) = this.new_connection_form.as_mut() {
+                        form.field_focused = false;
+                        form.selected_field = None;
+                    }
+                    this.ime_marked_text = None;
+                    this.open_new_connection_select_from_pointer(select_id);
+                    window.focus(&this.focus_handle);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
 
-        let row = if edit_properties_mode {
-            let mut row = segmented_tabs(&self.tokens);
-            for (tab, key) in tabs {
-                row = row.child(build_tab(self, tab, key, active_tab, false, cx));
+        form_field(
+            &self.tokens,
+            self.i18n.t("ssh.auth.key_source"),
+            select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            }),
+        )
+        .into_any_element()
+    }
+
+    fn set_new_connection_auth_family(
+        &mut self,
+        family: SshAuthFamily,
+        context: AuthSelectorContext,
+        jump_form: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(form) = self.new_connection_form.as_mut() {
+            let current_tab = if jump_form {
+                form.jump_server_form
+                    .as_ref()
+                    .map(|jump_form| jump_form.auth_tab)
+                    .unwrap_or(SshAuthTab::Password)
+            } else {
+                form.auth_tab
+            };
+            let next_tab = Self::auth_tab_for_family_selection(family, current_tab, context);
+            if jump_form {
+                if let Some(jump_form) = form.jump_server_form.as_mut() {
+                    jump_form.auth_tab = next_tab;
+                }
+            } else {
+                form.auth_tab = next_tab;
             }
-            row.into_any_element()
-        } else {
-            let mut first_row = self.render_auth_tab_row();
-            let mut second_row = self.render_auth_tab_row();
-            for (index, (tab, key)) in tabs.into_iter().enumerate() {
-                let item = build_tab(self, tab, key, active_tab, false, cx);
-                if index < 3 {
-                    first_row = first_row.child(item);
+            form.focused_field = Self::focus_field_for_auth_tab(next_tab, jump_form);
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn auth_tab_for_family_selection(
+        family: SshAuthFamily,
+        current_tab: SshAuthTab,
+        context: AuthSelectorContext,
+    ) -> SshAuthTab {
+        match family {
+            SshAuthFamily::Password => SshAuthTab::Password,
+            SshAuthFamily::Agent => SshAuthTab::Agent,
+            SshAuthFamily::TwoFactor => SshAuthTab::TwoFactor,
+            SshAuthFamily::Key => {
+                // A top-level switch into Key should land on the file-key form,
+                // while repeated clicks preserve the selected key source.
+                if auth_family_from_tab(current_tab) == SshAuthFamily::Key {
+                    auth_tab_from_key_source(Self::normalized_key_source_for_context(
+                        current_tab,
+                        context,
+                    ))
                 } else {
-                    second_row = second_row.child(item);
+                    default_auth_tab_for_family(family)
                 }
             }
-            // Mirrors Tauri's 3+4 auth-tab wrap while keeping one shared auth state.
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(self.tokens.spacing.one))
-                .child(first_row)
-                .child(second_row)
-                .into_any_element()
-        };
-        form_field(&self.tokens, self.i18n.t("ssh.form.authentication"), row)
-    }
-
-    fn render_auth_tab_row(&self) -> Div {
-        div()
-            .min_h(px(self.tokens.metrics.ui_tabs_list_height))
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_center()
-            .p(px(self.tokens.metrics.ui_tabs_list_padding))
-            .rounded(px(self.tokens.radii.xs))
-            .bg(rgb(self.tokens.ui.bg_panel))
-            .text_color(rgb(self.tokens.ui.text_muted))
-    }
-
-    fn render_drill_auth_tabs(&self, active_tab: SshAuthTab, cx: &mut Context<Self>) -> AnyElement {
-        let tabs = [
-            (SshAuthTab::Agent, "ssh.drill_down.auth_agent"),
-            (SshAuthTab::SshKey, "ssh.drill_down.auth_key"),
-            (SshAuthTab::Password, "ssh.drill_down.auth_password"),
-        ];
-        let mut row = segmented_tabs(&self.tokens);
-        for (tab, key) in tabs {
-            row = row.child(
-                segmented_tab(&self.tokens, self.i18n.t(key), tab == active_tab).on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if let Some(form) = this.new_connection_form.as_mut() {
-                            form.auth_tab = tab;
-                            clear_connection_selection(form);
-                        }
-                        this.close_new_connection_select();
-                        cx.notify();
-                    }),
-                ),
-            );
         }
-        form_field(&self.tokens, self.i18n.t("ssh.drill_down.auth_method"), row).into_any_element()
+    }
+
+    fn set_new_connection_key_auth_source(
+        &mut self,
+        select_id: NewConnectionSelect,
+        source: SshKeyAuthSource,
+        cx: &mut Context<Self>,
+    ) {
+        let tab = auth_tab_from_key_source(source);
+        if let Some(form) = self.new_connection_form.as_mut() {
+            match select_id {
+                NewConnectionSelect::KeyAuthSource => form.auth_tab = tab,
+                NewConnectionSelect::JumpKeyAuthSource => {
+                    let Some(jump_form) = form.jump_server_form.as_mut() else {
+                        return;
+                    };
+                    jump_form.auth_tab = tab;
+                }
+                _ => return,
+            }
+            form.focused_field = Self::focus_field_for_auth_tab(tab, select_id == NewConnectionSelect::JumpKeyAuthSource);
+            form.field_focused = false;
+            clear_connection_selection(form);
+            form.error = None;
+        }
+        self.close_new_connection_select();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn focus_field_for_auth_tab(tab: SshAuthTab, jump_form: bool) -> NewConnectionField {
+        if jump_form {
+            match tab {
+                SshAuthTab::Password => NewConnectionField::JumpPassword,
+                SshAuthTab::SshKey | SshAuthTab::Certificate => NewConnectionField::JumpKeyPath,
+                SshAuthTab::ManagedKey => NewConnectionField::JumpManagedKeyId,
+                SshAuthTab::DefaultKey | SshAuthTab::Agent | SshAuthTab::TwoFactor => {
+                    NewConnectionField::JumpHost
+                }
+            }
+        } else {
+            match tab {
+                SshAuthTab::Password => NewConnectionField::Password,
+                SshAuthTab::SshKey | SshAuthTab::Certificate => NewConnectionField::KeyPath,
+                SshAuthTab::ManagedKey => NewConnectionField::ManagedKeyId,
+                SshAuthTab::DefaultKey => NewConnectionField::Passphrase,
+                SshAuthTab::Agent | SshAuthTab::TwoFactor => NewConnectionField::Host,
+            }
+        }
     }
 
     fn render_edit_color_field(&self, value: &str, cx: &mut Context<Self>) -> AnyElement {
@@ -1128,6 +1244,10 @@ impl WorkspaceApp {
                             .selectable_overflow_y_scroll(
                                 &self.selectable_text_scroll_handle("edit-connection-icon-grid"),
                             )
+                            // The icon grid is a nested scroll surface inside
+                            // the edit dialog. Wheel input over it should not
+                            // also move the outer form body.
+                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                             .child(grid),
                     )
                 }),
