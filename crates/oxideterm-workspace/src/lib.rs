@@ -324,6 +324,26 @@ impl PaneNode {
                 .any(|child| child.update_group_sizes(group_id, next_sizes)),
         }
     }
+
+    pub fn reset_group_sizes(&mut self, group_id: PaneId) -> bool {
+        match self {
+            Self::Leaf { .. } => false,
+            Self::Group {
+                id,
+                children,
+                sizes,
+                ..
+            } if *id == group_id => {
+                // Reset only the addressed split group so nested pane ratios
+                // remain untouched when a sibling divider is double-clicked.
+                *sizes = equal_sizes(children.len());
+                true
+            }
+            Self::Group { children, .. } => children
+                .iter_mut()
+                .any(|child| child.reset_group_sizes(group_id)),
+        }
+    }
 }
 
 pub fn adjusted_split_sizes(
@@ -509,5 +529,26 @@ mod tests {
             adjusted_split_sizes(&[20.0, 80.0], 0, -50.0),
             vec![10.0, 90.0]
         );
+    }
+
+    #[test]
+    fn reset_group_sizes_restores_equal_split_for_target_group() {
+        let (pane_a, pane_b, group, session_a, session_b) = ids();
+        let mut node = PaneNode::Group {
+            id: group,
+            direction: SplitDirection::Horizontal,
+            children: vec![
+                PaneNode::leaf(pane_a, session_a),
+                PaneNode::leaf(pane_b, session_b),
+            ],
+            sizes: vec![70.0, 30.0],
+        };
+
+        assert!(node.reset_group_sizes(group));
+
+        match node {
+            PaneNode::Group { sizes, .. } => assert_eq!(sizes, vec![50.0, 50.0]),
+            PaneNode::Leaf { .. } => panic!("expected split group"),
+        }
     }
 }

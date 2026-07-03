@@ -1,5 +1,14 @@
 use super::*;
 
+const SPLIT_HANDLE_LINE_ALPHA: u32 = 0x80;
+const SPLIT_HANDLE_HOVER_BG_ALPHA: u32 = 0x12;
+const SPLIT_HANDLE_ACTIVE_BG_ALPHA: u32 = 0x1f;
+const SPLIT_HANDLE_ACTIVE_LINE_ALPHA: u32 = 0xcc;
+const SPLIT_HANDLE_LINE_WIDTH: f32 = 1.0;
+const ACTIVE_PANE_BORDER_ALPHA: u32 = 0x66;
+const ACTIVE_PANE_SHADOW_ALPHA: u32 = 0x24;
+const ACTIVE_PANE_SHADOW_BLUR: f32 = 10.0;
+
 #[derive(Clone)]
 pub(super) struct SplitDrag {
     tab_id: Option<TabId>,
@@ -335,6 +344,30 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn reset_split_group_sizes(
+        &mut self,
+        tab_id: Option<TabId>,
+        group_id: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let updated = if let Some(tab_id) = tab_id {
+            self.tab_mut_by_id(tab_id).is_some_and(|tab| {
+                tab.root_pane
+                    .as_mut()
+                    .is_some_and(|root_pane| root_pane.reset_group_sizes(group_id))
+            })
+        } else {
+            self.active_tab_mut().is_some_and(|tab| {
+                tab.root_pane
+                    .as_mut()
+                    .is_some_and(|root_pane| root_pane.reset_group_sizes(group_id))
+            })
+        };
+        if updated {
+            cx.notify();
+        }
+    }
+
     pub(super) fn render_pane_tree(&self, node: &PaneNode, cx: &mut Context<Self>) -> AnyElement {
         self.render_pane_tree_for_tab(self.main_window_tabs.active_tab_id, node, cx)
     }
@@ -348,6 +381,15 @@ impl WorkspaceApp {
         let active_pane_id = tab_id
             .and_then(|tab_id| self.tab_by_id(tab_id))
             .and_then(|tab| tab.active_pane_id);
+        let has_split_panes = if let Some(tab_id) = tab_id {
+            self.tab_by_id(tab_id)
+                .and_then(|tab| tab.root_pane.as_ref())
+                .is_some_and(|root_pane| root_pane.pane_count() > 1)
+        } else {
+            self.active_tab()
+                .and_then(|tab| tab.root_pane.as_ref())
+                .is_some_and(|root_pane| root_pane.pane_count() > 1)
+        };
         match node {
             PaneNode::Leaf { pane_id, .. } => {
                 let active = Some(*pane_id) == active_pane_id;
@@ -396,6 +438,28 @@ impl WorkspaceApp {
                     .when(active && self.ai_inline_panel.open, |pane_frame| {
                         pane_frame.child(self.render_terminal_ai_inline_panel(cx))
                     })
+                    .when(active && has_split_panes, |pane_frame| {
+                        let accent = self.tokens.ui.accent;
+                        let active_shadow = vec![gpui::BoxShadow {
+                            color: gpui::Hsla::from(rgba((accent << 8) | ACTIVE_PANE_SHADOW_ALPHA)),
+                            offset: gpui::point(px(0.0), px(0.0)),
+                            blur_radius: px(ACTIVE_PANE_SHADOW_BLUR),
+                            spread_radius: px(0.0),
+                        }];
+                        // This overlay is painted above the terminal content
+                        // without changing pane layout or terminal grid size.
+                        pane_frame.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .border_1()
+                                .border_color(rgba((accent << 8) | ACTIVE_PANE_BORDER_ALPHA))
+                                .shadow(active_shadow),
+                        )
+                    })
                     .into_any_element()
             }
             PaneNode::Group {
@@ -439,12 +503,61 @@ impl WorkspaceApp {
                         let group_id = *id;
                         let direction = *direction;
                         let start_sizes = sizes.clone();
+                        let active_drag = self.split_drag.as_ref().is_some_and(|drag| {
+                            drag.tab_id == tab_id
+                                && drag.group_id == group_id
+                                && drag.handle_index == index
+                                && drag.direction == direction
+                        });
+                        let handle_bg = if active_drag {
+                            rgba((self.tokens.ui.accent << 8) | SPLIT_HANDLE_ACTIVE_BG_ALPHA)
+                        } else {
+                            rgba(0x00000000)
+                        };
+                        let line_color = if active_drag {
+                            rgba((self.tokens.ui.accent << 8) | SPLIT_HANDLE_ACTIVE_LINE_ALPHA)
+                        } else {
+                            rgba((self.tokens.ui.divider << 8) | SPLIT_HANDLE_LINE_ALPHA)
+                        };
+                        // Keep the drag target wide while drawing only a
+                        // hairline in the center, matching common terminal and
+                        // editor splitters without making the seam look heavy.
+                        let line = div()
+                            .absolute()
+                            .bg(line_color)
+                            .when(direction == SplitDirection::Horizontal, |line| {
+                                line.top_0()
+                                    .bottom_0()
+                                    .left(px((self.tokens.metrics.split_handle_size
+                                        - SPLIT_HANDLE_LINE_WIDTH)
+                                        / 2.0))
+                                    .w(px(SPLIT_HANDLE_LINE_WIDTH))
+                            })
+                            .when(direction == SplitDirection::Vertical, |line| {
+                                line.left_0()
+                                    .right_0()
+                                    .top(px((self.tokens.metrics.split_handle_size
+                                        - SPLIT_HANDLE_LINE_WIDTH)
+                                        / 2.0))
+                                    .h(px(SPLIT_HANDLE_LINE_WIDTH))
+                            });
                         let mut handle = div()
                             .flex_none()
-                            .bg(rgb(self.tokens.ui.divider))
+                            .relative()
+                            .bg(handle_bg)
+                            .hover({
+                                let accent = self.tokens.ui.accent;
+                                move |style| {
+                                    style.bg(rgba((accent << 8) | SPLIT_HANDLE_HOVER_BG_ALPHA))
+                                }
+                            })
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(move |this, event, _window, cx| {
+                                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                    if event.click_count >= 2 {
+                                        this.reset_split_group_sizes(tab_id, group_id, cx);
+                                        return;
+                                    }
                                     this.start_split_drag(
                                         tab_id,
                                         group_id,
@@ -455,7 +568,8 @@ impl WorkspaceApp {
                                         cx,
                                     );
                                 }),
-                            );
+                            )
+                            .child(line);
                         handle = match direction {
                             SplitDirection::Horizontal => handle
                                 .w(px(self.tokens.metrics.split_handle_size))
