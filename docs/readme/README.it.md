@@ -98,6 +98,18 @@ Non vuole essere una piattaforma di agenti ospitata nel cloud né un progetto ce
 
 Scarica l'ultima versione da [GitHub Releases](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest).
 
+Gli utenti macOS possono installarlo anche dal tap Homebrew di OxideTerm:
+
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+Gli utenti Arch Linux possono installare il pacchetto AUR mantenuto dalla community:
+
+```bash
+yay -S oxideterm-bin
+```
+
 ---
 
 ## Panoramica delle funzionalità

@@ -98,6 +98,18 @@ Nó không cố trở thành nền tảng tác nhân đám mây được lưu tr
 
 Tải phiên bản mới nhất từ [GitHub Releases](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest).
 
+Người dùng macOS cũng có thể cài đặt từ Homebrew tap của OxideTerm:
+
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+Người dùng Arch Linux có thể cài đặt gói AUR do cộng đồng duy trì:
+
+```bash
+yay -S oxideterm-bin
+```
+
 ---
 
 ## Tổng quan tính năng

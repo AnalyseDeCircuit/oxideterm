@@ -98,6 +98,18 @@ OxideTerm 是一个**面向远程服务器的本地优先 AI 工作区**——Te
 
 从 [GitHub Releases](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) 下载最新版本。
 
+macOS 用户也可以通过 OxideTerm Homebrew tap 安装：
+
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+Arch Linux 用户可以安装社区维护的 AUR 包：
+
+```bash
+yay -S oxideterm-bin
+```
+
 ---
 
 ## 功能概览

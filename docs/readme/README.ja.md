@@ -98,6 +98,18 @@ OxideTerm は **リモートサーバー向けのローカル優先 AI ワーク
 
 [GitHub Releases](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) から最新版をダウンロードしてください。
 
+macOS ユーザーは OxideTerm の Homebrew tap からもインストールできます:
+
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+Arch Linux ユーザーはコミュニティ管理の AUR パッケージをインストールできます:
+
+```bash
+yay -S oxideterm-bin
+```
+
 ---
 
 ## 機能概要
