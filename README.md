@@ -104,6 +104,12 @@ macOS users can also install from the OxideTerm Homebrew tap:
 brew install --cask AnalyseDeCircuit/tap/oxideterm
 ```
 
+Arch Linux users can install the community-maintained AUR package:
+
+```bash
+yay -S oxideterm-bin
+```
+
 ---
 
 ## Feature Overview
