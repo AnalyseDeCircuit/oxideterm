@@ -50,7 +50,7 @@ impl Render for WorkspaceApp {
         // just like Tauri's linuxBackdropBlurClass compatibility gate.
         set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
         if self.applied_vibrancy_mode != vibrancy_mode {
-            let _ = apply_window_vibrancy(window, vibrancy_mode);
+            self.vibrancy_support = apply_window_vibrancy(window, vibrancy_mode);
             self.applied_vibrancy_mode = vibrancy_mode;
         }
         if self.needs_active_pane_focus

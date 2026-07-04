@@ -26,6 +26,7 @@ pub(crate) struct Scene {
     primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<DrawOrder>,
     pub(crate) shadows: Vec<Shadow>,
+    pub(crate) backdrop_blurs: Vec<BackdropBlur>,
     pub(crate) quads: Vec<Quad>,
     pub(crate) paths: Vec<Path<ScaledPixels>>,
     pub(crate) underlines: Vec<Underline>,
@@ -41,6 +42,7 @@ impl Scene {
         self.layer_stack.clear();
         self.paths.clear();
         self.shadows.clear();
+        self.backdrop_blurs.clear();
         self.quads.clear();
         self.underlines.clear();
         self.monochrome_sprites.clear();
@@ -84,6 +86,10 @@ impl Scene {
                 shadow.order = order;
                 self.shadows.push(shadow.clone());
             }
+            Primitive::BackdropBlur(backdrop_blur) => {
+                backdrop_blur.order = order;
+                self.backdrop_blurs.push(backdrop_blur.clone());
+            }
             Primitive::Quad(quad) => {
                 quad.order = order;
                 self.quads.push(quad.clone());
@@ -126,6 +132,8 @@ impl Scene {
 
     pub fn finish(&mut self) {
         self.shadows.sort_by_key(|shadow| shadow.order);
+        self.backdrop_blurs
+            .sort_by_key(|backdrop_blur| backdrop_blur.order);
         self.quads.sort_by_key(|quad| quad.order);
         self.paths.sort_by_key(|path| path.order);
         self.underlines.sort_by_key(|underline| underline.order);
@@ -148,6 +156,9 @@ impl Scene {
             shadows: &self.shadows,
             shadows_start: 0,
             shadows_iter: self.shadows.iter().peekable(),
+            backdrop_blurs: &self.backdrop_blurs,
+            backdrop_blurs_start: 0,
+            backdrop_blurs_iter: self.backdrop_blurs.iter().peekable(),
             quads: &self.quads,
             quads_start: 0,
             quads_iter: self.quads.iter().peekable(),
@@ -180,6 +191,7 @@ impl Scene {
 )]
 pub(crate) enum PrimitiveKind {
     Shadow,
+    BackdropBlur,
     #[default]
     Quad,
     Path,
@@ -198,6 +210,7 @@ pub(crate) enum PaintOperation {
 #[derive(Clone)]
 pub(crate) enum Primitive {
     Shadow(Shadow),
+    BackdropBlur(BackdropBlur),
     Quad(Quad),
     Path(Path<ScaledPixels>),
     Underline(Underline),
@@ -210,6 +223,7 @@ impl Primitive {
     pub fn bounds(&self) -> &Bounds<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.bounds,
+            Primitive::BackdropBlur(backdrop_blur) => &backdrop_blur.bounds,
             Primitive::Quad(quad) => &quad.bounds,
             Primitive::Path(path) => &path.bounds,
             Primitive::Underline(underline) => &underline.bounds,
@@ -222,6 +236,7 @@ impl Primitive {
     pub fn content_mask(&self) -> &ContentMask<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.content_mask,
+            Primitive::BackdropBlur(backdrop_blur) => &backdrop_blur.content_mask,
             Primitive::Quad(quad) => &quad.content_mask,
             Primitive::Path(path) => &path.content_mask,
             Primitive::Underline(underline) => &underline.content_mask,
@@ -243,6 +258,9 @@ struct BatchIterator<'a> {
     shadows: &'a [Shadow],
     shadows_start: usize,
     shadows_iter: Peekable<slice::Iter<'a, Shadow>>,
+    backdrop_blurs: &'a [BackdropBlur],
+    backdrop_blurs_start: usize,
+    backdrop_blurs_iter: Peekable<slice::Iter<'a, BackdropBlur>>,
     quads: &'a [Quad],
     quads_start: usize,
     quads_iter: Peekable<slice::Iter<'a, Quad>>,
@@ -271,6 +289,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.shadows_iter.peek().map(|s| s.order),
                 PrimitiveKind::Shadow,
+            ),
+            (
+                self.backdrop_blurs_iter.peek().map(|b| b.order),
+                PrimitiveKind::BackdropBlur,
             ),
             (self.quads_iter.peek().map(|q| q.order), PrimitiveKind::Quad),
             (self.paths_iter.peek().map(|q| q.order), PrimitiveKind::Path),
@@ -316,6 +338,22 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.shadows_start = shadows_end;
                 Some(PrimitiveBatch::Shadows(
                     &self.shadows[shadows_start..shadows_end],
+                ))
+            }
+            PrimitiveKind::BackdropBlur => {
+                let backdrop_blurs_start = self.backdrop_blurs_start;
+                let mut backdrop_blurs_end = backdrop_blurs_start + 1;
+                self.backdrop_blurs_iter.next();
+                while self
+                    .backdrop_blurs_iter
+                    .next_if(|backdrop_blur| (backdrop_blur.order, batch_kind) < max_order_and_kind)
+                    .is_some()
+                {
+                    backdrop_blurs_end += 1;
+                }
+                self.backdrop_blurs_start = backdrop_blurs_end;
+                Some(PrimitiveBatch::BackdropBlurs(
+                    &self.backdrop_blurs[backdrop_blurs_start..backdrop_blurs_end],
                 ))
             }
             PrimitiveKind::Quad => {
@@ -434,6 +472,7 @@ impl<'a> Iterator for BatchIterator<'a> {
 )]
 pub(crate) enum PrimitiveBatch<'a> {
     Shadows(&'a [Shadow]),
+    BackdropBlurs(&'a [BackdropBlur]),
     Quads(&'a [Quad]),
     Paths(&'a [Path<ScaledPixels>]),
     Underlines(&'a [Underline]),
@@ -482,6 +521,196 @@ pub(crate) struct Underline {
 impl From<Underline> for Primitive {
     fn from(underline: Underline) -> Self {
         Primitive::Underline(underline)
+    }
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub(crate) struct BackdropBlur {
+    pub order: DrawOrder,
+    pub blur_radius: ScaledPixels,
+    pub bounds: Bounds<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub overlay_color: Hsla,
+}
+
+impl BackdropBlur {
+    #[allow(dead_code)]
+    pub(crate) fn fallback_quad(&self) -> Quad {
+        // Until a backend implements framebuffer sampling, the primitive paints
+        // the exact overlay color so existing Tauri fallback visuals stay stable.
+        Quad {
+            order: self.order,
+            border_style: BorderStyle::default(),
+            bounds: self.bounds,
+            content_mask: self.content_mask.clone(),
+            background: self.overlay_color.into(),
+            border_color: Hsla::transparent_black(),
+            corner_radii: self.corner_radii,
+            border_widths: Edges::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BackdropBlurWorkArea {
+    pub source_x: u32,
+    pub source_y: u32,
+    pub source_width: u32,
+    pub source_height: u32,
+    pub blur_x: u32,
+    pub blur_y: u32,
+    pub blur_width: u32,
+    pub blur_height: u32,
+}
+
+/// Computes the smallest framebuffer region needed by the backdrop blur passes.
+pub(crate) fn backdrop_blur_work_area(
+    backdrop_blurs: &[BackdropBlur],
+    viewport_width: i32,
+    viewport_height: i32,
+    downsample: f32,
+) -> Option<BackdropBlurWorkArea> {
+    if backdrop_blurs.is_empty() || viewport_width <= 0 || viewport_height <= 0 || downsample <= 0.0
+    {
+        return None;
+    }
+
+    let viewport_width = viewport_width as f32;
+    let viewport_height = viewport_height as f32;
+    let mut left = viewport_width;
+    let mut top = viewport_height;
+    let mut right: f32 = 0.0;
+    let mut bottom: f32 = 0.0;
+    let mut has_region = false;
+
+    for backdrop_blur in backdrop_blurs {
+        let clipped_bounds = backdrop_blur
+            .bounds
+            .intersect(&backdrop_blur.content_mask.bounds);
+        if clipped_bounds.size.width.0 <= 0.0 || clipped_bounds.size.height.0 <= 0.0 {
+            continue;
+        }
+
+        // A 3-sigma margin keeps the separable blur from sampling unrefreshed
+        // pixels near the scissored edge.
+        let dilation = (backdrop_blur.blur_radius.0 * 3.0).max(0.0);
+        left = left.min((clipped_bounds.origin.x.0 - dilation).clamp(0.0, viewport_width));
+        top = top.min((clipped_bounds.origin.y.0 - dilation).clamp(0.0, viewport_height));
+        right = right.max(
+            (clipped_bounds.origin.x.0 + clipped_bounds.size.width.0 + dilation)
+                .clamp(0.0, viewport_width),
+        );
+        bottom = bottom.max(
+            (clipped_bounds.origin.y.0 + clipped_bounds.size.height.0 + dilation)
+                .clamp(0.0, viewport_height),
+        );
+        has_region = true;
+    }
+
+    if !has_region || right <= left || bottom <= top {
+        return None;
+    }
+
+    let blur_x = (left / downsample).floor() as u32;
+    let blur_y = (top / downsample).floor() as u32;
+    let blur_right = (right / downsample).ceil() as u32;
+    let blur_bottom = (bottom / downsample).ceil() as u32;
+    // Align the copied source rectangle to the downsampled work area so the
+    // first scissored texels never sample stale pixels just outside the copy.
+    let source_x = ((blur_x as f32) * downsample).floor() as u32;
+    let source_y = ((blur_y as f32) * downsample).floor() as u32;
+    let source_right =
+        (((blur_right as f32) * downsample).ceil() as u32).min(viewport_width.ceil() as u32);
+    let source_bottom =
+        (((blur_bottom as f32) * downsample).ceil() as u32).min(viewport_height.ceil() as u32);
+
+    if source_right <= source_x
+        || source_bottom <= source_y
+        || blur_right <= blur_x
+        || blur_bottom <= blur_y
+    {
+        return None;
+    }
+
+    Some(BackdropBlurWorkArea {
+        source_x,
+        source_y,
+        source_width: source_right - source_x,
+        source_height: source_bottom - source_y,
+        blur_x,
+        blur_y,
+        blur_width: blur_right - blur_x,
+        blur_height: blur_bottom - blur_y,
+    })
+}
+
+/// Fingerprints the inputs that affect a cached modal backdrop blur texture.
+pub(crate) fn backdrop_blur_batch_signature(
+    backdrop_blurs: &[BackdropBlur],
+    viewport_width: i32,
+    viewport_height: i32,
+    work_area: BackdropBlurWorkArea,
+) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    fn mix(signature: &mut u64, value: u64) {
+        *signature ^= value;
+        *signature = signature.wrapping_mul(FNV_PRIME);
+    }
+
+    fn mix_f32(signature: &mut u64, value: f32) {
+        mix(signature, value.to_bits() as u64);
+    }
+
+    let mut signature = OFFSET_BASIS;
+    mix(&mut signature, viewport_width as u32 as u64);
+    mix(&mut signature, viewport_height as u32 as u64);
+    mix(&mut signature, work_area.source_x as u64);
+    mix(&mut signature, work_area.source_y as u64);
+    mix(&mut signature, work_area.source_width as u64);
+    mix(&mut signature, work_area.source_height as u64);
+    mix(&mut signature, work_area.blur_x as u64);
+    mix(&mut signature, work_area.blur_y as u64);
+    mix(&mut signature, work_area.blur_width as u64);
+    mix(&mut signature, work_area.blur_height as u64);
+    mix(&mut signature, backdrop_blurs.len() as u64);
+
+    for backdrop_blur in backdrop_blurs {
+        mix(&mut signature, backdrop_blur.order as u64);
+        mix_f32(&mut signature, backdrop_blur.blur_radius.0);
+        mix_f32(&mut signature, backdrop_blur.bounds.origin.x.0);
+        mix_f32(&mut signature, backdrop_blur.bounds.origin.y.0);
+        mix_f32(&mut signature, backdrop_blur.bounds.size.width.0);
+        mix_f32(&mut signature, backdrop_blur.bounds.size.height.0);
+        mix_f32(&mut signature, backdrop_blur.corner_radii.top_left.0);
+        mix_f32(&mut signature, backdrop_blur.corner_radii.top_right.0);
+        mix_f32(&mut signature, backdrop_blur.corner_radii.bottom_right.0);
+        mix_f32(&mut signature, backdrop_blur.corner_radii.bottom_left.0);
+        mix_f32(&mut signature, backdrop_blur.content_mask.bounds.origin.x.0);
+        mix_f32(&mut signature, backdrop_blur.content_mask.bounds.origin.y.0);
+        mix_f32(
+            &mut signature,
+            backdrop_blur.content_mask.bounds.size.width.0,
+        );
+        mix_f32(
+            &mut signature,
+            backdrop_blur.content_mask.bounds.size.height.0,
+        );
+        mix_f32(&mut signature, backdrop_blur.overlay_color.h);
+        mix_f32(&mut signature, backdrop_blur.overlay_color.s);
+        mix_f32(&mut signature, backdrop_blur.overlay_color.l);
+        mix_f32(&mut signature, backdrop_blur.overlay_color.a);
+    }
+
+    signature
+}
+
+impl From<BackdropBlur> for Primitive {
+    fn from(backdrop_blur: BackdropBlur) -> Self {
+        Primitive::BackdropBlur(backdrop_blur)
     }
 }
 

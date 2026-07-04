@@ -8,6 +8,7 @@ cbuffer GlobalParams: register(b0) {
 };
 
 Texture2D<float4> t_sprite: register(t0);
+Texture2D<float4> t_blur: register(t2);
 SamplerState s_sprite: register(s0);
 
 struct Bounds {
@@ -988,6 +989,108 @@ PathSpriteVertexOutput path_sprite_vertex(uint vertex_id: SV_VertexID, uint spri
 
 float4 path_sprite_fragment(PathSpriteVertexOutput input): SV_Target {
     return t_sprite.Sample(s_sprite, input.texture_coords);
+}
+
+/*
+**
+**              Backdrop blur
+**
+*/
+
+struct BackdropBlurPassParams {
+    float2 texture_size;
+    float2 direction;
+    float radius;
+    float3 _pad;
+};
+
+StructuredBuffer<BackdropBlurPassParams> backdrop_blur_passes: register(t1);
+
+struct BackdropFullscreenOutput {
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD0;
+};
+
+BackdropFullscreenOutput backdrop_downsample_vertex(uint vertex_id: SV_VertexID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    BackdropFullscreenOutput output;
+    output.position = float4(unit_vertex * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    output.texture_coords = unit_vertex;
+    return output;
+}
+
+float4 backdrop_downsample_fragment(BackdropFullscreenOutput input): SV_Target {
+    return t_sprite.Sample(s_sprite, input.texture_coords);
+}
+
+BackdropFullscreenOutput backdrop_blur_pass_vertex(uint vertex_id: SV_VertexID) {
+    return backdrop_downsample_vertex(vertex_id);
+}
+
+float4 backdrop_blur_pass_fragment(BackdropFullscreenOutput input): SV_Target {
+    BackdropBlurPassParams params = backdrop_blur_passes[0];
+    static const int max_radius = 16;
+    float radius = clamp(params.radius, 1.0, float(max_radius));
+    float sigma = max(radius * 0.5, 0.5);
+    float2 step = params.direction / params.texture_size;
+
+    float4 color = float4(0.0, 0.0, 0.0, 0.0);
+    float weight_sum = 0.0;
+    [unroll]
+    for (int i = -max_radius; i <= max_radius; i++) {
+        float offset = float(i);
+        float in_radius = offset <= radius && offset >= -radius ? 1.0 : 0.0;
+        float weight = exp(-(offset * offset) / (2.0 * sigma * sigma)) * in_radius;
+        color += t_sprite.Sample(s_sprite, input.texture_coords + step * offset) * weight;
+        weight_sum += weight;
+    }
+
+    return color / max(weight_sum, 0.0001);
+}
+
+struct BackdropBlur {
+    Bounds bounds;
+    Bounds content_mask;
+    Corners corner_radii;
+    Hsla overlay_color;
+};
+
+struct BackdropCompositeVertexOutput {
+    nointerpolation uint backdrop_blur_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float4 clip_distance: SV_ClipDistance;
+};
+
+struct BackdropCompositeFragmentInput {
+    nointerpolation uint backdrop_blur_id: TEXCOORD0;
+    float4 position: SV_Position;
+};
+
+StructuredBuffer<BackdropBlur> backdrop_blurs: register(t1);
+
+BackdropCompositeVertexOutput backdrop_composite_vertex(uint vertex_id: SV_VertexID, uint backdrop_blur_id: SV_InstanceID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    BackdropBlur backdrop_blur = backdrop_blurs[backdrop_blur_id];
+
+    BackdropCompositeVertexOutput output;
+    output.backdrop_blur_id = backdrop_blur_id;
+    output.position = to_device_position(unit_vertex, backdrop_blur.bounds);
+    output.clip_distance = distance_from_clip_rect(unit_vertex, backdrop_blur.bounds, backdrop_blur.content_mask);
+    return output;
+}
+
+float4 backdrop_composite_fragment(BackdropCompositeFragmentInput input): SV_Target {
+    BackdropBlur backdrop_blur = backdrop_blurs[input.backdrop_blur_id];
+    float2 texture_coords = input.position.xy / global_viewport_size;
+    float outer_sdf = quad_sdf(input.position.xy, backdrop_blur.bounds, backdrop_blur.corner_radii);
+    float mask = saturate(0.5 - outer_sdf);
+
+    float4 original_color = t_sprite.Sample(s_sprite, texture_coords);
+    float4 blurred_color = t_blur.Sample(s_sprite, texture_coords);
+    float4 overlay_color = hsla_to_rgba(backdrop_blur.overlay_color);
+    float4 composed_color = over(blurred_color, overlay_color);
+
+    return lerp(original_color, composed_color, mask);
 }
 
 /*

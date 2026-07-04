@@ -123,7 +123,10 @@ fn tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
 
 fn native_vibrancy_mode(mode: FrostedGlassMode) -> NativeVibrancyMode {
     match mode {
-        FrostedGlassMode::Off | FrostedGlassMode::Css => NativeVibrancyMode::Off,
+        FrostedGlassMode::Off => NativeVibrancyMode::Off,
+        // Keep old persisted "css" values usable without exposing the
+        // WebView-era option in GPUI settings.
+        FrostedGlassMode::Css => NativeVibrancyMode::System,
         FrostedGlassMode::Native | FrostedGlassMode::System => NativeVibrancyMode::System,
         FrostedGlassMode::Mica => NativeVibrancyMode::Mica,
         FrostedGlassMode::Acrylic => NativeVibrancyMode::Acrylic,

@@ -68,6 +68,10 @@ var<uniform> gamma_ratios: vec4<f32>;
 var<uniform> grayscale_enhanced_contrast: f32;
 var t_sprite: texture_2d<f32>;
 var s_sprite: sampler;
+var t_source: texture_2d<f32>;
+var s_source: sampler;
+var t_original: texture_2d<f32>;
+var t_blur: texture_2d<f32>;
 
 const M_PI_F: f32 = 3.1415926;
 const GRAYSCALE_FACTORS: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
@@ -1075,6 +1079,100 @@ fn vs_path(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
 fn fs_path(input: PathVarying) -> @location(0) vec4<f32> {
     let sample = textureSample(t_sprite, s_sprite, input.texture_coords);
     return sample;
+}
+
+// --- backdrop blur --- //
+
+struct BackdropBlurPassParams {
+    texture_size: vec2<f32>,
+    direction: vec2<f32>,
+    radius: f32,
+    pad: vec3<f32>,
+}
+var<uniform> pass_params: BackdropBlurPassParams;
+
+struct BackdropBlur {
+    bounds: Bounds,
+    content_mask: Bounds,
+    corner_radii: Corners,
+    overlay_color: Hsla,
+}
+var<storage, read> b_backdrop_blurs: array<BackdropBlur>;
+
+struct BackdropFullscreenVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) texture_coords: vec2<f32>,
+}
+
+@vertex
+fn vs_backdrop_fullscreen(@builtin(vertex_index) vertex_id: u32) -> BackdropFullscreenVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    var out = BackdropFullscreenVarying();
+    out.position = vec4<f32>(unit_vertex * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
+    out.texture_coords = unit_vertex;
+    return out;
+}
+
+@fragment
+fn fs_backdrop_downsample(input: BackdropFullscreenVarying) -> @location(0) vec4<f32> {
+    return textureSample(t_source, s_source, input.texture_coords);
+}
+
+@fragment
+fn fs_backdrop_blur_pass(input: BackdropFullscreenVarying) -> @location(0) vec4<f32> {
+    let max_radius = 16;
+    let radius = clamp(pass_params.radius, 1.0, f32(max_radius));
+    let sigma = max(radius * 0.5, 0.5);
+    let step = pass_params.direction / pass_params.texture_size;
+
+    var color = vec4<f32>(0.0);
+    var weight_sum = 0.0;
+    for (var i = -max_radius; i <= max_radius; i = i + 1) {
+        let offset = f32(i);
+        let in_radius = select(0.0, 1.0, offset <= radius && offset >= -radius);
+        let weight = exp(-(offset * offset) / (2.0 * sigma * sigma)) * in_radius;
+        color = color + textureSample(t_source, s_source, input.texture_coords + step * offset) * weight;
+        weight_sum = weight_sum + weight;
+    }
+    return color / max(weight_sum, 0.0001);
+}
+
+struct BackdropCompositeVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) backdrop_blur_id: u32,
+    @location(1) clip_distances: vec4<f32>,
+}
+
+@vertex
+fn vs_backdrop_composite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> BackdropCompositeVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    let backdrop_blur = b_backdrop_blurs[instance_id];
+
+    var out = BackdropCompositeVarying();
+    out.position = to_device_position(unit_vertex, backdrop_blur.bounds);
+    out.backdrop_blur_id = instance_id;
+    out.clip_distances = distance_from_clip_rect(unit_vertex, backdrop_blur.bounds, backdrop_blur.content_mask);
+    return out;
+}
+
+@fragment
+fn fs_backdrop_composite(input: BackdropCompositeVarying) -> @location(0) vec4<f32> {
+    if (any(input.clip_distances < vec4<f32>(0.0))) {
+        return vec4<f32>(0.0);
+    }
+
+    let backdrop_blur = b_backdrop_blurs[input.backdrop_blur_id];
+    let texture_coords = input.position.xy / globals.viewport_size;
+    let point = input.position.xy - backdrop_blur.bounds.origin;
+    let outer_sdf = quad_sdf(point, backdrop_blur.bounds, backdrop_blur.corner_radii);
+    let mask = saturate(0.5 - outer_sdf);
+
+    let original_color = textureSample(t_original, s_source, texture_coords);
+    let blurred_color = textureSample(t_blur, s_source, texture_coords);
+    let overlay_color = hsla_to_rgba(backdrop_blur.overlay_color);
+    let composed_color = over(blurred_color, overlay_color);
+
+    return blend_color(mix(original_color, composed_color, mask), 1.0);
 }
 
 // --- underlines --- //

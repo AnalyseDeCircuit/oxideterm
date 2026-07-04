@@ -2,8 +2,8 @@
 use crate::Inspector;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
-    Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
+    AsyncWindowContext, AvailableSpace, BackdropBlur, Background, BorderStyle, Bounds, BoxShadow,
+    Capslock, Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
     KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId,
@@ -2868,6 +2868,26 @@ impl Window {
         }
     }
 
+    /// Paint an element-level backdrop blur primitive into the scene.
+    ///
+    /// Backends that do not yet support sampling the existing framebuffer must
+    /// render the overlay color as a fallback, preserving current Tauri parity.
+    pub fn paint_backdrop_blur(&mut self, backdrop_blur: PaintBackdropBlur) {
+        self.invalidator.debug_assert_paint();
+
+        let scale_factor = self.scale_factor();
+        let content_mask = self.content_mask();
+        let opacity = self.element_opacity();
+        self.next_frame.scene.insert_primitive(BackdropBlur {
+            order: 0,
+            blur_radius: backdrop_blur.blur_radius.scale(scale_factor),
+            bounds: backdrop_blur.bounds.scale(scale_factor),
+            corner_radii: backdrop_blur.corner_radii.scale(scale_factor),
+            content_mask: content_mask.scale(scale_factor),
+            overlay_color: backdrop_blur.overlay_color.opacity(opacity),
+        });
+    }
+
     /// Paint one or more quads into the scene for the next frame at the current stacking context.
     /// Quads are colored rectangular regions with an optional background, border, and corner radius.
     /// see [`fill`], [`outline`], and [`quad`] to construct this type.
@@ -5174,6 +5194,19 @@ impl PaintQuad {
             ..self
         }
     }
+}
+
+/// Passed as an argument [`Window::paint_backdrop_blur`].
+#[derive(Clone)]
+pub struct PaintBackdropBlur {
+    /// The bounds of the backdrop blur region within the window.
+    pub bounds: Bounds<Pixels>,
+    /// The radii of the backdrop blur region's corners.
+    pub corner_radii: Corners<Pixels>,
+    /// The requested blur radius for already-painted content behind the region.
+    pub blur_radius: Pixels,
+    /// The overlay color composited above the blurred backdrop.
+    pub overlay_color: Hsla,
 }
 
 /// Creates a quad with the given parameters.

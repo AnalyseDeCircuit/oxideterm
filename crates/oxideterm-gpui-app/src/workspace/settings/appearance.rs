@@ -150,6 +150,7 @@ impl WorkspaceApp {
                         cx,
                     ),
                 ),
+                self.appearance_vibrancy_status(settings),
             ],
         )
     }
@@ -439,6 +440,95 @@ impl WorkspaceApp {
 
     fn appearance_row(&self, label_key: &str, hint_key: &str, control: AnyElement) -> AnyElement {
         settings_appearance_row(&self.tokens, &self.i18n, label_key, hint_key, control)
+    }
+
+    fn appearance_vibrancy_status(&self, settings: &PersistedSettings) -> AnyElement {
+        let mode = effective_vibrancy_mode(settings, &self.render_policy);
+        let mode_label = frosted_glass_label(frosted_glass_mode_from_native(mode), &self.i18n);
+        let effective_text = format!(
+            "{} {}",
+            self.i18n
+                .t("settings_view.appearance.frosted_glass_effective_mode"),
+            mode_label
+        );
+        let (status_key, status_color) = if !self.render_policy.allow_vibrancy {
+            (
+                "settings_view.appearance.frosted_glass_status_profile_disabled",
+                self.tokens.ui.warning,
+            )
+        } else if mode == NativeVibrancyMode::Off {
+            (
+                "settings_view.appearance.frosted_glass_status_off",
+                self.tokens.ui.text_muted,
+            )
+        } else {
+            match self.vibrancy_support {
+                VibrancySupport::Supported => (
+                    "settings_view.appearance.frosted_glass_status_active",
+                    self.tokens.ui.success,
+                ),
+                VibrancySupport::Fallback { .. } => (
+                    "settings_view.appearance.frosted_glass_status_fallback",
+                    self.tokens.ui.warning,
+                ),
+                VibrancySupport::Unsupported { .. } => (
+                    "settings_view.appearance.frosted_glass_status_unsupported",
+                    self.tokens.ui.error,
+                ),
+            }
+        };
+        let blur_key = if self.render_policy.allow_background_blur {
+            "settings_view.appearance.frosted_glass_dialog_blur_enabled"
+        } else {
+            "settings_view.appearance.frosted_glass_dialog_blur_disabled"
+        };
+        let status_row = |color: u32, label: String| {
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_row()
+                .items_start()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .size(px(6.0))
+                        .flex_none()
+                        .rounded_full()
+                        .bg(rgb(color)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .line_height(px(18.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(label),
+                )
+                .into_any_element()
+        };
+
+        // This status block explains the two independent glass layers. They
+        // intentionally follow different render-policy gates so low-power mode
+        // can keep cheap system material while disabling expensive realtime blur.
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg_sunken))
+            .px(px(12.0))
+            .py(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(status_row(self.tokens.ui.accent, effective_text))
+            .child(status_row(status_color, self.i18n.t(status_key)))
+            .child(status_row(self.tokens.ui.text_muted, self.i18n.t(blur_key)))
+            .into_any_element()
     }
 
     fn appearance_checkbox_row(

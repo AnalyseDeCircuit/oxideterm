@@ -132,6 +132,9 @@ mod macos {
             "PathRasterizationVertex".into(),
             "ShadowInputIndex".into(),
             "Shadow".into(),
+            "BackdropBlurInputIndex".into(),
+            "BackdropBlur".into(),
+            "BackdropBlurPassParams".into(),
             "QuadInputIndex".into(),
             "Underline".into(),
             "UnderlineInputIndex".into(),
@@ -295,6 +298,9 @@ mod windows {
             "underline",
             "monochrome_sprite",
             "polychrome_sprite",
+            "backdrop_downsample",
+            "backdrop_blur_pass",
+            "backdrop_composite",
         ];
 
         let rust_binding_path = format!("{}/shaders_bytes.rs", out_dir);

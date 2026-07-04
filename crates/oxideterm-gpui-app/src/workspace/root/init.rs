@@ -104,6 +104,7 @@ impl WorkspaceApp {
         let cloud_sync_form =
             CloudSyncFormDraft::from_settings(&cloud_sync_store.state().settings);
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
+        let initial_vibrancy_support = apply_window_vibrancy(window, initial_vibrancy_mode);
         let mut background_image_cache = BackgroundImageRenderCache::default();
         background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
         let settings_store_last_modified =
@@ -723,6 +724,7 @@ impl WorkspaceApp {
             render_profile_override,
             render_policy,
             applied_vibrancy_mode: initial_vibrancy_mode,
+            vibrancy_support: initial_vibrancy_support,
             background_image_cache,
             settings_store,
             connection_store,
@@ -879,7 +881,6 @@ impl WorkspaceApp {
         }
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.restore_session_tree_snapshot();
-        let _ = apply_window_vibrancy(window, initial_vibrancy_mode);
         let window_handle = window.window_handle();
         cx.spawn(async move |weak, cx| {
             loop {

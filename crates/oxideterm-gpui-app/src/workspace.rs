@@ -129,7 +129,7 @@ use oxideterm_forwarding::{
 use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
-    vibrancy::{NativeVibrancyMode, apply_window_vibrancy},
+    vibrancy::{NativeVibrancyMode, VibrancySupport, apply_window_vibrancy},
 };
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SharedTerminalSession, TerminalBackgroundFit,
@@ -1010,6 +1010,7 @@ pub(crate) struct WorkspaceApp {
     render_profile_override: Option<RenderProfile>,
     render_policy: EffectiveRenderPolicy,
     applied_vibrancy_mode: NativeVibrancyMode,
+    vibrancy_support: VibrancySupport,
     background_image_cache: BackgroundImageRenderCache,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,

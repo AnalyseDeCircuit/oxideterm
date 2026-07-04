@@ -12,6 +12,7 @@ pub enum NativeVibrancyMode {
 #[allow(dead_code)]
 pub enum VibrancySupport {
     Supported,
+    Fallback { reason: &'static str },
     Unsupported { reason: &'static str },
 }
 
@@ -81,10 +82,13 @@ mod imp {
             NativeVibrancyMode::Acrylic => {
                 if set_system_backdrop(window, DWMSBT_TRANSIENTWINDOW).is_err() {
                     window.set_background_appearance(WindowBackgroundAppearance::Blurred);
+                    VibrancySupport::Fallback {
+                        reason: "DWM acrylic backdrop is unavailable",
+                    }
                 } else {
                     window.set_background_appearance(WindowBackgroundAppearance::Transparent);
+                    VibrancySupport::Supported
                 }
-                VibrancySupport::Supported
             }
             NativeVibrancyMode::System | NativeVibrancyMode::Mica => {
                 let backdrop = match mode {

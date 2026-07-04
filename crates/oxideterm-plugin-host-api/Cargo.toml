@@ -4,6 +4,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = []
+wasm-runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
@@ -26,8 +30,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-wasmtime.workspace = true
-wasmtime-wasi.workspace = true
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
 zeroize.workspace = true
 
 [dev-dependencies]

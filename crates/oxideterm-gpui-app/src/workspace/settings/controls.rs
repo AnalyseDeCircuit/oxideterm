@@ -335,20 +335,23 @@ impl WorkspaceApp {
             }
             (SettingsTab::Appearance, SettingsSelect::AppearanceFrostedGlass) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                // Tauri exposes off/css/native. GPUI maps native to window
-                // vibrancy today; css is retained as the future element-level
-                // backdrop-filter mode instead of collapsing it into off.
-                for mode in [
-                    FrostedGlassMode::Off,
-                    FrostedGlassMode::Css,
-                    FrostedGlassMode::Native,
-                ] {
+                // The selector lists platform window materials only. Legacy
+                // WebView CSS/native values are normalized to the system entry.
+                let selected_mode = match settings.appearance.frosted_glass {
+                    FrostedGlassMode::Css | FrostedGlassMode::Native => FrostedGlassMode::System,
+                    mode => mode,
+                };
+                for mode in available_modes()
+                    .iter()
+                    .copied()
+                    .map(frosted_glass_mode_from_native)
+                {
                     popup = popup.child(
                         select_option_action(
                             select_option(
                                 &self.tokens,
                                 frosted_glass_label(mode, &self.i18n),
-                                settings.appearance.frosted_glass == mode,
+                                selected_mode == mode,
                             ),
                             false,
                             false,

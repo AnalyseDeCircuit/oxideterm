@@ -83,8 +83,10 @@ impl Render for TerminalPane {
             .terminal_timestamps_enabled
             .then(|| Arc::new(self.row_timestamps.clone()));
 
-        let background = self.preferences.background.clone().filter(|background| {
-            self.preferences.render_policy.allow_background_images && background.path.exists()
+        let background = self.preferences.background.clone().filter(|_background| {
+            // Keep terminal repaint frames off the filesystem hot path; image
+            // fallback and the blurred-image loader handle missing files.
+            self.preferences.render_policy.allow_background_images
         });
         let background_layer = background.as_ref().map(|background| {
             terminal_background_layer(

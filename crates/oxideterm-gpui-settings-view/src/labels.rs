@@ -75,8 +75,10 @@ pub fn frosted_glass_mode_from_native(mode: NativeVibrancyMode) -> FrostedGlassM
 pub fn frosted_glass_label(mode: FrostedGlassMode, i18n: &I18n) -> String {
     match mode {
         FrostedGlassMode::Off => i18n.t("settings_view.appearance.frosted_glass_off"),
-        FrostedGlassMode::Css => i18n.t("settings_view.appearance.frosted_glass_css"),
-        FrostedGlassMode::Native | FrostedGlassMode::System => {
+        FrostedGlassMode::Css | FrostedGlassMode::Native | FrostedGlassMode::System => {
+            // Legacy "css" and "native" settings now resolve to the native
+            // glass label so the obsolete WebView-era blur mode never
+            // resurfaces in GPUI.
             i18n.t("settings_view.appearance.frosted_glass_native")
         }
         FrostedGlassMode::Mica => "Mica".to_string(),

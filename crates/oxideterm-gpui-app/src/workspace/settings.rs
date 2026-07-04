@@ -70,6 +70,7 @@ use oxideterm_connections::{
     list_ssh_config_hosts, preview_connection_import, resolve_ssh_config_alias,
     saved_connection_from_ssh_host,
 };
+use oxideterm_gpui_platform::vibrancy::{NativeVibrancyMode, VibrancySupport, available_modes};
 use oxideterm_gpui_settings_view::*;
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
