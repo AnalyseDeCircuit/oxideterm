@@ -110,6 +110,10 @@ jobs:
         env:
           OXIDETERM_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ runner.os == 'Linux' && '1' || '' }}
+          # sha2-asm ships .S sources for x86 targets; clang-cl can assemble them
+          # for MSVC while cl.exe treats them as unknown object inputs.
+          CC_x86_64_pc_windows_msvc: ${{ runner.os == 'Windows' && 'clang-cl' || '' }}
+          CC_aarch64_pc_windows_msvc: ${{ runner.os == 'Windows' && 'clang-cl' || '' }}
         run: python scripts/package_native.py ${{ matrix.target }}
 
       - name: Upload workflow artifact
