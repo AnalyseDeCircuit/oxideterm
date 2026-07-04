@@ -27,6 +27,7 @@ import { AlertTriangle, HelpCircle } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from '../components/ui/dialog';
 
@@ -41,31 +42,37 @@ interface ConfirmOptions {
 export function useConfirm() {
   const { t } = useTranslation();
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
+  const [open, setOpen] = useState(false);
   const resolveRef = useRef<((value: boolean) => void) | null>(null);
 
   const confirm = useCallback((opts: ConfirmOptions): Promise<boolean> => {
     return new Promise<boolean>((resolve) => {
       resolveRef.current = resolve;
       setOptions(opts);
+      setOpen(true);
     });
   }, []);
 
-  const handleConfirm = useCallback(() => {
-    resolveRef.current?.(true);
+  const close = useCallback((confirmed: boolean) => {
+    const resolve = resolveRef.current;
     resolveRef.current = null;
-    setOptions(null);
+    // Keep the dialog mounted while Radix releases its body pointer lock.
+    setOpen(false);
+    resolve?.(confirmed);
   }, []);
 
+  const handleConfirm = useCallback(() => {
+    close(true);
+  }, [close]);
+
   const handleCancel = useCallback(() => {
-    resolveRef.current?.(false);
-    resolveRef.current = null;
-    setOptions(null);
-  }, []);
+    close(false);
+  }, [close]);
 
   const isDanger = options?.variant === 'danger';
 
   const ConfirmDialog = options ? (
-    <Dialog open={true} onOpenChange={(open) => { if (!open) handleCancel(); }}>
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) handleCancel(); }}>
       <DialogContent
         className="max-w-sm p-0 overflow-hidden rounded-lg border border-theme-border/60 shadow-2xl shadow-black/40"
         // Hide the default close button — we have Cancel
@@ -93,11 +100,12 @@ export function useConfirm() {
           </h3>
 
           {/* Description */}
-          {options.description && (
-            <p className="text-xs text-theme-text-muted text-center leading-relaxed">
-              {options.description}
-            </p>
-          )}
+          <DialogDescription className={options.description
+            ? "text-xs text-theme-text-muted text-center leading-relaxed"
+            : "sr-only"
+          }>
+            {options.description ?? options.title}
+          </DialogDescription>
         </div>
 
         {/* Actions */}
