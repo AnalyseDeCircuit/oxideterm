@@ -143,10 +143,5 @@
     "typescript": "~5.9.3",
     "vite": "^7.3.5",
     "vitest": "^4.1.9"
-  },
-  "pnpm": {
-    "overrides": {
-      "@lezer/common": "1.5.2"
-    }
   }
 }

@@ -1,0 +1,11 @@
+packages:
+  - .
+
+allowBuilds:
+  esbuild: true
+
+overrides:
+  '@lezer/common': 1.5.2
+
+onlyBuiltDependencies:
+  - esbuild

@@ -139,4 +139,28 @@ describe('AI evidence binding', () => {
       code: 'result-binding-required',
     });
   });
+
+  it('keeps unstructured replies when the current turn has tool facts', () => {
+    const result = toolResult('tool-1', 'ok');
+    const record = buildAiToolExecutionRecord({
+      conversationId: 'conversation-1',
+      assistantMessageId: 'assistant-1',
+      toolCallId: result.toolCallId,
+      toolName: result.toolName,
+      args: {},
+      status: 'completed',
+      result,
+      risk: 'execute',
+    });
+    recordAiToolResultFacts(record, result);
+
+    const message = assistantMessage('我已经执行了命令，输出正常。');
+    const guarded = applyAiResultBindingGuard(
+      message,
+      aiToolResultFactsForMessage('conversation-1', 'assistant-1'),
+    );
+
+    expect(guarded.guardrail).toBeUndefined();
+    expect(guarded.message.content).toBe(message.content);
+  });
 });

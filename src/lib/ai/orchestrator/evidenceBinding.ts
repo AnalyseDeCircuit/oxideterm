@@ -502,9 +502,22 @@ export function applyAiResultBindingGuard(
     return guardrailForMessage(message);
   }
 
-  if (!textClaimsToolBackedFact(message.content) || recentFactsSupportText(message.content, recentFacts)) {
+  if (!textClaimsToolBackedFact(message.content)) {
     return { message };
   }
+
+  if (recentFactsSupportText(message.content, recentFacts)) {
+    return { message };
+  }
+
+  // Some providers, especially local or smaller models, do not reliably emit
+  // the structured <evidence_claims> block. If this exact assistant turn did
+  // produce tool facts, keep the answer visible instead of replacing it with
+  // the guardrail message; the tool-result parts remain attached to the turn.
+  if (recentFacts.length > 0) {
+    return { message };
+  }
+
   return guardrailForMessage(message);
 }
 
