@@ -1432,8 +1432,12 @@ impl WorkspaceApp {
         let (tx, rx) = mpsc::channel();
         let host = self.plugin_runtime_host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
+        let wasm_sidecar_path =
+            plugin_runtime::installed_wasm_sidecar_binary_path(self.settings_store.path());
+        let wasm_sidecar_path = wasm_sidecar_path.is_file().then_some(wasm_sidecar_path);
         self.forwarding_runtime.spawn(async move {
             let mut host = host.lock().await;
+            host.set_wasm_sidecar_path(wasm_sidecar_path);
             host.set_host_api_resolver(host_api_resolver);
             // Tauri initializePluginSystem() loads enabled plugins sequentially.
             // Native keeps that ordering for process/WASM runtimes so
@@ -1533,9 +1537,14 @@ impl WorkspaceApp {
         let activation = match result {
             Ok(activation) => activation,
             Err(error) => {
-                let _ = self
-                    .plugin_registry
-                    .mark_runtime_error(&plugin_id, error.message);
+                // Keep actionable runtime codes in the persisted error so the
+                // plugin manager can render recovery actions after restart.
+                let message = if error.code == plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE {
+                    format!("{}: {}", error.code, error.message)
+                } else {
+                    error.message
+                };
+                let _ = self.plugin_registry.mark_runtime_error(&plugin_id, message);
                 cx.notify();
                 return;
             }

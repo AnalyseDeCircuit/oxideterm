@@ -6,7 +6,7 @@ version.workspace = true
 
 [features]
 default = []
-wasm-runtime = ["dep:wasmtime", "dep:wasmtime-wasi"]
+wasm-runtime = ["dep:oxideterm-plugin-wasm-runtime"]
 
 [dependencies]
 anyhow.workspace = true
@@ -21,6 +21,7 @@ oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
+oxideterm-plugin-wasm-runtime = { path = "../oxideterm-plugin-wasm-runtime", optional = true }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
@@ -30,8 +31,6 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-wasmtime = { workspace = true, optional = true }
-wasmtime-wasi = { workspace = true, optional = true }
 zeroize.workspace = true
 
 [dev-dependencies]

@@ -1,10 +1,27 @@
-//! WASI/Wasmtime runtime bridge for native WASM plugins.
-//!
-//! The GPUI app should not know about guest memory ABI details. This module owns
-//! module loading, exported function calls, outbound frame capture, and timeout
-//! enforcement for WASM-backed native plugins.
+// Copyright (C) 2026 AnalyseDeCircuit
+// SPDX-License-Identifier: GPL-3.0-only
 
-use super::*;
+//! WASI/Wasmtime runtime bridge for native Wasm plugins.
+
+use std::{
+    collections::VecDeque,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use oxideterm_plugin_protocol::{
+    PluginActivateRequest, PluginError, PluginEvent, PluginOutboundEffect, PluginOutboundMessage,
+    PluginRequest, PluginRequestKind, PluginResponse, PluginRuntimeHealth,
+    PluginRuntimeSupervisorState,
+};
+use serde::Deserialize;
+use wasmtime::{
+    Config as WasmConfig, Engine as WasmEngine, Instance as WasmInstance, Linker as WasmLinker,
+    Memory as WasmMemory, Store as WasmStore,
+};
+use wasmtime_wasi::{WasiCtxBuilder, p1::WasiP1Ctx};
+
+use crate::resolve_wasm_runtime_entry;
 
 pub struct NativeWasmPluginRuntime {
     plugin_dir: PathBuf,
@@ -65,22 +82,92 @@ impl NativeWasmPluginRuntime {
         self.outbound_effects.drain(..).collect()
     }
 
+    pub async fn activate(
+        &mut self,
+        request: PluginActivateRequest,
+    ) -> Result<PluginResponse, PluginError> {
+        self.supervisor.start_activation();
+        match instantiate_wasi_preview1_plugin(
+            &request.manifest.id,
+            &self.plugin_dir,
+            &self.entry,
+            self.supervisor.lifecycle_timeout(),
+        ) {
+            Ok(instance) => {
+                self.instance = Some(instance);
+                let messages = self.drain_wasm_guest_outbound()?;
+                self.capture_wasm_outbound_messages(messages)?;
+                self.active = true;
+                self.supervisor.mark_active();
+                Ok(PluginResponse::ok(
+                    request.request_id,
+                    serde_json::json!({
+                        "state": "active",
+                        "runtime": "wasm",
+                        "wasi": "preview1",
+                    }),
+                ))
+            }
+            Err(error) => {
+                self.instance = None;
+                self.active = false;
+                self.supervisor.record_error(error.clone());
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn deactivate(&mut self) -> Result<PluginResponse, PluginError> {
+        self.supervisor.start_deactivation();
+        self.instance = None;
+        self.active = false;
+        self.supervisor.kill();
+        Ok(PluginResponse::ok(
+            "wasm.deactivate",
+            serde_json::json!({ "state": "inactive" }),
+        ))
+    }
+
+    pub async fn call(&mut self, request: PluginRequest) -> Result<PluginResponse, PluginError> {
+        self.call_wasm_guest(request, "oxideterm_plugin_command")
+    }
+
+    pub async fn send_event(&mut self, event: PluginEvent) -> Result<PluginResponse, PluginError> {
+        let request_id = format!("event:{}", event.name);
+        self.call_wasm_guest(
+            PluginRequest {
+                request_id,
+                kind: PluginRequestKind::SendEvent { event },
+                timeout_ms: None,
+            },
+            "oxideterm_plugin_event",
+        )
+    }
+
+    pub async fn kill(&mut self) -> Result<PluginResponse, PluginError> {
+        self.deactivate().await
+    }
+
+    pub async fn health(&mut self) -> Result<PluginRuntimeHealth, PluginError> {
+        Ok(self.supervisor.health())
+    }
+
     fn call_wasm_guest(
         &mut self,
         request: PluginRequest,
         export_name: &str,
     ) -> Result<PluginResponse, PluginError> {
         let request_id = request.request_id.clone();
+        let timeout = request
+            .timeout_ms
+            .map(Duration::from_millis)
+            .unwrap_or_else(|| self.supervisor.lifecycle_timeout());
         let instance = self.instance.as_mut().ok_or_else(|| {
             PluginError::runtime(
                 "wasm_runtime_not_active",
                 "Native WASM plugin runtime is not active",
             )
         })?;
-        let timeout = request
-            .timeout_ms
-            .map(Duration::from_millis)
-            .unwrap_or_else(|| self.supervisor.lifecycle_timeout());
         instance.reset_epoch_deadline(timeout);
         let guest_response = instance.call_json_request(export_name, &request)?;
         self.capture_wasm_outbound_messages(guest_response.messages)?;
@@ -278,88 +365,6 @@ impl NativeWasmPluginInstance {
     }
 }
 
-impl PluginRuntimeBridge for NativeWasmPluginRuntime {
-    fn activate<'a>(
-        &'a mut self,
-        request: PluginActivateRequest,
-    ) -> PluginRuntimeFuture<'a, PluginResponse> {
-        Box::pin(async move {
-            self.supervisor.start_activation();
-            match instantiate_wasi_preview1_plugin(
-                &request.manifest.id,
-                &self.plugin_dir,
-                &self.entry,
-                self.supervisor.lifecycle_timeout(),
-            ) {
-                Ok(instance) => {
-                    self.instance = Some(instance);
-                    let messages = self.drain_wasm_guest_outbound()?;
-                    self.capture_wasm_outbound_messages(messages)?;
-                    self.active = true;
-                    self.supervisor.mark_active();
-                    Ok(PluginResponse::ok(
-                        request.request_id,
-                        serde_json::json!({
-                            "state": "active",
-                            "runtime": "wasm",
-                            "wasi": "preview1",
-                        }),
-                    ))
-                }
-                Err(error) => {
-                    self.instance = None;
-                    self.active = false;
-                    self.supervisor.record_error(error.clone());
-                    Err(error)
-                }
-            }
-        })
-    }
-
-    fn deactivate<'a>(&'a mut self) -> PluginRuntimeFuture<'a, PluginResponse> {
-        Box::pin(async move {
-            self.supervisor.start_deactivation();
-            self.instance = None;
-            self.active = false;
-            self.supervisor.kill();
-            Ok(PluginResponse::ok(
-                "wasm.deactivate",
-                serde_json::json!({ "state": "inactive" }),
-            ))
-        })
-    }
-
-    fn call<'a>(&'a mut self, request: PluginRequest) -> PluginRuntimeFuture<'a, PluginResponse> {
-        Box::pin(async move {
-            let response = self.call_wasm_guest(request, "oxideterm_plugin_command")?;
-            Ok(response)
-        })
-    }
-
-    fn send_event<'a>(&'a mut self, event: PluginEvent) -> PluginRuntimeFuture<'a, PluginResponse> {
-        Box::pin(async move {
-            let request_id = format!("event:{}", event.name);
-            let response = self.call_wasm_guest(
-                PluginRequest {
-                    request_id,
-                    kind: PluginRequestKind::SendEvent { event },
-                    timeout_ms: None,
-                },
-                "oxideterm_plugin_event",
-            )?;
-            Ok(response)
-        })
-    }
-
-    fn kill<'a>(&'a mut self) -> PluginRuntimeFuture<'a, PluginResponse> {
-        self.deactivate()
-    }
-
-    fn health<'a>(&'a mut self) -> PluginRuntimeFuture<'a, PluginRuntimeHealth> {
-        Box::pin(async move { Ok(self.supervisor.health()) })
-    }
-}
-
 fn instantiate_wasi_preview1_plugin(
     plugin_id: &str,
     plugin_dir: &Path,
@@ -438,9 +443,9 @@ fn instantiate_wasi_preview1_plugin(
 
 fn wasm_runtime_engine() -> Result<WasmEngine, PluginError> {
     let mut config = WasmConfig::new();
-    // WASM plugins run inside Wasmtime, not a process that can be killed by the
-    // OS. Epoch interruption ties Phase 3 lifecycle timeout to the engine so a
-    // tight guest loop traps instead of occupying a runtime worker forever.
+    // Wasm plugins run inside Wasmtime, not a process that can be killed by the
+    // OS. Epoch interruption ties lifecycle timeout to the engine so a tight
+    // guest loop traps instead of occupying a runtime worker forever.
     config.epoch_interruption(true);
     WasmEngine::new(&config).map_err(|error| {
         PluginError::runtime(
@@ -464,9 +469,9 @@ fn wasm_unpack_ptr_len(packed: i64) -> Result<(usize, usize), PluginError> {
             format!("Native WASM plugin returned negative response pointer {packed}"),
         ));
     }
-    // The selected Phase 3 ABI packs `(ptr, len)` as `ptr << 32 | len`.
-    // Keeping the layout explicit lets non-Rust WASM plugins implement the
-    // same deterministic boundary without depending on native Rust structs.
+    // The selected ABI packs `(ptr, len)` as `ptr << 32 | len`. Keeping the
+    // layout explicit lets non-Rust Wasm plugins implement the same boundary
+    // without depending on native Rust structs.
     let packed = packed as u64;
     let ptr = (packed >> 32) as usize;
     let len = (packed & 0xffff_ffff) as usize;

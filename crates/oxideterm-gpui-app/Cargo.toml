@@ -4,6 +4,10 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[features]
+default = []
+plugin-wasm-runtime = ["oxideterm-plugin-host-api/wasm-runtime"]
+
 [[bin]]
 name = "oxideterm-native"
 path = "src/main.rs"
@@ -12,6 +16,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
+flate2 = "1.1.9"
 gpui.workspace = true
 image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
@@ -68,6 +73,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sysinfo.workspace = true
+tar = "0.4"
 tokio.workspace = true
 uuid.workspace = true
 walkdir = "2"

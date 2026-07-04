@@ -24,11 +24,6 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout},
     time,
 };
-use wasmtime::{
-    Config as WasmConfig, Engine as WasmEngine, Instance as WasmInstance, Linker as WasmLinker,
-    Memory as WasmMemory, Store as WasmStore,
-};
-use wasmtime_wasi::{WasiCtxBuilder, p1::WasiP1Ctx};
 
 use oxideterm_plugin_manifest::NativePluginManifest;
 pub use oxideterm_plugin_protocol::{
@@ -38,6 +33,8 @@ pub use oxideterm_plugin_protocol::{
     PluginRuntimeHealth, PluginRuntimeSupervisorState,
 };
 use oxideterm_plugin_registry::validate_plugin_relative_path;
+
+pub const WASM_RUNTIME_NOT_INSTALLED_CODE: &str = "wasm_runtime_not_installed";
 
 #[cfg(test)]
 pub use oxideterm_plugin_protocol::{
@@ -94,12 +91,21 @@ pub struct NativePluginRuntimeEventDispatch {
 pub struct NativePluginRuntimeHost {
     process_runtimes: HashMap<String, NativeProcessPluginRuntime>,
     process_permissions: HashMap<String, PluginPermissionSet>,
+    sidecar_wasm_runtimes: HashMap<String, NativeSidecarWasmPluginRuntime>,
+    sidecar_wasm_permissions: HashMap<String, PluginPermissionSet>,
+    wasm_sidecar_path: Option<PathBuf>,
+    #[cfg(feature = "wasm-runtime")]
     wasm_runtimes: HashMap<String, NativeWasmPluginRuntime>,
+    #[cfg(feature = "wasm-runtime")]
     wasm_permissions: HashMap<String, PluginPermissionSet>,
     host_api_resolver: Option<NativeHostApiResolver>,
 }
 
 impl NativePluginRuntimeHost {
+    pub fn set_wasm_sidecar_path(&mut self, path: Option<PathBuf>) {
+        self.wasm_sidecar_path = path;
+    }
+
     pub fn set_host_api_resolver(&mut self, resolver: NativeHostApiResolver) {
         self.host_api_resolver = Some(resolver);
         let Some(resolver) = self.host_api_resolver.clone() else {
@@ -185,36 +191,95 @@ impl NativePluginRuntimeHost {
         permissions: PluginPermissionSet,
         lifecycle_timeout: Duration,
     ) -> Result<NativePluginRuntimeActivation, PluginError> {
-        let plugin_id = manifest.id.clone();
-        if self.wasm_runtimes.contains_key(&plugin_id) {
-            self.deactivate_plugin(&plugin_id).await?;
+        #[cfg(not(feature = "wasm-runtime"))]
+        {
+            // Standard builds keep plugin discovery and management, but run
+            // WASM plugins through an optional sidecar instead of linking
+            // Wasmtime into the main application binary.
+            let plugin_id = manifest.id.clone();
+            if self.sidecar_wasm_runtimes.contains_key(&plugin_id) {
+                self.deactivate_plugin(&plugin_id).await?;
+            }
+            let Some(sidecar_path) = self.wasm_sidecar_path.clone() else {
+                return Err(PluginError::runtime(
+                    WASM_RUNTIME_NOT_INSTALLED_CODE,
+                    format!(
+                        "WASM plugin runtime is not bundled with the standard build; install the optional runtime to activate \"{}\"",
+                        manifest.id
+                    ),
+                ));
+            };
+            let mut runtime = NativeSidecarWasmPluginRuntime::new(
+                plugin_id.clone(),
+                sidecar_path,
+                plugin_dir,
+                entry,
+                lifecycle_timeout,
+            );
+            let response = runtime
+                .activate(PluginActivateRequest {
+                    request_id: format!("activate:{plugin_id}"),
+                    manifest,
+                    permissions: permissions.clone(),
+                    timeout_ms: lifecycle_timeout.as_millis() as u64,
+                })
+                .await?;
+            let messages = runtime.drain_outbound_messages();
+            let effects = runtime.drain_outbound_effects();
+            validate_outbound_effect_permissions(&effects, &permissions)?;
+
+            if matches!(response.result, PluginResponseResult::Ok { .. }) {
+                self.sidecar_wasm_runtimes
+                    .insert(plugin_id.clone(), runtime);
+                self.sidecar_wasm_permissions
+                    .insert(plugin_id.clone(), permissions);
+            }
+
+            return Ok(NativePluginRuntimeActivation {
+                plugin_id,
+                response,
+                messages,
+                effects,
+            });
         }
 
-        let mut runtime =
-            NativeWasmPluginRuntime::new(plugin_id.clone(), plugin_dir, entry, lifecycle_timeout);
-        let response = runtime
-            .activate(PluginActivateRequest {
-                request_id: format!("activate:{plugin_id}"),
-                manifest,
-                permissions: permissions.clone(),
-                timeout_ms: lifecycle_timeout.as_millis() as u64,
+        #[cfg(feature = "wasm-runtime")]
+        {
+            let plugin_id = manifest.id.clone();
+            if self.wasm_runtimes.contains_key(&plugin_id) {
+                self.deactivate_plugin(&plugin_id).await?;
+            }
+
+            let mut runtime = NativeWasmPluginRuntime::new(
+                plugin_id.clone(),
+                plugin_dir,
+                entry,
+                lifecycle_timeout,
+            );
+            let response = runtime
+                .activate(PluginActivateRequest {
+                    request_id: format!("activate:{plugin_id}"),
+                    manifest,
+                    permissions: permissions.clone(),
+                    timeout_ms: lifecycle_timeout.as_millis() as u64,
+                })
+                .await?;
+            let messages = runtime.drain_outbound_messages();
+            let effects = runtime.drain_outbound_effects();
+            validate_outbound_effect_permissions(&effects, &permissions)?;
+
+            if matches!(response.result, PluginResponseResult::Ok { .. }) {
+                self.wasm_runtimes.insert(plugin_id.clone(), runtime);
+                self.wasm_permissions.insert(plugin_id.clone(), permissions);
+            }
+
+            Ok(NativePluginRuntimeActivation {
+                plugin_id,
+                response,
+                messages,
+                effects,
             })
-            .await?;
-        let messages = runtime.drain_outbound_messages();
-        let effects = runtime.drain_outbound_effects();
-        validate_outbound_effect_permissions(&effects, &permissions)?;
-
-        if matches!(response.result, PluginResponseResult::Ok { .. }) {
-            self.wasm_runtimes.insert(plugin_id.clone(), runtime);
-            self.wasm_permissions.insert(plugin_id.clone(), permissions);
         }
-
-        Ok(NativePluginRuntimeActivation {
-            plugin_id,
-            response,
-            messages,
-            effects,
-        })
     }
 
     pub async fn dispatch_command(
@@ -224,9 +289,38 @@ impl NativePluginRuntimeHost {
         args: Value,
         timeout: Duration,
     ) -> Result<NativePluginRuntimeCommandDispatch, PluginError> {
+        #[cfg(feature = "wasm-runtime")]
         if let Some(runtime) = self.wasm_runtimes.get_mut(plugin_id) {
             let permissions = self
                 .wasm_permissions
+                .get(plugin_id)
+                .cloned()
+                .unwrap_or_default();
+            let response = runtime
+                .call(PluginRequest {
+                    request_id: format!("command:{plugin_id}:{command}"),
+                    kind: PluginRequestKind::DispatchCommand {
+                        command: command.clone(),
+                        args,
+                    },
+                    timeout_ms: Some(timeout.as_millis() as u64),
+                })
+                .await?;
+            let messages = runtime.drain_outbound_messages();
+            let effects = runtime.drain_outbound_effects();
+            validate_outbound_effect_permissions(&effects, &permissions)?;
+            return Ok(NativePluginRuntimeCommandDispatch {
+                plugin_id: plugin_id.to_string(),
+                command,
+                response,
+                messages,
+                effects,
+            });
+        }
+
+        if let Some(runtime) = self.sidecar_wasm_runtimes.get_mut(plugin_id) {
+            let permissions = self
+                .sidecar_wasm_permissions
                 .get(plugin_id)
                 .cloned()
                 .unwrap_or_default();
@@ -299,9 +393,30 @@ impl NativePluginRuntimeHost {
         event: PluginEvent,
         timeout: Duration,
     ) -> Result<NativePluginRuntimeEventDispatch, PluginError> {
+        #[cfg(feature = "wasm-runtime")]
         if let Some(runtime) = self.wasm_runtimes.get_mut(plugin_id) {
             let permissions = self
                 .wasm_permissions
+                .get(plugin_id)
+                .cloned()
+                .unwrap_or_default();
+            let response = runtime.send_event(event.clone()).await?;
+            let messages = runtime.drain_outbound_messages();
+            let effects = runtime.drain_outbound_effects();
+            validate_outbound_effect_permissions(&effects, &permissions)?;
+            let _ = timeout;
+            return Ok(NativePluginRuntimeEventDispatch {
+                plugin_id: plugin_id.to_string(),
+                event,
+                response,
+                messages,
+                effects,
+            });
+        }
+
+        if let Some(runtime) = self.sidecar_wasm_runtimes.get_mut(plugin_id) {
+            let permissions = self
+                .sidecar_wasm_permissions
                 .get(plugin_id)
                 .cloned()
                 .unwrap_or_default();
@@ -369,29 +484,57 @@ impl NativePluginRuntimeHost {
         // mutation stays on the UI thread.
         let response = if let Some(mut runtime) = self.process_runtimes.remove(plugin_id) {
             runtime.deactivate().await?
-        } else if let Some(mut runtime) = self.wasm_runtimes.remove(plugin_id) {
+        } else if let Some(mut runtime) = self.sidecar_wasm_runtimes.remove(plugin_id) {
             runtime.deactivate().await?
         } else {
-            PluginResponse::ok(
-                format!("deactivate:{plugin_id}"),
-                serde_json::json!({ "state": "not-running" }),
-            )
+            #[cfg(feature = "wasm-runtime")]
+            {
+                if let Some(mut runtime) = self.wasm_runtimes.remove(plugin_id) {
+                    runtime.deactivate().await?
+                } else {
+                    PluginResponse::ok(
+                        format!("deactivate:{plugin_id}"),
+                        serde_json::json!({ "state": "not-running" }),
+                    )
+                }
+            }
+            #[cfg(not(feature = "wasm-runtime"))]
+            {
+                PluginResponse::ok(
+                    format!("deactivate:{plugin_id}"),
+                    serde_json::json!({ "state": "not-running" }),
+                )
+            }
         };
         self.process_permissions.remove(plugin_id);
+        self.sidecar_wasm_permissions.remove(plugin_id);
+        #[cfg(feature = "wasm-runtime")]
         self.wasm_permissions.remove(plugin_id);
         Ok(response)
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SidecarWasmResponseEnvelope {
+    response: PluginResponse,
+    #[serde(default)]
+    messages: Vec<PluginOutboundMessage>,
+}
+
 mod paths;
 mod permissions;
 mod process;
-mod wasm;
+mod sidecar_wasm;
 
-pub use paths::{resolve_process_runtime_entry, resolve_wasm_runtime_entry};
+#[cfg(feature = "wasm-runtime")]
+pub use oxideterm_plugin_wasm_runtime::{NativeWasmPluginRuntime, resolve_wasm_runtime_entry};
+pub use paths::resolve_process_runtime_entry;
 use permissions::{install_process_host_call_handler, validate_outbound_effect_permissions};
 pub use process::NativeProcessPluginRuntime;
-pub use wasm::NativeWasmPluginRuntime;
+pub use sidecar_wasm::{
+    NativeSidecarWasmPluginRuntime, installed_wasm_sidecar_binary_path, wasm_sidecar_install_dir,
+};
 
 #[cfg(test)]
 mod tests;

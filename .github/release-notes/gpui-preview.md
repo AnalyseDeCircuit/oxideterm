@@ -11,18 +11,18 @@ If you just want the most stable daily-use OxideTerm release, do not download th
 - Built from the same product direction as OxideTerm: local-first remote server work over SSH, with terminal, SFTP, port forwarding, connection management, file workflows, and OxideSens AI context.
 - Intended for users who are comfortable testing early builds and filing detailed issues.
 
-## GPUI Preview 10 Highlights
+## GPUI Preview 12 Highlights
 
-This preview focuses on closing GPUI preview regressions, improving Windows usability, and tightening native workflow parity.
+This preview focuses on reducing the standard package size, making native plugin setup clearer, and tightening GPUI workflow polish before the 2.0 line becomes the default app.
 
-- Windows terminal input handling was refined so ordinary Tab/Shift+Tab reaches the active terminal instead of being swallowed by focus traversal, while command-bar and quick-command UI keeps its own key handling.
-- Windows text editing shortcuts and GPUI text-selection affordances were tightened across settings, quick-command, and path-oriented surfaces.
-- Windows releases now include portable archives in addition to installers, so Portable Runtime users can start from a self-contained package.
-- SFTP gained archive extraction from the context menu, improved path text selection, and remote workflow fixes.
-- Local terminal lifecycle handling was improved so exited panes can close cleanly without leaving stale local PTY state behind.
-- Cloud sync configuration is now persisted before sync actions, reducing surprises when upload/check/pull is triggered immediately after edits.
-- Local terminal setup gained Nushell support alongside the existing shell detection paths.
-- GPUI shared UI primitives and command-bar focus handling were refined to reduce visual regressions while keeping terminal-first input behavior.
+- Wasm plugin execution is now split into an optional `oxideterm-wasm-runtime` sidecar. Standard OxideTerm packages no longer bundle Wasmtime by default.
+- The plugin manager can download, verify, install, and bootstrap the matching Wasm runtime from inside the app when a Wasm plugin needs it.
+- The Wasm runtime selector now checks the host update channel, host version, plugin protocol, Wasm guest ABI, WASI profile, platform target, and asset checksum before installing a sidecar.
+- Native plugin runtime ownership was narrowed so the in-process host API, optional Wasm executor, and sidecar process bridge stay separate.
+- Quick Commands, settings, and narrow-width GPUI forms received layout and overflow fixes across the native preview UI.
+- SSH authentication selection was simplified into password, key, Agent, and two-factor groups while keeping existing saved connection formats unchanged.
+- Session icons, legal notices, onboarding, and plugin manager surfaces received additional polish and localization coverage.
+- Serial and VNC work continues in the native preview track; please report device-specific and remote-desktop edge cases with logs and screenshots where possible.
 
 ## What To Test
 
