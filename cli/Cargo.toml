@@ -1,6 +1,6 @@
 [package]
 name = "oxide-cli"
-version = "1.6.10"
+version = "1.6.11"
 edition = "2021"
 description = "CLI companion for OxideTerm"
 authors = ["OxideTerm Team"]
