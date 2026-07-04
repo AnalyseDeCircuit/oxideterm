@@ -482,7 +482,7 @@ impl DirectXRenderer {
                         work_area.source_x,
                         work_area.source_y,
                         0,
-                        &self.resources.render_target,
+                        &*self.resources.render_target,
                         0,
                         Some(&source_box as *const _),
                     );
