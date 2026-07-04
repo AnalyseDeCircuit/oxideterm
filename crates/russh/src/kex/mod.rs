@@ -19,6 +19,7 @@ mod curve25519;
 pub mod dh;
 mod ecdh_nistp;
 mod hybrid_mlkem;
+#[cfg(not(windows))]
 mod hybrid_sntrup761;
 mod none;
 use std::cell::RefCell;
@@ -39,6 +40,7 @@ use digest::Digest;
 use ecdh_nistp::{EcdhNistP256KexType, EcdhNistP384KexType, EcdhNistP521KexType};
 use enum_dispatch::enum_dispatch;
 use hybrid_mlkem::MlKem768X25519KexType;
+#[cfg(not(windows))]
 use hybrid_sntrup761::Sntrup761X25519KexType;
 use p256::NistP256;
 use p384::NistP384;
@@ -137,6 +139,7 @@ pub(crate) enum KexAlgorithm {
     EcdhNistP384Kex(ecdh_nistp::EcdhNistPKex<NistP384, Sha384>),
     EcdhNistP521Kex(ecdh_nistp::EcdhNistPKex<NistP521, Sha512>),
     MlKem768X25519Kex(hybrid_mlkem::MlKem768X25519Kex),
+    #[cfg(not(windows))]
     Sntrup761X25519Kex(hybrid_sntrup761::Sntrup761X25519Kex),
     None(none::NoneKexAlgorithm),
 }
@@ -291,12 +294,15 @@ const _ECDH_SHA2_NISTP256: EcdhNistP256KexType = EcdhNistP256KexType {};
 const _ECDH_SHA2_NISTP384: EcdhNistP384KexType = EcdhNistP384KexType {};
 const _ECDH_SHA2_NISTP521: EcdhNistP521KexType = EcdhNistP521KexType {};
 const _MLKEM768X25519_SHA256: MlKem768X25519KexType = MlKem768X25519KexType {};
+#[cfg(not(windows))]
 const _SNTRUP761X25519_SHA512: Sntrup761X25519KexType = Sntrup761X25519KexType {};
 const _NONE: none::NoneKexType = none::NoneKexType {};
 
 pub const ALL_KEX_ALGORITHMS: &[&Name] = &[
     &MLKEM768X25519_SHA256,
+    #[cfg(not(windows))]
     &SNTRUP761X25519_SHA512,
+    #[cfg(not(windows))]
     &SNTRUP761X25519_SHA512_OPENSSH,
     &CURVE25519,
     &CURVE25519_PRE_RFC_8731,
@@ -319,7 +325,9 @@ pub(crate) static KEXES: LazyLock<HashMap<&'static Name, &(dyn KexType + Send + 
     LazyLock::new(|| {
         let mut h: HashMap<&'static Name, &(dyn KexType + Send + Sync)> = HashMap::new();
         h.insert(&MLKEM768X25519_SHA256, &_MLKEM768X25519_SHA256);
+        #[cfg(not(windows))]
         h.insert(&SNTRUP761X25519_SHA512, &_SNTRUP761X25519_SHA512);
+        #[cfg(not(windows))]
         h.insert(
             &SNTRUP761X25519_SHA512_OPENSSH,
             &_SNTRUP761X25519_SHA512,

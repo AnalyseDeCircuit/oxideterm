@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 //! Integration tests for sntrup761 hybrid key exchange.
+#![cfg(not(windows))]
 
 use std::borrow::Cow;
 use std::sync::Arc;
