@@ -8,7 +8,9 @@ use oxideterm_gpui_ui::{
         text_input_with_content_align,
     },
 };
-use std::{process::Command, sync::mpsc};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::{io::Cursor, process::Command, sync::mpsc};
 
 const PLUGIN_ID_CONFLICT_ERROR_PREFIX: &str = "PLUGIN_ID_CONFLICT:";
 const PLUGIN_MANAGER_DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -32,6 +34,9 @@ const PLUGIN_MANAGER_TW_GREEN_400: u32 = 0x4ade80;
 const PLUGIN_MANAGER_TW_GREEN_500: u32 = 0x22c55e;
 const PLUGIN_MANAGER_TW_RED_400: u32 = 0xf87171;
 const PLUGIN_MANAGER_TW_RED_500: u32 = 0xef4444;
+const WASM_RUNTIME_SIDECAR_LATEST_API_URL: &str =
+    "https://api.github.com/repos/AnalyseDeCircuit/oxideterm-wasm-runtime/releases/latest";
+const WASM_RUNTIME_SIDECAR_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum NativePluginManagerOperationStatus {
@@ -55,6 +60,46 @@ pub(super) enum NativePluginManagerDelivery {
         result: Result<plugin_host::NativePluginUrlInstallResult, String>,
     },
     CheckUpdates(Result<Vec<plugin_host::NativePluginRegistryEntry>, String>),
+    InstallWasmRuntime(Result<NativeWasmRuntimeInstallResult, String>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NativeWasmRuntimeInstallResult {
+    pub version: String,
+    pub path: std::path::PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WasmRuntimeReleaseIndex {
+    runtimes: Vec<WasmRuntimeReleaseDescriptor>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WasmRuntimeReleaseDescriptor {
+    supports: WasmRuntimeReleaseSupport,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WasmRuntimeReleaseSupport {
+    oxideterm_channels: Vec<String>,
+    oxideterm_versions: Vec<String>,
+    plugin_protocol: Vec<u32>,
+    wasm_guest_abi: Vec<u32>,
+    wasi: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,6 +346,18 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }),
                             ))
+                            .when(cfg!(not(feature = "plugin-wasm-runtime")), |actions| {
+                                actions.child(self.render_native_plugin_action_button(
+                                    LucideIcon::Download,
+                                    self.i18n.t("plugin.wasm_runtime_download"),
+                                    NativePluginManagerActionButtonTone::Muted,
+                                    false,
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.start_wasm_runtime_sidecar_install(cx);
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                            })
                             .child(self.render_native_plugin_action_button(
                                 LucideIcon::RefreshCw,
                                 self.i18n.t("plugin.refresh"),
@@ -1241,6 +1298,26 @@ impl WorkspaceApp {
         });
     }
 
+    fn start_wasm_runtime_sidecar_install(&mut self, cx: &mut Context<Self>) {
+        if self.plugin_manager_delivery_rx.is_some() {
+            self.plugin_manager_operation_status =
+                NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.installing"));
+            cx.notify();
+            return;
+        }
+
+        let settings_path = self.settings_store.path().to_path_buf();
+        let (tx, rx) = mpsc::channel();
+        self.plugin_manager_delivery_rx = Some(rx);
+        self.plugin_manager_operation_status =
+            NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.wasm_runtime_installing"));
+        self.schedule_native_plugin_manager_delivery_poll(cx);
+        self.forwarding_runtime.spawn(async move {
+            let result = install_wasm_runtime_sidecar(&settings_path).await;
+            let _ = tx.send(NativePluginManagerDelivery::InstallWasmRuntime(result));
+        });
+    }
+
     fn schedule_native_plugin_manager_delivery_poll(&mut self, cx: &mut Context<Self>) {
         if self.plugin_manager_delivery_polling {
             return;
@@ -1310,6 +1387,21 @@ impl WorkspaceApp {
                             "{update_count} {}",
                             self.i18n.t("plugin.updates")
                         ));
+                }
+                Err(error) => {
+                    self.plugin_manager_operation_status =
+                        NativePluginManagerOperationStatus::Error(error);
+                }
+            },
+            NativePluginManagerDelivery::InstallWasmRuntime(result) => match result {
+                Ok(result) => {
+                    self.bootstrap_native_plugin_runtime(cx);
+                    self.plugin_manager_operation_status =
+                        NativePluginManagerOperationStatus::Success(
+                            self.i18n
+                                .t("plugin.wasm_runtime_install_success")
+                                .replace("{{version}}", &result.version),
+                        );
                 }
                 Err(error) => {
                     self.plugin_manager_operation_status =
@@ -1421,6 +1513,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let (state_label, state_tone) = native_plugin_status_badge(&self.i18n, plugin);
         let error_message = native_plugin_visible_error(&self.i18n, plugin);
+        let wasm_runtime_missing = native_plugin_is_wasm_runtime_missing(plugin);
         let is_expanded = self
             .plugin_manager_expanded_plugin_ids
             .contains(&plugin.manifest.id);
@@ -1669,6 +1762,18 @@ impl WorkspaceApp {
                             .whitespace_normal()
                             .child(error_message),
                     )
+                    .when(wasm_runtime_missing, |error_row| {
+                        error_row.child(self.render_native_plugin_action_button(
+                            LucideIcon::Download,
+                            self.i18n.t("plugin.wasm_runtime_download"),
+                            NativePluginManagerActionButtonTone::Muted,
+                            false,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.start_wasm_runtime_sidecar_install(cx);
+                                cx.stop_propagation();
+                            }),
+                        ))
+                    })
                     .child(self.render_native_plugin_row_icon_button(
                         LucideIcon::Copy,
                         PLUGIN_MANAGER_TW_RED_400,
@@ -2005,13 +2110,28 @@ fn native_plugin_visible_error(
     ) {
         return None;
     }
-    Some(
-        plugin
-            .config
-            .last_error
-            .clone()
-            .unwrap_or_else(|| i18n.t("plugin.load_failed_default")),
-    )
+    let Some(error) = plugin.config.last_error.as_deref() else {
+        return Some(i18n.t("plugin.load_failed_default"));
+    };
+    if native_plugin_error_has_code(error, plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE) {
+        return Some(i18n.t("plugin.wasm_runtime_missing"));
+    }
+    Some(error.to_string())
+}
+
+fn native_plugin_is_wasm_runtime_missing(plugin: &plugin_host::NativePluginInfo) -> bool {
+    plugin.config.last_error.as_deref().is_some_and(|error| {
+        native_plugin_error_has_code(error, plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE)
+    })
+}
+
+fn native_plugin_error_has_code(error: &str, code: &str) -> bool {
+    // Runtime errors may keep a stable machine-readable code before the
+    // localized message so UI actions do not depend on English text matching.
+    let Some(rest) = error.trim_start().strip_prefix(code) else {
+        return false;
+    };
+    rest.is_empty() || rest.starts_with(':')
 }
 
 fn open_native_plugins_dir(settings_path: &std::path::Path, i18n: &I18n) -> Result<(), String> {
@@ -2038,6 +2158,334 @@ fn open_native_plugins_dir(settings_path: &std::path::Path, i18n: &I18n) -> Resu
             .t("plugin.open_dir_status_failed")
             .replace("{{status}}", &status.to_string()))
     }
+}
+
+async fn install_wasm_runtime_sidecar(
+    settings_path: &std::path::Path,
+) -> Result<NativeWasmRuntimeInstallResult, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .user_agent(format!("OxideTerm/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
+    let release = fetch_wasm_runtime_latest_release(&client).await?;
+    let runtime_index_asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == "runtime-index.json")
+        .ok_or_else(|| "Wasm runtime release does not provide runtime-index.json".to_string())?;
+    let runtime_index =
+        download_text_asset(&client, &runtime_index_asset.browser_download_url).await?;
+    validate_wasm_runtime_release_index(&runtime_index)?;
+    let target = wasm_runtime_target_triple()?;
+    let asset = select_wasm_runtime_asset(&release, target)?;
+    let checksums_asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == "SHA256SUMS")
+        .ok_or_else(|| "Wasm runtime release does not provide SHA256SUMS".to_string())?;
+    let checksums = download_text_asset(&client, &checksums_asset.browser_download_url).await?;
+    let expected_sha256 = checksum_for_asset(&checksums, &asset.name)?;
+    let archive = download_binary_asset(&client, &asset.browser_download_url).await?;
+    verify_sha256(&archive, &expected_sha256, &asset.name)?;
+
+    let install_dir = plugin_runtime::wasm_sidecar_install_dir(settings_path);
+    let runtime_path = install_wasm_runtime_archive(&archive, &asset.name, &install_dir)?;
+    Ok(NativeWasmRuntimeInstallResult {
+        version: release.tag_name.trim_start_matches('v').to_string(),
+        path: runtime_path,
+    })
+}
+
+async fn fetch_wasm_runtime_latest_release(
+    client: &reqwest::Client,
+) -> Result<GithubRelease, String> {
+    let response = client
+        .get(WASM_RUNTIME_SIDECAR_LATEST_API_URL)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to fetch Wasm runtime release: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Wasm runtime release API returned HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    response
+        .json::<GithubRelease>()
+        .await
+        .map_err(|error| format!("Failed to parse Wasm runtime release: {error}"))
+}
+
+async fn download_text_asset(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let bytes = download_asset_bytes(client, url).await?;
+    String::from_utf8(bytes).map_err(|error| format!("Downloaded checksum is not UTF-8: {error}"))
+}
+
+async fn download_binary_asset(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    download_asset_bytes(client, url).await
+}
+
+async fn download_asset_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to download Wasm runtime asset: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Wasm runtime asset returned HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    if let Some(content_length) = response.content_length()
+        && content_length > WASM_RUNTIME_SIDECAR_MAX_BYTES
+    {
+        return Err(format!(
+            "Wasm runtime asset too large: {content_length} bytes"
+        ));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("Failed to read Wasm runtime asset: {error}"))?;
+    if bytes.len() as u64 > WASM_RUNTIME_SIDECAR_MAX_BYTES {
+        return Err(format!(
+            "Wasm runtime asset too large: {} bytes",
+            bytes.len()
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+fn select_wasm_runtime_asset<'a>(
+    release: &'a GithubRelease,
+    target: &str,
+) -> Result<&'a GithubReleaseAsset, String> {
+    release
+        .assets
+        .iter()
+        .find(|asset| {
+            asset.name.starts_with("oxideterm-wasm-runtime-")
+                && asset.name.contains(target)
+                && (asset.name.ends_with(".zip") || asset.name.ends_with(".tar.gz"))
+        })
+        .ok_or_else(|| format!("No Wasm runtime asset found for target {target}"))
+}
+
+fn validate_wasm_runtime_release_index(index: &str) -> Result<(), String> {
+    let index: WasmRuntimeReleaseIndex = serde_json::from_str(index)
+        .map_err(|error| format!("Failed to parse Wasm runtime index: {error}"))?;
+    let host_channel = current_oxideterm_runtime_channel();
+    let host_version = env!("CARGO_PKG_VERSION");
+    let compatible = index.runtimes.iter().any(|runtime| {
+        runtime
+            .supports
+            .oxideterm_channels
+            .iter()
+            .any(|channel| channel == host_channel)
+            && runtime
+                .supports
+                .oxideterm_versions
+                .iter()
+                .any(|requirement| {
+                    runtime_requirement_mentions_host_channel(
+                        requirement,
+                        host_channel,
+                        host_version,
+                    )
+                })
+            && runtime
+                .supports
+                .plugin_protocol
+                .contains(&oxideterm_plugin_protocol::NATIVE_PLUGIN_PROTOCOL_VERSION)
+            && runtime.supports.wasm_guest_abi.contains(&1)
+            && runtime
+                .supports
+                .wasi
+                .iter()
+                .any(|profile| profile == "preview1")
+    });
+    compatible.then_some(()).ok_or_else(|| {
+        format!(
+            "Latest Wasm runtime does not declare support for OxideTerm {host_version} ({host_channel})"
+        )
+    })
+}
+
+fn runtime_requirement_mentions_host_channel(
+    requirement: &str,
+    host_channel: &str,
+    host_version: &str,
+) -> bool {
+    match host_channel {
+        "gpui-preview" => requirement.contains("gpui-preview"),
+        "beta" => requirement.contains("beta"),
+        _ => !host_version.contains('-') && !requirement.contains('-'),
+    }
+}
+
+fn current_oxideterm_runtime_channel() -> &'static str {
+    let version = env!("CARGO_PKG_VERSION").to_ascii_lowercase();
+    if version.contains("gpui-preview") {
+        "gpui-preview"
+    } else if version.contains('-') {
+        "beta"
+    } else {
+        "stable"
+    }
+}
+
+fn checksum_for_asset(checksums: &str, asset_name: &str) -> Result<String, String> {
+    checksums
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let hash = parts.next()?;
+            let name = parts.next()?.trim_start_matches('*');
+            (name == asset_name).then(|| hash.to_string())
+        })
+        .next()
+        .ok_or_else(|| format!("SHA256SUMS does not contain {asset_name}"))
+}
+
+fn verify_sha256(bytes: &[u8], expected: &str, asset_name: &str) -> Result<(), String> {
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Checksum mismatch for {asset_name}: expected {expected}, got {actual}"
+        ))
+    }
+}
+
+fn install_wasm_runtime_archive(
+    archive: &[u8],
+    asset_name: &str,
+    install_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let parent = install_dir.parent().unwrap_or(install_dir);
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create runtime directory: {error}"))?;
+    let temp_dir = parent.join("wasm.download");
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)
+            .map_err(|error| format!("Failed to reset runtime download directory: {error}"))?;
+    }
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|error| format!("Failed to create runtime download directory: {error}"))?;
+
+    let binary_name = wasm_runtime_binary_name();
+    let temp_binary = temp_dir.join(binary_name);
+    if asset_name.ends_with(".zip") {
+        extract_wasm_runtime_zip(archive, binary_name, &temp_binary)?;
+    } else if asset_name.ends_with(".tar.gz") {
+        extract_wasm_runtime_tar_gz(archive, binary_name, &temp_binary)?;
+    } else {
+        return Err(format!("Unsupported Wasm runtime archive: {asset_name}"));
+    }
+    mark_wasm_runtime_executable(&temp_binary)?;
+
+    if install_dir.exists() {
+        std::fs::remove_dir_all(install_dir)
+            .map_err(|error| format!("Failed to replace old Wasm runtime: {error}"))?;
+    }
+    std::fs::create_dir_all(install_dir)
+        .map_err(|error| format!("Failed to create Wasm runtime install directory: {error}"))?;
+    let installed_binary = install_dir.join(binary_name);
+    std::fs::rename(&temp_binary, &installed_binary)
+        .map_err(|error| format!("Failed to install Wasm runtime: {error}"))?;
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    Ok(installed_binary)
+}
+
+fn extract_wasm_runtime_zip(
+    archive: &[u8],
+    binary_name: &str,
+    output: &std::path::Path,
+) -> Result<(), String> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(archive))
+        .map_err(|error| format!("Failed to read Wasm runtime zip: {error}"))?;
+    for index in 0..zip.len() {
+        let mut file = zip
+            .by_index(index)
+            .map_err(|error| format!("Failed to read Wasm runtime zip entry: {error}"))?;
+        let entry_name = file.name().rsplit('/').next().unwrap_or_default();
+        if entry_name == binary_name {
+            let mut output_file = std::fs::File::create(output)
+                .map_err(|error| format!("Failed to create Wasm runtime binary: {error}"))?;
+            std::io::copy(&mut file, &mut output_file)
+                .map_err(|error| format!("Failed to extract Wasm runtime binary: {error}"))?;
+            return Ok(());
+        }
+    }
+    Err(format!("Wasm runtime zip does not contain {binary_name}"))
+}
+
+fn extract_wasm_runtime_tar_gz(
+    archive: &[u8],
+    binary_name: &str,
+    output: &std::path::Path,
+) -> Result<(), String> {
+    let decoder = flate2::read::GzDecoder::new(Cursor::new(archive));
+    let mut archive = tar::Archive::new(decoder);
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("Failed to read Wasm runtime tarball: {error}"))?;
+    for entry in entries {
+        let mut entry = entry.map_err(|error| format!("Failed to read tar entry: {error}"))?;
+        let path = entry
+            .path()
+            .map_err(|error| format!("Failed to read tar entry path: {error}"))?;
+        if path.file_name().and_then(|name| name.to_str()) == Some(binary_name) {
+            let mut output_file = std::fs::File::create(output)
+                .map_err(|error| format!("Failed to create Wasm runtime binary: {error}"))?;
+            std::io::copy(&mut entry, &mut output_file)
+                .map_err(|error| format!("Failed to extract Wasm runtime binary: {error}"))?;
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "Wasm runtime tarball does not contain {binary_name}"
+    ))
+}
+
+fn wasm_runtime_target_triple() -> Result<&'static str, String> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
+        ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
+        ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
+        ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),
+        ("windows", "aarch64") => Ok("aarch64-pc-windows-msvc"),
+        (os, arch) => Err(format!("No Wasm runtime sidecar target for {os}/{arch}")),
+    }
+}
+
+fn wasm_runtime_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "oxideterm-wasm-runtime.exe"
+    } else {
+        "oxideterm-wasm-runtime"
+    }
+}
+
+#[cfg(unix)]
+fn mark_wasm_runtime_executable(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)
+        .map_err(|error| format!("Failed to stat Wasm runtime binary: {error}"))?
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(path, permissions)
+        .map_err(|error| format!("Failed to mark Wasm runtime executable: {error}"))
+}
+
+#[cfg(not(unix))]
+fn mark_wasm_runtime_executable(_path: &std::path::Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn plugin_manager_root_bg(color: u32, has_background: bool) -> Rgba {

@@ -1,0 +1,18 @@
+[package]
+name = "oxideterm-plugin-wasm-runtime"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+
+[dev-dependencies]
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
+tokio.workspace = true
+wat = "1.250.0"

@@ -150,6 +150,7 @@ fn process_runtime_entry_rejects_symlink_escape() {
     assert_eq!(error.code, "process_entry_escapes_plugin_dir");
 }
 
+#[cfg(feature = "wasm-runtime")]
 #[test]
 fn wasm_runtime_entry_validates_plugin_path_and_magic() {
     let temp_dir = unique_temp_dir("plugin-wasm-entry");
@@ -166,6 +167,7 @@ fn wasm_runtime_entry_validates_plugin_path_and_magic() {
     assert_eq!(traversal.code, "invalid_wasm_entry");
 }
 
+#[cfg(feature = "wasm-runtime")]
 #[tokio::test]
 async fn wasm_runtime_activation_executes_wasi_preview1_start() {
     let temp_dir = unique_temp_dir("plugin-wasm-activate");
@@ -205,6 +207,7 @@ async fn wasm_runtime_activation_executes_wasi_preview1_start() {
     );
 }
 
+#[cfg(feature = "wasm-runtime")]
 #[tokio::test]
 async fn wasm_runtime_dispatches_command_and_event_over_memory_abi() {
     let temp_dir = unique_temp_dir("plugin-wasm-dispatch");
@@ -265,6 +268,7 @@ async fn wasm_runtime_dispatches_command_and_event_over_memory_abi() {
     );
 }
 
+#[cfg(feature = "wasm-runtime")]
 fn wasm_noop_start_module() -> Vec<u8> {
     wat::parse_str(
         r#"
@@ -286,6 +290,7 @@ fn wasm_noop_start_module() -> Vec<u8> {
     .unwrap()
 }
 
+#[cfg(feature = "wasm-runtime")]
 fn wasm_dispatch_module() -> Vec<u8> {
     let command_response = r#"{"requestId":"command:com.example.runtime:demo.run","result":{"status":"ok","value":{"handled":true}}}"#;
     let event_response = r#"{"requestId":"event:demo.event","result":{"status":"ok","value":{"eventHandled":true}}}"#;
@@ -337,8 +342,28 @@ fn wasm_dispatch_module() -> Vec<u8> {
     wat::parse_str(wat).unwrap()
 }
 
+#[cfg(feature = "wasm-runtime")]
 fn wat_data_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(not(feature = "wasm-runtime"))]
+#[tokio::test]
+async fn wasm_runtime_activation_reports_optional_runtime_missing() {
+    let mut host = NativePluginRuntimeHost::default();
+    let error = host
+        .activate_wasm_plugin(
+            sample_manifest(),
+            PathBuf::from("/tmp/plugin"),
+            "plugin.wasm".to_string(),
+            PluginPermissionSet::default(),
+            Duration::from_millis(250),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code, "wasm_runtime_not_installed");
+    assert!(error.message.contains("standard build"));
 }
 
 #[cfg(unix)]
