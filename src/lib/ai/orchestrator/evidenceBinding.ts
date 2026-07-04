@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import type { AiChatMessage, AiToolResult } from '../../../types';
-import type { AiAssistantTurn, AiEvidenceClaim, AiTurnPart } from '../turnModel/types';
+import type { AiAssistantTurn, AiTurnPart } from '../turnModel/types';
 import { fromLegacyToolResult } from '../tools/protocol';
 import { getAiRuntimeEpoch } from './runtimeEpoch';
 
@@ -43,17 +43,6 @@ export type AiToolResultFact = {
   runtimeEpoch: string;
 };
 
-export type AiResultBindingGuardrail = {
-  message: string;
-  rawText: string;
-};
-
-type ParsedEvidenceClaims = {
-  visibleText: string;
-  claims: Array<Omit<AiEvidenceClaim, 'status'>>;
-};
-
-const GUARDRAIL_MESSAGE = 'I do not have tool-result evidence for that claim, so I cannot present it as a verified fact yet. I need to run the appropriate tool first.';
 const MAX_TOOL_EXECUTION_RECORDS = 1000;
 const MAX_TOOL_RESULT_FACTS = 1000;
 
@@ -226,20 +215,7 @@ export function clearAiToolEvidenceLedger(): void {
   toolResultFacts.length = 0;
 }
 
-function stripEvidenceClaimsCodeFence(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('```')) {
-    return trimmed;
-  }
-  const firstNewline = trimmed.indexOf('\n');
-  if (firstNewline === -1) {
-    return trimmed;
-  }
-  const body = trimmed.slice(firstNewline + 1);
-  return body.endsWith('```') ? body.slice(0, -3).trim() : body;
-}
-
-function extractEvidenceClaimsBlock(text: string): { visibleText: string; block: string } | null {
+function extractEvidenceClaimsBlock(text: string): { visibleText: string } | null {
   const open = '<evidence_claims>';
   const close = '</evidence_claims>';
   const start = text.indexOf(open);
@@ -257,166 +233,22 @@ function extractEvidenceClaimsBlock(text: string): { visibleText: string; block:
   }
   return {
     visibleText: `${text.slice(0, start)}${text.slice(closeEnd)}`.trim(),
-    block: text.slice(blockStart, closeStart),
   };
 }
 
-function parseEvidenceClaims(text: string): ParsedEvidenceClaims | null {
-  const extracted = extractEvidenceClaimsBlock(text);
-  if (!extracted) {
-    return null;
-  }
-  const parsed = JSON.parse(stripEvidenceClaimsCodeFence(extracted.block));
-  const claimsValue = Array.isArray(parsed) ? parsed : parsed?.claims;
-  if (!Array.isArray(claimsValue)) {
-    throw new Error('evidence claims must be an object with claims[] or an array');
-  }
-
-  const claims = claimsValue.map((claim: unknown): Omit<AiEvidenceClaim, 'status'> => {
-    if (!claim || typeof claim !== 'object') {
-      throw new Error('each evidence claim must be an object');
+export function stripEvidenceClaimsFromText(text: string): string {
+  let nextText = text;
+  while (true) {
+    try {
+      const extracted = extractEvidenceClaimsBlock(nextText);
+      if (!extracted) {
+        return nextText.trim();
+      }
+      nextText = extracted.visibleText;
+    } catch {
+      const start = nextText.indexOf('<evidence_claims>');
+      return (start === -1 ? nextText : nextText.slice(0, start)).trim();
     }
-    const object = claim as Record<string, unknown>;
-    const evidenceValue = object.evidence ?? object.evidenceFactIds;
-    if (!Array.isArray(evidenceValue)) {
-      throw new Error('each evidence claim must include evidence[]');
-    }
-    return {
-      text: typeof object.text === 'string' ? object.text.trim() : '',
-      evidence: evidenceValue
-        .filter((value): value is string => typeof value === 'string')
-        .map((value) => value.trim())
-        .filter(Boolean),
-      confidence: typeof object.confidence === 'string' ? object.confidence.trim() : 'verified',
-    };
-  });
-
-  return { visibleText: extracted.visibleText, claims };
-}
-
-function compactEvidenceText(value: string): string {
-  return Array.from(value)
-    .filter((character) => !/\s/.test(character) && !['*', '`', ','].includes(character))
-    .join('');
-}
-
-function pushEvidenceToken(tokens: string[], current: string): void {
-  if (current && /\d/.test(current)) {
-    tokens.push(current);
-  }
-}
-
-function numericEvidenceTokens(text: string): string[] {
-  const tokens: string[] = [];
-  let current = '';
-  for (const character of text) {
-    const allowedAfterDigit = /[a-z0-9.:%-]/i.test(character);
-    if (/\d/.test(character) || (current && allowedAfterDigit)) {
-      current += character.toLowerCase();
-      continue;
-    }
-    pushEvidenceToken(tokens, current);
-    current = '';
-  }
-  pushEvidenceToken(tokens, current);
-  return Array.from(new Set(tokens)).sort();
-}
-
-function recentFactsSupportText(text: string, facts: readonly AiToolResultFact[]): boolean {
-  if (facts.length === 0) {
-    return false;
-  }
-  const tokens = numericEvidenceTokens(text);
-  if (tokens.length === 0) {
-    return false;
-  }
-  const support = compactEvidenceText(facts.map((fact) => fact.outputPreview).join('\n').toLowerCase());
-  return tokens.every((token) => support.includes(compactEvidenceText(token)));
-}
-
-function textClaimsToolBackedFact(text: string): boolean {
-  const normalized = text.toLowerCase();
-  const englishMarkers = [
-    'i ran ',
-    'i executed ',
-    'i checked ',
-    'i verified ',
-    'command output',
-    'exit code',
-    'stdout',
-    'stderr',
-    'system load',
-    'load average',
-    'uptime',
-    'disk',
-    'memory',
-  ];
-  if (englishMarkers.some((marker) => normalized.includes(marker))) {
-    return true;
-  }
-  return [
-    '我执行',
-    '我运行',
-    '我检查',
-    '检查过',
-    '已经检查',
-    '已执行',
-    '已运行',
-    '真正的系统状态',
-    '真实的系统状态',
-    '命令输出',
-    '退出码',
-    '运行时间',
-    '系统负载',
-    '磁盘',
-    '内存',
-    '负载',
-    '结果是',
-    '输出是',
-  ].some((marker) => text.includes(marker));
-}
-
-function citedFacts(
-  claims: readonly Omit<AiEvidenceClaim, 'status'>[],
-  facts: readonly AiToolResultFact[],
-): AiToolResultFact[] {
-  return facts.filter((fact) => claims.some((claim) => claim.evidence.includes(fact.factId)));
-}
-
-function validateEvidenceClaim(
-  claim: Omit<AiEvidenceClaim, 'status'>,
-  facts: readonly AiToolResultFact[],
-): void {
-  if (!claim.text.trim()) {
-    throw new Error('evidence claim text is empty');
-  }
-  if (claim.confidence.toLowerCase() !== 'verified') {
-    throw new Error('first-pass evidence claims must be verified');
-  }
-  if (claim.evidence.length === 0) {
-    throw new Error('verified evidence claim has no evidence');
-  }
-  const claimFacts = facts.filter((fact) => claim.evidence.includes(fact.factId));
-  if (claimFacts.length !== claim.evidence.length) {
-    throw new Error('evidence claim cites unknown fact ids');
-  }
-  if (!recentFactsSupportText(claim.text, claimFacts)) {
-    throw new Error('claim text is not supported by cited evidence');
-  }
-}
-
-function validateEvidenceClaims(
-  visibleText: string,
-  claims: readonly Omit<AiEvidenceClaim, 'status'>[],
-  facts: readonly AiToolResultFact[],
-): void {
-  if (claims.length === 0) {
-    throw new Error('evidence claims block has no claims');
-  }
-  claims.forEach((claim) => validateEvidenceClaim(claim, facts));
-  const visibleFacts = citedFacts(claims, facts);
-  if (!recentFactsSupportText(visibleText, visibleFacts)) {
-    throw new Error('visible answer is not supported by cited evidence');
   }
 }
 
@@ -426,99 +258,33 @@ function stripEvidenceBlockFromTextParts(parts: readonly AiTurnPart[]): AiTurnPa
       if (part.type !== 'text') {
         return part;
       }
-      try {
-        const extracted = extractEvidenceClaimsBlock(part.text);
-        return extracted ? { ...part, text: extracted.visibleText } : part;
-      } catch {
-        return part;
-      }
+      return { ...part, text: stripEvidenceClaimsFromText(part.text) };
     })
     .filter((part) => part.type !== 'text' || part.text.length > 0);
 }
 
-function appendClaimParts(turn: AiAssistantTurn | undefined, claims: readonly Omit<AiEvidenceClaim, 'status'>[]): AiAssistantTurn | undefined {
+function stripEvidenceBlockFromTurn(turn: AiAssistantTurn | undefined): AiAssistantTurn | undefined {
   if (!turn) {
     return undefined;
   }
-  const claimParts: AiTurnPart[] = claims.map((claim) => ({
-    type: 'claim',
-    text: claim.text,
-    evidence: claim.evidence,
-    confidence: claim.confidence,
-    status: 'verified',
-  }));
+  const parts = stripEvidenceBlockFromTextParts(turn.parts);
   return {
     ...turn,
-    parts: [...stripEvidenceBlockFromTextParts(turn.parts), ...claimParts],
+    parts,
+    plainTextSummary: parts
+      .filter((part): part is Extract<AiTurnPart, { type: 'text' }> => part.type === 'text')
+      .map((part) => part.text)
+      .join(''),
   };
 }
 
-function appendGuardrailPart(turn: AiAssistantTurn | undefined, rawText: string): AiAssistantTurn | undefined {
-  if (!turn) {
-    return {
-      id: `result-binding-${Date.now().toString(36)}`,
-      status: 'complete',
-      parts: [{ type: 'guardrail', code: 'result-binding-required', message: GUARDRAIL_MESSAGE, rawText }],
-      toolRounds: [],
-      plainTextSummary: GUARDRAIL_MESSAGE,
-    };
-  }
+export function stripAiEvidenceClaims(message: AiChatMessage): AiChatMessage {
+  const turn = stripEvidenceBlockFromTurn(message.turn);
   return {
-    ...turn,
-    parts: [{ type: 'guardrail', code: 'result-binding-required', message: GUARDRAIL_MESSAGE, rawText }],
-    plainTextSummary: GUARDRAIL_MESSAGE,
+    ...message,
+    content: stripEvidenceClaimsFromText(message.content),
+    turn,
   };
-}
-
-function guardrailForMessage(message: AiChatMessage): { message: AiChatMessage; guardrail: AiResultBindingGuardrail } {
-  const rawText = message.content;
-  return {
-    message: {
-      ...message,
-      content: GUARDRAIL_MESSAGE,
-      turn: appendGuardrailPart(message.turn, rawText),
-    },
-    guardrail: { message: GUARDRAIL_MESSAGE, rawText },
-  };
-}
-
-export function applyAiResultBindingGuard(
-  message: AiChatMessage,
-  recentFacts: readonly AiToolResultFact[],
-): { message: AiChatMessage; guardrail?: AiResultBindingGuardrail } {
-  try {
-    const parsed = parseEvidenceClaims(message.content);
-    if (parsed) {
-      validateEvidenceClaims(parsed.visibleText, parsed.claims, recentFacts);
-      return {
-        message: {
-          ...message,
-          content: parsed.visibleText,
-          turn: appendClaimParts(message.turn, parsed.claims),
-        },
-      };
-    }
-  } catch {
-    return guardrailForMessage(message);
-  }
-
-  if (!textClaimsToolBackedFact(message.content)) {
-    return { message };
-  }
-
-  if (recentFactsSupportText(message.content, recentFacts)) {
-    return { message };
-  }
-
-  // Some providers, especially local or smaller models, do not reliably emit
-  // the structured <evidence_claims> block. If this exact assistant turn did
-  // produce tool facts, keep the answer visible instead of replacing it with
-  // the guardrail message; the tool-result parts remain attached to the turn.
-  if (recentFacts.length > 0) {
-    return { message };
-  }
-
-  return guardrailForMessage(message);
 }
 
 export function buildAiToolExecutionRecord(input: {

@@ -255,6 +255,52 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().settings.ai.toolUse?.maxRounds).toBe(30);
   });
 
+  it('clears legacy default profile tool overrides when global tool use changes', async () => {
+    const useSettingsStore = await loadSettingsStore();
+    const now = Date.now();
+
+    useSettingsStore.getState().updateAi('executionProfiles', {
+      defaultProfileId: 'default',
+      profiles: [{
+        id: 'default',
+        name: 'Default',
+        backend: 'provider',
+        providerId: null,
+        acpAgentId: null,
+        model: null,
+        reasoningEffort: 'auto',
+        toolUse: {
+          enabled: false,
+          autoApproveTools: {
+            list_targets: true,
+            select_target: true,
+            observe_terminal: true,
+            run_command: false,
+          },
+          disabledTools: [],
+          maxRounds: 20,
+        },
+        createdAt: now,
+        updatedAt: now,
+      }],
+    });
+
+    const toolUse = useSettingsStore.getState().settings.ai.toolUse ?? {
+      enabled: false,
+      autoApproveTools: {},
+      disabledTools: [],
+      maxRounds: 10,
+    };
+    useSettingsStore.getState().updateAi('toolUse', {
+      ...toolUse,
+      enabled: true,
+      maxRounds: 20,
+    });
+
+    const [defaultProfile] = useSettingsStore.getState().settings.ai.executionProfiles?.profiles ?? [];
+    expect(defaultProfile?.toolUse).toBeUndefined();
+  });
+
   it('normalizes ACP agents without persisting plaintext auth tokens', async () => {
     localStorage.setItem('oxide-settings-v2', JSON.stringify(buildSavedSettings({
       ai: {

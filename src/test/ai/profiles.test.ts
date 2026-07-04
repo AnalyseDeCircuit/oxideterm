@@ -64,6 +64,35 @@ describe('AI execution profiles', () => {
     expect(config.profiles[0].toolUse).toBeUndefined();
   });
 
+  it('migrates legacy default profiles with generated approval details', () => {
+    const config = normalizeExecutionProfiles({
+      config: {
+        defaultProfileId: DEFAULT_AI_EXECUTION_PROFILE_ID,
+        profiles: [
+          defaultProfile({
+            toolUse: {
+              enabled: false,
+              autoApproveTools: {
+                list_targets: true,
+                select_target: true,
+                observe_terminal: true,
+                run_command: false,
+              },
+              disabledTools: [],
+              maxRounds: 20,
+            },
+          }),
+        ],
+      },
+      providerId: 'provider-1',
+      model: 'model-1',
+      reasoningEffort: 'auto',
+      toolUse: inheritedToolUse,
+    });
+
+    expect(config.profiles[0].toolUse).toBeUndefined();
+  });
+
   it('keeps explicit profile tool policies with approval details', () => {
     const toolUse = {
       enabled: false,
@@ -74,7 +103,7 @@ describe('AI execution profiles', () => {
     const config = normalizeExecutionProfiles({
       config: {
         defaultProfileId: DEFAULT_AI_EXECUTION_PROFILE_ID,
-        profiles: [defaultProfile({ toolUse })],
+        profiles: [defaultProfile({ id: 'custom-profile', toolUse })],
       },
       providerId: 'provider-1',
       model: 'model-1',

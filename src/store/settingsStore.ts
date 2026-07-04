@@ -1739,9 +1739,19 @@ export const useSettingsStore = create<SettingsStore>()(
     // ========== AI Settings ==========
     updateAi: (key, value) => {
       set((state) => {
+        const nextAi = { ...state.settings.ai, [key]: value };
+        if (key === 'toolUse') {
+          nextAi.executionProfiles = normalizeExecutionProfiles({
+            config: nextAi.executionProfiles,
+            providerId: nextAi.activeProviderId,
+            model: nextAi.activeModel,
+            reasoningEffort: nextAi.reasoningEffort,
+            toolUse: nextAi.toolUse,
+          });
+        }
         const newSettings: PersistedSettingsV2 = {
           ...state.settings,
-          ai: { ...state.settings.ai, [key]: value },
+          ai: nextAi,
         };
         persistSettings(newSettings);
         return { settings: newSettings };

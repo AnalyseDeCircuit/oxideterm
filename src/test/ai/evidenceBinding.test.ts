@@ -1,13 +1,14 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 
 import {
-  applyAiResultBindingGuard,
   aiToolResultFactsForMessage,
   buildAiToolExecutionRecord,
   clearAiToolEvidenceLedger,
   extractAiToolResultFacts,
   recordAiToolExecution,
   recordAiToolResultFacts,
+  stripAiEvidenceClaims,
+  stripEvidenceClaimsFromText,
 } from '@/lib/ai/orchestrator/evidenceBinding';
 import type { AiChatMessage, AiToolResult } from '@/types';
 
@@ -84,7 +85,7 @@ describe('AI evidence binding', () => {
     expect(facts.find((fact) => fact.factId === 'tool-1.output')?.outputPreview).toContain('468G');
   });
 
-  it('accepts structured evidence claims backed by current-turn facts', () => {
+  it('strips structured evidence claims from visible replies', () => {
     const result = toolResult('tool-1', 'Filesystem Size Used Avail Use%\n/ 468G 72G 373G 17%');
     const record = buildAiToolExecutionRecord({
       conversationId: 'conversation-1',
@@ -103,17 +104,14 @@ describe('AI evidence binding', () => {
       '<evidence_claims>{"claims":[{"text":"磁盘是 468G，已用 72G。","evidence":["tool-1.output"],"confidence":"verified"}]}</evidence_claims>',
     ].join('\n'));
 
-    const guarded = applyAiResultBindingGuard(
-      message,
-      aiToolResultFactsForMessage('conversation-1', 'assistant-1'),
-    );
+    const cleaned = stripAiEvidenceClaims(message);
 
-    expect(guarded.guardrail).toBeUndefined();
-    expect(guarded.message.content).toBe('磁盘是 468G，已用 72G。');
-    expect(guarded.message.turn?.parts.map((part) => part.type)).toEqual(['text', 'claim']);
+    expect(cleaned.content).toBe('磁盘是 468G，已用 72G。');
+    expect(cleaned.turn?.parts).toEqual([{ type: 'text', text: '磁盘是 468G，已用 72G。' }]);
+    expect(aiToolResultFactsForMessage('conversation-1', 'assistant-1').map((fact) => fact.factId)).toContain('tool-1.output');
   });
 
-  it('rejects claims that cite old assistant-turn facts', () => {
+  it('does not replace replies when only old assistant-turn facts exist', () => {
     const oldResult = toolResult('old-tool', 'Filesystem Size Used\n/ 468G 72G');
     const oldRecord = buildAiToolExecutionRecord({
       conversationId: 'conversation-1',
@@ -128,16 +126,10 @@ describe('AI evidence binding', () => {
     recordAiToolResultFacts(oldRecord, oldResult);
     const message = assistantMessage('磁盘是 468G，已用 72G。');
 
-    const guarded = applyAiResultBindingGuard(
-      message,
-      aiToolResultFactsForMessage('conversation-1', 'assistant-1'),
-    );
+    const cleaned = stripAiEvidenceClaims(message);
 
-    expect(guarded.guardrail).toBeDefined();
-    expect(guarded.message.turn?.parts[0]).toMatchObject({
-      type: 'guardrail',
-      code: 'result-binding-required',
-    });
+    expect(cleaned.content).toBe(message.content);
+    expect(cleaned.turn?.parts[0]).toEqual({ type: 'text', text: message.content });
   });
 
   it('keeps unstructured replies when the current turn has tool facts', () => {
@@ -155,12 +147,18 @@ describe('AI evidence binding', () => {
     recordAiToolResultFacts(record, result);
 
     const message = assistantMessage('我已经执行了命令，输出正常。');
-    const guarded = applyAiResultBindingGuard(
-      message,
-      aiToolResultFactsForMessage('conversation-1', 'assistant-1'),
-    );
+    const cleaned = stripAiEvidenceClaims(message);
 
-    expect(guarded.guardrail).toBeUndefined();
-    expect(guarded.message.content).toBe(message.content);
+    expect(cleaned.content).toBe(message.content);
+  });
+
+  it('drops malformed evidence claims instead of showing them', () => {
+    const cleaned = stripEvidenceClaimsFromText([
+      '当前工作目录是 `/Users/example`。',
+      '<evidence_claims>',
+      '{"claims":[',
+    ].join('\n'));
+
+    expect(cleaned).toBe('当前工作目录是 `/Users/example`。');
   });
 });

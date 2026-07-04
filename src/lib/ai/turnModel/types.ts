@@ -58,22 +58,13 @@ export type AiGuardrailCode =
   | 'tool-context-missing'
   | 'tool-disabled-hard-deny'
   | 'tool-required-no-call'
-  | 'tool-budget-limit'
-  | 'result-binding-required';
-
-export interface AiEvidenceClaim {
-  text: string;
-  evidence: string[];
-  confidence: string;
-  status: 'verified';
-}
+  | 'tool-budget-limit';
 
 export type AiTurnPart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string; streaming?: boolean }
   | { type: 'tool_call'; id: string; name: string; argumentsText: string; status: 'partial' | 'complete' }
   | { type: 'tool_result'; toolCallId: string; toolName: string; success: boolean; output: string; error?: string; durationMs?: number; truncated?: boolean; envelope?: ToolResultEnvelope }
-  | ({ type: 'claim' } & AiEvidenceClaim)
   | { type: 'guardrail'; code: AiGuardrailCode; message: string; rawText?: string }
   | { type: 'warning'; code: string; message: string }
   | { type: 'error'; message: string };

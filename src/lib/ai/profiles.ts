@@ -106,14 +106,13 @@ function normalizeExecutionProfile(profile: AiExecutionProfile): AiExecutionProf
 function isLegacyDefaultProfileToolUseOverride(profile: AiExecutionProfile): boolean {
   if (profile.id !== DEFAULT_AI_EXECUTION_PROFILE_ID || !profile.toolUse) return false;
 
-  const autoApproveTools = profile.toolUse.autoApproveTools ?? {};
   const disabledTools = profile.toolUse.disabledTools ?? [];
 
   // Older default profiles stored a disabled tool-use block even though the UI
-  // exposes tool calling as a global setting. Treat that generated block as
-  // inherited so the global Tools page controls chat behavior.
+  // exposes tool calling as a global setting. Some migrated copies also contain
+  // the default approval matrix, so the absence of disabled tools is the stable
+  // signal that this was generated state rather than a profile-specific policy.
   return profile.toolUse.enabled === false
-    && Object.keys(autoApproveTools).length === 0
     && disabledTools.length === 0;
 }
 

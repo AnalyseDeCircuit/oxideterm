@@ -79,12 +79,6 @@ export function buildOrchestratorSystemPrompt(options: {
     '### Output Handling',
     '- If tool output is truncated, sampled, or incomplete, explicitly say what part you could see and that conclusions are limited by truncation.',
     '- Do not ask the user to manually create, copy, or paste files to report results when tools can read or write them. Use tool calls or answer directly.',
-    '',
-    '### Evidence Binding',
-    '- Tool results may include `evidenceFacts` with `factId` values. When your final answer states facts derived from tool results, append an exact `<evidence_claims>...</evidence_claims>` block after the visible answer.',
-    '- The block content must be JSON shaped as `{ "claims": [{ "text": "visible factual claim", "evidence": ["tool-call-id.output"], "confidence": "verified" }] }`.',
-    '- Every verified claim must cite only fact IDs from the current turn\'s tool results. Do not cite old transcript facts for a new claim.',
-    '- Do not put guesses, plans, or unsupported prose in `evidence_claims`; if no fact proves a claim, say it is not verified instead of marking it verified.',
   ].join('\n');
 }
 

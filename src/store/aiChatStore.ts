@@ -38,8 +38,6 @@ import {
   buildOrchestratorObligationPrompt,
   buildOrchestratorSystemPrompt,
   classifyOrchestratorObligation,
-  applyAiResultBindingGuard,
-  aiToolResultFactsForMessage,
   buildAiToolExecutionRecord,
   executeOrchestratorTool,
   formatContextChipsForPrompt,
@@ -48,6 +46,7 @@ import {
   recordAiToolExecution,
   recordAiToolResultFacts,
   resolveAiPolicyDecision,
+  stripAiEvidenceClaims,
   type OrchestratorObligation,
   type OrchestratorToolContext,
 } from '../lib/ai/orchestrator';
@@ -3057,25 +3056,13 @@ export const useAiChatStore = create<AiChatStore>()((set, get) => ({
 
       recordTurnToolEvidence(convId, assistantMessage.id, assistantTurn);
       let projectedAssistantMessage = projectTurnToLegacyMessageFields(assistantTurn);
-      const bindingFacts = aiToolResultFactsForMessage(convId, assistantMessage.id);
-      const bindingResult = applyAiResultBindingGuard({
+      const cleanedAssistantMessage = stripAiEvidenceClaims({
         ...assistantMessage,
         ...projectedAssistantMessage,
         turn: assistantTurn,
-      }, bindingFacts);
-      if (bindingResult.guardrail) {
-        assistantTurn = bindingResult.message.turn ?? assistantTurn;
-        projectedAssistantMessage = projectTurnToLegacyMessageFields(assistantTurn);
-        queueDiagnosticEvent('guardrail', {
-          code: 'result-binding-required',
-          message: bindingResult.guardrail.message,
-          rawTextLength: bindingResult.guardrail.rawText.length,
-        }, {
-          turnId: assistantMessage.id,
-          requestKind: 'chat',
-        });
-      } else if (bindingResult.message.turn !== assistantTurn || bindingResult.message.content !== projectedAssistantMessage.content) {
-        assistantTurn = bindingResult.message.turn ?? assistantTurn;
+      });
+      if (cleanedAssistantMessage.turn !== assistantTurn || cleanedAssistantMessage.content !== projectedAssistantMessage.content) {
+        assistantTurn = cleanedAssistantMessage.turn ?? assistantTurn;
         projectedAssistantMessage = projectTurnToLegacyMessageFields(assistantTurn);
       }
       queueAssistantTurnCompletion(assistantTurn, 'complete');
