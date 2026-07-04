@@ -914,6 +914,11 @@ impl WorkspaceApp {
         let status = snapshot.status;
         let status_color = remote_desktop_status_color(&self.tokens, status);
         let reconnect_disabled = remote_desktop_reconnect_mode(status).is_none();
+        let resize_capability_label = if session.provider.capabilities.resize {
+            self.i18n.t("remote_desktop.resize_dynamic")
+        } else {
+            self.i18n.t("remote_desktop.resize_fixed")
+        };
         let label = format!(
             "{} · {}:{}",
             session.provider.name, session.profile.endpoint.host, session.profile.endpoint.port
@@ -949,6 +954,10 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(label),
             )
+            .child(remote_desktop_capability_chip(
+                &self.tokens,
+                resize_capability_label,
+            ))
             .child(
                 div()
                     .flex()
@@ -1050,8 +1059,13 @@ impl WorkspaceApp {
 
     fn send_remote_desktop_request(&mut self, tab_id: TabId, request: RemoteDesktopHelperRequest) {
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
-            if let RemoteDesktopHelperRequest::Resize { size, .. } = request {
-                session.state.mark_resize_requested(size);
+            if matches!(request, RemoteDesktopHelperRequest::Resize { .. })
+                && !session.provider.capabilities.resize
+            {
+                return;
+            }
+            if let RemoteDesktopHelperRequest::Resize { size, .. } = &request {
+                session.state.mark_resize_requested(*size);
             }
             if let Some(request_tx) = session.request_tx.as_ref() {
                 let _ = request_tx.send(request);
@@ -1303,7 +1317,8 @@ impl WorkspaceApp {
             if snapshot.status != RemoteDesktopSessionStatus::Connected {
                 continue;
             }
-            let should_send_resize = remote_desktop_resize_request_needed(
+            let should_send_resize = remote_desktop_resize_request_needed_for_capability(
+                session.provider.capabilities.resize,
                 snapshot.size,
                 snapshot.pending_resize,
                 session.last_viewport_size,
@@ -1456,7 +1471,11 @@ impl WorkspaceApp {
         );
         if remote_desktop_diagnostics_enabled() {
             eprintln!(
-                "[oxideterm:remote-desktop-render] tab={tab_id:?} gen={generation} trace={:?}->{:?} drained={drained_events} budget_hit={budget_hit} apply_us={} full={} updates={} dirty_applied={} dirty_rejected={} dirty_px={} dirty_frame_px={} pending_texture_updates={} pending_texture_bytes={} texture_updates={} textures_created={} retired={} full_update_recoveries={} totals={:?}",
+                "[oxideterm:remote-desktop-render] tab={tab_id:?} protocol={:?} provider={} resize={} clipboard_data={} gen={generation} trace={:?}->{:?} drained={drained_events} budget_hit={budget_hit} apply_us={} full={} updates={} dirty_applied={} dirty_rejected={} dirty_px={} dirty_frame_px={} pending_texture_updates={} pending_texture_bytes={} texture_updates={} textures_created={} retired={} full_update_recoveries={} totals={:?}",
+                session.profile.protocol,
+                session.provider.id,
+                session.provider.capabilities.resize,
+                session.provider.capabilities.clipboard_data,
                 apply_stats.first_trace_id,
                 apply_stats.last_trace_id,
                 duration_micros_u64(apply_elapsed),
@@ -1868,6 +1887,8 @@ impl WorkspaceApp {
             return true;
         };
 
+        // Rich clipboard formats are provider-owned. Built-in VNC remains
+        // text-only until an RFB clipboard extension is negotiated.
         if let Some(session) = self.remote_desktop_sessions.get(&tab_id)
             && session.provider.capabilities.clipboard_data
             && let Some(data) = remote_desktop_clipboard_data_from_item(&item)
@@ -2046,6 +2067,22 @@ fn remote_desktop_protocol_chip(
         .font_weight(gpui::FontWeight::BOLD)
         .text_color(rgb(tokens.ui.accent))
         .child(label)
+}
+
+fn remote_desktop_capability_chip(tokens: &ThemeTokens, label: impl Into<String>) -> gpui::Div {
+    div()
+        .min_w(px(0.0))
+        .flex_shrink()
+        .h(px(20.0))
+        .px(px(tokens.spacing.two))
+        .flex()
+        .items_center()
+        .rounded(px(tokens.radii.sm))
+        .border_1()
+        .border_color(rgba((tokens.ui.border << 8) | 0x99))
+        .text_size(px(tokens.metrics.ui_text_xs))
+        .text_color(rgb(tokens.ui.text_muted))
+        .child(div().min_w(px(0.0)).truncate().child(label.into()))
 }
 
 fn remote_desktop_status_color(tokens: &ThemeTokens, status: RemoteDesktopSessionStatus) -> u32 {
@@ -2817,6 +2854,30 @@ fn remote_desktop_resize_request_needed(
         return false;
     }
     true
+}
+
+fn remote_desktop_resize_request_needed_for_capability(
+    resize_supported: bool,
+    current_frame_size: Option<RemoteDesktopSize>,
+    pending_resize: Option<RemoteDesktopSize>,
+    last_viewport_size: Option<RemoteDesktopSize>,
+    last_sent_resize: Option<RemoteDesktopResizeRequestState>,
+    viewport_size: RemoteDesktopSize,
+    request_size: RemoteDesktopSize,
+    viewport_scale_factor: Option<u32>,
+) -> bool {
+    // VNC's built-in provider has a fixed server framebuffer; viewport changes
+    // still update local geometry, but they must not create remote resize state.
+    resize_supported
+        && remote_desktop_resize_request_needed(
+            current_frame_size,
+            pending_resize,
+            last_viewport_size,
+            last_sent_resize,
+            viewport_size,
+            request_size,
+            viewport_scale_factor,
+        )
 }
 
 fn remote_desktop_size_delta_is_meaningful(
@@ -3802,6 +3863,39 @@ mod tests {
             viewport,
             viewport,
             Some(125),
+        ));
+    }
+
+    #[test]
+    fn resize_request_is_blocked_when_provider_does_not_support_resize() {
+        let current = RemoteDesktopSize {
+            width: 1280,
+            height: 720,
+        };
+        let viewport = RemoteDesktopSize {
+            width: 1600,
+            height: 900,
+        };
+
+        assert!(!remote_desktop_resize_request_needed_for_capability(
+            false,
+            Some(current),
+            None,
+            Some(current),
+            None,
+            viewport,
+            viewport,
+            Some(100),
+        ));
+        assert!(remote_desktop_resize_request_needed_for_capability(
+            true,
+            Some(current),
+            None,
+            Some(current),
+            None,
+            viewport,
+            viewport,
+            Some(100),
         ));
     }
 

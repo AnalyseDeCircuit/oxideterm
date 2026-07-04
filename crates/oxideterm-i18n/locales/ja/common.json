@@ -1039,6 +1039,8 @@
     "session_missing": "リモートデスクトップセッションを利用できません。",
     "force_recover": "復旧",
     "reconnect": "再接続",
+    "resize_dynamic": "リモートサイズ可変",
+    "resize_fixed": "サーバー固定サイズ",
     "disconnect": "切断"
   }
 }

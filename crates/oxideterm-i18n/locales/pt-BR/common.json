@@ -1034,6 +1034,8 @@
     "session_missing": "A sessão de área de trabalho remota está indisponível.",
     "force_recover": "Recuperar",
     "reconnect": "Reconectar",
+    "resize_dynamic": "Redimensionamento remoto",
+    "resize_fixed": "Tamanho fixo do servidor",
     "disconnect": "Desconectar"
   }
 }

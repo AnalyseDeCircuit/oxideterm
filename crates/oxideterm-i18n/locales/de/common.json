@@ -1034,6 +1034,8 @@
     "session_missing": "Remote-Desktop-Sitzung ist nicht verfügbar.",
     "force_recover": "Wiederherstellen",
     "reconnect": "Neu verbinden",
+    "resize_dynamic": "Remote-Größe anpassbar",
+    "resize_fixed": "Feste Servergröße",
     "disconnect": "Trennen"
   }
 }

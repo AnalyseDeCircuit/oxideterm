@@ -1034,6 +1034,8 @@
     "session_missing": "원격 데스크톱 세션을 사용할 수 없습니다.",
     "force_recover": "복구",
     "reconnect": "다시 연결",
+    "resize_dynamic": "원격 크기 조정",
+    "resize_fixed": "고정 서버 크기",
     "disconnect": "연결 끊기"
   }
 }

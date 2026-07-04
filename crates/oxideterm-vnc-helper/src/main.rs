@@ -40,6 +40,15 @@ const VNC_ENCODING_ZRLE: i32 = 16;
 const VNC_ENCODING_DESKTOP_SIZE: i32 = -223;
 const VNC_ENCODING_CURSOR: i32 = -239;
 const VNC_ENCODING_X_CURSOR: i32 = -240;
+const VNC_ADVERTISED_ENCODINGS: [i32; 7] = [
+    VNC_ENCODING_DESKTOP_SIZE,
+    VNC_ENCODING_CURSOR,
+    VNC_ENCODING_X_CURSOR,
+    VNC_ENCODING_COPY_RECT,
+    VNC_ENCODING_ZRLE,
+    VNC_ENCODING_HEXTILE,
+    VNC_ENCODING_RAW,
+];
 const VNC_HEXTILE_TILE_SIZE: u16 = 16;
 const VNC_HEXTILE_RAW: u8 = 1;
 const VNC_HEXTILE_BACKGROUND_SPECIFIED: u8 = 2;
@@ -58,6 +67,7 @@ const VNC_WHEEL_DOWN: u8 = 16;
 const VNC_WHEEL_LEFT: u8 = 32;
 const VNC_WHEEL_RIGHT: u8 = 64;
 const VNC_SCROLL_STEP: f32 = 120.0;
+const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
 const MAX_VNC_FRAME_BYTES: usize =
     RemoteDesktopSize::MAX_DIMENSION as usize * RemoteDesktopSize::MAX_DIMENSION as usize * 4;
 
@@ -74,6 +84,91 @@ enum VncRequestAction {
     Continue,
     Close,
     Reconnect,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct VncDiagnostics {
+    // Diagnostics stay opt-in because helper stderr can be collected by parent
+    // processes and must never include user payloads by default.
+    enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VncProtocolVersion {
+    Rfb003003,
+    Rfb003008,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VncSecuritySelection {
+    None,
+    VncAuth,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct VncHandshakeInfo {
+    protocol_version: VncProtocolVersion,
+    security: VncSecuritySelection,
+    legacy_security: bool,
+}
+
+#[derive(Default)]
+struct VncReaderDiagnosticsCounters {
+    // These counters intentionally track protocol volume, not frame bytes or
+    // clipboard contents.
+    server_messages: u64,
+    helper_frames: u64,
+    helper_frame_updates: u64,
+    helper_side_events: u64,
+    dirty_rects: u64,
+    dirty_pixels: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct VncServerEventSummary {
+    // The summary is safe for logs: it records counts and areas only.
+    dirty_rects: u64,
+    dirty_pixels: u64,
+    side_events: u64,
+}
+
+impl VncDiagnostics {
+    fn from_env() -> Self {
+        Self {
+            enabled: std::env::var_os(REMOTE_DESKTOP_DIAGNOSTICS_ENV).is_some(),
+        }
+    }
+
+    fn log(&self, message: impl AsRef<str>) {
+        if self.enabled {
+            eprintln!("[oxideterm:vnc-helper] {}", message.as_ref());
+        }
+    }
+}
+
+impl VncProtocolVersion {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Rfb003003 => "RFB 003.003",
+            Self::Rfb003008 => "RFB 003.008",
+        }
+    }
+}
+
+impl VncSecuritySelection {
+    fn code(self) -> u8 {
+        match self {
+            Self::None => VNC_SECURITY_NONE,
+            Self::VncAuth => VNC_SECURITY_VNC_AUTH,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::VncAuth => "vnc-auth",
+        }
+    }
 }
 
 fn main() {
@@ -107,6 +202,7 @@ fn run() -> Result<(), String> {
 
 fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     let writer = Arc::new(Mutex::new(io::stdout()));
+    let diagnostics = VncDiagnostics::from_env();
     let Some(first_request) = read_request_line(reader).map_err(|error| error.to_string())? else {
         return Ok(());
     };
@@ -151,9 +247,18 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     )?;
 
     let session_config = VncSessionConfig { endpoint, password };
-    let mut connection = match VncConnection::connect(&session_config, writer.clone()) {
+    let mut reconnect_count = 0_u64;
+    diagnostics.log(format!(
+        "connect attempt reconnects=0 read_only={read_only}"
+    ));
+    let mut connection = match VncConnection::connect(&session_config, writer.clone(), diagnostics)
+    {
         Ok(connection) => connection,
         Err(error) => {
+            diagnostics.log(format!(
+                "connect failed reconnects=0 category={:?}",
+                vnc_error_category_from_message(&error)
+            ));
             send_event(
                 &writer,
                 RemoteDesktopHelperEvent::ConnectionFailure {
@@ -174,6 +279,10 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             },
         },
     )?;
+    diagnostics.log(format!(
+        "connect ok reconnects=0 framebuffer={}x{}",
+        connection.width, connection.height
+    ));
     connection.start_reader();
     connection.request_framebuffer_update(false)?;
 
@@ -198,19 +307,28 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
                 )?;
                 connection.shutdown();
                 input_state = VncInputState::default();
-                connection = match VncConnection::connect(&session_config, writer.clone()) {
-                    Ok(connection) => connection,
-                    Err(error) => {
-                        send_event(
-                            &writer,
-                            RemoteDesktopHelperEvent::ConnectionFailure {
-                                category: Some(vnc_error_category_from_message(&error)),
-                                message: error,
-                            },
-                        )?;
-                        break;
-                    }
-                };
+                reconnect_count = reconnect_count.saturating_add(1);
+                diagnostics.log(format!(
+                    "connect attempt reconnects={reconnect_count} read_only={read_only}"
+                ));
+                connection =
+                    match VncConnection::connect(&session_config, writer.clone(), diagnostics) {
+                        Ok(connection) => connection,
+                        Err(error) => {
+                            diagnostics.log(format!(
+                                "connect failed reconnects={reconnect_count} category={:?}",
+                                vnc_error_category_from_message(&error)
+                            ));
+                            send_event(
+                                &writer,
+                                RemoteDesktopHelperEvent::ConnectionFailure {
+                                    category: Some(vnc_error_category_from_message(&error)),
+                                    message: error,
+                                },
+                            )?;
+                            break;
+                        }
+                    };
                 send_event(
                     &writer,
                     RemoteDesktopHelperEvent::Connected {
@@ -220,6 +338,10 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
                         },
                     },
                 )?;
+                diagnostics.log(format!(
+                    "connect ok reconnects={reconnect_count} framebuffer={}x{}",
+                    connection.width, connection.height
+                ));
                 connection.start_reader();
                 connection.request_framebuffer_update(false)?;
             }
@@ -359,6 +481,7 @@ struct VncConnection {
     writer: SharedVncWriter,
     reader: Option<TcpStream>,
     event_writer: SharedEventWriter,
+    diagnostics: VncDiagnostics,
     closed: Arc<AtomicBool>,
     session_state: Arc<VncSessionSharedState>,
     width: u16,
@@ -373,7 +496,12 @@ struct VncSessionSharedState {
 
 fn vnc_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory {
     let normalized = message.to_ascii_lowercase();
-    if normalized.contains("password") || normalized.contains("authentication") {
+    if normalized.contains("expected an initial connect")
+        || normalized.contains("non-vnc connect")
+        || normalized.contains("second connect request")
+    {
+        RemoteDesktopErrorCategory::Configuration
+    } else if normalized.contains("password") || normalized.contains("authentication") {
         RemoteDesktopErrorCategory::Authentication
     } else if normalized.contains("tcp")
         || normalized.contains("connection")
@@ -381,10 +509,13 @@ fn vnc_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory 
         || normalized.contains("write failed")
     {
         RemoteDesktopErrorCategory::Network
-    } else if normalized.contains("security")
-        || normalized.contains("protocol")
-        || normalized.contains("unsupported")
+    } else if normalized.contains("unsupported vnc security")
+        || normalized.contains("security type")
+        || normalized.contains("security types")
+        || normalized.contains("security negotiation")
     {
+        RemoteDesktopErrorCategory::LegacySecurity
+    } else if normalized.contains("protocol") || normalized.contains("unsupported") {
         RemoteDesktopErrorCategory::Protocol
     } else {
         RemoteDesktopErrorCategory::Unknown
@@ -428,7 +559,11 @@ impl VncSessionSharedState {
 }
 
 impl VncConnection {
-    fn connect(config: &VncSessionConfig, event_writer: SharedEventWriter) -> Result<Self, String> {
+    fn connect(
+        config: &VncSessionConfig,
+        event_writer: SharedEventWriter,
+        diagnostics: VncDiagnostics,
+    ) -> Result<Self, String> {
         let mut stream = TcpStream::connect((config.endpoint.host.as_str(), config.endpoint.port))
             .map_err(|error| format!("VNC TCP connection failed: {error}"))?;
         stream
@@ -441,10 +576,19 @@ impl VncConnection {
             .set_write_timeout(Some(Duration::from_secs(10)))
             .map_err(|error| format!("VNC write timeout setup failed: {error}"))?;
 
-        handshake_vnc(&mut stream, config.password.as_ref())?;
+        let handshake = handshake_vnc(&mut stream, config.password.as_ref())?;
+        diagnostics.log(format!(
+            "handshake protocol={} legacy_security={} security={} security_type={}",
+            handshake.protocol_version.as_str(),
+            handshake.legacy_security,
+            handshake.security.as_str(),
+            handshake.security.code()
+        ));
         let (width, height) = read_server_init(&mut stream)?;
+        diagnostics.log(format!("server_init framebuffer={width}x{height}"));
         write_pixel_format(&mut stream)?;
         write_encodings(&mut stream)?;
+        diagnostics.log(format!("encodings advertised={VNC_ADVERTISED_ENCODINGS:?}"));
 
         let reader = stream
             .try_clone()
@@ -454,6 +598,7 @@ impl VncConnection {
             writer: Arc::new(Mutex::new(stream)),
             reader: Some(reader),
             event_writer,
+            diagnostics,
             closed: Arc::new(AtomicBool::new(false)),
             session_state,
             width,
@@ -467,6 +612,7 @@ impl VncConnection {
         };
         let writer = self.writer.clone();
         let event_writer = self.event_writer.clone();
+        let diagnostics = self.diagnostics;
         let closed = self.closed.clone();
         let session_state = self.session_state.clone();
         let width = self.width;
@@ -478,6 +624,7 @@ impl VncConnection {
                     reader,
                     writer,
                     event_writer,
+                    diagnostics,
                     closed,
                     session_state,
                     width,
@@ -542,7 +689,7 @@ impl VncConnection {
 fn handshake_vnc(
     stream: &mut TcpStream,
     password: Option<&RemoteDesktopSecret>,
-) -> Result<(), String> {
+) -> Result<VncHandshakeInfo, String> {
     let server_version = read_exact_array::<12, _>(stream)
         .map_err(|error| format!("VNC protocol banner read failed: {error}"))?;
     if !server_version.starts_with(b"RFB ") {
@@ -550,33 +697,40 @@ fn handshake_vnc(
     }
 
     let legacy_security = server_version.starts_with(b"RFB 003.003");
-    let client_version = if legacy_security {
-        VNC_PROTOCOL_VERSION_33
+    let (client_version, protocol_version) = if legacy_security {
+        (VNC_PROTOCOL_VERSION_33, VncProtocolVersion::Rfb003003)
     } else {
-        VNC_PROTOCOL_VERSION_38
+        (VNC_PROTOCOL_VERSION_38, VncProtocolVersion::Rfb003008)
     };
     stream
         .write_all(client_version)
         .map_err(|error| format!("VNC protocol banner write failed: {error}"))?;
 
-    if legacy_security {
+    let security = if legacy_security {
         negotiate_legacy_security(stream, password)
     } else {
         negotiate_modern_security(stream, password)
-    }
+    }?;
+    Ok(VncHandshakeInfo {
+        protocol_version,
+        security,
+        legacy_security,
+    })
 }
 
 fn negotiate_legacy_security(
     stream: &mut TcpStream,
     password: Option<&RemoteDesktopSecret>,
-) -> Result<(), String> {
+) -> Result<VncSecuritySelection, String> {
     let security_type =
         read_be_u32(stream).map_err(|error| format!("VNC security type read failed: {error}"))?;
     match security_type {
         0 => Err(read_reason(stream)
             .unwrap_or_else(|_| "VNC server rejected security negotiation.".to_string())),
-        1 => write_client_init(stream),
-        2 => authenticate_vnc_password(stream, password).and_then(|_| write_client_init(stream)),
+        1 => write_client_init(stream).map(|_| VncSecuritySelection::None),
+        2 => authenticate_vnc_password(stream, password)
+            .and_then(|_| write_client_init(stream))
+            .map(|_| VncSecuritySelection::VncAuth),
         other => Err(format!("Unsupported VNC security type {other}.")),
     }
 }
@@ -584,7 +738,7 @@ fn negotiate_legacy_security(
 fn negotiate_modern_security(
     stream: &mut TcpStream,
     password: Option<&RemoteDesktopSecret>,
-) -> Result<(), String> {
+) -> Result<VncSecuritySelection, String> {
     let count =
         read_u8(stream).map_err(|error| format!("VNC security list read failed: {error}"))?;
     if count == 0 {
@@ -608,7 +762,7 @@ fn negotiate_modern_security(
             return Err(read_reason(stream)
                 .unwrap_or_else(|_| "VNC security negotiation failed.".to_string()));
         }
-        return write_client_init(stream);
+        return write_client_init(stream).map(|_| VncSecuritySelection::None);
     }
 
     if security_types.contains(&VNC_SECURITY_VNC_AUTH) {
@@ -616,7 +770,7 @@ fn negotiate_modern_security(
             .write_all(&[VNC_SECURITY_VNC_AUTH])
             .map_err(|error| format!("VNC security selection failed: {error}"))?;
         authenticate_vnc_password(stream, password)?;
-        return write_client_init(stream);
+        return write_client_init(stream).map(|_| VncSecuritySelection::VncAuth);
     }
 
     Err(format!(
@@ -723,14 +877,10 @@ fn set_encodings_message() -> Vec<u8> {
     let mut message = Vec::with_capacity(32);
     message.push(2);
     message.push(0);
-    push_be_u16(&mut message, 7);
-    push_be_i32(&mut message, VNC_ENCODING_DESKTOP_SIZE);
-    push_be_i32(&mut message, VNC_ENCODING_CURSOR);
-    push_be_i32(&mut message, VNC_ENCODING_X_CURSOR);
-    push_be_i32(&mut message, VNC_ENCODING_COPY_RECT);
-    push_be_i32(&mut message, VNC_ENCODING_ZRLE);
-    push_be_i32(&mut message, VNC_ENCODING_HEXTILE);
-    push_be_i32(&mut message, VNC_ENCODING_RAW);
+    push_be_u16(&mut message, VNC_ADVERTISED_ENCODINGS.len() as u16);
+    for encoding in VNC_ADVERTISED_ENCODINGS {
+        push_be_i32(&mut message, encoding);
+    }
     message
 }
 
@@ -738,6 +888,7 @@ fn read_vnc_events(
     mut reader: TcpStream,
     writer: SharedVncWriter,
     event_writer: SharedEventWriter,
+    diagnostics: VncDiagnostics,
     closed: Arc<AtomicBool>,
     session_state: Arc<VncSessionSharedState>,
     width: u16,
@@ -745,10 +896,18 @@ fn read_vnc_events(
 ) {
     let mut framebuffer = VncFramebuffer::new(width, height);
     let mut decode_state = VncDecodeState::default();
+    let mut counters = VncReaderDiagnosticsCounters::default();
     let mut sent_initial_frame = false;
     loop {
         match read_vnc_event(&mut reader, &mut decode_state) {
             Ok(event) => {
+                let summary = vnc_server_event_summary(&event);
+                counters.server_messages = counters.server_messages.saturating_add(1);
+                counters.helper_side_events = counters
+                    .helper_side_events
+                    .saturating_add(summary.side_events);
+                counters.dirty_rects = counters.dirty_rects.saturating_add(summary.dirty_rects);
+                counters.dirty_pixels = counters.dirty_pixels.saturating_add(summary.dirty_pixels);
                 for helper_event in vnc_helper_events(&event) {
                     let _ = send_event(&event_writer, helper_event);
                 }
@@ -760,6 +919,40 @@ fn read_vnc_events(
                         &mut sent_initial_frame,
                         session_state.take_base_frame_request(),
                     );
+                    match &frame_event {
+                        RemoteDesktopHelperEvent::Frame { frame } => {
+                            counters.helper_frames = counters.helper_frames.saturating_add(1);
+                            diagnostics.log(format!(
+                                "frame kind=base size={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
+                                frame.size.width,
+                                frame.size.height,
+                                counters.helper_frames,
+                                counters.helper_frame_updates,
+                                counters.server_messages,
+                                counters.dirty_rects,
+                                summary.dirty_rects,
+                                counters.dirty_pixels,
+                                counters.helper_side_events
+                            ));
+                        }
+                        RemoteDesktopHelperEvent::FrameUpdate { update } => {
+                            counters.helper_frame_updates =
+                                counters.helper_frame_updates.saturating_add(1);
+                            diagnostics.log(format!(
+                                "frame kind=update rect={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
+                                update.rect.width,
+                                update.rect.height,
+                                counters.helper_frames,
+                                counters.helper_frame_updates,
+                                counters.server_messages,
+                                counters.dirty_rects,
+                                summary.dirty_rects,
+                                counters.dirty_pixels,
+                                counters.helper_side_events
+                            ));
+                        }
+                        _ => {}
+                    }
                     let _ = send_event(&event_writer, frame_event);
                 }
                 let _ = request_framebuffer_update(
@@ -771,6 +964,10 @@ fn read_vnc_events(
             }
             Err(error) => {
                 if !closed.load(Ordering::Acquire) {
+                    diagnostics.log(format!(
+                        "disconnect category={:?}",
+                        vnc_error_category_from_message(&error)
+                    ));
                     let _ = send_event(
                         &event_writer,
                         RemoteDesktopHelperEvent::Disconnected {
@@ -861,6 +1058,51 @@ fn vnc_helper_events(event: &VncServerEvent) -> Vec<RemoteDesktopHelperEvent> {
         }
         _ => Vec::new(),
     }
+}
+
+fn vnc_server_event_summary(event: &VncServerEvent) -> VncServerEventSummary {
+    match event {
+        VncServerEvent::SetResolution { width, height } => VncServerEventSummary {
+            dirty_rects: 1,
+            dirty_pixels: u64::from(*width) * u64::from(*height),
+            side_events: 0,
+        },
+        VncServerEvent::RawImage(rect, _) | VncServerEvent::CopyRect { dst: rect, .. } => {
+            VncServerEventSummary {
+                dirty_rects: 1,
+                dirty_pixels: rfb_rect_pixels(*rect),
+                side_events: 0,
+            }
+        }
+        VncServerEvent::ClipboardText(_)
+        | VncServerEvent::CursorShape(_)
+        | VncServerEvent::CursorHidden => VncServerEventSummary {
+            dirty_rects: 0,
+            dirty_pixels: 0,
+            side_events: 1,
+        },
+        VncServerEvent::Batch(events) => {
+            let mut summary = VncServerEventSummary::default();
+            for event in events {
+                let event_summary = vnc_server_event_summary(event);
+                summary.dirty_rects = summary
+                    .dirty_rects
+                    .saturating_add(event_summary.dirty_rects);
+                summary.dirty_pixels = summary
+                    .dirty_pixels
+                    .saturating_add(event_summary.dirty_pixels);
+                summary.side_events = summary
+                    .side_events
+                    .saturating_add(event_summary.side_events);
+            }
+            summary
+        }
+        VncServerEvent::Noop => VncServerEventSummary::default(),
+    }
+}
+
+fn rfb_rect_pixels(rect: RfbRect) -> u64 {
+    u64::from(rect.width) * u64::from(rect.height)
 }
 
 fn read_vnc_event(
@@ -2971,6 +3213,49 @@ mod tests {
         assert_eq!(
             vnc_error_category_from_message("VNC TCP connection failed: refused"),
             RemoteDesktopErrorCategory::Network
+        );
+        assert_eq!(
+            vnc_error_category_from_message("VNC security list read failed: timed out"),
+            RemoteDesktopErrorCategory::Network
+        );
+    }
+
+    #[test]
+    fn vnc_error_category_separates_security_configuration_and_protocol_errors() {
+        assert_eq!(
+            vnc_error_category_from_message("Unsupported VNC security types: [19]."),
+            RemoteDesktopErrorCategory::LegacySecurity
+        );
+        assert_eq!(
+            vnc_error_category_from_message("VNC helper received a non-VNC connect request."),
+            RemoteDesktopErrorCategory::Configuration
+        );
+        assert_eq!(
+            vnc_error_category_from_message("Unsupported VNC rectangle encoding 99."),
+            RemoteDesktopErrorCategory::Protocol
+        );
+    }
+
+    #[test]
+    fn vnc_server_event_summary_counts_metadata_without_payloads() {
+        let rect = RfbRect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 3,
+        };
+        let summary = vnc_server_event_summary(&VncServerEvent::Batch(vec![
+            VncServerEvent::RawImage(rect, vec![1; 48]),
+            VncServerEvent::CursorHidden,
+        ]));
+
+        assert_eq!(
+            summary,
+            VncServerEventSummary {
+                dirty_rects: 1,
+                dirty_pixels: 12,
+                side_events: 1,
+            }
         );
     }
 

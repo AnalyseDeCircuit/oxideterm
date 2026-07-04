@@ -1034,6 +1034,8 @@
     "session_missing": "遠端桌面工作階段無法使用。",
     "force_recover": "恢復",
     "reconnect": "重新連線",
+    "resize_dynamic": "遠端尺寸可調",
+    "resize_fixed": "固定伺服器尺寸",
     "disconnect": "中斷連線"
   }
 }

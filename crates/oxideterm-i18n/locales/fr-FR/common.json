@@ -1034,6 +1034,8 @@
     "session_missing": "La session de bureau distant est indisponible.",
     "force_recover": "Récupérer",
     "reconnect": "Reconnecter",
+    "resize_dynamic": "Redimensionnement distant",
+    "resize_fixed": "Taille serveur fixe",
     "disconnect": "Déconnecter"
   }
 }

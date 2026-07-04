@@ -1039,6 +1039,8 @@
     "session_missing": "Remote desktop session is unavailable.",
     "force_recover": "Recover",
     "reconnect": "Reconnect",
+    "resize_dynamic": "Remote resize",
+    "resize_fixed": "Fixed server size",
     "disconnect": "Disconnect"
   }
 }

@@ -1034,6 +1034,8 @@
     "session_missing": "La sesión de escritorio remoto no está disponible.",
     "force_recover": "Recuperar",
     "reconnect": "Reconectar",
+    "resize_dynamic": "Redimensionamiento remoto",
+    "resize_fixed": "Tamaño fijo del servidor",
     "disconnect": "Desconectar"
   }
 }

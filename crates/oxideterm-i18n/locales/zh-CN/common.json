@@ -1039,6 +1039,8 @@
     "session_missing": "远程桌面会话不可用。",
     "force_recover": "恢复",
     "reconnect": "重新连接",
+    "resize_dynamic": "远端尺寸可调",
+    "resize_fixed": "固定服务端尺寸",
     "disconnect": "断开连接"
   }
 }

@@ -1034,6 +1034,8 @@
     "session_missing": "Phiên máy tính từ xa không khả dụng.",
     "force_recover": "Khôi phục",
     "reconnect": "Kết nối lại",
+    "resize_dynamic": "Đổi kích thước từ xa",
+    "resize_fixed": "Kích thước máy chủ cố định",
     "disconnect": "Ngắt kết nối"
   }
 }
