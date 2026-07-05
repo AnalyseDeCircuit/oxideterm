@@ -1060,7 +1060,9 @@ impl WorkspaceApp {
         line_count: usize,
     ) -> Pixels {
         match target {
-            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => px(20.0),
+            WorkspaceImeTarget::TerminalCommandBar
+            | WorkspaceImeTarget::AiChatInput
+            | WorkspaceImeTarget::AiMessageEdit => px(20.0),
             WorkspaceImeTarget::Settings(input) if input.accepts_newline() => {
                 // Tauri textareas hit-test by their visual line box. Settings
                 // multiline fields are hand-rendered in GPUI, so keep the IME
@@ -1586,7 +1588,11 @@ impl WorkspaceApp {
                 keystroke.key.as_str(),
                 "up" | "arrowup" | "down" | "arrowdown"
             )
+            && (!self.terminal_command_bar_draft.contains('\n')
+                || self.terminal_command_suggestions_open)
         {
+            // Single-line command input keeps Up/Down for command suggestions;
+            // multiline drafts borrow the shared textarea navigation instead.
             return false;
         }
         if target == WorkspaceImeTarget::CommandPalette
@@ -1669,7 +1675,9 @@ impl WorkspaceApp {
         }
         if matches!(
             target,
-            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit
+            WorkspaceImeTarget::AiChatInput
+                | WorkspaceImeTarget::AiMessageEdit
+                | WorkspaceImeTarget::TerminalCommandBar
         ) && !keystroke.modifiers.shift
         {
             return false;
@@ -2563,6 +2571,7 @@ fn normalize_clipboard_text_for_ime_target(target: WorkspaceImeTarget, text: &st
 fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
     match target {
         WorkspaceImeTarget::ReadOnlyText(_) => true,
+        WorkspaceImeTarget::TerminalCommandBar => true,
         WorkspaceImeTarget::Settings(input) => input.accepts_newline(),
         WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
         WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
@@ -3037,10 +3046,11 @@ mod tests {
         WorkspaceApp, WorkspaceImeMarkedText, WorkspaceImeTarget,
         active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
         control_k_delete_end, copy_shortcut_owner_for_target,
-        effective_platform_text_replacement_range, ime_target_should_blink_caret,
-        keystroke_commits_platform_text, keystroke_uses_text_edit_modifier,
-        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
-        next_utf16_boundary, next_word_boundary, platform_text_commit_is_duplicate,
+        effective_platform_text_replacement_range, ime_target_accepts_newline,
+        ime_target_should_blink_caret, keystroke_commits_platform_text,
+        keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
+        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
+        normalize_clipboard_text_for_ime_target, platform_text_commit_is_duplicate,
         previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
         transpose_text_at_utf16_offset, vertical_line_navigation_destination,
         word_range_for_utf16_offset,
@@ -3166,6 +3176,17 @@ mod tests {
             true,
             &modified_space
         ));
+    }
+
+    #[test]
+    fn terminal_command_bar_preserves_multiline_clipboard_text() {
+        let target = WorkspaceImeTarget::TerminalCommandBar;
+
+        assert!(ime_target_accepts_newline(target));
+        assert_eq!(
+            normalize_clipboard_text_for_ime_target(target, "printf one\r\nprintf two"),
+            "printf one\nprintf two"
+        );
     }
 
     #[test]

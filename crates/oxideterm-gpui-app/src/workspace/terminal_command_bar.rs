@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 
 use super::actions::TerminalBroadcastMenuPlacement;
 use super::ime::WorkspaceImeTarget;
@@ -43,7 +44,23 @@ const TERMINAL_PROJECT_MENU_BODY_MAX_HEIGHT: f32 = 420.0;
 const TERMINAL_PROJECT_MENU_MARGIN: f32 = 12.0;
 const TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH: f32 = 260.0; // Keep context chips compact beside command-bar actions.
 const TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH: f32 = 240.0; // Project labels are shorter than cwd/git labels in Tauri.
+const TERMINAL_COMMAND_INPUT_LINE_HEIGHT: f32 = 20.0;
+const TERMINAL_COMMAND_INPUT_MIN_HEIGHT: f32 = 24.0;
+const TERMINAL_COMMAND_INPUT_MAX_VISIBLE_LINES: usize = 6;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
+
+#[derive(Clone, Copy, Debug)]
+struct TerminalCommandInputLine<'a> {
+    text: &'a str,
+    utf16_start: usize,
+    utf16_end: usize,
+}
+
+impl TerminalCommandInputLine<'_> {
+    fn utf16_len(&self) -> usize {
+        self.utf16_end.saturating_sub(self.utf16_start)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MatchedPrivilegeCredential {
@@ -70,6 +87,61 @@ fn log_privilege_prompt_helper(args: std::fmt::Arguments<'_>) {
     if std::env::var_os(PRIVILEGE_PROMPT_DEBUG_ENV).is_some() {
         eprintln!("[oxideterm:privilege] {args}");
     }
+}
+
+fn terminal_command_input_lines(input: &str) -> Vec<TerminalCommandInputLine<'_>> {
+    // Keep hard line breaks as the editing model so the command bar behaves
+    // like a small textarea without introducing persistent scroll state.
+    let mut lines = Vec::new();
+    let mut byte_start = 0usize;
+    let mut utf16_start = 0usize;
+    let mut utf16_offset = 0usize;
+
+    for (byte_index, ch) in input.char_indices() {
+        if ch == '\n' {
+            lines.push(TerminalCommandInputLine {
+                text: &input[byte_start..byte_index],
+                utf16_start,
+                utf16_end: utf16_offset,
+            });
+            utf16_offset += ch.len_utf16();
+            byte_start = byte_index + ch.len_utf8();
+            utf16_start = utf16_offset;
+        } else {
+            utf16_offset += ch.len_utf16();
+        }
+    }
+
+    lines.push(TerminalCommandInputLine {
+        text: &input[byte_start..],
+        utf16_start,
+        utf16_end: utf16_offset,
+    });
+    lines
+}
+
+fn terminal_command_line_selection(
+    line: TerminalCommandInputLine<'_>,
+    selection: Option<&Range<usize>>,
+) -> Option<Range<usize>> {
+    selection.and_then(|selection| {
+        let start = selection.start.max(line.utf16_start).min(line.utf16_end);
+        let end = selection.end.max(line.utf16_start).min(line.utf16_end);
+        (start < end).then_some(start - line.utf16_start..end - line.utf16_start)
+    })
+}
+
+fn terminal_command_line_caret(
+    line: TerminalCommandInputLine<'_>,
+    caret_offset: Option<usize>,
+) -> Option<usize> {
+    caret_offset
+        .filter(|offset| *offset >= line.utf16_start && *offset <= line.utf16_end)
+        .map(|offset| {
+            offset
+                .saturating_sub(line.utf16_start)
+                .min(line.utf16_len())
+        })
 }
 
 fn terminal_git_section_icon(section: TerminalGitPanelSection) -> LucideIcon {
@@ -3462,6 +3534,83 @@ impl WorkspaceApp {
             .map(|range| range.start);
         let shows_selection = selection_range.is_some();
         let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
+        let command_lines = terminal_command_input_lines(&command_text);
+        let command_visible_lines = command_lines
+            .len()
+            .clamp(1, TERMINAL_COMMAND_INPUT_MAX_VISIBLE_LINES);
+        let command_input_height = (command_visible_lines as f32
+            * TERMINAL_COMMAND_INPUT_LINE_HEIGHT)
+            .max(TERMINAL_COMMAND_INPUT_MIN_HEIGHT);
+        let mut command_input_content = div()
+            .h(px(command_input_height))
+            .max_h(px(command_input_height))
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .overflow_y_scrollbar()
+            .text_size(px(13.0))
+            .line_height(px(TERMINAL_COMMAND_INPUT_LINE_HEIGHT))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_color(if showing_placeholder {
+                rgb(theme.text_muted)
+            } else {
+                rgb(theme.text)
+            });
+        for (index, line) in command_lines.iter().copied().enumerate() {
+            let is_last_line = index + 1 == command_lines.len();
+            let line_selection = terminal_command_line_selection(line, selection_range.as_ref());
+            let line_caret = terminal_command_line_caret(line, caret_offset);
+            let line_ghost = is_last_line.then(|| ghost_text.as_deref()).flatten();
+
+            command_input_content = command_input_content.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .overflow_hidden()
+                    .child(if showing_placeholder {
+                        div().child(line.text.to_string()).into_any_element()
+                    } else {
+                        text_input_value_segments_with_color(
+                            &self.tokens,
+                            line.text,
+                            false,
+                            line_selection,
+                            line_caret,
+                            self.new_connection_caret_visible,
+                            Some(theme.text),
+                        )
+                        .into_any_element()
+                    })
+                    .when(
+                        focused
+                            && is_last_line
+                            && !showing_placeholder
+                            && !shows_selection
+                            && !shows_positioned_caret,
+                        |line| {
+                            line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                        },
+                    )
+                    .when_some(line_ghost, |line, ghost| {
+                        line.child(
+                            div()
+                                .text_color(rgba((theme.text_muted << 8) | 0x99))
+                                .child(ghost.to_string()),
+                        )
+                    }),
+            );
+        }
+        if let Some(marked) = marked_text {
+            command_input_content = command_input_content.child(
+                div()
+                    .underline()
+                    .text_color(rgb(theme.text))
+                    .child(marked.to_string()),
+            );
+        }
         // The visible chip and completion providers share Tauri's target-label
         // inference so local shells that are currently inside SSH show the
         // remote identity consistently in both places.
@@ -3951,68 +4100,7 @@ impl WorkspaceApp {
                                 ))
                                 .child(text_input_anchor_probe(
                                     target.anchor_id(),
-                                    div()
-                                        .h(px(24.0))
-                                        .flex_1()
-                                        .flex()
-                                        .items_center()
-                                        .overflow_hidden()
-                                        .text_size(px(13.0))
-                                        .font_family(settings_mono_font_family(
-                                            self.settings_store.settings(),
-                                        ))
-                                        .text_color(if showing_placeholder {
-                                            rgb(theme.text_muted)
-                                        } else {
-                                            rgb(theme.text)
-                                        })
-                                        // Tauri uses a real textarea, so the painted caret
-                                        // follows selectionStart instead of always sitting
-                                        // at the end of the value. Keep native rendering
-                                        // tied to the shared IME range for click/arrow parity.
-                                        .child(if showing_placeholder {
-                                            div().child(command_text).into_any_element()
-                                        } else {
-                                            text_input_value_segments_with_color(
-                                                &self.tokens,
-                                                &command_text,
-                                                false,
-                                                selection_range,
-                                                caret_offset,
-                                                self.new_connection_caret_visible,
-                                                Some(theme.text),
-                                            )
-                                            .into_any_element()
-                                        })
-                                        .when_some(marked_text, |input, marked| {
-                                            input.child(
-                                                div()
-                                                    .underline()
-                                                    .text_color(rgb(theme.text))
-                                                    .child(marked.to_string()),
-                                            )
-                                        })
-                                        .when(
-                                            focused
-                                                && !showing_placeholder
-                                                && !shows_selection
-                                                && !shows_positioned_caret,
-                                            |input| {
-                                                input.child(text_caret(
-                                                    &self.tokens,
-                                                    self.new_connection_caret_visible,
-                                                ))
-                                            },
-                                        )
-                                        .when_some(ghost_text, |input, ghost| {
-                                            input.child(
-                                                div()
-                                                    .text_color(rgba(
-                                                        (theme.text_muted << 8) | 0x99,
-                                                    ))
-                                                    .child(ghost),
-                                            )
-                                        }),
+                                    command_input_content,
                                     {
                                         let workspace = workspace.clone();
                                         move |anchor, _window, cx| {
