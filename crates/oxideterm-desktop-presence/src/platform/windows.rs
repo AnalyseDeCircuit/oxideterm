@@ -153,7 +153,7 @@ fn main_window_hwnd(window: &Window) -> anyhow::Result<HWND> {
     // GPUI also exposes Window::window_handle() with a different return type,
     // so call the raw-window-handle trait explicitly here.
     let handle = raw_window_handle::HasWindowHandle::window_handle(window)
-        .context("unable to read Windows window handle")?;
+        .map_err(|_| anyhow!("unable to read Windows window handle"))?;
     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
         return Err(anyhow!("OxideTerm main window is not a Win32 window"));
     };
