@@ -746,7 +746,7 @@
     "wasm_runtime_download": "Wasm-Laufzeit herunterladen",
     "wasm_runtime_installing": "Wasm-Laufzeit wird installiert...",
     "wasm_runtime_install_success": "Wasm-Laufzeit {{version}} installiert",
-    "wasm_runtime_missing": "Dieses Plugin benötigt die optionale Wasm-Laufzeit. Standard-Builds enthalten sie nicht im App-Paket; laden und installieren Sie den Sidecar und laden Sie das Plugin anschließend neu.",
+    "wasm_runtime_missing": "Dieses Plugin benötigt die Wasm-Laufzeit, aber dieser Build enthält sie nicht. Laden und installieren Sie den Sidecar und laden Sie das Plugin anschließend neu.",
     "empty_title": "Installierte Plugins",
     "empty_description": "Legen Sie Plugin-Ordner in ~/.oxideterm/plugins/ ab, um loszulegen.",
     "footer": "{{count}} Plugin(s) installiert",

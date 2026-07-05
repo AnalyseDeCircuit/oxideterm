@@ -751,7 +751,7 @@
     "wasm_runtime_download": "Wasm ランタイムをダウンロード",
     "wasm_runtime_installing": "Wasm ランタイムをインストール中...",
     "wasm_runtime_install_success": "Wasm ランタイム {{version}} をインストールしました",
-    "wasm_runtime_missing": "このプラグインには任意の Wasm ランタイムが必要です。標準版ではアプリ本体に同梱していません。sidecar をダウンロードしてインストールしてから、プラグインを再読み込みしてください。",
+    "wasm_runtime_missing": "このプラグインには Wasm ランタイムが必要ですが、このビルドには含まれていません。sidecar をダウンロードしてインストールしてから、プラグインを再読み込みしてください。",
     "empty_title": "インストール済みプラグイン",
     "empty_description": "~/.oxideterm/plugins/ にプラグインフォルダを配置して始めましょう。",
     "footer": "{{count}} 個のプラグインがインストール済み",

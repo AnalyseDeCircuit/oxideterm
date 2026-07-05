@@ -751,7 +751,7 @@
     "wasm_runtime_download": "Scarica runtime Wasm",
     "wasm_runtime_installing": "Installazione runtime Wasm...",
     "wasm_runtime_install_success": "Runtime Wasm {{version}} installato",
-    "wasm_runtime_missing": "Questo plugin richiede il runtime Wasm opzionale. Le build standard non lo includono nel pacchetto dell’app; scarica e installa il sidecar, quindi ricarica il plugin.",
+    "wasm_runtime_missing": "Questo plugin richiede il runtime Wasm, ma questa build non lo include. Scarica e installa il sidecar, quindi ricarica il plugin.",
     "empty_title": "Plugin installati",
     "empty_description": "Posiziona le cartelle dei plugin in ~/.oxideterm/plugins/ per iniziare.",
     "footer": "{{count}} plugin installato/i",

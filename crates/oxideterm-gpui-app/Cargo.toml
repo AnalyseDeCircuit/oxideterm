@@ -5,7 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [features]
-default = []
+default = ["plugin-wasm-runtime"]
 plugin-wasm-runtime = ["oxideterm-plugin-host-api/wasm-runtime"]
 
 [[bin]]

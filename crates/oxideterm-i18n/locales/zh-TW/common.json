@@ -746,7 +746,7 @@
     "wasm_runtime_download": "下載 Wasm 執行階段",
     "wasm_runtime_installing": "正在安裝 Wasm 執行階段...",
     "wasm_runtime_install_success": "Wasm 執行階段 {{version}} 已安裝",
-    "wasm_runtime_missing": "此外掛需要選用的 Wasm 執行階段。標準版不會把它打包進應用程式；請下載並安裝 sidecar 後重新載入外掛。",
+    "wasm_runtime_missing": "此外掛需要 Wasm 執行階段，但目前建置未包含它。請下載並安裝 sidecar 後重新載入外掛。",
     "empty_title": "已安裝外掛",
     "empty_description": "將外掛資料夾放入 ~/.oxideterm/plugins/ 即可開始使用。",
     "footer": "已安裝 {{count}} 個外掛",
