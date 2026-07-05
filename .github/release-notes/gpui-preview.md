@@ -13,12 +13,12 @@ If you just want the most stable daily-use OxideTerm release, do not download th
 
 ## GPUI Preview 12 Highlights
 
-This preview focuses on reducing the standard package size, making native plugin setup clearer, and tightening GPUI workflow polish before the 2.0 line becomes the default app.
+This preview focuses on native plugin runtime reliability, packaging cleanup, and tightening GPUI workflow polish before the 2.0 line becomes the default app.
 
-- Wasm plugin execution is now split into an optional `oxideterm-wasm-runtime` sidecar. Standard OxideTerm packages no longer bundle Wasmtime by default.
-- The plugin manager can download, verify, install, and bootstrap the matching Wasm runtime from inside the app when a Wasm plugin needs it.
-- The Wasm runtime selector now checks the host update channel, host version, plugin protocol, Wasm guest ABI, WASI profile, platform target, and asset checksum before installing a sidecar.
-- Native plugin runtime ownership was narrowed so the in-process host API, optional Wasm executor, and sidecar process bridge stay separate.
+- Wasm plugin execution is bundled again in standard GPUI preview packages so Wasm plugins work without a separate runtime download.
+- The optional `oxideterm-wasm-runtime` sidecar path remains available for future lightweight or externally managed builds.
+- The Wasm runtime compatibility model now checks the host update channel, host version, plugin protocol, Wasm guest ABI, WASI profile, platform target, and asset checksum for sidecar installs.
+- Native plugin runtime ownership was narrowed so the in-process host API, bundled Wasm executor, and optional sidecar process bridge stay separate.
 - Quick Commands, settings, and narrow-width GPUI forms received layout and overflow fixes across the native preview UI.
 - SSH authentication selection was simplified into password, key, Agent, and two-factor groups while keeping existing saved connection formats unchanged.
 - Session icons, legal notices, onboarding, and plugin manager surfaces received additional polish and localization coverage.

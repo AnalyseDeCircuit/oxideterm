@@ -746,7 +746,7 @@
     "wasm_runtime_download": "Descargar runtime Wasm",
     "wasm_runtime_installing": "Instalando runtime Wasm...",
     "wasm_runtime_install_success": "Runtime Wasm {{version}} instalado",
-    "wasm_runtime_missing": "Este complemento requiere el runtime Wasm opcional. Las compilaciones estándar lo mantienen fuera del paquete de la aplicación; descarga e instala el sidecar y vuelve a cargar el complemento.",
+    "wasm_runtime_missing": "Este complemento requiere el runtime Wasm, pero esta compilación no lo incluye. Descarga e instala el sidecar y vuelve a cargar el complemento.",
     "empty_title": "Complementos instalados",
     "empty_description": "Coloque carpetas de complementos en ~/.oxideterm/plugins/ para comenzar.",
     "footer": "{{count}} complemento(s) instalado(s)",

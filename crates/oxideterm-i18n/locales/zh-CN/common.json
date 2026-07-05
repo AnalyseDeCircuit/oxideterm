@@ -751,7 +751,7 @@
     "wasm_runtime_download": "下载 Wasm 运行时",
     "wasm_runtime_installing": "正在安装 Wasm 运行时...",
     "wasm_runtime_install_success": "Wasm 运行时 {{version}} 已安装",
-    "wasm_runtime_missing": "此插件需要可选的 Wasm 运行时。标准版不会把它打进应用包；请下载并安装 sidecar 后重新加载插件。",
+    "wasm_runtime_missing": "此插件需要 Wasm 运行时，但当前构建未包含它。请下载并安装 sidecar 后重新加载插件。",
     "empty_title": "已安装插件",
     "empty_description": "将插件文件夹放入 ~/.oxideterm/plugins/ 即可开始使用。",
     "footer": "已安装 {{count}} 个插件",
