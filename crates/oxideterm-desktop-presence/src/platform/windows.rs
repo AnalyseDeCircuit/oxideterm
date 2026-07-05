@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context as _, anyhow};
 use gpui::{App, Window};
-use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+use raw_window_handle::RawWindowHandle;
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
@@ -150,8 +150,9 @@ fn send_event(event: DesktopPresenceEvent) {
 }
 
 fn main_window_hwnd(window: &Window) -> anyhow::Result<HWND> {
-    let handle = window
-        .window_handle()
+    // GPUI also exposes Window::window_handle() with a different return type,
+    // so call the raw-window-handle trait explicitly here.
+    let handle = raw_window_handle::HasWindowHandle::window_handle(window)
         .context("unable to read Windows window handle")?;
     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
         return Err(anyhow!("OxideTerm main window is not a Win32 window"));
