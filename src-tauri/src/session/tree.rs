@@ -610,6 +610,17 @@ impl SessionTree {
         Ok(())
     }
 
+    /// Clear the node that owns a terminal session and return its node ID.
+    pub fn clear_terminal_session_id_by_session(&mut self, session_id: &str) -> Option<String> {
+        let (node_id, node) = self
+            .nodes
+            .iter_mut()
+            .find(|(_, node)| node.terminal_session_id.as_deref() == Some(session_id))?;
+
+        node.terminal_session_id = None;
+        Some(node_id.clone())
+    }
+
     /// 关联 SFTP 会话 ID
     pub fn set_sftp_session_id(
         &mut self,
@@ -950,6 +961,28 @@ mod tests {
         assert_eq!(snapshot.ssh_connection_id.as_deref(), Some("conn-1"));
         assert_eq!(snapshot.terminal_session_id.as_deref(), Some("term-1"));
         assert_eq!(snapshot.sftp_session_id.as_deref(), Some("sftp-1"));
+    }
+
+    #[test]
+    fn test_clear_terminal_session_id_by_session_clears_owner_node() {
+        let mut tree = SessionTree::new();
+        let node_id = tree.add_root_node(make_connection("server-a"), NodeOrigin::Direct);
+        tree.set_terminal_session_id(&node_id, "term-1".to_string())
+            .unwrap();
+
+        let cleared_node_id = tree.clear_terminal_session_id_by_session("term-1");
+
+        assert_eq!(cleared_node_id.as_deref(), Some(node_id.as_str()));
+        assert!(
+            tree.get_node(&node_id)
+                .unwrap()
+                .terminal_session_id
+                .is_none()
+        );
+        assert!(
+            tree.clear_terminal_session_id_by_session("term-1")
+                .is_none()
+        );
     }
 
     #[test]

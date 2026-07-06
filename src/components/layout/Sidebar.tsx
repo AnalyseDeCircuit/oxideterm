@@ -628,10 +628,20 @@ export const Sidebar = () => {
     const existingTab = tabs.find(t => t.sessionId === terminalId && t.type === 'terminal');
     if (existingTab) {
       setActiveTab(existingTab.id);
-    } else {
-      createTab('terminal', terminalId);
+      return;
     }
-  }, [tabs, setActiveTab, createTab]);
+
+    if (!sessions.has(terminalId)) {
+      // Remove stale tree entries left behind by backend-side session cleanup.
+      const node = useSessionTreeStore.getState().getNodeByTerminalId(terminalId);
+      if (node) {
+        void closeTerminalForNode(node.id, terminalId);
+      }
+      return;
+    }
+
+    createTab('terminal', terminalId);
+  }, [tabs, sessions, setActiveTab, createTab, closeTerminalForNode]);
 
   // 重连节点
   const handleTreeReconnect = useCallback(async (nodeId: string) => {

@@ -16,9 +16,9 @@ use tokio::sync::RwLock;
 use crate::config::{
     SavedUpstreamProxyProtocol, UpstreamProxyAuthForConnect, UpstreamProxyForConnect,
 };
-use crate::session::AuthMethod;
 use crate::session::tree::{FlatNode, NodeConnection, NodeOrigin, NodeState, SessionTree};
 use crate::session::types::SessionConfig;
+use crate::session::{AuthMethod, SessionRegistry};
 use crate::ssh::{
     HostKeyStatus, SshConnectionRegistry, UpstreamProxyAuth, UpstreamProxyConfig,
     UpstreamProxyProtocol, check_host_key_with_upstream_proxy,
@@ -77,6 +77,38 @@ pub async fn mark_tree_nodes_disconnected_by_connection_ids(
     }
 
     affected_node_ids
+}
+
+/// Clear a terminal reference from the tree when its backend session is gone.
+pub async fn clear_tree_terminal_by_session_id(
+    state: &Arc<SessionTreeState>,
+    session_id: &str,
+) -> Option<String> {
+    let mut tree = state.tree.write().await;
+    tree.clear_terminal_session_id_by_session(session_id)
+}
+
+async fn prune_stale_terminal_sessions(
+    state: &Arc<SessionTreeState>,
+    session_registry: &Arc<SessionRegistry>,
+) -> Vec<String> {
+    let stale_session_ids = {
+        let tree = state.tree.read().await;
+        tree.flatten()
+            .into_iter()
+            .filter_map(|node| node.terminal_session_id)
+            .filter(|session_id| session_registry.with_session(session_id, |_| ()).is_none())
+            .collect::<Vec<_>>()
+    };
+
+    let mut pruned_node_ids = Vec::new();
+    for session_id in stale_session_ids {
+        if let Some(node_id) = clear_tree_terminal_by_session_id(state, &session_id).await {
+            pruned_node_ids.push(node_id);
+        }
+    }
+
+    pruned_node_ids
 }
 
 // ============================================================================
@@ -302,7 +334,17 @@ fn build_runtime_upstream_proxy(
 #[tauri::command]
 pub async fn get_session_tree(
     state: State<'_, Arc<SessionTreeState>>,
+    session_registry: State<'_, Arc<SessionRegistry>>,
 ) -> Result<Vec<FlatNode>, String> {
+    let pruned_node_ids =
+        prune_stale_terminal_sessions(state.inner(), session_registry.inner()).await;
+    if !pruned_node_ids.is_empty() {
+        tracing::info!(
+            "Pruned {} stale terminal reference(s) before returning session tree",
+            pruned_node_ids.len()
+        );
+    }
+
     let tree = state.tree.read().await;
     Ok(tree.flatten())
 }
@@ -1019,6 +1061,33 @@ mod tests {
         assert!(node.ssh_connection_id.is_none());
         assert!(node.terminal_session_id.is_none());
         assert!(node.sftp_session_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_prune_stale_terminal_sessions_removes_missing_backend_session() {
+        let state = Arc::new(SessionTreeState::new());
+        let node_id = {
+            let mut tree = state.tree.write().await;
+            let node_id = tree.add_root_node(
+                NodeConnection::new("example.com", 22, "alice"),
+                NodeOrigin::Direct,
+            );
+            tree.set_terminal_session_id(&node_id, "stale-terminal".to_string())
+                .unwrap();
+            node_id
+        };
+        let registry = Arc::new(SessionRegistry::new_without_persistence());
+
+        let pruned_node_ids = prune_stale_terminal_sessions(&state, &registry).await;
+
+        assert_eq!(pruned_node_ids, vec![node_id.clone()]);
+        let tree = state.tree.read().await;
+        assert!(
+            tree.get_node(&node_id)
+                .unwrap()
+                .terminal_session_id
+                .is_none()
+        );
     }
 
     #[test]
@@ -2026,7 +2095,6 @@ fn topology_auth_to_session_auth(
 // ============================================================================
 
 use crate::bridge::BridgeManager;
-use crate::session::SessionRegistry;
 use crate::sftp::session::SftpRegistry;
 
 /// 销毁节点会话响应

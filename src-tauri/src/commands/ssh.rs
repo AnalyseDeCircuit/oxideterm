@@ -19,7 +19,7 @@ use russh::client::Msg;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
@@ -503,7 +503,7 @@ pub struct CreateTerminalResponse {
 /// 为已有 SSH 连接创建终端
 #[tauri::command]
 pub async fn create_terminal(
-    _app_handle: AppHandle,
+    app_handle: AppHandle,
     request: CreateTerminalRequest,
     connection_registry: State<'_, Arc<SshConnectionRegistry>>,
     session_registry: State<'_, Arc<SessionRegistry>>,
@@ -776,6 +776,7 @@ pub async fn create_terminal(
     let registry_clone = session_registry.inner().clone();
     let conn_registry_clone = connection_registry.inner().clone();
     let conn_id_clone = request.connection_id.clone();
+    let app_handle_for_cleanup = app_handle.clone();
     let my_ws_port = port; // Capture this bridge's port for affinity check
     tokio::spawn(async move {
         if let Ok(reason) = disconnect_rx.await {
@@ -799,6 +800,22 @@ pub async fn create_terminal(
                                 "Releasing connection {} ref after WS detach timeout (session: {})",
                                 conn_id, sid
                             );
+                            if let Some(tree_state) = app_handle_for_cleanup
+                                .try_state::<Arc<crate::commands::session_tree::SessionTreeState>>()
+                            {
+                                if let Some(node_id) =
+                                    crate::commands::session_tree::clear_tree_terminal_by_session_id(
+                                        tree_state.inner(),
+                                        &sid,
+                                    )
+                                    .await
+                                {
+                                    info!(
+                                        "Cleared stale terminal {} from session tree node {}",
+                                        sid, node_id
+                                    );
+                                }
+                            }
                             let _ = conn_reg.remove_terminal(&conn_id, &sid).await;
                             let _ = conn_reg.release(&conn_id).await;
                         });
