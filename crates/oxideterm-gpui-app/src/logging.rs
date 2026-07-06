@@ -6,8 +6,8 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 const LOG_FILE_PREFIX: &str = "oxideterm-native";
-const DEFAULT_LOG_FILTER: &str = "warn,oxideterm=info";
-const DEBUG_LOG_FILTER: &str = "warn,oxideterm=debug,gpui=info";
+const DEFAULT_LOG_FILTER: &str = "warn,oxideterm_gpui_app=info,oxideterm_ssh=info";
+const DEBUG_LOG_FILTER: &str = "warn,oxideterm_gpui_app=debug,oxideterm_ssh=debug,gpui=info";
 
 pub(crate) fn init_file_logging(
     settings: &PersistedSettings,

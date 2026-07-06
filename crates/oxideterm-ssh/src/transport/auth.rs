@@ -27,6 +27,7 @@ async fn try_password_as_keyboard_interactive(
     {
         return Ok(false);
     }
+    tracing::debug!("SSH attempting password-as-keyboard-interactive fallback");
 
     let mut password_prompt_consumed = false;
     let mut response = tokio::time::timeout(
@@ -54,6 +55,12 @@ async fn try_password_as_keyboard_interactive(
                 instructions,
                 prompts,
             } => {
+                tracing::debug!(
+                    prompt_count = prompts.len(),
+                    has_name = !name.trim().is_empty(),
+                    has_instructions = !instructions.trim().is_empty(),
+                    "SSH keyboard-interactive password fallback prompt received"
+                );
                 let replies = if prompts.is_empty() {
                     Vec::new()
                 } else if !password_prompt_consumed
@@ -156,6 +163,7 @@ async fn try_keyboard_interactive_chain(
     let Some(prompt_handler) = prompt_handler else {
         return Ok(false);
     };
+    tracing::debug!("SSH chained keyboard-interactive authentication starting");
     let response = handle
         .authenticate_keyboard_interactive_start(username, None::<String>)
         .await
@@ -182,6 +190,13 @@ async fn continue_keyboard_interactive_flow(
                 instructions,
                 prompts,
             } => {
+                tracing::debug!(
+                    prompt_count = prompts.len(),
+                    has_name = !name.trim().is_empty(),
+                    has_instructions = !instructions.trim().is_empty(),
+                    chained,
+                    "SSH keyboard-interactive prompt received"
+                );
                 let request = KeyboardInteractivePromptRequest {
                     flow_id: uuid::Uuid::new_v4().to_string(),
                     name,
@@ -477,6 +492,11 @@ async fn authenticate_publickey_best_algo(
     let mut last_result = None;
 
     for hash_alg in algorithms {
+        tracing::debug!(
+            key_algorithm = key.algorithm().to_string(),
+            rsa_hash_algorithm = ?hash_alg,
+            "SSH public-key authentication attempt"
+        );
         let result = handle
             .authenticate_publickey(
                 username,
@@ -510,6 +530,11 @@ async fn authenticate_certificate_best_algo(
     let mut last_result = None;
 
     for hash_alg in algorithms {
+        tracing::debug!(
+            certificate_algorithm = cert.algorithm().to_string(),
+            rsa_hash_algorithm = ?hash_alg,
+            "SSH certificate authentication attempt"
+        );
         let result = handle
             .authenticate_certificate_with(username, cert.clone(), hash_alg, &mut signer)
             .await
@@ -570,17 +595,27 @@ async fn authenticate_agent(
             "SSH agent has no identities".to_string(),
         ));
     }
+    tracing::debug!(
+        identity_count = identities.len(),
+        "SSH agent identities loaded"
+    );
 
     let server_rsa_preference = resolve_server_rsa_preference(handle).await;
     let mut last_error = None;
     let mut publickey_exhausted = false;
-    for identity in identities {
+    for (identity_index, identity) in identities.into_iter().enumerate() {
         let public_key = identity.public_key().into_owned();
         let algorithms = auth_algorithm_attempt_order(
             matches!(public_key.algorithm(), Algorithm::Rsa { .. }),
             server_rsa_preference,
         );
         for hash_alg in algorithms {
+            tracing::debug!(
+                identity_index,
+                key_algorithm = public_key.algorithm().to_string(),
+                rsa_hash_algorithm = ?hash_alg,
+                "SSH agent authentication attempt"
+            );
             match handle
                 .authenticate_publickey_with(
                     config.username.clone(),

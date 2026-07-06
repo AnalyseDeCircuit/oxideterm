@@ -314,6 +314,14 @@ impl SshTransportClient {
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
     ) -> Result<(client::Handle<NativeClientHandler>, AuthBannerSink), SshTransportError> {
+        tracing::debug!(
+            target_host = config.host.as_str(),
+            target_port = config.port,
+            timeout_secs = config.timeout_secs,
+            upstream_proxy = config.upstream_proxy.is_some(),
+            legacy_ssh_compatibility = config.legacy_ssh_compatibility,
+            "SSH direct connection starting"
+        );
         log_upstream_proxy_path(&config.host, config.port, config.upstream_proxy.as_ref());
         let stream = dial_initial_tcp(
             &config.host,
@@ -322,6 +330,11 @@ impl SshTransportClient {
             config.upstream_proxy.as_ref(),
         )
         .await?;
+        tracing::debug!(
+            target_host = config.host.as_str(),
+            target_port = config.port,
+            "SSH TCP stream established"
+        );
 
         let client_config = ssh_client_config(config.legacy_ssh_compatibility);
         let handler = NativeClientHandler::new(
@@ -335,6 +348,11 @@ impl SshTransportClient {
             x11_forward_handler,
         );
         let auth_banners = handler.auth_banners();
+        tracing::debug!(
+            target_host = config.host.as_str(),
+            target_port = config.port,
+            "SSH protocol handshake starting"
+        );
         let mut handle = tokio::time::timeout(
             Duration::from_secs(config.timeout_secs),
             client::connect_stream(Arc::new(client_config), stream, handler),
@@ -342,6 +360,11 @@ impl SshTransportClient {
         .await
         .map_err(|_| SshTransportError::Timeout)?
         .map_err(SshTransportError::from)?;
+        tracing::debug!(
+            target_host = config.host.as_str(),
+            target_port = config.port,
+            "SSH protocol handshake established"
+        );
 
         authenticate(
             &mut handle,
@@ -350,6 +373,11 @@ impl SshTransportClient {
             self.managed_key_resolver.as_ref(),
         )
         .await?;
+        tracing::debug!(
+            target_host = config.host.as_str(),
+            target_port = config.port,
+            "SSH authentication completed"
+        );
         Ok((handle, auth_banners))
     }
 
@@ -365,11 +393,25 @@ impl SshTransportClient {
             ));
         }
         validate_proxy_chain_depth(chain)?;
+        tracing::debug!(
+            target_host = self.config.host.as_str(),
+            target_port = self.config.port,
+            proxy_hops = chain.len(),
+            "SSH proxy chain connection starting"
+        );
 
         let mut current_stream: Option<russh::ChannelStream<client::Msg>> = None;
         let mut jump_handles = Vec::with_capacity(chain.len());
 
         for (index, hop) in chain.iter().enumerate() {
+            tracing::debug!(
+                proxy_hop_index = index + 1,
+                proxy_hop_count = chain.len(),
+                hop_host = hop.host.as_str(),
+                hop_port = hop.port,
+                via_existing_stream = current_stream.is_some(),
+                "SSH proxy hop connection starting"
+            );
             let handle = if let Some(stream) = current_stream.take() {
                 self.connect_proxy_hop_via_stream(hop, stream).await?
             } else {
@@ -381,6 +423,12 @@ impl SshTransportClient {
             } else {
                 (self.config.host.as_str(), self.config.port)
             };
+            tracing::debug!(
+                proxy_hop_index = index + 1,
+                next_host,
+                next_port,
+                "SSH opening direct-tcpip tunnel through proxy hop"
+            );
             let channel = handle
                 .channel_open_direct_tcpip(next_host, next_port as u32, "127.0.0.1", 0)
                 .await
@@ -406,6 +454,12 @@ impl SshTransportClient {
                 x11_forward_handler.clone(),
             )
             .await?;
+        tracing::debug!(
+            target_host = self.config.host.as_str(),
+            target_port = self.config.port,
+            proxy_hops = chain.len(),
+            "SSH proxy chain connection established"
+        );
         Ok(Arc::new(PooledSshConnection::tunneled(
             target,
             jump_handles,
@@ -419,6 +473,13 @@ impl SshTransportClient {
         &self,
         hop: &ProxyHopConfig,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
+        tracing::debug!(
+            hop_host = hop.host.as_str(),
+            hop_port = hop.port,
+            upstream_proxy = self.config.upstream_proxy.is_some(),
+            legacy_ssh_compatibility = hop.legacy_ssh_compatibility,
+            "SSH proxy hop direct connection starting"
+        );
         log_upstream_proxy_path(&hop.host, hop.port, self.config.upstream_proxy.as_ref());
         let stream = dial_initial_tcp(
             &hop.host,
@@ -427,6 +488,11 @@ impl SshTransportClient {
             self.config.upstream_proxy.as_ref(),
         )
         .await?;
+        tracing::debug!(
+            hop_host = hop.host.as_str(),
+            hop_port = hop.port,
+            "SSH proxy hop TCP stream established"
+        );
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
@@ -446,6 +512,11 @@ impl SshTransportClient {
             self.managed_key_resolver.as_ref(),
         )
         .await?;
+        tracing::debug!(
+            hop_host = hop.host.as_str(),
+            hop_port = hop.port,
+            "SSH proxy hop authenticated"
+        );
         Ok(handle)
     }
 
@@ -454,6 +525,12 @@ impl SshTransportClient {
         hop: &ProxyHopConfig,
         stream: russh::ChannelStream<client::Msg>,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
+        tracing::debug!(
+            hop_host = hop.host.as_str(),
+            hop_port = hop.port,
+            legacy_ssh_compatibility = hop.legacy_ssh_compatibility,
+            "SSH proxy hop tunneled connection starting"
+        );
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
@@ -478,6 +555,11 @@ impl SshTransportClient {
             self.managed_key_resolver.as_ref(),
         )
         .await?;
+        tracing::debug!(
+            hop_host = hop.host.as_str(),
+            hop_port = hop.port,
+            "SSH proxy hop tunneled authentication completed"
+        );
         Ok(handle)
     }
 
@@ -488,6 +570,12 @@ impl SshTransportClient {
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
     ) -> Result<(client::Handle<NativeClientHandler>, AuthBannerSink), SshTransportError> {
+        tracing::debug!(
+            target_host = self.config.host.as_str(),
+            target_port = self.config.port,
+            legacy_ssh_compatibility = self.config.legacy_ssh_compatibility,
+            "SSH target connection over proxy stream starting"
+        );
         let handler = NativeClientHandler::new(
             self.config.host.clone(),
             self.config.port,
@@ -520,6 +608,11 @@ impl SshTransportClient {
             self.managed_key_resolver.as_ref(),
         )
         .await?;
+        tracing::debug!(
+            target_host = self.config.host.as_str(),
+            target_port = self.config.port,
+            "SSH target over proxy stream authenticated"
+        );
         Ok((handle, auth_banners))
     }
 

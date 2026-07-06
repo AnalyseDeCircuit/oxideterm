@@ -181,8 +181,20 @@ impl client::Handler for NativeClientHandler {
         server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         let actual_fingerprint = public_key_fingerprint(server_public_key);
+        tracing::debug!(
+            host = self.host.as_str(),
+            port = self.port,
+            host_key_algorithm = server_public_key.algorithm().as_str(),
+            host_key_fingerprint = actual_fingerprint.as_str(),
+            "SSH server host key received"
+        );
         if let Some(expected_fingerprint) = self.expected_host_key_fingerprint.as_deref() {
             if expected_fingerprint != actual_fingerprint {
+                tracing::debug!(
+                    host = self.host.as_str(),
+                    port = self.port,
+                    "SSH server host key fingerprint mismatch"
+                );
                 return Err(SshTransportError::HostKeyChanged {
                     host: self.host.clone(),
                     port: self.port,
@@ -195,22 +207,46 @@ impl client::Handler for NativeClientHandler {
                 if trust_host_key {
                     learn_host_key(&self.host, self.port, server_public_key)?;
                 }
+                tracing::debug!(
+                    host = self.host.as_str(),
+                    port = self.port,
+                    persisted = trust_host_key,
+                    "SSH server host key matched expected fingerprint"
+                );
                 return Ok(true);
             }
         }
 
         match verify_host_key(&self.host, self.port, server_public_key)? {
-            HostKeyVerification::Verified => Ok(true),
+            HostKeyVerification::Verified => {
+                tracing::debug!(
+                    host = self.host.as_str(),
+                    port = self.port,
+                    "SSH server host key verified"
+                );
+                Ok(true)
+            }
             HostKeyVerification::Unknown { fingerprint, .. } => {
                 if let Some(trust_host_key) = self.trust_host_key {
                     accept_host_key_for_session(&self.host, self.port, fingerprint);
                     if trust_host_key {
                         learn_host_key(&self.host, self.port, server_public_key)?;
                     }
+                    tracing::debug!(
+                        host = self.host.as_str(),
+                        port = self.port,
+                        persisted = trust_host_key,
+                        "SSH unknown server host key accepted by policy"
+                    );
                     return Ok(true);
                 }
 
                 if self.strict {
+                    tracing::debug!(
+                        host = self.host.as_str(),
+                        port = self.port,
+                        "SSH unknown server host key rejected by strict checking"
+                    );
                     Err(SshTransportError::HostKeyUnknown {
                         host: self.host.clone(),
                         port: self.port,
@@ -218,6 +254,11 @@ impl client::Handler for NativeClientHandler {
                     })
                 } else {
                     learn_host_key(&self.host, self.port, server_public_key)?;
+                    tracing::debug!(
+                        host = self.host.as_str(),
+                        port = self.port,
+                        "SSH unknown server host key learned"
+                    );
                     Ok(true)
                 }
             }
@@ -225,12 +266,19 @@ impl client::Handler for NativeClientHandler {
                 expected_fingerprint,
                 actual_fingerprint,
                 ..
-            } => Err(SshTransportError::HostKeyChanged {
-                host: self.host.clone(),
-                port: self.port,
-                expected_fingerprint,
-                actual_fingerprint,
-            }),
+            } => {
+                tracing::debug!(
+                    host = self.host.as_str(),
+                    port = self.port,
+                    "SSH server host key changed"
+                );
+                Err(SshTransportError::HostKeyChanged {
+                    host: self.host.clone(),
+                    port: self.port,
+                    expected_fingerprint,
+                    actual_fingerprint,
+                })
+            }
         }
     }
 
@@ -355,15 +403,22 @@ async fn authenticate_with_options(
     managed_key_resolver: Option<&ManagedKeyResolver>,
     options: AuthenticationOptions,
 ) -> Result<(), SshTransportError> {
+    tracing::debug!(
+        auth_method = auth_method_label(&config.auth),
+        "SSH authentication flow starting"
+    );
     if let Some(result) = try_none_auth_probe(handle, &config.username).await
         && result.success()
     {
+        tracing::debug!("SSH none-auth probe accepted by server");
         return Ok(());
     }
 
     let result = match &config.auth {
         AuthMethod::Password { password } => {
+            tracing::debug!("SSH password authentication starting");
             let result = authenticate_password(handle, config, password).await?;
+            log_auth_result("password", &result);
             if options.password_kbi_fallback
                 && try_password_as_keyboard_interactive(
                     handle,
@@ -374,6 +429,7 @@ async fn authenticate_with_options(
                 )
                 .await?
             {
+                tracing::debug!("SSH password keyboard-interactive fallback succeeded");
                 return Ok(());
             }
             result
@@ -382,31 +438,69 @@ async fn authenticate_with_options(
             key_path,
             passphrase,
         } => {
+            tracing::debug!(
+                key_source = if key_path.trim().is_empty() {
+                    "default"
+                } else {
+                    "file"
+                },
+                passphrase_supplied = passphrase.is_some(),
+                "SSH public-key authentication preparing key"
+            );
             let key = load_private_key_material(
                 key_path,
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
-            authenticate_publickey_best_algo(handle, &config.username, key).await?
+            let result = authenticate_publickey_best_algo(handle, &config.username, key).await?;
+            log_auth_result("publickey", &result);
+            result
         }
         AuthMethod::Certificate {
             key_path,
             cert_path,
             passphrase,
         } => {
+            tracing::debug!(
+                key_source = if key_path.trim().is_empty() {
+                    "default"
+                } else {
+                    "file"
+                },
+                certificate_source = if cert_path.trim().is_empty() {
+                    "empty"
+                } else {
+                    "file"
+                },
+                passphrase_supplied = passphrase.is_some(),
+                "SSH certificate authentication preparing key"
+            );
             let (key, cert) = load_certificate_auth_material(
                 key_path,
                 cert_path,
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
-            authenticate_certificate_best_algo(handle, &config.username, key, cert).await?
+            let result =
+                authenticate_certificate_best_algo(handle, &config.username, key, cert).await?;
+            log_auth_result("certificate", &result);
+            result
         }
-        AuthMethod::Agent => authenticate_agent(handle, config).await?,
+        AuthMethod::Agent => {
+            tracing::debug!("SSH agent authentication starting");
+            let result = authenticate_agent(handle, config).await?;
+            log_auth_result("agent", &result);
+            result
+        }
         AuthMethod::ManagedKey { key_id, passphrase } => {
             let Some(resolve_managed_key) = managed_key_resolver else {
                 return Err(SshTransportError::AuthenticationFailed(
                     "Managed key authentication requires a key resolver".to_string(),
                 ));
             };
+            tracing::debug!(
+                managed_key_configured = !key_id.trim().is_empty(),
+                passphrase_supplied = passphrase.is_some(),
+                "SSH managed-key authentication preparing key"
+            );
             // SshConfig stores only the managed key id. The resolver exposes
             // keychain material for this auth attempt and drops it after decode.
             let private_key = resolve_managed_key(key_id)?;
@@ -414,24 +508,75 @@ async fn authenticate_with_options(
                 private_key.as_str(),
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
-            authenticate_publickey_best_algo(handle, &config.username, key).await?
+            let result = authenticate_publickey_best_algo(handle, &config.username, key).await?;
+            log_auth_result("managed-key", &result);
+            result
         }
         AuthMethod::KeyboardInteractive => {
-            authenticate_keyboard_interactive(handle, &config.username, prompt_handler).await?
+            tracing::debug!("SSH keyboard-interactive authentication starting");
+            let result =
+                authenticate_keyboard_interactive(handle, &config.username, prompt_handler).await?;
+            log_auth_result("keyboard-interactive", &result);
+            result
         }
     };
 
     if result.success() {
+        tracing::debug!("SSH authentication flow succeeded");
         Ok(())
     } else if options.interactive_kbi_chain
         && try_keyboard_interactive_chain(handle, &config.username, &result, prompt_handler)
         .await?
     {
+        tracing::debug!("SSH chained keyboard-interactive authentication succeeded");
         Ok(())
     } else {
+        tracing::debug!("SSH authentication flow failed");
         Err(SshTransportError::AuthenticationFailed(
             authentication_failure_message(&result),
         ))
+    }
+}
+
+fn auth_method_label(auth: &AuthMethod) -> &'static str {
+    match auth {
+        AuthMethod::Password { .. } => "password",
+        AuthMethod::Key { .. } => "publickey",
+        AuthMethod::Agent => "agent",
+        AuthMethod::ManagedKey { .. } => "managed-key",
+        AuthMethod::Certificate { .. } => "certificate",
+        AuthMethod::KeyboardInteractive => "keyboard-interactive",
+    }
+}
+
+fn auth_result_remaining_methods(result: &client::AuthResult) -> String {
+    match result {
+        client::AuthResult::Success => String::new(),
+        client::AuthResult::Failure {
+            remaining_methods, ..
+        } => remaining_methods
+            .iter()
+            .map(|method| String::from(<&str>::from(method)))
+            .collect::<Vec<_>>()
+            .join(","),
+    }
+}
+
+fn log_auth_result(method: &'static str, result: &client::AuthResult) {
+    match result {
+        client::AuthResult::Success => {
+            tracing::debug!(auth_method = method, "SSH authentication method accepted");
+        }
+        client::AuthResult::Failure {
+            partial_success, ..
+        } => {
+            tracing::debug!(
+                auth_method = method,
+                partial_success,
+                remaining_methods = auth_result_remaining_methods(result),
+                "SSH authentication method rejected"
+            );
+        }
     }
 }
 
@@ -439,9 +584,16 @@ async fn try_none_auth_probe(
     handle: &mut client::Handle<NativeClientHandler>,
     username: &str,
 ) -> Option<client::AuthResult> {
+    tracing::debug!("SSH none-auth probe starting");
     match tokio::time::timeout(NONE_AUTH_PROBE_TIMEOUT, handle.authenticate_none(username)).await {
-        Ok(Ok(result)) => Some(result),
-        Ok(Err(_)) | Err(_) => None,
+        Ok(Ok(result)) => {
+            log_auth_result("none", &result);
+            Some(result)
+        }
+        Ok(Err(_)) | Err(_) => {
+            tracing::debug!("SSH none-auth probe unavailable");
+            None
+        }
     }
 }
 
@@ -465,6 +617,7 @@ async fn authenticate_password(
     }
 
     if should_retry_password_auth(&result) {
+        tracing::debug!("SSH password authentication retry starting");
         tokio::time::sleep(PASSWORD_RETRY_DELAY).await;
         tokio::time::timeout(
             PASSWORD_AUTH_TIMEOUT,
