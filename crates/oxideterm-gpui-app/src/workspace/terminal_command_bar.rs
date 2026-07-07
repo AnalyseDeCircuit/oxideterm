@@ -3621,14 +3621,6 @@ impl WorkspaceApp {
             .flatten();
         let cwd_supported =
             cwd_awareness_enabled && self.active_terminal_cwd_scope_and_pane().is_some();
-        if cwd_supported && cwd_snapshot.is_none() {
-            cx.spawn(async move |weak, cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    this.bootstrap_active_terminal_cwd(cx);
-                });
-            })
-            .detach();
-        }
         let git_snapshot = self.active_terminal_git_snapshot(cx);
         let project_tasks_enabled = self.terminal_project_tasks_enabled();
         let project_snapshot = project_tasks_enabled

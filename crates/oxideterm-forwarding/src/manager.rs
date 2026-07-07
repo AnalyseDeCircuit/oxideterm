@@ -64,7 +64,11 @@ impl ForwardingManager {
         &self.session_id
     }
 
-    pub async fn create_forward(&self, rule: ForwardRule) -> Result<ForwardRule, ForwardingError> {
+    pub async fn create_forward(
+        &self,
+        mut rule: ForwardRule,
+    ) -> Result<ForwardRule, ForwardingError> {
+        rule.normalize_hosts_for_runtime();
         if self.has_rule(&rule.id) {
             return Err(ForwardingError::AlreadyExists(rule.id));
         }
@@ -106,9 +110,10 @@ impl ForwardingManager {
 
     pub async fn create_forward_with_health_check(
         &self,
-        rule: ForwardRule,
+        mut rule: ForwardRule,
         check_health: bool,
     ) -> Result<ForwardRule, ForwardingError> {
+        rule.normalize_hosts_for_runtime();
         if check_health && rule.forward_type != ForwardType::Dynamic {
             match self
                 .check_port_available(&rule.target_host, rule.target_port, 3000)

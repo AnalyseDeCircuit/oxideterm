@@ -652,7 +652,6 @@ pub(crate) struct WorkspaceApp {
     terminal_cwd_tx: std::sync::mpsc::Sender<terminal_cwd::TerminalCwdDelivery>,
     terminal_cwd_rx: std::sync::mpsc::Receiver<terminal_cwd::TerminalCwdDelivery>,
     terminal_cwd_picker: terminal_cwd::TerminalCwdPickerState,
-    terminal_cwd_bootstrap_requested: HashSet<PaneId>,
     terminal_git_store: oxideterm_environment::GitStatusStore,
     terminal_git_tx: std::sync::mpsc::Sender<terminal_git::TerminalGitDelivery>,
     terminal_git_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,

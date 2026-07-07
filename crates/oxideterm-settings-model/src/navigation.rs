@@ -54,7 +54,7 @@ pub fn terminal_settings_section_count(page: TerminalSettingsPage) -> usize {
         TerminalSettingsPage::Display => 2,
         TerminalSettingsPage::Input => 1,
         TerminalSettingsPage::Local => 6,
-        TerminalSettingsPage::CommandBar => 1,
+        TerminalSettingsPage::CommandBar => 3,
         TerminalSettingsPage::History => 2,
         TerminalSettingsPage::Transfer => 1,
         TerminalSettingsPage::Highlight => 1,
@@ -126,6 +126,10 @@ mod tests {
         assert_eq!(
             terminal_settings_section_count(TerminalSettingsPage::Input),
             2
+        );
+        assert_eq!(
+            terminal_settings_section_count(TerminalSettingsPage::CommandBar),
+            4
         );
     }
 

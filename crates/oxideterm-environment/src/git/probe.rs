@@ -105,20 +105,29 @@ fn remote_shell_cd_target(cwd: &str) -> String {
     }
 }
 
+// Remote probes must emit the repository identity before the potentially slow
+// status scan. Otherwise a large worktree can hide the branch chip completely.
 fn shell_probe_body() -> &'static str {
     concat!(
         "GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS\n",
         "printf 'OXIDETERM_GIT_PROBE_V1\\0'\n",
         "if ! command -v git >/dev/null 2>&1; then printf 'state\\0git_missing\\0'; exit 0; fi\n",
+        "git_probe_status() {\n",
+        "  if command -v timeout >/dev/null 2>&1; then\n",
+        "    timeout 2 git status --porcelain=v2 --branch 2>/dev/null | sed -n '1,200p;201q' || true\n",
+        "  else\n",
+        "    git status --porcelain=v2 --branch --untracked-files=no 2>/dev/null | sed -n '1,200p;201q' || true\n",
+        "  fi\n",
+        "}\n",
         "root=$(git rev-parse --show-toplevel 2>/dev/null) || { printf 'state\\0not_repo\\0'; exit 0; }\n",
         "branch=$(git symbolic-ref --short HEAD 2>/dev/null || true)\n",
         "head=$(git rev-parse --short HEAD 2>/dev/null || true)\n",
-        "status=$(git status --porcelain=v2 --branch 2>/dev/null || true)\n",
         "operation=$(git_operation_state)\n",
         "printf 'state\\0repo\\0root\\0%s\\0' \"$root\"\n",
         "if [ -n \"$branch\" ]; then printf 'branch\\0%s\\0' \"$branch\"; else printf 'detached\\0%s\\0' \"$head\"; fi\n",
-        "printf 'status\\0%s\\0' \"$status\"\n",
         "printf 'operation\\0%s\\0' \"$operation\"\n",
+        "status=$(git_probe_status)\n",
+        "printf 'status\\0%s\\0' \"$status\"\n",
     )
 }
 
@@ -201,6 +210,29 @@ mod tests {
         let command = remote_shell_probe_command("~/project dir");
         assert!(command.contains("cd -- \"$HOME\"/'project dir'"));
         assert!(!command.contains("/home/"));
+    }
+
+    #[test]
+    fn remote_shell_probe_emits_repo_identity_before_status() {
+        let command = remote_shell_probe_command("/tmp/project");
+        let repo_position = command
+            .find("printf 'state\\0repo\\0root\\0%s\\0'")
+            .expect("repo identity should be emitted");
+        let status_position = command
+            .find("status=$(git_probe_status)")
+            .expect("status should be collected after identity");
+
+        assert!(repo_position < status_position);
+    }
+
+    #[test]
+    fn remote_shell_probe_bounds_status_collection() {
+        let command = remote_shell_probe_command("/tmp/project");
+
+        assert!(command.contains("git_probe_status()"));
+        assert!(command.contains("timeout 2 git status --porcelain=v2 --branch"));
+        assert!(command.contains("git status --porcelain=v2 --branch --untracked-files=no"));
+        assert!(command.contains("sed -n '1,200p;201q'"));
     }
 
     #[test]

@@ -668,6 +668,21 @@ mod tests {
     }
 
     #[test]
+    fn shell_probe_output_accepts_identity_without_status() {
+        let output =
+            "OXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/repo\0branch\0main\0operation\0rebase\0";
+        let outcome = parse_shell_probe_output(output);
+
+        let GitProbeOutcome::Ready(snapshot) = outcome else {
+            panic!("expected ready shell git snapshot");
+        };
+        assert_eq!(snapshot.repo_root, "/repo");
+        assert_eq!(snapshot.branch.display_text(), "main");
+        assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Rebase));
+        assert!(!snapshot.status.is_dirty());
+    }
+
+    #[test]
     fn shell_probe_output_handles_not_repo() {
         let output = "OXIDETERM_GIT_PROBE_V1\0state\0not_repo\0";
         assert_eq!(

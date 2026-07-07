@@ -7,7 +7,7 @@ use oxideterm_environment::{
     CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
     current_directory_parent, current_directory_report_command,
-    current_directory_shell_integration_command, current_directory_shell_path_argument,
+    current_directory_shell_path_argument, infer_terminal_cwd_from_text,
 };
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};
 use oxideterm_ssh::NodeId;
@@ -205,8 +205,15 @@ impl WorkspaceApp {
     ) -> Option<CurrentDirectorySnapshot> {
         let pane = self.panes.get(&pane_id)?.read(cx);
 
-        // OSC 7 is the active shell channel's own cwd report. The picker must
-        // not infer cwd from prompt text, node metadata, or tab titles.
+        if matches!(&scope, CurrentDirectoryScope::SshNode(_))
+            && let Some(cwd) = infer_terminal_cwd_from_text(&pane.visible_text_snapshot())
+        {
+            // SSH shells do not expose a process cwd. Prefer the latest visible
+            // prompt/path because an injected OSC 7 hook can lag behind `cd`.
+            return CurrentDirectorySnapshot::new(scope, cwd, CurrentDirectorySource::VisibleText);
+        }
+
+        // OSC 7 is the active shell channel's own cwd report.
         if let Some(cwd) = pane.current_working_directory() {
             let source = match pane.current_working_directory_source() {
                 Some(TerminalWorkingDirectorySource::ShellIntegration) => {
@@ -329,44 +336,6 @@ impl WorkspaceApp {
         pane.update(cx, |pane, cx| {
             pane.send_internal_control_command_line(command, cx)
         })
-    }
-
-    pub(in crate::workspace) fn bootstrap_active_terminal_cwd(&mut self, cx: &mut Context<Self>) {
-        if !self.terminal_current_directory_awareness_enabled() {
-            return;
-        }
-        let Some((scope, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
-            return;
-        };
-        if matches!(&scope, CurrentDirectoryScope::Local)
-            || self.terminal_cwd_bootstrap_requested.contains(&pane_id)
-            || self
-                .terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
-                .is_some()
-        {
-            return;
-        }
-        let Some(pane) = self.panes.get(&pane_id) else {
-            return;
-        };
-        if !pane.read(cx).can_switch_working_directory_from_chrome() {
-            return;
-        }
-
-        // SSH panes have no local process cwd fallback. Ask the live shell to
-        // report OSC 7. A prompt-safe shell hook is preferred when the pane
-        // already exposed a shell-integration prompt boundary; otherwise fall
-        // back to the one-shot report command.
-        self.terminal_cwd_bootstrap_requested.insert(pane_id);
-        let shell_integration_command = current_directory_shell_integration_command();
-        if pane.update(cx, |pane, cx| {
-            pane.try_install_current_directory_shell_integration(shell_integration_command, cx)
-        }) {
-            return;
-        }
-        if !self.request_terminal_cwd_report(pane_id, cx) {
-            self.terminal_cwd_bootstrap_requested.remove(&pane_id);
-        }
     }
 
     fn spawn_terminal_cwd_report_poll(&mut self, generation: u64, cx: &mut Context<Self>) {

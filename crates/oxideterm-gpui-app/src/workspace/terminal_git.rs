@@ -9,15 +9,16 @@ use oxideterm_ai::{
     provider_chat_requires_key as ai_provider_chat_requires_key, stream_chat_completion,
 };
 use oxideterm_environment::{
-    GitBranchListOutcome, GitBranchReference, GitCommandOutput, GitOperationKind, GitProbeKey,
-    GitProbeOutcome, GitProbeScope, GitRepositorySnapshot, GitStagedDiffContext,
-    GitStagedDiffOutcome, git_absolute_git_dir_args, git_branch_args, git_branch_list_args,
-    git_head_args, git_repo_root_args, git_staged_diff_patch_args, git_staged_diff_stat_args,
-    git_status_args, git_worktree_list_args, infer_terminal_cwd_from_text,
-    interpret_git_branch_list_outputs, interpret_git_command_outputs_with_status_and_operation,
-    interpret_git_staged_diff_outputs, parse_shell_branch_list_output, parse_shell_probe_output,
-    parse_shell_staged_diff_output, remote_shell_branch_list_command, remote_shell_probe_command,
-    remote_shell_staged_diff_command, shell_quote,
+    CurrentDirectoryScope, CurrentDirectorySnapshot, GitBranchListOutcome, GitBranchReference,
+    GitCommandOutput, GitOperationKind, GitProbeKey, GitProbeOutcome, GitProbeScope,
+    GitRepositorySnapshot, GitStagedDiffContext, GitStagedDiffOutcome, git_absolute_git_dir_args,
+    git_branch_args, git_branch_list_args, git_head_args, git_repo_root_args,
+    git_staged_diff_patch_args, git_staged_diff_stat_args, git_status_args, git_worktree_list_args,
+    infer_terminal_cwd_from_text, interpret_git_branch_list_outputs,
+    interpret_git_command_outputs_with_status_and_operation, interpret_git_staged_diff_outputs,
+    parse_shell_branch_list_output, parse_shell_probe_output, parse_shell_staged_diff_output,
+    remote_shell_branch_list_command, remote_shell_probe_command, remote_shell_staged_diff_command,
+    shell_quote,
 };
 use oxideterm_ssh::NodeId;
 use tokio::process::Command;
@@ -25,7 +26,7 @@ use tokio::process::Command;
 use super::*;
 
 const TERMINAL_GIT_PROBE_TTL_MS: u64 = 5_000;
-const TERMINAL_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const TERMINAL_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 const TERMINAL_GIT_BRANCH_LIST_TIMEOUT: Duration = Duration::from_secs(4);
 const TERMINAL_GIT_AI_DIFF_TIMEOUT: Duration = Duration::from_secs(6);
 const TERMINAL_GIT_REMOTE_MAX_OUTPUT: usize = 8 * 1024;
@@ -972,14 +973,17 @@ impl WorkspaceApp {
         scope: &GitProbeScope,
         cx: &mut Context<Self>,
     ) -> Option<String> {
+        let snapshot_cwd = self
+            .active_terminal_cwd_snapshot(cx)
+            .and_then(|snapshot| terminal_git_cwd_from_directory_snapshot(scope, &snapshot));
         let pane = self.panes.get(&pane_id)?;
         let pane = pane.read(cx);
         // OSC 7 / shell integration is the authoritative cwd source. The
         // visible-text fallback only recovers the cwd for Git UX; SSH ownership
         // and credential scope must still come from workspace state.
-        let cwd = pane
-            .current_working_directory()
-            .or_else(|| infer_terminal_cwd_from_text(&pane.visible_text_snapshot()))?;
+        let shell_cwd = pane.current_working_directory();
+        let visible_cwd = infer_terminal_cwd_from_text(&pane.visible_text_snapshot());
+        let cwd = terminal_git_preferred_cwd(scope, snapshot_cwd, shell_cwd, visible_cwd)?;
         Some(match scope {
             GitProbeScope::Local => terminal_git_expand_local_home(&cwd),
             GitProbeScope::SshNode(_) => cwd,
@@ -1222,6 +1226,38 @@ impl WorkspaceApp {
         }
         true
     }
+}
+
+fn terminal_git_cwd_from_directory_snapshot(
+    scope: &GitProbeScope,
+    snapshot: &CurrentDirectorySnapshot,
+) -> Option<String> {
+    match (scope, snapshot.scope()) {
+        (GitProbeScope::Local, CurrentDirectoryScope::Local) => {
+            Some(terminal_git_expand_local_home(snapshot.path()))
+        }
+        (GitProbeScope::SshNode(expected), CurrentDirectoryScope::SshNode(actual))
+            if expected == actual =>
+        {
+            Some(snapshot.path().to_string())
+        }
+        _ => None,
+    }
+}
+
+fn terminal_git_preferred_cwd(
+    scope: &GitProbeScope,
+    snapshot_cwd: Option<String>,
+    shell_cwd: Option<String>,
+    visible_cwd: Option<String>,
+) -> Option<String> {
+    if matches!(scope, GitProbeScope::SshNode(_)) {
+        // SSH cwd reports can lag behind an interactive `cd`. The visible
+        // prompt is the freshest low-risk source because it does not inject
+        // another command into the user's shell.
+        return visible_cwd.or(snapshot_cwd).or(shell_cwd);
+    }
+    snapshot_cwd.or(shell_cwd).or(visible_cwd)
 }
 
 async fn run_local_git_probe(cwd: &str) -> GitProbeOutcome {
@@ -1713,6 +1749,7 @@ fn terminal_git_clean_ai_commit_subject(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxideterm_environment::CurrentDirectorySource;
 
     #[test]
     fn branch_action_plan_uses_worktree_cd_when_available() {
@@ -1722,6 +1759,61 @@ mod tests {
 
         assert_eq!(plan.command, "cd '/tmp/Oxide Term'");
         assert_eq!(plan.cwd_after_command.as_deref(), Some("/tmp/Oxide Term"));
+    }
+
+    #[test]
+    fn remote_git_cwd_prefers_matching_directory_snapshot() {
+        let snapshot = CurrentDirectorySnapshot::new(
+            CurrentDirectoryScope::ssh_node("node-1"),
+            "/home/dev/project",
+            CurrentDirectorySource::ShellIntegration,
+        )
+        .unwrap();
+
+        assert_eq!(
+            terminal_git_cwd_from_directory_snapshot(&GitProbeScope::ssh_node("node-1"), &snapshot)
+                .as_deref(),
+            Some("/home/dev/project")
+        );
+    }
+
+    #[test]
+    fn remote_git_cwd_rejects_other_node_snapshot() {
+        let snapshot = CurrentDirectorySnapshot::new(
+            CurrentDirectoryScope::ssh_node("node-2"),
+            "/home/dev/project",
+            CurrentDirectorySource::ShellIntegration,
+        )
+        .unwrap();
+
+        assert!(
+            terminal_git_cwd_from_directory_snapshot(&GitProbeScope::ssh_node("node-1"), &snapshot)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn remote_git_prefers_visible_cwd_before_prompt_hook_is_active() {
+        let cwd = terminal_git_preferred_cwd(
+            &GitProbeScope::ssh_node("node-1"),
+            Some("/home/lipsc".to_string()),
+            Some("/home/lipsc".to_string()),
+            Some("~/oxideterm.cloud-sync-server".to_string()),
+        );
+
+        assert_eq!(cwd.as_deref(), Some("~/oxideterm.cloud-sync-server"));
+    }
+
+    #[test]
+    fn remote_git_prefers_visible_cwd_over_stale_shell_cwd() {
+        let cwd = terminal_git_preferred_cwd(
+            &GitProbeScope::ssh_node("node-1"),
+            Some("/home/lipsc".to_string()),
+            Some("/home/lipsc".to_string()),
+            Some("~/oxideterm.cloud-sync-server".to_string()),
+        );
+
+        assert_eq!(cwd.as_deref(), Some("~/oxideterm.cloud-sync-server"));
     }
 
     #[test]

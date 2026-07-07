@@ -487,9 +487,9 @@ impl WorkspaceApp {
     }
 
     fn render_welcome_brand(&self) -> AnyElement {
-        const BRAND_GLOW_BG_ALPHA: u32 = 0x12;
-        const BRAND_GLOW_INNER_ALPHA: u32 = 0x33;
-        const BRAND_GLOW_OUTER_ALPHA: u32 = 0x1a;
+        const BRAND_GLOW_BG_ALPHA: u32 = 0x02;
+        const BRAND_GLOW_INNER_ALPHA: u32 = 0x18;
+        const BRAND_GLOW_OUTER_ALPHA: u32 = 0x0c;
         const BRAND_CARET_GLOW_ALPHA: u32 = 0x66;
 
         let theme = self.tokens.ui;
@@ -523,18 +523,19 @@ impl WorkspaceApp {
                     .relative()
                     .flex()
                     .items_center()
-                    .px(px(20.0))
-                    .py(px(6.0))
+                    .px(px(8.0))
+                    .py(px(2.0))
                     // GPUI does not expose CSS text-shadow; a static shadowed
-                    // backing quad keeps the Tauri brand glow without realtime blur.
+                    // backing glow keeps the Tauri brand halo without drawing
+                    // a visible capsule behind the wordmark.
                     .child(
                         div()
                             .absolute()
-                            .top_0()
-                            .left_0()
-                            .right_0()
-                            .bottom_0()
-                            .rounded_full()
+                            .top(px(14.0))
+                            .left(px(18.0))
+                            .right(px(18.0))
+                            .bottom(px(14.0))
+                            .rounded(px(self.tokens.radii.lg))
                             .bg(rgba((theme.accent << 8) | BRAND_GLOW_BG_ALPHA))
                             .shadow(brand_glow),
                     )

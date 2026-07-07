@@ -239,7 +239,7 @@ fn build_linux_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
             "echo '__OXIDE_LOG_CAPABILITY__\tfull\tlinux_systemd'; ",
             "oxide_logs=$(journalctl {journal_args} -n {limit} --no-pager -o json 2>&1); ",
             "oxide_status=$?; ",
-            "if [ \"$oxide_status\" -eq 0 ]; then printf '%s\n' \"$oxide_logs\" | sed 's/^/JSON\t/'; ",
+            "if [ \"$oxide_status\" -eq 0 ]; then printf '%s\\n' \"$oxide_logs\" | sed 's/^/JSON\t/'; ",
             "else printf '__OXIDE_LOG_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_logs\" | head -n 1 | tr '\\t' ' ')\"; fi; ",
             "else ",
             "echo '__OXIDE_LOG_CAPABILITY__\tpartial\tlinux_files'; ",
@@ -280,7 +280,7 @@ fn build_macos_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
             "echo '__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log'; ",
             "oxide_logs=$(log show --last 1h --style compact {predicate} 2>&1 | tail -n {limit}); ",
             "oxide_status=$?; ",
-            "if [ \"$oxide_status\" -eq 0 ]; then printf '%s\n' \"$oxide_logs\" | awk '{{ gsub(/\\t/, \" \"); printf \"ROW\\t\\tinfo\\tmacos_log\\t\\t%s\\n\", $0 }}'; ",
+            "if [ \"$oxide_status\" -eq 0 ]; then printf '%s\\n' \"$oxide_logs\" | awk '{{ gsub(/\\t/, \" \"); printf \"ROW\\t\\tinfo\\tmacos_log\\t\\t%s\\n\", $0 }}'; ",
             "else printf '__OXIDE_LOG_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_logs\" | head -n 1 | tr '\\t' ' ')\"; fi; ",
             "else echo '__OXIDE_LOG_UNAVAILABLE__'; fi; ",
             "echo '===HOST_LOGS_END==='"
@@ -793,5 +793,22 @@ mod tests {
         assert!(windows.command.contains("Get-WinEvent"));
         assert!(windows.command.starts_with("powershell "));
         assert!(follow.command.contains("journalctl -k -f --no-pager"));
+    }
+
+    #[test]
+    fn unix_log_snapshot_commands_stay_single_line_for_exec_shells() {
+        for os_type in ["Linux", "macOS", "FreeBSD"] {
+            let command = build_log_snapshot_command(os_type, LogPreset::All, 300)
+                .unwrap_or_else(|error| panic!("{os_type} log command should build: {error}"));
+
+            // SSH exec channels commonly run the command through the user's
+            // login shell with `-c`; keeping the generated command one-line
+            // avoids zsh parsing marker lines as standalone shell syntax.
+            assert!(
+                !command.command.contains('\n'),
+                "{os_type} log command contains a literal newline: {}",
+                command.command
+            );
+        }
     }
 }
