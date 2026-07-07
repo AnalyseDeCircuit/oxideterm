@@ -18,6 +18,14 @@ import { api } from '../../lib/api';
 import { useToast } from '../../hooks/useToast';
 import type { DetectedPort } from '../../types';
 
+const DEFAULT_FORWARD_HOST = 'localhost';
+
+const assertForwardCreated = (response: { success: boolean; error?: string }): void => {
+  if (!response.success) {
+    throw new Error(response.error || 'Failed to create port forward');
+  }
+};
+
 interface PortDetectionBannerProps {
   /** Newly detected ports to show in the banner */
   newPorts: DetectedPort[];
@@ -41,28 +49,29 @@ export const PortDetectionBanner: React.FC<PortDetectionBannerProps> = ({
   const handleForward = useCallback(
     async (port: DetectedPort) => {
       try {
-        await api.nodeCreateForward({
+        const response = await api.nodeCreateForward({
           node_id: nodeId,
           forward_type: 'local',
-          bind_address: 'localhost',
+          bind_address: DEFAULT_FORWARD_HOST,
           bind_port: port.port,
-          target_host: 'localhost',
+          target_host: DEFAULT_FORWARD_HOST,
           target_port: port.port,
           description: port.process_name
             ? `${port.process_name} (${t('forwards.detection.auto')})`
             : `${t('forwards.detection.port')} ${port.port} (${t('forwards.detection.auto')})`,
           check_health: true,
         });
+        assertForwardCreated(response);
         onDismiss(port.port);
         onForwardCreated?.();
         toast({
           title: t('forwards.detection.forwarded'),
-          description: `localhost:${port.port} → remote:${port.port}`,
+          description: `${DEFAULT_FORWARD_HOST}:${port.port} → remote:${port.port}`,
         });
       } catch (error) {
         toast({
           title: t('forwards.detection.forwardError'),
-          description: String(error),
+          description: error instanceof Error ? error.message : String(error),
           variant: 'error',
         });
       }

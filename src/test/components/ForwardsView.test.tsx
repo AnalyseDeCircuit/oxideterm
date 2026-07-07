@@ -236,6 +236,60 @@ describe('ForwardsView', () => {
     });
   });
 
+  it('defaults a blank remote bind host to localhost when creating a remote forward', async () => {
+    render(<ForwardsView nodeId="node-1" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: 'forwards.actions.new_forward' })[0]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('forwards.form.type_remote'));
+    });
+
+    const portInputs = screen.getAllByPlaceholderText('forwards.form.port_placeholder');
+    await act(async () => {
+      fireEvent.change(portInputs[0], { target: { value: '5500' } });
+      fireEvent.change(portInputs[1], { target: { value: '5500' } });
+      fireEvent.click(screen.getByRole('button', { name: 'forwards.form.create_forward' }));
+    });
+
+    await waitFor(() => {
+      expect(apiMocks.nodeCreateForward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          node_id: 'node-1',
+          forward_type: 'remote',
+          bind_address: 'localhost',
+          bind_port: 5500,
+          target_host: 'localhost',
+          target_port: 5500,
+        }),
+      );
+    });
+  });
+
+  it('shows backend create failures returned in ForwardResponse', async () => {
+    apiMocks.nodeCreateForward.mockResolvedValueOnce({
+      success: false,
+      error: 'Connection failed: The request was rejected by the other party',
+    });
+
+    render(<ForwardsView nodeId="node-1" />);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: 'forwards.actions.new_forward' })[0]);
+    });
+
+    const portInputs = screen.getAllByPlaceholderText('forwards.form.port_placeholder');
+    await act(async () => {
+      fireEvent.change(portInputs[0], { target: { value: '8080' } });
+      fireEvent.change(portInputs[1], { target: { value: '3000' } });
+      fireEvent.click(screen.getByRole('button', { name: 'forwards.form.create_forward' }));
+    });
+
+    expect(await screen.findByText('Connection failed: The request was rejected by the other party')).toBeInTheDocument();
+  });
+
   it('submits parsed numeric ports when editing a stopped forward', async () => {
     apiMocks.nodeListForwards.mockResolvedValue([makeForward()]);
 

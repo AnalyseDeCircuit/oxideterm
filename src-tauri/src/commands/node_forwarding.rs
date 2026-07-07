@@ -23,12 +23,23 @@ use crate::state::PersistedForward;
 
 use super::session_tree::SessionTreeState;
 
+const DEFAULT_FORWARD_HOST: &str = "localhost";
+
 fn parse_forward_type(forward_type: &str) -> Result<ForwardType, String> {
     match forward_type {
         "local" => Ok(ForwardType::Local),
         "remote" => Ok(ForwardType::Remote),
         "dynamic" => Ok(ForwardType::Dynamic),
         other => Err(format!("Unknown forward type: {}", other)),
+    }
+}
+
+fn normalize_forward_host(host: String) -> String {
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        DEFAULT_FORWARD_HOST.to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -167,23 +178,34 @@ pub async fn node_create_forward(
         }
     };
 
+    // Normalize host fields before health checks and SSH forward requests.
+    let normalized_bind_address = normalize_forward_host(bind_address);
+    let normalized_target_host = if fwd_type == ForwardType::Dynamic {
+        target_host
+    } else {
+        normalize_forward_host(target_host)
+    };
+
     // Health check for non-dynamic forwards
     let do_check = check_health.unwrap_or(true);
     if do_check && fwd_type != ForwardType::Dynamic {
         info!(
             "Checking port availability: {}:{}",
-            target_host, target_port
+            normalized_target_host, target_port
         );
 
         match mgr
-            .check_port_available(&target_host, target_port, 3000)
+            .check_port_available(&normalized_target_host, target_port, 3000)
             .await
         {
             Ok(true) => {
-                info!("Port {}:{} is available", target_host, target_port);
+                info!(
+                    "Port {}:{} is available",
+                    normalized_target_host, target_port
+                );
             }
             Ok(false) => {
-                let error_msg = build_unreachable_port_error(&target_host, target_port);
+                let error_msg = build_unreachable_port_error(&normalized_target_host, target_port);
                 error!("Port health check failed: {}", error_msg);
                 return Ok(ForwardResponse {
                     success: false,
@@ -206,9 +228,9 @@ pub async fn node_create_forward(
     let rule = ForwardRule {
         id: uuid::Uuid::new_v4().to_string(),
         forward_type: fwd_type,
-        bind_address,
+        bind_address: normalized_bind_address,
         bind_port,
-        target_host,
+        target_host: normalized_target_host,
         target_port,
         status: ForwardStatus::Starting,
         description,
@@ -282,6 +304,16 @@ mod tests {
     fn parse_forward_type_rejects_unknown_values() {
         let error = parse_forward_type("udp").unwrap_err();
         assert!(error.contains("Unknown forward type: udp"));
+    }
+
+    #[test]
+    fn normalize_forward_host_defaults_blank_values() {
+        assert_eq!(normalize_forward_host("".to_string()), DEFAULT_FORWARD_HOST);
+        assert_eq!(
+            normalize_forward_host("   ".to_string()),
+            DEFAULT_FORWARD_HOST
+        );
+        assert_eq!(normalize_forward_host("  0.0.0.0  ".to_string()), "0.0.0.0");
     }
 
     #[test]
@@ -440,9 +472,9 @@ pub async fn node_update_forward(
     })?;
 
     let updates = ForwardRuleUpdate {
-        bind_address,
+        bind_address: bind_address.map(normalize_forward_host),
         bind_port,
-        target_host,
+        target_host: target_host.map(normalize_forward_host),
         target_port,
         description,
     };

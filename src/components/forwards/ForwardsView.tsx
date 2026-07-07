@@ -28,6 +28,20 @@ import { validateForwardForm } from './forwardFormValidation';
 // Type guard for ForwardType using const type parameter (TS 5.0+)
 const FORWARD_TYPES = ['local', 'remote', 'dynamic'] as const;
 const isForwardType = createTypeGuard(FORWARD_TYPES);
+const DEFAULT_FORWARD_HOST = 'localhost';
+
+// Blank host fields should mean the UI default, not an empty SSH bind address.
+const normalizeForwardHost = (value: string | undefined, fallback = DEFAULT_FORWARD_HOST): string => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+};
+
+// Node-first commands return ForwardResponse even when the command itself succeeds.
+const assertForwardResponse = (response: { success: boolean; error?: string }, fallbackMessage: string): void => {
+  if (!response.success) {
+    throw new Error(response.error || fallbackMessage);
+  }
+};
 
 interface ForwardStats {
   connection_count: number;
@@ -188,69 +202,67 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
   }, [nodeId, nodeReady, fetchForwards]);
 
   const handleCreateQuick = async (type: 'jupyter' | 'tensorboard' | 'vscode') => {
-      try {
-          if (type === 'jupyter') {
-            await api.nodeForwardJupyter(nodeId, 8888, 8888);
-            toast({ title: t('forwards.toast.jupyter_created'), description: t('forwards.toast.jupyter_desc') });
-          } else if (type === 'tensorboard') {
-            await api.nodeForwardTensorboard(nodeId, 6006, 6006);
-            toast({ title: t('forwards.toast.tensorboard_created'), description: t('forwards.toast.tensorboard_desc') });
-          } else if (type === 'vscode') {
-            await api.nodeForwardVscode(nodeId, 8080, 8080);
-            toast({ title: t('forwards.toast.vscode_created'), description: t('forwards.toast.vscode_desc') });
-          }
-          fetchForwards();
-      } catch (e) {
-          console.error(e);
-          toast({ 
-            title: t('forwards.toast.create_failed'), 
-            description: e instanceof Error ? e.message : String(e),
-            variant: 'error'
-          });
+    try {
+      if (type === 'jupyter') {
+        const response = await api.nodeForwardJupyter(nodeId, 8888, 8888);
+        assertForwardResponse(response, t('forwards.toast.create_failed'));
+        toast({ title: t('forwards.toast.jupyter_created'), description: t('forwards.toast.jupyter_desc') });
+      } else if (type === 'tensorboard') {
+        const response = await api.nodeForwardTensorboard(nodeId, 6006, 6006);
+        assertForwardResponse(response, t('forwards.toast.create_failed'));
+        toast({ title: t('forwards.toast.tensorboard_created'), description: t('forwards.toast.tensorboard_desc') });
+      } else if (type === 'vscode') {
+        const response = await api.nodeForwardVscode(nodeId, 8080, 8080);
+        assertForwardResponse(response, t('forwards.toast.create_failed'));
+        toast({ title: t('forwards.toast.vscode_created'), description: t('forwards.toast.vscode_desc') });
       }
+      fetchForwards();
+    } catch (e) {
+      console.error(e);
+      toast({
+        title: t('forwards.toast.create_failed'),
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
   };
 
   const handleCreateForward = async () => {
-      setCreateError(null);
-      const validation = validateForwardForm({
-        forwardType,
-        bindPort,
-        targetPort,
-      });
-      if (validation.errorKey) {
-        setCreateError(t(validation.errorKey));
-          return;
-      }
+    setCreateError(null);
+    const validation = validateForwardForm({
+      forwardType,
+      bindPort,
+      targetPort,
+    });
+    if (validation.errorKey) {
+      setCreateError(t(validation.errorKey));
+      return;
+    }
 
-      setIsCreating(true);
-      try {
-          const response = await api.nodeCreateForward({
-              node_id: nodeId,
-              forward_type: forwardType,
-              bind_address: bindAddress,
-          bind_port: validation.bindPort!,
-              target_host: forwardType === 'dynamic' ? '0.0.0.0' : targetHost,
-          target_port: forwardType === 'dynamic' ? 0 : validation.targetPort!,
-              check_health: !skipHealthCheck
-          });
-          
-          // Check response for errors
-          if (response && !response.success && response.error) {
-              setCreateError(response.error);
-              setIsCreating(false);
-              return;
-          }
-          
-          setShowNewForm(false);
-          setBindPort('');
-          setTargetPort('');
-          setSkipHealthCheck(false);
-          fetchForwards();
-      } catch (e: unknown) {
-          setCreateError(e instanceof Error ? e.message : String(e));
-      } finally {
-          setIsCreating(false);
-      }
+    setIsCreating(true);
+    try {
+      const response = await api.nodeCreateForward({
+        node_id: nodeId,
+        forward_type: forwardType,
+        bind_address: normalizeForwardHost(bindAddress),
+        bind_port: validation.bindPort!,
+        target_host: forwardType === 'dynamic' ? '0.0.0.0' : normalizeForwardHost(targetHost),
+        target_port: forwardType === 'dynamic' ? 0 : validation.targetPort!,
+        check_health: !skipHealthCheck,
+      });
+
+      assertForwardResponse(response, t('forwards.toast.create_failed'));
+
+      setShowNewForm(false);
+      setBindPort('');
+      setTargetPort('');
+      setSkipHealthCheck(false);
+      fetchForwards();
+    } catch (e: unknown) {
+      setCreateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -410,7 +422,19 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                                 variant="ghost" 
                                 className="h-7 w-7 text-theme-text-muted hover:text-yellow-400"
                                 aria-label={t('forwards.actions.stop')}
-                                onClick={() => api.nodeStopForward(nodeId, fw.id).then(fetchForwards)}
+                                onClick={async () => {
+                                  try {
+                                    const response = await api.nodeStopForward(nodeId, fw.id);
+                                    assertForwardResponse(response, t('forwards.actions.stop'));
+                                    fetchForwards();
+                                  } catch (error) {
+                                    toast({
+                                      title: t('forwards.toast.error_title'),
+                                      description: error instanceof Error ? error.message : String(error),
+                                      variant: 'error',
+                                    });
+                                  }
+                                }}
                               >
                                 <Square className="h-3 w-3 fill-current" />
                               </Button>
@@ -432,7 +456,19 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                                   variant="ghost" 
                                   className="h-7 w-7 text-theme-text-muted hover:text-green-400"
                                   aria-label={t('forwards.actions.restart')}
-                                  onClick={() => api.nodeRestartForward(nodeId, fw.id).then(fetchForwards)}
+                                  onClick={async () => {
+                                    try {
+                                      const response = await api.nodeRestartForward(nodeId, fw.id);
+                                      assertForwardResponse(response, t('forwards.actions.restart'));
+                                      fetchForwards();
+                                    } catch (error) {
+                                      toast({
+                                        title: t('forwards.toast.error_title'),
+                                        description: error instanceof Error ? error.message : String(error),
+                                        variant: 'error',
+                                      });
+                                    }
+                                  }}
                                 >
                                   <Play className="h-3 w-3 fill-current" />
                                 </Button>
@@ -478,7 +514,17 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                                   variant: 'danger',
                                 });
                                 if (confirmed) {
-                                  api.nodeDeleteForward(nodeId, fw.id).then(fetchForwards);
+                                  try {
+                                    const response = await api.nodeDeleteForward(nodeId, fw.id);
+                                    assertForwardResponse(response, t('forwards.actions.delete'));
+                                    fetchForwards();
+                                  } catch (error) {
+                                    toast({
+                                      title: t('forwards.toast.error_title'),
+                                      description: error instanceof Error ? error.message : String(error),
+                                      variant: 'error',
+                                    });
+                                  }
                                 }
                               }}
                             >
@@ -695,20 +741,21 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                             setEditError(t(validation.errorKey));
                             return;
                           }
-                            try {
-                                await api.nodeUpdateForward({
-                                    node_id: nodeId,
-                                    forward_id: editingForward.id,
-                                    bind_address: editBindAddress,
+                          try {
+                            const response = await api.nodeUpdateForward({
+                              node_id: nodeId,
+                              forward_id: editingForward.id,
+                              bind_address: normalizeForwardHost(editBindAddress),
                               bind_port: validation.bindPort,
-                              target_host: editingForward.forward_type === 'dynamic' ? undefined : editTargetHost,
+                              target_host: editingForward.forward_type === 'dynamic' ? undefined : normalizeForwardHost(editTargetHost),
                               target_port: editingForward.forward_type === 'dynamic' ? undefined : validation.targetPort,
-                                });
-                                setEditingForward(null);
-                                fetchForwards();
-                            } catch (e: unknown) {
-                                setEditError(e instanceof Error ? e.message : String(e));
-                            }
+                            });
+                            assertForwardResponse(response, t('forwards.form.save_changes'));
+                            setEditingForward(null);
+                            fetchForwards();
+                          } catch (e: unknown) {
+                            setEditError(e instanceof Error ? e.message : String(e));
+                          }
                         }}>
                             {t('forwards.form.save_changes')}
                         </Button>
@@ -776,23 +823,24 @@ export const ForwardsView = ({ nodeId }: { nodeId: string }) => {
                             className="h-6 text-xs gap-1 text-theme-text-muted hover:text-emerald-400"
                             onClick={async () => {
                               try {
-                                await api.nodeCreateForward({
+                                const response = await api.nodeCreateForward({
                                   node_id: nodeId,
                                   forward_type: 'local',
-                                  bind_address: 'localhost',
+                                  bind_address: DEFAULT_FORWARD_HOST,
                                   bind_port: p.port,
-                                  target_host: 'localhost',
+                                  target_host: DEFAULT_FORWARD_HOST,
                                   target_port: p.port,
                                 });
+                                assertForwardResponse(response, t('forwards.detection.forwardError'));
                                 fetchForwards();
                                 toast({
                                   title: t('forwards.detection.forwarded'),
-                                  description: `localhost:${p.port}`,
+                                  description: `${DEFAULT_FORWARD_HOST}:${p.port}`,
                                 });
-                              } catch {
+                              } catch (error) {
                                 toast({
                                   title: t('forwards.detection.forwardError'),
-                                  description: `Port ${p.port}`,
+                                  description: error instanceof Error ? error.message : `Port ${p.port}`,
                                   variant: 'error',
                                 });
                               }
