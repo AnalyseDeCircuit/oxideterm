@@ -11,7 +11,7 @@ If you just want the most stable daily-use OxideTerm release, do not download th
 - Built from the same product direction as OxideTerm: local-first remote server work over SSH, with terminal, SFTP, port forwarding, connection management, file workflows, and OxideSens AI context.
 - Intended for users who are comfortable testing early builds and filing detailed issues.
 
-<!-- GPUI_PREVIEW_CHANGELOG -->
+<!-- RELEASE_CHANGELOG -->
 
 ## What To Test
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compose GPUI preview release notes from evergreen text and one changelog entry."""
+"""Compose release notes from channel-specific evergreen text and one changelog entry."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-CHANGELOG_MARKER = "<!-- GPUI_PREVIEW_CHANGELOG -->"
+CHANGELOG_MARKER = "<!-- RELEASE_CHANGELOG -->"
 
 
 def extract_version_section(changelog: str, version: str) -> str:
@@ -45,7 +45,7 @@ def main() -> int:
     try:
         notes = compose_notes(args.version, args.base, args.changelog)
     except Exception as error:
-        print(f"failed to compose GPUI preview release notes: {error}", file=sys.stderr)
+        print(f"failed to compose release notes: {error}", file=sys.stderr)
         return 1
 
     args.output.write_text(notes, encoding="utf-8")
