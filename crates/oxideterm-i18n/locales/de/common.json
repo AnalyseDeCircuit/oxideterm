@@ -84,7 +84,6 @@
     "cmd_reconnect_all": "Alle neu verbinden",
     "cmd_cancel_reconnect": "Alle Neuverbindungen abbrechen",
     "cmd_open_runtime": "Laufzeit öffnen",
-    "cmd_open_connection_pool": "Verbindungspool öffnen",
     "cmd_health_check": "Gesundheitscheck ausführen",
     "health_result": "{{healthy}}/{{total}} Verbindungen gesund",
     "cmd_shell_launcher": "Shell-Starter",

@@ -84,7 +84,6 @@
     "cmd_reconnect_all": "Reconnect All",
     "cmd_cancel_reconnect": "Cancel All Reconnects",
     "cmd_open_runtime": "Open Runtime",
-    "cmd_open_connection_pool": "Open Connection Pool",
     "cmd_health_check": "Run Health Check",
     "health_result": "{{healthy}}/{{total}} connections healthy",
     "cmd_shell_launcher": "Shell Launcher",

@@ -145,9 +145,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = match section {
-            SidebarSection::Terminal => self
-                .active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::ConnectionPool),
+            SidebarSection::Terminal => false,
             SidebarSection::Runtime => self
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::Runtime),
@@ -307,7 +305,11 @@ impl WorkspaceApp {
                     } else if section == SidebarSection::Connections {
                         this.open_session_manager_tab(window, cx);
                     } else if section == SidebarSection::Terminal {
-                        this.open_connection_pool_tab(window, cx);
+                        this.open_connection_runtime_tab(
+                            ConnectionRuntimeSection::Overview,
+                            window,
+                            cx,
+                        );
                     } else if section == SidebarSection::Runtime {
                         this.open_connection_runtime_tab(
                             ConnectionRuntimeSection::Overview,
@@ -358,7 +360,7 @@ impl WorkspaceApp {
             SidebarSection::Connections => self.i18n.t("sidebar.panels.open_session_manager"),
             SidebarSection::Sftp => self.i18n.t("sidebar.panels.sftp"),
             SidebarSection::Forwards => self.i18n.t("forwards.table.title"),
-            SidebarSection::Terminal => self.i18n.t("sidebar.panels.connection_pool"),
+            SidebarSection::Terminal => self.i18n.t("sidebar.panels.runtime_overview"),
             SidebarSection::Runtime => self.i18n.t("sidebar.panels.runtime"),
             SidebarSection::Activity => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Network => self.i18n.t("sidebar.panels.connection_matrix"),

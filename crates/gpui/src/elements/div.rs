@@ -2446,6 +2446,10 @@ impl Interactivity {
                     scroll_offset.y += delta_y;
                     scroll_offset.x += delta_x;
                     if *scroll_offset != old_scroll_offset {
+                        // A child overflow region that actually scrolls owns
+                        // this wheel event. Let parent scrollers take over
+                        // only when this region is already at its boundary.
+                        cx.stop_propagation();
                         cx.notify(current_view);
                     }
                 }

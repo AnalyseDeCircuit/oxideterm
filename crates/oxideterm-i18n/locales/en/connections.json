@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}} hrs ago"
     },
     "panel": {
-      "title": "Connection Pool",
+      "title": "Background SSH Connections",
       "description": "Manage active SSH connections and keep-alive settings",
       "refresh": "Refresh",
       "no_connections": "No active SSH connections",

@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}} ore fa"
     },
     "panel": {
-      "title": "Pool Connessioni",
+      "title": "Connessioni SSH in background",
       "description": "Gestisci le connessioni SSH attive e le impostazioni keep-alive",
       "refresh": "Aggiorna",
       "no_connections": "Nessuna connessione SSH attiva",

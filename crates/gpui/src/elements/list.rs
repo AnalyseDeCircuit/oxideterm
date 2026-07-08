@@ -492,19 +492,21 @@ impl StateInner {
         current_view: EntityId,
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> bool {
         // Drop scroll events after a reset, since we can't calculate
         // the new logical scroll top without the item heights
         if self.reset {
-            return;
+            return false;
         }
 
         let padding = self.last_padding.unwrap_or_default();
         let scroll_max =
             (self.items.summary().height + padding.top + padding.bottom - height).max(px(0.));
-        let new_scroll_top = (self.scroll_top(scroll_top) - delta.y)
-            .max(px(0.))
-            .min(scroll_max);
+        let old_scroll_top = self.scroll_top(scroll_top);
+        let new_scroll_top = (old_scroll_top - delta.y).max(px(0.)).min(scroll_max);
+        if new_scroll_top == old_scroll_top {
+            return false;
+        }
 
         if self.alignment == ListAlignment::Bottom && new_scroll_top == scroll_max {
             self.logical_scroll_top = None;
@@ -534,6 +536,7 @@ impl StateInner {
         }
 
         cx.notify(current_view);
+        true
     }
 
     fn logical_scroll_top(&self) -> ListOffset {
@@ -1082,14 +1085,19 @@ impl Element for List {
             if phase == DispatchPhase::Bubble && hitbox_id.should_handle_scroll(window) {
                 accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
                 let pixel_delta = accumulated_scroll_delta.pixel_delta(px(20.));
-                list_state.0.borrow_mut().scroll(
+                if list_state.0.borrow_mut().scroll(
                     &scroll_top,
                     height,
                     pixel_delta,
                     current_view,
                     window,
                     cx,
-                )
+                ) {
+                    // A nested list that actually moves owns this wheel event.
+                    // Let parent scroll regions handle the event only after the
+                    // list has reached one of its boundaries.
+                    cx.stop_propagation();
+                }
             }
         });
     }
@@ -1283,5 +1291,57 @@ mod test {
         let offset = state.logical_scroll_top();
         assert_eq!(offset.item_ix, 0);
         assert_eq!(offset.offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn nested_list_consumes_wheel_when_it_scrolls(cx: &mut TestAppContext) {
+        use crate::{
+            AppContext, Context, Element, InteractiveElement, IntoElement, ListAlignment,
+            ListState, ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled,
+            Window, div, list, point, px, size,
+        };
+
+        let cx = cx.add_empty_window();
+        let outer = ScrollHandle::new();
+        let inner = ListState::new(20, ListAlignment::Top, px(20.));
+
+        struct TestView {
+            outer: ScrollHandle,
+            inner: ListState,
+        }
+
+        impl Render for TestView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .id("nested-list-outer-scroll")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.outer)
+                    .child(
+                        list(self.inner.clone(), |_, _, _| {
+                            div().h(px(20.)).w_full().into_any()
+                        })
+                        .h(px(40.))
+                        .w_full(),
+                    )
+                    .child(div().h(px(240.)).w_full())
+            }
+        }
+
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, cx| {
+            cx.new(|_| TestView {
+                outer: outer.clone(),
+                inner: inner.clone(),
+            })
+        });
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(10.), px(10.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-30.))),
+            ..Default::default()
+        });
+
+        assert!(inner.logical_scroll_top().item_ix > 0);
+        assert_eq!(outer.offset().y, px(0.));
     }
 }

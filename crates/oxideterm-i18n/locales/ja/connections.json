@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}}時間前"
     },
     "panel": {
-      "title": "接続プール",
+      "title": "バックグラウンド SSH 接続",
       "description": "アクティブなSSH接続とキープアライブ設定を管理",
       "refresh": "更新",
       "no_connections": "アクティブなSSH接続がありません",

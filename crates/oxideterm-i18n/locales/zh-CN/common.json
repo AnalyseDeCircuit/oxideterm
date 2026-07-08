@@ -84,7 +84,6 @@
     "cmd_reconnect_all": "重连所有连接",
     "cmd_cancel_reconnect": "取消所有重连",
     "cmd_open_runtime": "打开运行时",
-    "cmd_open_connection_pool": "打开连接池",
     "cmd_health_check": "运行健康检查",
     "health_result": "{{healthy}}/{{total}} 个连接正常",
     "cmd_shell_launcher": "Shell 启动器",

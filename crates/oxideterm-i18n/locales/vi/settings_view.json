@@ -577,16 +577,16 @@
         "no_drafts": "Không tìm thấy kết nối có thể nhập"
       },
       "idle_timeout": {
-        "title": "Nhóm kết nối",
-        "description": "Cấu hình quản lý kết nối SSH không hoạt động.",
-        "label": "Thời gian chờ không hoạt động",
+        "title": "Kết nối SSH nền",
+        "description": "Cấu hình thời điểm thu hồi các kết nối SSH nền không dùng đến.",
+        "label": "Thu hồi khi không hoạt động",
         "5min": "5 phút",
         "15min": "15 phút",
         "30min": "30 phút (mặc định)",
         "1hr": "1 giờ",
         "never": "Không bao giờ (duy trì kết nối)",
-        "hint": "Các kết nối SSH không có terminal mở sẽ bị ngắt sau khoảng thời gian này. Đặt thành 'Không bao giờ' để duy trì kết nối vô thời hạn.",
-        "save_failed": "Lưu cài đặt thời gian chờ thất bại"
+        "hint": "Các kết nối SSH nền không có terminal, phiên SFTP hoặc chuyển tiếp cổng đang mở sẽ được thu hồi sau khoảng thời gian này. Đặt thành 'Không bao giờ' để duy trì kết nối vô thời hạn.",
+        "save_failed": "Lưu cài đặt thu hồi khi không hoạt động thất bại"
       }
     },
     "ssh_keys": {

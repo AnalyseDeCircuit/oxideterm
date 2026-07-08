@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}} 小時前"
     },
     "panel": {
-      "title": "連線池",
+      "title": "背景 SSH 連線",
       "description": "管理使用中的 SSH 連線和 Keep-alive 設定",
       "refresh": "重新整理",
       "no_connections": "沒有使用中的 SSH 連線",

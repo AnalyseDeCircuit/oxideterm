@@ -34,7 +34,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_connection_pool_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_connection_runtime_tab(ConnectionRuntimeSection::Pool, window, cx);
+        self.open_connection_runtime_tab(ConnectionRuntimeSection::Overview, window, cx);
     }
 
     pub(super) fn open_topology_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -120,23 +120,6 @@ impl WorkspaceApp {
             Some(self.ssh_registry.connection_topology_snapshot());
         self.connection_monitor.pool_error = None;
         self.connection_monitor.last_pool_refresh = Some(Instant::now());
-    }
-
-    fn set_connection_pool_keep_alive(
-        &mut self,
-        connection_id: &str,
-        keep_alive: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .ssh_registry
-            .set_keep_alive(connection_id, keep_alive)
-            .is_none()
-        {
-            return;
-        }
-        self.refresh_connection_monitor_pool_stats();
-        cx.notify();
     }
 
     pub(super) fn sync_connection_monitor_selection(&mut self, cx: &mut Context<Self>) {

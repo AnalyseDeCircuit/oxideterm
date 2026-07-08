@@ -1887,8 +1887,8 @@ impl WorkspaceApp {
                 self.open_connection_pool_tab(window, cx);
                 snapshot
                     .ok(
-                        "Opened connection_pool.",
-                        "Opened connection_pool.",
+                        "Opened runtime overview.",
+                        "Opened runtime overview.",
                         serde_json::Value::Null,
                         "write",
                     )

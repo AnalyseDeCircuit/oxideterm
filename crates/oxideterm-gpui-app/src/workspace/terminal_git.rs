@@ -978,11 +978,10 @@ impl WorkspaceApp {
             .and_then(|snapshot| terminal_git_cwd_from_directory_snapshot(scope, &snapshot));
         let pane = self.panes.get(&pane_id)?;
         let pane = pane.read(cx);
-        // OSC 7 / shell integration is the authoritative cwd source. The
-        // visible-text fallback only recovers the cwd for Git UX; SSH ownership
-        // and credential scope must still come from workspace state.
         let shell_cwd = pane.current_working_directory();
-        let visible_cwd = infer_terminal_cwd_from_text(&pane.visible_text_snapshot());
+        let visible_cwd = matches!(scope, GitProbeScope::Local)
+            .then(|| infer_terminal_cwd_from_text(&pane.visible_text_snapshot()))
+            .flatten();
         let cwd = terminal_git_preferred_cwd(scope, snapshot_cwd, shell_cwd, visible_cwd)?;
         Some(match scope {
             GitProbeScope::Local => terminal_git_expand_local_home(&cwd),
@@ -1252,10 +1251,9 @@ fn terminal_git_preferred_cwd(
     visible_cwd: Option<String>,
 ) -> Option<String> {
     if matches!(scope, GitProbeScope::SshNode(_)) {
-        // SSH cwd reports can lag behind an interactive `cd`. The visible
-        // prompt is the freshest low-risk source because it does not inject
-        // another command into the user's shell.
-        return visible_cwd.or(snapshot_cwd).or(shell_cwd);
+        // Remote Git probing must not infer paths from visible prompt text:
+        // typed commands and command output are not authoritative cwd reports.
+        return snapshot_cwd.or(shell_cwd);
     }
     snapshot_cwd.or(shell_cwd).or(visible_cwd)
 }
@@ -1793,27 +1791,39 @@ mod tests {
     }
 
     #[test]
-    fn remote_git_prefers_visible_cwd_before_prompt_hook_is_active() {
+    fn remote_git_uses_matching_snapshot_before_shell_cwd() {
         let cwd = terminal_git_preferred_cwd(
             &GitProbeScope::ssh_node("node-1"),
-            Some("/home/lipsc".to_string()),
-            Some("/home/lipsc".to_string()),
             Some("~/oxideterm.cloud-sync-server".to_string()),
+            Some("/home/lipsc".to_string()),
+            Some("/wrong/from-visible-text".to_string()),
         );
 
         assert_eq!(cwd.as_deref(), Some("~/oxideterm.cloud-sync-server"));
     }
 
     #[test]
-    fn remote_git_prefers_visible_cwd_over_stale_shell_cwd() {
+    fn remote_git_falls_back_to_shell_cwd_without_snapshot() {
         let cwd = terminal_git_preferred_cwd(
             &GitProbeScope::ssh_node("node-1"),
+            None,
             Some("/home/lipsc".to_string()),
-            Some("/home/lipsc".to_string()),
-            Some("~/oxideterm.cloud-sync-server".to_string()),
+            Some("/wrong/from-visible-text".to_string()),
         );
 
-        assert_eq!(cwd.as_deref(), Some("~/oxideterm.cloud-sync-server"));
+        assert_eq!(cwd.as_deref(), Some("/home/lipsc"));
+    }
+
+    #[test]
+    fn remote_git_ignores_visible_text_cwd_without_authoritative_source() {
+        let cwd = terminal_git_preferred_cwd(
+            &GitProbeScope::ssh_node("node-1"),
+            None,
+            None,
+            Some("/wrong/from-visible-text".to_string()),
+        );
+
+        assert_eq!(cwd, None);
     }
 
     #[test]

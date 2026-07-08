@@ -1,11 +1,9 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use gpui::{MouseButton, PathBuilder, Rgba, canvas, fill, point, rgb, rgba};
 use oxideterm_connection_monitor::{ProfilerState, ResourceSampler};
-use oxideterm_gpui_ui::button::{
-    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
-};
+use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::context_menu::{ContextMenuActionableStyle, context_menu_event_boundary};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::select::{
@@ -158,22 +156,6 @@ const MONITOR_EMERALD_DARK: u32 = 0x10b981;
 const MONITOR_AMBER: u32 = 0xf59e0b;
 const MONITOR_RED: u32 = 0xef4444;
 const MONITOR_BLUE: u32 = 0x3b82f6;
-const CONNECTION_POOL_HEADER_X: f32 = 24.0;
-const CONNECTION_POOL_HEADER_Y: f32 = 16.0;
-const CONNECTION_POOL_BODY_PADDING: f32 = 24.0;
-const CONNECTION_POOL_CARD_GAP: f32 = 16.0;
-const CONNECTION_POOL_CARD_PADDING: f32 = 16.0;
-const CONNECTION_POOL_EMPTY_Y: f32 = 64.0;
-const CONNECTION_POOL_BUTTON_SIZE: f32 = 32.0;
-const CONNECTION_POOL_ICON_SIZE_LG: f32 = 20.0;
-const CONNECTION_POOL_ICON_SIZE_MD: f32 = 16.0;
-const CONNECTION_POOL_ICON_SIZE_SM: f32 = 12.0;
-const CONNECTION_POOL_GREEN_400: u32 = 0x4ade80;
-const CONNECTION_POOL_AMBER_400: u32 = 0xfbbf24;
-const CONNECTION_POOL_PANEL_ALPHA_30: u32 = 0x4d;
-const CONNECTION_POOL_EMPTY_ICON_ALPHA: u32 = 0x4d;
-const CONNECTION_POOL_EMPTY_HINT_OPACITY: f32 = 0.7;
-const CONNECTION_POOL_IDLE_BORDER_ALPHA_30: u32 = 0x4d;
 const TOPOLOGY_BG_GRID_STEP: f32 = 40.0;
 const TOPOLOGY_BG_GRID_ALPHA: u32 = 0x1a;
 const TOPOLOGY_PANEL_BG_ALPHA_20: u32 = 0x33;
@@ -239,10 +221,6 @@ struct TopologyNodeMenuState {
     view_status: TopologyViewStatus,
     x: f32,
     y: f32,
-}
-
-struct ConnectionPoolStateView {
-    label: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -516,7 +494,6 @@ pub(in crate::workspace) struct HostTmuxInputDialog {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConnectionRuntimeSection {
     Overview,
-    Pool,
     Health,
     Topology,
 }

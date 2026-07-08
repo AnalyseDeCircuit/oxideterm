@@ -1935,6 +1935,7 @@ impl TerminalPane {
         // prompts such as macOS `Password:` do not depend on viewport parsing.
         self.privilege_prompt_tracker
             .observe_submitted_command(&command, now);
+        self.observe_current_directory_submitted_command(&command, cx);
         if self.shell_integration_status.detected
             || !self.settings.command_marks_user_input_observed
         {
@@ -1981,6 +1982,31 @@ impl TerminalPane {
         self.command_fact_ledger
             .record_runtime_autosuggest_command(&command);
         Some(command)
+    }
+
+    fn observe_current_directory_submitted_command(
+        &mut self,
+        command: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.settings.current_directory_awareness_enabled || self.shell_integration_status.detected
+        {
+            return;
+        }
+        let cwd = self
+            .pending_cwd
+            .as_ref()
+            .map(|pending| pending.path.as_str())
+            .or(self.cwd.as_deref());
+        if let Some(next_cwd) = cwd_after_simple_cd_command(command, cwd) {
+            // The pending state lets the UI follow a submitted simple `cd`
+            // immediately without treating terminal viewport text as evidence.
+            self.set_pending_current_working_directory_from_terminal_action(
+                next_cwd,
+                command.to_string(),
+                cx,
+            );
+        }
     }
 
     fn terminal_accepts_input(&self) -> bool {

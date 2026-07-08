@@ -308,9 +308,6 @@ const FORWARDS_TABLE_ROW_LIST_OVERSCAN: usize = 8;
 const CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT: usize = 2;
 const CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 280.0;
 const CONNECTION_MONITOR_SECTION_LIST_OVERSCAN: usize = 1;
-const CONNECTION_POOL_BODY_LIST_INITIAL_ITEM_COUNT: usize = 1;
-const CONNECTION_POOL_BODY_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
-const CONNECTION_POOL_BODY_LIST_OVERSCAN: usize = 3;
 const LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const LAUNCHER_WSL_LIST_OVERSCAN: usize = 6;
@@ -965,8 +962,6 @@ pub(crate) struct WorkspaceApp {
     active_connection_runtime_section: ConnectionRuntimeSection,
     connection_monitor_section_list_state: ListState,
     connection_monitor_section_list_cache: RefCell<VirtualListSignatureCache>,
-    connection_pool_body_list_state: ListState,
-    connection_pool_body_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync_store: oxideterm_cloud_sync::state::CloudSyncStateStore,
     cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
     cloud_sync_form: CloudSyncFormDraft,

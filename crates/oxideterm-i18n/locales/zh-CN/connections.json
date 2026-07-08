@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}} 小时前"
     },
     "panel": {
-      "title": "连接池",
+      "title": "后台 SSH 连接",
       "description": "管理活动的 SSH 连接和保活设置",
       "refresh": "刷新",
       "no_connections": "无活动 SSH 连接",

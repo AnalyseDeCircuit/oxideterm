@@ -577,16 +577,16 @@
         "no_drafts": "Keine importierbaren Verbindungen gefunden"
       },
       "idle_timeout": {
-        "title": "Verbindungspool",
-        "description": "Verwaltung inaktiver SSH-Verbindungen konfigurieren.",
-        "label": "Leerlauf-Timeout",
+        "title": "SSH-Hintergrundverbindungen",
+        "description": "Konfiguriert, wann ungenutzte SSH-Hintergrundverbindungen freigegeben werden.",
+        "label": "Leerlauf-Freigabe",
         "5min": "5 Minuten",
         "15min": "15 Minuten",
         "30min": "30 Minuten (Standard)",
         "1hr": "1 Stunde",
         "never": "Nie (Verbindung aufrechterhalten)",
-        "hint": "SSH-Verbindungen ohne offene Terminals werden nach diesem Zeitraum getrennt. Auf 'Nie' setzen, um Verbindungen dauerhaft aufrechtzuerhalten.",
-        "save_failed": "Speichern der Leerlauf-Timeout-Einstellung fehlgeschlagen"
+        "hint": "SSH-Hintergrundverbindungen ohne offene Terminals, SFTP-Sitzungen oder Portweiterleitungen werden nach diesem Zeitraum freigegeben. Auf 'Nie' setzen, um sie dauerhaft aufrechtzuerhalten.",
+        "save_failed": "Speichern der Leerlauf-Freigabe fehlgeschlagen"
       }
     },
     "ssh_keys": {

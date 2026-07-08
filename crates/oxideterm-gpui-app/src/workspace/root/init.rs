@@ -624,7 +624,7 @@ impl WorkspaceApp {
             connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
             active_connection_runtime_section: ConnectionRuntimeSection::Overview,
             // Monitor pages are variable-height browser sections; keep the
-            // summary page and pool body on shared ListState-backed render paths.
+            // summary page on a shared ListState-backed render path.
             connection_monitor_section_list_state: ListState::new(
                 CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT,
                 ListAlignment::Top,
@@ -638,17 +638,6 @@ impl WorkspaceApp {
             connection_monitor_section_list_cache: RefCell::new(
                 VirtualListSignatureCache::default(),
             ),
-            connection_pool_body_list_state: ListState::new(
-                CONNECTION_POOL_BODY_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(CONNECTION_POOL_BODY_LIST_ESTIMATED_HEIGHT),
-                    CONNECTION_POOL_BODY_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            connection_pool_body_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             cloud_sync_store,
             cloud_sync_service: oxideterm_cloud_sync::operation::CloudSyncOperationService::new(),
             cloud_sync_form,

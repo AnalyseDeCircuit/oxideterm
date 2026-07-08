@@ -20,7 +20,6 @@ impl WorkspaceApp {
             .child(self.render_connection_runtime_header(has_background, cx))
             .child(match self.active_connection_runtime_section {
                 ConnectionRuntimeSection::Overview => self.render_connection_runtime_overview(cx),
-                ConnectionRuntimeSection::Pool => self.render_connection_runtime_pool(cx),
                 ConnectionRuntimeSection::Health => self.render_connection_runtime_health(cx),
                 ConnectionRuntimeSection::Topology => self.render_connection_runtime_topology(cx),
             })
@@ -89,12 +88,6 @@ impl WorkspaceApp {
                 ConnectionRuntimeSection::Overview,
                 "sidebar.panels.runtime_overview",
                 LucideIcon::LayoutList,
-                cx,
-            ))
-            .child(self.render_connection_runtime_section_tab(
-                ConnectionRuntimeSection::Pool,
-                "sidebar.panels.connection_pool",
-                LucideIcon::Terminal,
                 cx,
             ))
             .child(self.render_connection_runtime_section_tab(

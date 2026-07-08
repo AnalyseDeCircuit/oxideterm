@@ -577,16 +577,16 @@
         "no_drafts": "No importable connections found"
       },
       "idle_timeout": {
-        "title": "Connection Pool",
-        "description": "Configure how idle SSH connections are managed.",
-        "label": "Idle Timeout",
+        "title": "Background SSH Connections",
+        "description": "Configure how unused background SSH connections are reclaimed.",
+        "label": "Idle Reclaim",
         "5min": "5 minutes",
         "15min": "15 minutes",
         "30min": "30 minutes (default)",
         "1hr": "1 hour",
         "never": "Never (keep alive)",
-        "hint": "SSH connections with no open terminals will be disconnected after this period. Set to 'Never' to keep connections alive indefinitely.",
-        "save_failed": "Failed to save idle timeout setting"
+        "hint": "Background SSH connections with no open terminals, SFTP sessions, or port forwards are reclaimed after this period. Set to 'Never' to keep them alive indefinitely.",
+        "save_failed": "Failed to save idle reclaim setting"
       }
     },
     "ssh_keys": {

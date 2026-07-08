@@ -7,7 +7,7 @@ use oxideterm_environment::{
     CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
     current_directory_parent, current_directory_report_command,
-    current_directory_shell_path_argument, infer_terminal_cwd_from_text,
+    current_directory_shell_path_argument,
 };
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};
 use oxideterm_ssh::NodeId;
@@ -204,14 +204,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<CurrentDirectorySnapshot> {
         let pane = self.panes.get(&pane_id)?.read(cx);
-
-        if matches!(&scope, CurrentDirectoryScope::SshNode(_))
-            && let Some(cwd) = infer_terminal_cwd_from_text(&pane.visible_text_snapshot())
-        {
-            // SSH shells do not expose a process cwd. Prefer the latest visible
-            // prompt/path because an injected OSC 7 hook can lag behind `cd`.
-            return CurrentDirectorySnapshot::new(scope, cwd, CurrentDirectorySource::VisibleText);
-        }
 
         // OSC 7 is the active shell channel's own cwd report.
         if let Some(cwd) = pane.current_working_directory() {

@@ -73,32 +73,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn format_connection_pool_time(&self, time: SystemTime) -> String {
-        let elapsed = SystemTime::now()
-            .duration_since(time)
-            .unwrap_or(Duration::from_secs(0));
-        let diff_mins = elapsed.as_secs() / 60;
-        if diff_mins < 1 {
-            return self.i18n.t("connections.time.just_now");
-        }
-        if diff_mins < 60 {
-            return self
-                .i18n
-                .t("connections.time.mins_ago")
-                .replace("{{count}}", &diff_mins.to_string());
-        }
-        let diff_hours = diff_mins / 60;
-        if diff_hours < 24 {
-            return self
-                .i18n
-                .t("connections.time.hrs_ago")
-                .replace("{{count}}", &diff_hours.to_string());
-        }
-
-        let date: chrono::DateTime<chrono::Local> = time.into();
-        date.format("%Y-%m-%d").to_string()
-    }
-
     fn render_connection_pool_monitor(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         if let Some(error) = &self.connection_monitor.pool_error {

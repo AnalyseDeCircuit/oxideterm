@@ -7,7 +7,7 @@ impl TerminalPane {
         if self.apply_pending_cwd_from_closed_command_mark(mark, cx) {
             return;
         }
-        if mark.exit_code != Some(0) {
+        if !command_mark_allows_cwd_fallback(mark.exit_code) {
             return;
         }
         if !self.settings.current_directory_awareness_enabled {
@@ -42,7 +42,7 @@ impl TerminalPane {
             return false;
         }
 
-        if mark.exit_code == Some(0) {
+        if command_mark_allows_cwd_fallback(mark.exit_code) {
             self.cwd = Some(pending.path.clone());
             self.cwd_source = Some(TerminalWorkingDirectorySource::VisibleCommand);
         }
@@ -77,6 +77,7 @@ impl TerminalPane {
             start_line,
             TerminalCommandMarkClosedBy::NextCommand,
             TerminalCommandMarkConfidence::High,
+            cx,
         );
 
         let mark = TerminalCommandMark {
@@ -309,8 +310,10 @@ impl TerminalPane {
         next_start_line: usize,
         closed_by: TerminalCommandMarkClosedBy,
         output_confidence: TerminalCommandMarkConfidence,
+        cx: &mut Context<Self>,
     ) {
         let now = now_millis();
+        let mut closed_marks = Vec::new();
         for mark in &mut self.command_marks {
             if mark.is_closed {
                 continue;
@@ -322,6 +325,13 @@ impl TerminalPane {
             mark.finished_at = Some(now);
             mark.duration_ms = Some(now.saturating_sub(mark.started_at));
             self.command_fact_ledger.close_from_mark(mark);
+            closed_marks.push(mark.clone());
+        }
+        for mark in closed_marks {
+            // User-input command marks do not carry shell exit status, but a
+            // later command boundary still proves the previous command returned
+            // to the shell. The cwd parser remains restricted to simple `cd`.
+            self.observe_terminal_cwd_action_from_closed_command_mark(&mark, cx);
         }
     }
 
@@ -695,7 +705,17 @@ fn is_printable_input(ch: char) -> bool {
     code >= 0x20 && code != 0x7f
 }
 
-fn cwd_after_simple_cd_command(command: &str, current_cwd: Option<&str>) -> Option<String> {
+fn command_mark_allows_cwd_fallback(exit_code: Option<i32>) -> bool {
+    // Some shells do not expose exit status through shell integration or user
+    // input observation. Treat an absent status as an unknown-but-complete
+    // command boundary, while still rejecting explicit failures.
+    matches!(exit_code, None | Some(0))
+}
+
+pub(super) fn cwd_after_simple_cd_command(
+    command: &str,
+    current_cwd: Option<&str>,
+) -> Option<String> {
     let words = split_simple_cd_words(command.trim())?;
     let [program, args @ ..] = words.as_slice() else {
         return None;
@@ -896,7 +916,7 @@ fn normalize_posix_display_path(path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod input_tracker_tests {
-    use super::{TerminalInputTracker, cwd_after_simple_cd_command};
+    use super::{TerminalInputTracker, command_mark_allows_cwd_fallback, cwd_after_simple_cd_command};
 
     #[test]
     fn input_tracker_completes_plain_command_on_enter() {
@@ -1001,5 +1021,13 @@ mod input_tracker_tests {
             cwd_after_simple_cd_command("cd /tmp/src", None).as_deref(),
             Some("/tmp/src")
         );
+    }
+
+    #[test]
+    fn cd_cwd_fallback_accepts_unknown_status_but_rejects_failures() {
+        assert!(command_mark_allows_cwd_fallback(None));
+        assert!(command_mark_allows_cwd_fallback(Some(0)));
+        assert!(!command_mark_allows_cwd_fallback(Some(1)));
+        assert!(!command_mark_allows_cwd_fallback(Some(127)));
     }
 }

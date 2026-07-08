@@ -595,7 +595,12 @@ impl WorkspaceApp {
             (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
             (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
             (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
-            (TabKind::ConnectionPool, _) => self.render_connection_pool_surface(cx),
+            (TabKind::ConnectionPool, _) => {
+                // Detached windows can outlive the UI route that created them.
+                // Preserve compatibility by rendering the runtime overview.
+                self.active_connection_runtime_section = ConnectionRuntimeSection::Overview;
+                self.render_connection_runtime_surface(cx)
+            }
             (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
             (TabKind::Topology, _) => self.render_topology_surface(cx),
             (TabKind::NotificationCenter, _) => self.render_notification_center_surface(cx),

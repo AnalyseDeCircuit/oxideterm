@@ -577,16 +577,16 @@
         "no_drafts": "Nessuna connessione importabile trovata"
       },
       "idle_timeout": {
-        "title": "Pool di connessioni",
-        "description": "Configura la gestione delle connessioni SSH inattive.",
-        "label": "Timeout inattività",
+        "title": "Connessioni SSH in background",
+        "description": "Configura quando recuperare le connessioni SSH in background non usate.",
+        "label": "Recupero inattività",
         "5min": "5 minuti",
         "15min": "15 minuti",
         "30min": "30 minuti (predefinito)",
         "1hr": "1 ora",
         "never": "Mai (mantieni connessione)",
-        "hint": "Le connessioni SSH senza terminali aperti verranno disconnesse dopo questo periodo. Imposta su «Mai» per mantenere le connessioni a tempo indeterminato.",
-        "save_failed": "Salvataggio dell'impostazione di timeout inattività non riuscito"
+        "hint": "Le connessioni SSH in background senza terminali aperti, sessioni SFTP o port forwarding verranno recuperate dopo questo periodo. Imposta su «Mai» per mantenerle a tempo indeterminato.",
+        "save_failed": "Salvataggio del recupero inattività non riuscito"
       }
     },
     "ssh_keys": {

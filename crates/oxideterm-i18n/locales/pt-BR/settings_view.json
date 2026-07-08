@@ -577,16 +577,16 @@
         "no_drafts": "Nenhuma conexão importável encontrada"
       },
       "idle_timeout": {
-        "title": "Pool de conexões",
-        "description": "Configure o gerenciamento de conexões SSH ociosas.",
-        "label": "Tempo limite de inatividade",
+        "title": "Conexões SSH em segundo plano",
+        "description": "Configure quando conexões SSH em segundo plano sem uso são recuperadas.",
+        "label": "Recuperação por inatividade",
         "5min": "5 minutos",
         "15min": "15 minutos",
         "30min": "30 minutos (padrão)",
         "1hr": "1 hora",
         "never": "Nunca (manter conexão)",
-        "hint": "Conexões SSH sem terminais abertos serão desconectadas após esse período. Defina como 'Nunca' para manter as conexões indefinidamente.",
-        "save_failed": "Falha ao salvar configuração de tempo limite"
+        "hint": "Conexões SSH em segundo plano sem terminais abertos, sessões SFTP ou encaminhamentos de porta são recuperadas após esse período. Defina como 'Nunca' para mantê-las indefinidamente.",
+        "save_failed": "Falha ao salvar recuperação por inatividade"
       }
     },
     "ssh_keys": {

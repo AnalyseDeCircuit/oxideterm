@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}}시간 전"
     },
     "panel": {
-      "title": "연결 풀",
+      "title": "백그라운드 SSH 연결",
       "description": "활성 SSH 연결 및 keep-alive 설정 관리",
       "refresh": "새로고침",
       "no_connections": "활성 SSH 연결 없음",

@@ -548,7 +548,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         ("reconnect.maxAttempts", 5, 1, 20),
         ("reconnect.baseDelayMs", 1000, 500, 10_000),
         ("reconnect.maxDelayMs", 15_000, 5_000, 60_000),
-        ("connectionPool.idleTimeoutSecs", 1800, 60, 86_400),
+        ("connectionPool.idleTimeoutSecs", 1800, 0, 86_400),
         (
             "ai.toolUse.maxRounds",
             DEFAULT_AI_TOOL_MAX_ROUNDS,

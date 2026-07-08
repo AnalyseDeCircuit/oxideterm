@@ -18,7 +18,7 @@
       "hrs_ago": "Il y a {{count}} h"
     },
     "panel": {
-      "title": "Pool de connexions",
+      "title": "Connexions SSH en arrière-plan",
       "description": "Gérer les connexions SSH actives et les paramètres de maintien en vie",
       "refresh": "Actualiser",
       "no_connections": "Aucune connexion SSH active",

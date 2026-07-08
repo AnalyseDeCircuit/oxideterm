@@ -64,7 +64,7 @@ impl WorkspaceApp {
                 TabKind::Launcher => LucideIcon::Monitor,
                 TabKind::Graphics => LucideIcon::Monitor,
                 TabKind::Runtime => LucideIcon::Gauge,
-                TabKind::ConnectionPool => LucideIcon::Terminal,
+                TabKind::ConnectionPool => LucideIcon::Gauge,
                 TabKind::ConnectionMonitor => LucideIcon::Activity,
                 TabKind::Topology => LucideIcon::Network,
                 TabKind::NotificationCenter => LucideIcon::Bell,

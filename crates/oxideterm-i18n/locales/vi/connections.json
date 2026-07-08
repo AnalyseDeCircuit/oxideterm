@@ -18,7 +18,7 @@
       "hrs_ago": "{{count}} giờ trước"
     },
     "panel": {
-      "title": "Nhóm kết nối",
+      "title": "Kết nối SSH nền",
       "description": "Quản lý kết nối SSH hoạt động và cài đặt keep-alive",
       "refresh": "Làm mới",
       "no_connections": "Không có kết nối SSH hoạt động",

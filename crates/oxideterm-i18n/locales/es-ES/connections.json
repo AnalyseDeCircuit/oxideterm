@@ -18,7 +18,7 @@
       "hrs_ago": "hace {{count}} h"
     },
     "panel": {
-      "title": "Pool de conexiones",
+      "title": "Conexiones SSH en segundo plano",
       "description": "Gestionar conexiones SSH activas y configuración de keep-alive",
       "refresh": "Actualizar",
       "no_connections": "No hay conexiones SSH activas",

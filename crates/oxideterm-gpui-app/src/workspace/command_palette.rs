@@ -78,7 +78,6 @@ enum PaletteAction {
     OpenSavedConnections,
     OpenSessionManager,
     OpenRuntime(ConnectionRuntimeSection),
-    OpenConnectionPool,
     OpenTopology,
     OpenPluginManager,
     OpenCloudSync,
@@ -500,7 +499,6 @@ impl WorkspaceApp {
             PaletteAction::OpenRuntime(section) => {
                 self.open_connection_runtime_tab(section, window, cx)
             }
-            PaletteAction::OpenConnectionPool => self.open_connection_pool_tab(window, cx),
             PaletteAction::OpenTopology => self.open_topology_tab(window, cx),
             PaletteAction::OpenPluginManager => self.open_plugin_manager_tab(window, cx),
             PaletteAction::OpenCloudSync => self.open_cloud_sync_tab(window, cx),
@@ -1026,7 +1024,7 @@ impl WorkspaceApp {
                     TabKind::Settings => self.i18n.t("settings_view.title"),
                     TabKind::SessionManager => self.i18n.t("sidebar.panels.saved_connections"),
                     TabKind::Runtime => self.i18n.t("sidebar.panels.runtime"),
-                    TabKind::ConnectionPool => self.i18n.t("sidebar.panels.connection_pool"),
+                    TabKind::ConnectionPool => self.i18n.t("sidebar.panels.runtime_overview"),
                     TabKind::ConnectionMonitor => self.i18n.t("sidebar.panels.connection_monitor"),
                     TabKind::Topology => self.i18n.t("topology.title"),
                     TabKind::NotificationCenter => self.i18n.t("sidebar.panels.notifications"),
@@ -2310,7 +2308,7 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::Launcher => LucideIcon::Terminal,
         TabKind::Graphics => LucideIcon::AppWindow,
         TabKind::Runtime => LucideIcon::Gauge,
-        TabKind::ConnectionPool => LucideIcon::Terminal,
+        TabKind::ConnectionPool => LucideIcon::Gauge,
         TabKind::ConnectionMonitor => LucideIcon::Activity,
         TabKind::Topology => LucideIcon::Network,
         TabKind::NotificationCenter => LucideIcon::Bell,
@@ -2598,13 +2596,6 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             icon: LucideIcon::Gauge,
             shortcut_action: None,
             action: PaletteAction::OpenRuntime(ConnectionRuntimeSection::Overview),
-        },
-        CommandSpec {
-            id: "cmd:open_connection_pool",
-            label_key: "command_palette.cmd_open_connection_pool".into(),
-            icon: LucideIcon::Activity,
-            shortcut_action: None,
-            action: PaletteAction::OpenConnectionPool,
         },
         CommandSpec {
             id: "cmd:disconnect_all",

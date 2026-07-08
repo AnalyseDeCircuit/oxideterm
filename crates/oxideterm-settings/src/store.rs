@@ -546,7 +546,7 @@ mod tests {
         assert_eq!(sanitized.settings.terminal.font_size, 32);
         assert_eq!(sanitized.settings.terminal.line_height, 3.0);
         assert_eq!(sanitized.settings.sidebar_ui.width, 600);
-        assert_eq!(sanitized.settings.connection_pool.idle_timeout_secs, 60);
+        assert_eq!(sanitized.settings.connection_pool.idle_timeout_secs, 1);
         assert!(!sanitized.validation_warnings.is_empty());
     }
 

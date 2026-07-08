@@ -84,7 +84,6 @@
     "cmd_reconnect_all": "Kết nối lại tất cả",
     "cmd_cancel_reconnect": "Hủy tất cả kết nối lại",
     "cmd_open_runtime": "Mở thời gian chạy",
-    "cmd_open_connection_pool": "Mở nhóm kết nối",
     "cmd_health_check": "Chạy kiểm tra sức khỏe",
     "health_result": "{{healthy}}/{{total}} kết nối bình thường",
     "cmd_shell_launcher": "Trình khởi chạy shell",
