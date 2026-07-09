@@ -183,11 +183,6 @@ pub fn background_tab_options() -> &'static [(&'static str, &'static str, Settin
             SettingsBackgroundTabIcon::Gauge,
         ),
         (
-            "connection_pool",
-            "settings_view.terminal.bg_tab_connections",
-            SettingsBackgroundTabIcon::Network,
-        ),
-        (
             "connection_monitor",
             "settings_view.terminal.bg_tab_monitor",
             SettingsBackgroundTabIcon::Activity,

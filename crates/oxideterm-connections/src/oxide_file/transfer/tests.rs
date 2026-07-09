@@ -5,13 +5,13 @@ mod tests {
 
     use crate::{
         PrivilegeCredentialKind, RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode,
-        RawTcpTlsMode, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding,
+        RawTcpTlsMode, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpProfile,
         RawUdpSendMode, SavePrivilegeCredentialRequest, SaveRawTcpProfileRequest,
         SaveRawUdpProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
         SerialFlowControl,
     };
-    use russh::keys::ssh_key::LineEnding;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
+    use russh::keys::ssh_key::LineEnding;
     use russh::keys::{Algorithm, PrivateKey};
 
     fn temp_store(name: &str) -> ConnectionStore {
@@ -23,8 +23,8 @@ mod tests {
     }
 
     fn generated_private_key_text() -> String {
-        let key_path = std::env::temp_dir()
-            .join(format!("oxideterm-managed-key-{}.key", Uuid::new_v4()));
+        let key_path =
+            std::env::temp_dir().join(format!("oxideterm-managed-key-{}.key", Uuid::new_v4()));
         let mut rng = UnwrapErr(SysRng);
         let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
         key.write_openssh_file(&key_path, LineEnding::LF).unwrap();
@@ -173,6 +173,153 @@ mod tests {
     }
 
     #[test]
+    fn import_validates_late_profile_resources_before_committing_connections() {
+        let mut source = temp_store("late-invalid-profile-source");
+        source
+            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .unwrap();
+        let mut invalid_profile = RawUdpProfile::new("Invalid", "example.test", 9000);
+        invalid_profile.remote_host.clear();
+        let raw_udp_snapshot = RawUdpProfilesSyncSnapshot {
+            revision: "invalid".to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            records: vec![invalid_profile],
+        };
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["conn-1".to_string()],
+            "secret!",
+            OxideExportOptions {
+                raw_udp_profiles_json: Some(serde_json::to_string(&raw_udp_snapshot).unwrap()),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let mut target = temp_store("late-invalid-profile-target");
+        let target_path = target.path().to_path_buf();
+
+        let result = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        );
+
+        assert!(result.is_err());
+        assert!(target.connections().is_empty());
+        assert!(
+            ConnectionStore::load(target_path)
+                .unwrap()
+                .connections()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn failed_connection_upsert_restores_profiles_and_store_file() {
+        const IMPORT_PASSWORD: &str = "secret!";
+        const CONNECTION_SECRET: &str = "oxide-rollback-secret";
+
+        let mut source = temp_store("transaction-source");
+        let mut imported_connection = saved_connection("conn-import", "Imported");
+        imported_connection.auth = SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(SecretString::from(CONNECTION_SECRET)),
+        };
+        source
+            .upsert_imported_connection(imported_connection)
+            .unwrap();
+        source
+            .upsert_raw_udp_profile(SaveRawUdpProfileRequest {
+                id: Some("raw-udp-import".to_string()),
+                name: "Imported UDP".to_string(),
+                remote_host: "udp.example.com".to_string(),
+                remote_port: 9000,
+                ..SaveRawUdpProfileRequest::default()
+            })
+            .unwrap();
+        let raw_udp_profiles_json =
+            serde_json::to_string_pretty(&source.export_raw_udp_profiles_snapshot().unwrap())
+                .unwrap();
+        let exported = export_connections_to_oxide(
+            &source,
+            &["conn-import".to_string()],
+            IMPORT_PASSWORD,
+            OxideExportOptions {
+                include_passwords: true,
+                raw_udp_profiles_json: Some(raw_udp_profiles_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+
+        // Re-encrypt a checksum-valid archive whose connection fails only in
+        // the final store upsert, after the profile stage has been persisted.
+        let exported_file = OxideFile::from_bytes(&exported).unwrap();
+        let mut payload = decrypt_payload(&exported, IMPORT_PASSWORD).unwrap();
+        payload.connections[0].host.clear();
+        payload.checksum = compute_checksum(&payload).unwrap();
+        let bytes = encrypt_oxide_file(&payload, IMPORT_PASSWORD, exported_file.metadata)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+
+        let mut target = temp_store("transaction-target");
+        target
+            .upsert_imported_connection(saved_connection("conn-local", "Local"))
+            .unwrap();
+        target
+            .upsert_serial_profile(SaveSerialProfileRequest {
+                id: Some("serial-local".to_string()),
+                name: "Local Serial".to_string(),
+                port_path: "/dev/cu.local".to_string(),
+                ..SaveSerialProfileRequest::default()
+            })
+            .unwrap();
+        let target_path = target.path().to_path_buf();
+        let original_file = fs::read(&target_path).unwrap();
+        let original_connections = target
+            .connections()
+            .iter()
+            .map(|connection| connection.id.clone())
+            .collect::<Vec<_>>();
+        let original_serial_profiles = target.serial_profiles().to_vec();
+
+        let error = apply_oxide_import(
+            &mut target,
+            &bytes,
+            IMPORT_PASSWORD,
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap_err();
+
+        assert!(!error.to_string().contains(CONNECTION_SECRET));
+        assert_eq!(
+            target
+                .connections()
+                .iter()
+                .map(|connection| connection.id.clone())
+                .collect::<Vec<_>>(),
+            original_connections
+        );
+        assert_eq!(target.serial_profiles(), original_serial_profiles);
+        assert!(target.raw_udp_profiles().is_empty());
+        assert_eq!(fs::read(&target_path).unwrap(), original_file);
+
+        let reloaded = ConnectionStore::load(target_path).unwrap();
+        assert_eq!(
+            reloaded
+                .connections()
+                .iter()
+                .map(|connection| connection.id.clone())
+                .collect::<Vec<_>>(),
+            original_connections
+        );
+        assert_eq!(reloaded.serial_profiles(), original_serial_profiles);
+        assert!(reloaded.raw_udp_profiles().is_empty());
+    }
+
+    #[test]
     fn export_import_roundtrip_preserves_serial_profiles() {
         let mut source = temp_store("serial-profile-source");
         source
@@ -187,10 +334,9 @@ mod tests {
                 ..SaveSerialProfileRequest::default()
             })
             .unwrap();
-        let serial_profiles_json = serde_json::to_string_pretty(
-            &source.export_serial_profiles_snapshot().unwrap(),
-        )
-        .unwrap();
+        let serial_profiles_json =
+            serde_json::to_string_pretty(&source.export_serial_profiles_snapshot().unwrap())
+                .unwrap();
 
         let bytes = export_connections_to_oxide(
             &source,
@@ -263,10 +409,9 @@ mod tests {
                 connect_on_open: Some(true),
             })
             .unwrap();
-        let raw_tcp_profiles_json = serde_json::to_string_pretty(
-            &source.export_raw_tcp_profiles_snapshot().unwrap(),
-        )
-        .unwrap();
+        let raw_tcp_profiles_json =
+            serde_json::to_string_pretty(&source.export_raw_tcp_profiles_snapshot().unwrap())
+                .unwrap();
 
         let bytes = export_connections_to_oxide(
             &source,
@@ -338,10 +483,9 @@ mod tests {
                 connect_on_open: Some(true),
             })
             .unwrap();
-        let raw_udp_profiles_json = serde_json::to_string_pretty(
-            &source.export_raw_udp_profiles_snapshot().unwrap(),
-        )
-        .unwrap();
+        let raw_udp_profiles_json =
+            serde_json::to_string_pretty(&source.export_raw_udp_profiles_snapshot().unwrap())
+                .unwrap();
 
         let bytes = export_connections_to_oxide(
             &source,
@@ -416,10 +560,9 @@ mod tests {
         }
 
         fn export_raw_udp_profiles(source: &ConnectionStore) -> Vec<u8> {
-            let raw_udp_profiles_json = serde_json::to_string_pretty(
-                &source.export_raw_udp_profiles_snapshot().unwrap(),
-            )
-            .unwrap();
+            let raw_udp_profiles_json =
+                serde_json::to_string_pretty(&source.export_raw_udp_profiles_snapshot().unwrap())
+                    .unwrap();
             export_connections_to_oxide(
                 source,
                 &["conn-1".to_string()],
@@ -447,7 +590,10 @@ mod tests {
         .unwrap();
         assert_eq!(skipped.imported_raw_udp_profiles, 0);
         assert_eq!(skipped.skipped_raw_udp_profiles, 1);
-        assert_eq!(newer_target.raw_udp_profiles()[0].remote_host, "current.example");
+        assert_eq!(
+            newer_target.raw_udp_profiles()[0].remote_host,
+            "current.example"
+        );
         assert_eq!(newer_target.raw_udp_profiles()[0].remote_port, 9001);
 
         let mut older_target =
@@ -466,7 +612,10 @@ mod tests {
         .unwrap();
         assert_eq!(replaced.imported_raw_udp_profiles, 1);
         assert_eq!(replaced.skipped_raw_udp_profiles, 0);
-        assert_eq!(older_target.raw_udp_profiles()[0].remote_host, "incoming.example");
+        assert_eq!(
+            older_target.raw_udp_profiles()[0].remote_host,
+            "incoming.example"
+        );
         assert_eq!(older_target.raw_udp_profiles()[0].remote_port, 9003);
     }
 
@@ -631,7 +780,9 @@ mod tests {
         assert_eq!(result.imported, 1);
         assert!(target.managed_ssh_keys().is_empty());
         let imported = target.connections().first().unwrap();
-        assert!(matches!(&imported.auth, SavedAuth::Key { key_path, .. } if key_path.contains(".ssh/imported")));
+        assert!(
+            matches!(&imported.auth, SavedAuth::Key { key_path, .. } if key_path.contains(".ssh/imported"))
+        );
     }
 
     #[test]
@@ -710,8 +861,8 @@ mod tests {
                 ("filtering_selection".to_string(), 6, 10),
                 ("collecting_existing".to_string(), 7, 10),
                 ("preparing_connections".to_string(), 8, 10),
-                ("applying_connections".to_string(), 9, 10),
-                ("saving_config".to_string(), 10, 10),
+                ("saving_config".to_string(), 9, 10),
+                ("applying_connections".to_string(), 10, 10),
             ]
         );
     }

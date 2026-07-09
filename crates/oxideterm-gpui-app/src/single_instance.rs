@@ -6,7 +6,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
@@ -23,7 +23,9 @@ const FORWARD_RETRY_COUNT: usize = 40;
 const FORWARD_RETRY_DELAY: Duration = Duration::from_millis(50);
 const MAX_INSTANCE_REQUEST_BYTES: u64 = 64 * 1024;
 
-pub(crate) type SingleInstanceReceiver = mpsc::Receiver<SingleInstanceEvent>;
+// The application keeps this shared receiver alive while individual workspace
+// windows attach and detach from the single-instance event stream.
+pub(crate) type SingleInstanceReceiver = Arc<Mutex<mpsc::Receiver<SingleInstanceEvent>>>;
 
 pub(crate) enum SingleInstanceOutcome {
     Primary {
@@ -170,7 +172,7 @@ fn start_primary(lock_file: File, paths: InstancePaths) -> Result<SingleInstance
             _lock_file: lock_file,
             state_path: paths.state_path,
         },
-        receiver: rx,
+        receiver: Arc::new(Mutex::new(rx)),
     })
 }
 
@@ -286,11 +288,44 @@ mod tests {
         assert!(matches!(forwarded, SingleInstanceOutcome::Forwarded));
 
         assert!(matches!(
-            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            receiver
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap(),
             SingleInstanceEvent::ShowMainWindow
         ));
 
         drop(guard);
         let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn shared_receiver_survives_workspace_holder_drop() {
+        let (tx, rx) = mpsc::channel();
+        let application_receiver = Arc::new(Mutex::new(rx));
+        let first_workspace_receiver = application_receiver.clone();
+        let ssh_launch = TemporarySshLaunch {
+            username: "test-user".to_string(),
+            host: "example.test".to_string(),
+            port: 22,
+            password: None,
+        };
+
+        drop(first_workspace_receiver);
+        tx.send(SingleInstanceEvent::ShowMainWindow).unwrap();
+        tx.send(SingleInstanceEvent::OpenTemporarySsh(ssh_launch.clone()))
+            .unwrap();
+
+        let receiver = application_receiver.lock().unwrap();
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            SingleInstanceEvent::ShowMainWindow
+        ));
+        let SingleInstanceEvent::OpenTemporarySsh(received_launch) = receiver.try_recv().unwrap()
+        else {
+            panic!("second event should retain the forwarded SSH launch");
+        };
+        assert_eq!(received_launch, ssh_launch);
     }
 }

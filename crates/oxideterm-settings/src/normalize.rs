@@ -489,7 +489,12 @@ fn derive_backend_hot_lines(scrollback: i64) -> i64 {
 }
 
 pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
-    let saved_version = raw.get("version").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let saved_version = raw.get("version").and_then(Value::as_u64).unwrap_or(0);
+    if saved_version > u64::from(SETTINGS_SCHEMA_VERSION) {
+        anyhow::bail!(
+            "settings version {saved_version} is newer than supported version {SETTINGS_SCHEMA_VERSION}"
+        );
+    }
     let mut migration_warnings = Vec::new();
     let mut validation_warnings = Vec::new();
     let mut settings = PersistedSettings::default().to_value();
@@ -505,7 +510,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     migrate_acp_agent_presets(&mut settings, &mut migration_warnings);
     migrate_ai_execution_profile_selection(&mut settings, &raw);
 
-    if saved_version < SETTINGS_SCHEMA_VERSION
+    if saved_version < u64::from(SETTINGS_SCHEMA_VERSION)
         && let Some(old_scrollback) = raw
             .get("terminal")
             .and_then(|terminal| terminal.get("scrollback"))

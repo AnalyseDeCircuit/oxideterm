@@ -432,3 +432,14 @@ fn matching_managed_key_passphrase_id(auth: Option<&SavedAuth>, key_id: &str) ->
         _ => None,
     }
 }
+fn rollback_keychain_result(errors: Vec<String>) -> Result<()> {
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "failed to restore {} keychain entries: {}",
+            errors.len(),
+            errors.join("; ")
+        )
+    }
+}

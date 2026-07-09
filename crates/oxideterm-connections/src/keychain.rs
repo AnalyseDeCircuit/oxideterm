@@ -1,4 +1,5 @@
-use anyhow::{Context, Result, bail};
+use crate::SecretString;
+use anyhow::{Context, Result};
 use keyring::Entry;
 use oxideterm_portable_runtime::keystore::{self as portable_keystore, PortableKeystoreError};
 #[cfg(test)]
@@ -6,73 +7,8 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-#[cfg(target_os = "macos")]
-use zeroize::Zeroizing;
-
-use crate::SecretString;
 
 const SERVICE_NAME: &str = "com.oxideterm.ssh";
-
-#[cfg(target_os = "macos")]
-mod mac_keychain {
-    use std::process::Command;
-
-    use zeroize::{Zeroize, Zeroizing};
-
-    pub(super) fn store(service: &str, account: &str, password: &str) -> Result<(), String> {
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-s", service, "-a", account])
-            .output();
-
-        let output = Command::new("security")
-            .args([
-                "add-generic-password",
-                "-s",
-                service,
-                "-a",
-                account,
-                "-w",
-                password,
-                "-A",
-            ])
-            .output()
-            .map_err(|error| format!("security CLI: {error}"))?;
-
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("security add-generic-password: {}", stderr.trim()))
-        }
-    }
-
-    pub(super) fn get(service: &str, account: &str) -> Result<Zeroizing<String>, String> {
-        let mut output = Command::new("security")
-            .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-            .output()
-            .map_err(|error| format!("security CLI: {error}"))?;
-
-        if output.status.success() {
-            // `security -w` returns the secret in stdout. Move it into a
-            // zeroizing owner and wipe the process output buffer immediately.
-            let secret = Zeroizing::new(
-                String::from_utf8_lossy(&output.stdout)
-                    .trim_end_matches('\n')
-                    .to_string(),
-            );
-            output.stdout.zeroize();
-            Ok(secret)
-        } else {
-            Err("not found".to_string())
-        }
-    }
-
-    pub(super) fn delete(service: &str, account: &str) {
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-s", service, "-a", account])
-            .output();
-    }
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConnectionKeychain {
@@ -166,7 +102,7 @@ impl ConnectionKeychain {
             {
                 // Tests use this to emulate OS credential backends that reject
                 // large managed SSH keys, such as RSA private-key blobs.
-                bail!("test keychain secret exceeds configured byte limit");
+                anyhow::bail!("test keychain secret exceeds configured byte limit");
             }
             store
                 .lock()
@@ -185,41 +121,33 @@ impl ConnectionKeychain {
             .with_context(|| format!("failed to store password in portable keystore for {id}"));
         }
 
-        #[cfg(target_os = "macos")]
-        if self.use_biometrics {
-            let account = self.account(id);
-            // Match Tauri's biometric keychain shape: LocalAuthentication
-            // gates reads, while `security -A` avoids per-binary ACL prompts
-            // when preview/dev builds write the item.
-            return mac_keychain::store(&self.service, &account, secret.expose_secret())
-                .map_err(anyhow::Error::msg)
-                .with_context(|| format!("failed to store password in OS keychain for {id}"));
-        }
-
         let entry = self.entry(id)?;
+        // keyring's apple-native backend keeps the secret out of process argv.
         entry
             .set_password(secret.expose_secret())
             .with_context(|| format!("failed to store password in OS keychain for {id}"))
     }
 
     pub(crate) fn get(&self, id: &str) -> Result<SecretString> {
+        self.get_optional(id)?
+            .ok_or_else(|| anyhow::anyhow!("Password not saved for this connection"))
+    }
+
+    pub(crate) fn get_optional(&self, id: &str) -> Result<Option<SecretString>> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {
-            return store
+            return Ok(store
                 .lock()
                 .map_err(|error| anyhow::anyhow!("failed to lock test keychain: {error}"))?
                 .get(id)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("Password not saved for this connection"));
+                .cloned());
         }
 
         if portable_keychain_enabled()? {
             let account = self.account(id);
             return match portable_keystore::get_secret(&self.service, &account) {
-                Ok(secret) => Ok(SecretString::from(secret)),
-                Err(PortableKeystoreError::NotFound(_)) => {
-                    bail!("Password not saved for this connection")
-                }
+                Ok(secret) => Ok(Some(SecretString::from(secret))),
+                Err(PortableKeystoreError::NotFound(_)) => Ok(None),
                 Err(error) => Err(error).with_context(|| {
                     format!("failed to load password from portable keystore for {id}")
                 }),
@@ -233,24 +161,11 @@ impl ConnectionKeychain {
                     .map_err(anyhow::Error::msg)
                     .with_context(|| format!("failed to authenticate keychain access for {id}"))?;
             }
-
-            let account = self.account(id);
-            if let Ok(secret) = mac_keychain::get(&self.service, &account) {
-                return Ok(SecretString::from(secret));
-            }
-
             let entry = self.entry(id)?;
             return match entry.get_password() {
-                Ok(secret) => {
-                    // Older native builds may have written this item via
-                    // keyring's restrictive macOS ACL. After the one-time
-                    // fallback read succeeds, migrate it to the Tauri-style
-                    // biometric-compatible storage shape.
-                    let secret = Zeroizing::new(secret);
-                    let _ = mac_keychain::store(&self.service, &account, secret.as_str());
-                    Ok(SecretString::from(secret))
-                }
-                Err(keyring::Error::NoEntry) => bail!("Password not saved for this connection"),
+                // Move the backend-owned String directly into a zeroizing owner.
+                Ok(secret) => Ok(Some(SecretString::from(secret))),
+                Err(keyring::Error::NoEntry) => Ok(None),
                 Err(error) => Err(error)
                     .with_context(|| format!("failed to load password from OS keychain for {id}")),
             };
@@ -258,8 +173,8 @@ impl ConnectionKeychain {
 
         let entry = self.entry(id)?;
         match entry.get_password() {
-            Ok(secret) => Ok(SecretString::from(secret)),
-            Err(keyring::Error::NoEntry) => bail!("Password not saved for this connection"),
+            Ok(secret) => Ok(Some(SecretString::from(secret))),
+            Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error)
                 .with_context(|| format!("failed to load password from OS keychain for {id}")),
         }
@@ -280,15 +195,6 @@ impl ConnectionKeychain {
             return portable_keystore::delete_secret(&self.service, &account).with_context(|| {
                 format!("failed to delete password from portable keystore for {id}")
             });
-        }
-
-        #[cfg(target_os = "macos")]
-        if self.use_biometrics {
-            let account = self.account(id);
-            mac_keychain::delete(&self.service, &account);
-            let entry = self.entry(id)?;
-            let _ = entry.delete_credential();
-            return Ok(());
         }
 
         let entry = self.entry(id)?;

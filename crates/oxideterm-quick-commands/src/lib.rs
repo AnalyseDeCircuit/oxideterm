@@ -14,6 +14,7 @@ pub use model::{
     QuickCommandImportStrategy, QuickCommandsSnapshot,
 };
 pub use store::{
-    apply_snapshot_json, default_quick_command_categories, default_quick_commands,
-    export_snapshot_json, load_snapshot, quick_commands_path, save_snapshot,
+    QuickCommandsCheckpoint, apply_snapshot_json, capture_checkpoint,
+    default_quick_command_categories, default_quick_commands, export_snapshot_json, load_snapshot,
+    quick_commands_path, restore_checkpoint, save_snapshot,
 };

@@ -20,67 +20,6 @@ static SECRET_SESSION_CACHE: OnceLock<Mutex<BTreeMap<String, Option<CloudSyncSec
 
 pub type CloudSyncSecretValue = Zeroizing<String>;
 
-#[cfg(target_os = "macos")]
-mod mac_keychain {
-    use std::process::Command;
-
-    use zeroize::{Zeroize, Zeroizing};
-
-    pub fn store(service: &str, account: &str, password: &str) -> Result<(), String> {
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-s", service, "-a", account])
-            .output();
-
-        let output = Command::new("security")
-            .args([
-                "add-generic-password",
-                "-s",
-                service,
-                "-a",
-                account,
-                "-w",
-                password,
-                "-A",
-            ])
-            .output()
-            .map_err(|error| format!("security CLI: {error}"))?;
-
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("security add-generic-password: {}", stderr.trim()))
-        }
-    }
-
-    pub fn get(service: &str, account: &str) -> Result<Zeroizing<String>, String> {
-        let mut output = Command::new("security")
-            .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-            .output()
-            .map_err(|error| format!("security CLI: {error}"))?;
-
-        if output.status.success() {
-            // `security -w` materializes the secret in stdout; move it into a
-            // zeroizing owner and wipe the command buffer before returning.
-            let secret = Zeroizing::new(
-                String::from_utf8_lossy(&output.stdout)
-                    .trim_end_matches('\n')
-                    .to_string(),
-            );
-            output.stdout.zeroize();
-            Ok(secret)
-        } else {
-            Err("not found".to_string())
-        }
-    }
-
-    pub fn delete(service: &str, account: &str) {
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-s", service, "-a", account])
-            .output();
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecretReadMode {
     Prompt,
@@ -193,20 +132,10 @@ impl CloudSyncKeychainSecretProvider {
             );
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            mac_keychain::store(&self.service, &account, value).map_err(|error| {
-                anyhow::anyhow!("failed to store cloud sync secret {key}: {error}")
-            })?;
-            return Ok(());
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Entry::new(&self.service, &account)?
-                .set_password(value)
-                .with_context(|| format!("failed to store cloud sync secret {key}"))
-        }
+        // keyring's apple-native backend keeps the secret out of process argv.
+        Entry::new(&self.service, &account)?
+            .set_password(value)
+            .with_context(|| format!("failed to store cloud sync secret {key}"))
     }
 
     fn get_current_secret(
@@ -227,25 +156,12 @@ impl CloudSyncKeychainSecretProvider {
             };
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            if let Ok(value) = mac_keychain::get(&self.service, &account) {
-                return Ok(Some(value));
-            }
-        }
-
         match Entry::new(&self.service, &account)
             .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))?
             .get_password()
         {
-            Ok(value) => {
-                let value = Zeroizing::new(value);
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = mac_keychain::store(&self.service, &account, value.as_str());
-                }
-                Ok(Some(value))
-            }
+            // Move the backend-owned String directly into a zeroizing owner.
+            Ok(value) => Ok(Some(Zeroizing::new(value))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(CloudSyncSecretError::AccessFailed(error.to_string())),
         }
@@ -275,10 +191,6 @@ impl CloudSyncKeychainSecretProvider {
             });
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            mac_keychain::delete(&self.service, &account);
-        }
         match Entry::new(&self.service, &account)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => {
@@ -693,6 +605,20 @@ mod tests {
             plugin_secret_account_id(secret_keys::BASIC_PASSWORD),
             "plugin-secret:24:com.oxideterm.cloud-sync:14:basic-password"
         );
+    }
+
+    #[test]
+    fn native_secret_store_does_not_spawn_the_macos_security_cli() {
+        // This source-level invariant avoids touching the real keychain while
+        // preventing secrets from being reintroduced into child-process argv.
+        let source = include_str!("secrets.rs");
+        for keychain_command in [
+            ["add-generic", "-password"].concat(),
+            ["find-generic", "-password"].concat(),
+            ["delete-generic", "-password"].concat(),
+        ] {
+            assert!(!source.contains(&keychain_command));
+        }
     }
 
     #[test]

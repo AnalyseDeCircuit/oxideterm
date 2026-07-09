@@ -21,19 +21,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Keep this workflow on the default branch while building the requested source branch.
           ref: ${{ inputs.source_ref || github.ref }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          toolchain: 1.94.1
           components: rustfmt
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: ./agent -> target
           key: remote-agent-binaries
@@ -52,7 +53,7 @@ jobs:
           sha256sum crates/oxideterm-gpui-app/resources/agents/oxideterm-agent-*-linux-musl
 
       - name: Upload bundled agents
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: oxideterm-agent-linux-musl
           path: |

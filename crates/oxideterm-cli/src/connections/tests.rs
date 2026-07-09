@@ -92,6 +92,7 @@ fn snapshot_changes_describe_incoming_records() {
             updated_at: "2026-05-27T00:00:00Z".to_string(),
             deleted: false,
             payload: Some(sample_connection("id-1", "Prod")),
+            options: None,
         }],
     };
 

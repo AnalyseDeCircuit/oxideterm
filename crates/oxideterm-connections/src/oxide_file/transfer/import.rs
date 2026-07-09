@@ -68,6 +68,80 @@ fn apply_oxide_import_with_options_inner(
         portable_secrets,
         ..
     } = payload;
+
+    // Parse and validate every selected profile resource before preparing or
+    // committing connections. This keeps a bad late archive section from
+    // leaving the connection half of the import on disk.
+    let serial_profiles_snapshot = serial_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<SerialProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid serial profiles snapshot in .oxide payload: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    if options.import_serial_profiles {
+        for profile in serial_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate serial profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
+    let raw_tcp_profiles_snapshot = raw_tcp_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<RawTcpProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid Raw TCP profiles snapshot in .oxide payload: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    if options.import_raw_tcp_profiles {
+        for profile in raw_tcp_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate Raw TCP profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
+    let raw_udp_profiles_snapshot = raw_udp_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<RawUdpProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid Raw UDP profiles snapshot in .oxide payload: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    if options.import_raw_udp_profiles {
+        for profile in raw_udp_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate Raw UDP profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
+
     current_step += 1;
     report_progress("filtering_selection", current_step);
     let mut selected_connections =
@@ -111,8 +185,7 @@ fn apply_oxide_import_with_options_inner(
     result.restored_connection_passwords = credential_counts.restored_connection_passwords;
     result.restored_key_passphrases = credential_counts.restored_key_passphrases;
     result.restored_managed_keys = credential_counts.restored_managed_keys;
-    result.restored_managed_key_passphrases =
-        credential_counts.restored_managed_key_passphrases;
+    result.restored_managed_key_passphrases = credential_counts.restored_managed_key_passphrases;
     result.restored_privilege_credentials = credential_counts.restored_privilege_credentials;
     result.skipped_sensitive_credentials = credential_counts.skipped_sensitive_credentials;
     let mut connections_to_save = Vec::new();
@@ -211,87 +284,87 @@ fn apply_oxide_import_with_options_inner(
         }
     }
 
-    current_step += 1;
-    report_progress("applying_connections", current_step);
-    store.upsert_imported_connections_and_managed_keys_transaction(
-        connections_to_save,
-        imported_managed_keys,
-    )?;
-
-    current_step += 1;
-    report_progress("saving_config", current_step);
     if !options.import_forwards {
         result.skipped_forwards = total_selected_forwards;
     } else if forward_filter.is_some() {
         result.skipped_forwards = total_available_forwards.saturating_sub(total_selected_forwards);
     }
 
-    if let Some(snapshot_json) = serial_profiles_json {
-        let serial_profiles_snapshot: SerialProfilesSyncSnapshot =
-            serde_json::from_str(&snapshot_json).map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Invalid serial profiles snapshot in .oxide payload: {error}"
-                ))
-            })?;
-        let serial_profiles_count = serial_profiles_snapshot.records.len();
-        if options.import_serial_profiles {
-            result.imported_serial_profiles =
-                store.apply_serial_profiles_snapshot(serial_profiles_snapshot).map_err(|error| {
-                    OxideFileError::InvalidFormat(format!(
-                        "Failed to import serial profiles from .oxide payload: {error}"
-                    ))
-                })?;
-            result.skipped_serial_profiles =
-                serial_profiles_count.saturating_sub(result.imported_serial_profiles);
-        } else {
-            result.skipped_serial_profiles = serial_profiles_count;
-        }
-    }
+    // Profiles and connections share one store file, so checkpoint the complete
+    // owner state before the first write. Secret-bearing connection upserts run
+    // last, leaving no fallible archive stage after credentials are committed.
+    let checkpoint = store.create_checkpoint()?;
+    let apply_result = (|| {
+        current_step += 1;
+        report_progress("saving_config", current_step);
 
-    if let Some(snapshot_json) = raw_tcp_profiles_json {
-        let raw_tcp_profiles_snapshot: RawTcpProfilesSyncSnapshot =
-            serde_json::from_str(&snapshot_json).map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Invalid Raw TCP profiles snapshot in .oxide payload: {error}"
-                ))
-            })?;
-        let raw_tcp_profiles_count = raw_tcp_profiles_snapshot.records.len();
-        if options.import_raw_tcp_profiles {
-            result.imported_raw_tcp_profiles = store
-                .apply_raw_tcp_profiles_snapshot(raw_tcp_profiles_snapshot)
-                .map_err(|error| {
-                    OxideFileError::InvalidFormat(format!(
-                        "Failed to import Raw TCP profiles from .oxide payload: {error}"
-                    ))
-                })?;
-            result.skipped_raw_tcp_profiles =
-                raw_tcp_profiles_count.saturating_sub(result.imported_raw_tcp_profiles);
-        } else {
-            result.skipped_raw_tcp_profiles = raw_tcp_profiles_count;
+        if let Some(serial_profiles_snapshot) = serial_profiles_snapshot {
+            let serial_profiles_count = serial_profiles_snapshot.records.len();
+            if options.import_serial_profiles {
+                result.imported_serial_profiles = store
+                    .apply_serial_profiles_snapshot(serial_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import serial profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_serial_profiles =
+                    serial_profiles_count.saturating_sub(result.imported_serial_profiles);
+            } else {
+                result.skipped_serial_profiles = serial_profiles_count;
+            }
         }
-    }
 
-    if let Some(snapshot_json) = raw_udp_profiles_json {
-        let raw_udp_profiles_snapshot: RawUdpProfilesSyncSnapshot =
-            serde_json::from_str(&snapshot_json).map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Invalid Raw UDP profiles snapshot in .oxide payload: {error}"
-                ))
-            })?;
-        let raw_udp_profiles_count = raw_udp_profiles_snapshot.records.len();
-        if options.import_raw_udp_profiles {
-            result.imported_raw_udp_profiles = store
-                .apply_raw_udp_profiles_snapshot(raw_udp_profiles_snapshot)
-                .map_err(|error| {
-                    OxideFileError::InvalidFormat(format!(
-                        "Failed to import Raw UDP profiles from .oxide payload: {error}"
-                    ))
-                })?;
-            result.skipped_raw_udp_profiles =
-                raw_udp_profiles_count.saturating_sub(result.imported_raw_udp_profiles);
-        } else {
-            result.skipped_raw_udp_profiles = raw_udp_profiles_count;
+        if let Some(raw_tcp_profiles_snapshot) = raw_tcp_profiles_snapshot {
+            let raw_tcp_profiles_count = raw_tcp_profiles_snapshot.records.len();
+            if options.import_raw_tcp_profiles {
+                result.imported_raw_tcp_profiles = store
+                    .apply_raw_tcp_profiles_snapshot(raw_tcp_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import Raw TCP profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_raw_tcp_profiles =
+                    raw_tcp_profiles_count.saturating_sub(result.imported_raw_tcp_profiles);
+            } else {
+                result.skipped_raw_tcp_profiles = raw_tcp_profiles_count;
+            }
         }
+
+        if let Some(raw_udp_profiles_snapshot) = raw_udp_profiles_snapshot {
+            let raw_udp_profiles_count = raw_udp_profiles_snapshot.records.len();
+            if options.import_raw_udp_profiles {
+                result.imported_raw_udp_profiles = store
+                    .apply_raw_udp_profiles_snapshot(raw_udp_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import Raw UDP profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_raw_udp_profiles =
+                    raw_udp_profiles_count.saturating_sub(result.imported_raw_udp_profiles);
+            } else {
+                result.skipped_raw_udp_profiles = raw_udp_profiles_count;
+            }
+        }
+
+        current_step += 1;
+        report_progress("applying_connections", current_step);
+        store.upsert_imported_connections_and_managed_keys_transaction(
+            connections_to_save,
+            imported_managed_keys,
+        )?;
+        Ok::<(), OxideFileError>(())
+    })();
+
+    if let Err(import_error) = apply_result {
+        return match store.restore_checkpoint(&checkpoint) {
+            Ok(()) => Err(import_error),
+            Err(rollback_error) => Err(OxideFileError::Store(format!(
+                "Import transaction failed ({import_error}); the connection store checkpoint also could not be restored ({rollback_error:#})"
+            ))),
+        };
     }
 
     if options.import_portable_secrets {
@@ -435,10 +508,7 @@ fn filter_selected_forward_ids(
     let mut skipped = 0usize;
     for connection in connections {
         connection.forwards.retain(|forward| {
-            let keep = forward
-                .id
-                .as_ref()
-                .is_some_and(|id| requested.contains(id));
+            let keep = forward.id.as_ref().is_some_and(|id| requested.contains(id));
             if keep {
                 if let Some(id) = &forward.id {
                     matched.insert(id.clone());
@@ -742,13 +812,11 @@ fn prepare_managed_key_restore(
             .decode(encoded_key.as_bytes())
             .map_err(|error| OxideFileError::InvalidFormat(error.to_string()))?,
     );
-    let private_key = Zeroizing::new(
-        String::from_utf8(decoded.to_vec()).map_err(|error| {
-            OxideFileError::InvalidFormat(format!(
-                "Managed key '{key_path}' is not valid UTF-8: {error}"
-            ))
-        })?,
-    );
+    let private_key = Zeroizing::new(String::from_utf8(decoded.to_vec()).map_err(|error| {
+        OxideFileError::InvalidFormat(format!(
+            "Managed key '{key_path}' is not valid UTF-8: {error}"
+        ))
+    })?);
     let key_id = Uuid::new_v4().to_string();
     let secret_id = format!("managed-key-{key_id}");
     let now = Utc::now();
@@ -894,7 +962,9 @@ fn merge_options(
     }
     existing.agent_forwarding |= imported.agent_forwarding;
     existing.legacy_ssh_compatibility |= imported.legacy_ssh_compatibility;
-    existing.post_connect_command = imported.post_connect_command.or(existing.post_connect_command);
+    existing.post_connect_command = imported
+        .post_connect_command
+        .or(existing.post_connect_command);
     if imported_has_proxy_chain {
         existing.jump_host = None;
     }

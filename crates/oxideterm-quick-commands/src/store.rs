@@ -3,7 +3,9 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    ffi::OsString,
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -23,8 +25,26 @@ const MAX_NAME_LEN: usize = 160;
 const MAX_COMMAND_LEN: usize = 4096;
 const MAX_DESCRIPTION_LEN: usize = 1024;
 const MAX_HOST_PATTERN_LEN: usize = 256;
+const MAX_ATOMIC_TEMP_ATTEMPTS: usize = 128;
 const BUILTIN_CATEGORY_IDS: &[&str] = &["system", "network", "files", "docker", "custom"];
 static QUICK_COMMAND_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+static ATOMIC_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_ATOMIC_REPLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FAIL_NEXT_CHECKPOINT_REMOVAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// An opaque copy of the exact Quick Commands file state used for rollback.
+pub struct QuickCommandsCheckpoint {
+    state: QuickCommandsCheckpointState,
+}
+
+enum QuickCommandsCheckpointState {
+    Missing,
+    Present(Vec<u8>),
+}
 
 pub fn quick_commands_path(settings_path: &Path) -> PathBuf {
     settings_path
@@ -47,6 +67,44 @@ pub fn load_snapshot(settings_path: &Path) -> Result<QuickCommandsSnapshot, Stri
 pub fn save_snapshot(settings_path: &Path, snapshot: &QuickCommandsSnapshot) -> Result<(), String> {
     let path = quick_commands_path(settings_path);
     save_snapshot_to_path(&path, snapshot)
+}
+
+/// Captures whether the Quick Commands file exists and its complete contents.
+pub fn capture_checkpoint(settings_path: &Path) -> Result<QuickCommandsCheckpoint, String> {
+    let path = quick_commands_path(settings_path);
+    let state = match fs::metadata(&path) {
+        Ok(metadata) => {
+            if metadata.len() > MAX_QUICK_COMMANDS_FILE_BYTES {
+                return Err("Quick Commands file exceeds size limit".to_string());
+            }
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read Quick Commands checkpoint: {error}"))?;
+            QuickCommandsCheckpointState::Present(bytes)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            QuickCommandsCheckpointState::Missing
+        }
+        Err(error) => {
+            return Err(format!(
+                "failed to stat Quick Commands checkpoint source: {error}"
+            ));
+        }
+    };
+    Ok(QuickCommandsCheckpoint { state })
+}
+
+/// Restores the exact file state represented by a previously captured checkpoint.
+pub fn restore_checkpoint(
+    settings_path: &Path,
+    checkpoint: &QuickCommandsCheckpoint,
+) -> Result<(), String> {
+    let path = quick_commands_path(settings_path);
+    match &checkpoint.state {
+        QuickCommandsCheckpointState::Present(bytes) => atomic_write_file(&path, bytes)
+            .map_err(|error| format!("failed to restore Quick Commands checkpoint: {error}")),
+        QuickCommandsCheckpointState::Missing => remove_file_if_present(&path)
+            .map_err(|error| format!("failed to restore missing Quick Commands state: {error}")),
+    }
 }
 
 pub fn apply_snapshot_json(
@@ -128,11 +186,169 @@ fn save_snapshot_to_path(path: &Path, snapshot: &QuickCommandsSnapshot) -> Resul
     if json.len() as u64 > MAX_QUICK_COMMANDS_FILE_BYTES {
         return Err("Quick Commands snapshot exceeds size limit".to_string());
     }
-    let temp_path = path.with_extension("json.tmp");
-    fs::write(&temp_path, json)
-        .map_err(|error| format!("failed to write Quick Commands temp file: {error}"))?;
-    fs::rename(&temp_path, path)
+    atomic_write_file(path, &json)
         .map_err(|error| format!("failed to replace Quick Commands file: {error}"))?;
+    Ok(())
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic write path has no file name",
+        )
+    })?;
+    let (temp_path, mut temp_file) = (0..MAX_ATOMIC_TEMP_ATTEMPTS)
+        .find_map(|_| {
+            let sequence = ATOMIC_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+            let temp_path = parent.join(temp_name);
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+            {
+                Ok(file) => Some(Ok((temp_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::AlreadyExists, "atomic temp path exhausted")
+        })?;
+
+    // The destination changes only after the complete temporary file reaches durable storage.
+    let write_result = (|| {
+        temp_file.write_all(bytes)?;
+        temp_file.flush()?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        fail_before_atomic_replace_for_tests()?;
+        atomic_replace_file(&temp_path, path)?;
+        sync_parent_directory(parent)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+fn remove_file_if_present(path: &Path) -> io::Result<()> {
+    fail_before_checkpoint_removal_for_tests()?;
+    match fs::remove_file(path) {
+        Ok(()) => {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            sync_parent_directory(parent)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other("injected failure before atomic replace"))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn fail_before_checkpoint_removal_for_tests() -> io::Result<()> {
+    FAIL_NEXT_CHECKPOINT_REMOVAL.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other(
+                "injected failure before checkpoint removal",
+            ))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_checkpoint_removal_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn inject_atomic_replace_failure() {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| fail.set(true));
+}
+
+#[cfg(test)]
+fn inject_checkpoint_removal_failure() {
+    FAIL_NEXT_CHECKPOINT_REMOVAL.with(|fail| fail.set(true));
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
+    // MoveFileExW uses WRITE_THROUGH on Windows, which flushes the replacement operation.
     Ok(())
 }
 
@@ -630,6 +846,100 @@ mod tests {
     }
 
     #[test]
+    fn failed_atomic_save_preserves_existing_file() {
+        let settings_path = temp_settings_path("atomic-existing");
+        let path = quick_commands_path(&settings_path);
+        let mut snapshot = default_snapshot();
+        save_snapshot(&settings_path, &snapshot).unwrap();
+        let previous = fs::read(&path).unwrap();
+        snapshot.updated_at = snapshot.updated_at.saturating_add(1);
+        inject_atomic_replace_failure();
+
+        assert!(save_snapshot(&settings_path, &snapshot).is_err());
+        assert_eq!(fs::read(&path).unwrap(), previous);
+        assert_no_temporary_files(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_atomic_save_preserves_missing_file_state() {
+        let settings_path = temp_settings_path("atomic-missing");
+        let path = quick_commands_path(&settings_path);
+        inject_atomic_replace_failure();
+
+        assert!(save_snapshot(&settings_path, &default_snapshot()).is_err());
+        assert!(!path.exists());
+        assert_no_temporary_files(path.parent().unwrap());
+    }
+
+    #[test]
+    fn checkpoint_restores_exact_present_file_contents() {
+        let settings_path = temp_settings_path("checkpoint-present");
+        let path = quick_commands_path(&settings_path);
+        let original = b"{ not a parsed snapshot, but exact persisted state }";
+        fs::write(&path, original).unwrap();
+        let checkpoint = capture_checkpoint(&settings_path).unwrap();
+        fs::write(&path, b"replacement").unwrap();
+
+        restore_checkpoint(&settings_path, &checkpoint).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn present_checkpoint_restore_recreates_removed_parent_directory() {
+        let settings_path = temp_settings_path("checkpoint-parent");
+        let path = quick_commands_path(&settings_path);
+        let original = b"checkpoint contents";
+        fs::write(&path, original).unwrap();
+        let checkpoint = capture_checkpoint(&settings_path).unwrap();
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+
+        restore_checkpoint(&settings_path, &checkpoint).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn checkpoint_restores_missing_file_state() {
+        let settings_path = temp_settings_path("checkpoint-missing");
+        let path = quick_commands_path(&settings_path);
+        let checkpoint = capture_checkpoint(&settings_path).unwrap();
+        save_snapshot(&settings_path, &default_snapshot()).unwrap();
+
+        restore_checkpoint(&settings_path, &checkpoint).unwrap();
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn failed_present_checkpoint_restore_preserves_current_file() {
+        let settings_path = temp_settings_path("checkpoint-present-failure");
+        let path = quick_commands_path(&settings_path);
+        fs::write(&path, b"checkpoint").unwrap();
+        let checkpoint = capture_checkpoint(&settings_path).unwrap();
+        let current = b"current state";
+        fs::write(&path, current).unwrap();
+        inject_atomic_replace_failure();
+
+        assert!(restore_checkpoint(&settings_path, &checkpoint).is_err());
+        assert_eq!(fs::read(&path).unwrap(), current);
+        assert_no_temporary_files(path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_missing_checkpoint_restore_preserves_current_file() {
+        let settings_path = temp_settings_path("checkpoint-missing-failure");
+        let path = quick_commands_path(&settings_path);
+        let checkpoint = capture_checkpoint(&settings_path).unwrap();
+        let current = b"current state";
+        fs::write(&path, current).unwrap();
+        inject_checkpoint_removal_failure();
+
+        assert!(restore_checkpoint(&settings_path, &checkpoint).is_err());
+        assert_eq!(fs::read(&path).unwrap(), current);
+    }
+
+    #[test]
     fn rename_import_does_not_duplicate_builtin_roundtrip_records() {
         let source_settings_path = temp_settings_path("roundtrip-source");
         let target_settings_path = temp_settings_path("roundtrip-target");
@@ -661,5 +971,16 @@ mod tests {
 
         let _ = fs::remove_dir_all(source_settings_path.parent().unwrap());
         let _ = fs::remove_dir_all(target_settings_path.parent().unwrap());
+    }
+
+    fn assert_no_temporary_files(directory: &Path) {
+        let has_temporary_file = fs::read_dir(directory).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        });
+        assert!(!has_temporary_file);
     }
 }

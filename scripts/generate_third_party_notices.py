@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--title", default="Third-Party Notices", help="Markdown title.")
     parser.add_argument("--exclude-name", action="append", default=[], help="Crate name to exclude.")
     parser.add_argument("--exclude-prefix", action="append", default=[], help="Crate name prefix to exclude.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Verify the existing output is current without rewriting it.",
+    )
     return parser.parse_args()
 
 
@@ -195,7 +200,11 @@ def build_notices(args: argparse.Namespace) -> tuple[str, int, int]:
         crate for crate in crates if any(is_copyleft(license_name) for license_name in crate.licenses) and has_permissive_option(crate)
     ]
 
-    generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    generated_at = getattr(
+        args,
+        "generated_at",
+        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
     lines = [
         f"# {args.title}",
         "",
@@ -250,7 +259,19 @@ def main() -> None:
     args = parse_args()
     cwd = Path(args.cwd).resolve()
     output_path = (cwd / args.output).resolve()
+    if args.check and output_path.is_file():
+        # Preserve the recorded timestamp during verification so dependency
+        # changes, rather than the current clock, determine freshness.
+        for line in output_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("Generated: "):
+                args.generated_at = line.removeprefix("Generated: ")
+                break
     output, crate_count, copyleft_count = build_notices(args)
+    if args.check:
+        if not output_path.is_file() or output_path.read_text(encoding="utf-8") != output:
+            raise SystemExit(f"{output_path} is stale; regenerate third-party notices")
+        print(f"Verified {output_path.relative_to(Path.cwd())} with {crate_count} crate entries.")
+        return
     output_path.write_text(output, encoding="utf-8")
     print(f"Wrote {output_path.relative_to(Path.cwd())} with {crate_count} crate entries ({copyleft_count} copyleft-flagged).")
 

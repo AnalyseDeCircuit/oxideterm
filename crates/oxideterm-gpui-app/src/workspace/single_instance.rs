@@ -44,13 +44,18 @@ impl WorkspaceApp {
 
         let mut events = Vec::new();
         let mut disconnected = false;
-        loop {
-            match rx.try_recv() {
-                Ok(event) => events.push(event),
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    disconnected = true;
-                    break;
+        {
+            // The application owns the receiver across workspace lifetimes;
+            // each active window only locks it while draining queued events.
+            let rx = rx.lock().expect("single-instance receiver poisoned");
+            loop {
+                match rx.try_recv() {
+                    Ok(event) => events.push(event),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
                 }
             }
         }

@@ -3,10 +3,18 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
+    ffi::OsString,
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
+
+#[cfg(test)]
+use std::cell::Cell;
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -15,8 +23,16 @@ use sha2::{Digest, Sha256};
 use crate::{ForwardRule, ForwardStatus, ForwardType};
 
 pub const FORWARD_TOMBSTONE_RETENTION_DAYS: i64 = 30;
+const MAX_ATOMIC_TEMP_ATTEMPTS: usize = 32;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+static ATOMIC_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_ATOMIC_REPLACE: Cell<bool> = const { Cell::new(false) };
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistedForward {
     pub id: String,
@@ -116,13 +132,26 @@ pub enum SavedForwardError {
     UnsupportedForwardType(String),
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedForwardData {
     #[serde(default)]
     forwards: Vec<PersistedForward>,
     #[serde(default)]
     tombstones: Vec<DeletedPersistedForwardTombstone>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+enum SavedForwardFileState {
+    Missing,
+    Present(Vec<u8>),
+}
+
+/// Opaque owner checkpoint used to restore every saved-forward record exactly.
+#[derive(Clone)]
+pub struct SavedForwardCheckpoint {
+    data: SavedForwardData,
+    file_state: SavedForwardFileState,
 }
 
 #[derive(Debug)]
@@ -183,6 +212,39 @@ impl SavedForwardStore {
         &self.path
     }
 
+    /// Captures all forwards, tombstones, and whether the backing file exists.
+    pub fn checkpoint(&self) -> Result<SavedForwardCheckpoint, SavedForwardError> {
+        let data = self.lock_data();
+        let file_state = match fs::read(&self.path) {
+            Ok(bytes) => SavedForwardFileState::Present(bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => SavedForwardFileState::Missing,
+            Err(error) => return Err(error.into()),
+        };
+        Ok(SavedForwardCheckpoint {
+            data: data.clone(),
+            file_state,
+        })
+    }
+
+    /// Replaces the complete owner state only after its file state is committed.
+    pub fn replace_from_checkpoint(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        let mut data = self.lock_data();
+        self.persist_checkpoint(checkpoint)?;
+        *data = checkpoint.data.clone();
+        Ok(())
+    }
+
+    /// Restores a prior owner checkpoint for transaction compensation.
+    pub fn restore_checkpoint(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        self.replace_from_checkpoint(checkpoint)
+    }
+
     pub fn sync_persisted_forward_rule(
         &self,
         forward_id: &str,
@@ -190,73 +252,75 @@ impl SavedForwardStore {
         owner_connection_id: Option<String>,
         rule: ForwardRule,
     ) -> Result<Option<PersistedForward>, SavedForwardError> {
-        let mut data = self.lock_data();
-        let saved = if let Some(existing) = data
-            .forwards
-            .iter_mut()
-            .find(|forward| forward.id == forward_id)
-        {
-            existing.session_id = session_id.to_string();
-            if owner_connection_id.is_some() {
-                existing.owner_connection_id = owner_connection_id;
-            }
-            existing.forward_type = rule.forward_type;
-            existing.rule = stopped_rule(rule);
-            existing.mark_updated();
-            Some(existing.clone())
-        } else if let Some(owner_connection_id) = owner_connection_id {
-            let forward = PersistedForward::new(
-                forward_id.to_string(),
-                session_id.to_string(),
-                Some(owner_connection_id),
-                rule.forward_type,
-                rule,
-                false,
-            );
-            data.tombstones
-                .retain(|tombstone| tombstone.id != forward_id);
-            data.forwards.push(forward.clone());
-            Some(forward)
-        } else {
-            None
-        };
-        self.save_locked(&mut data)?;
-        Ok(saved)
+        self.commit_update(|data| {
+            let saved = if let Some(existing) = data
+                .forwards
+                .iter_mut()
+                .find(|forward| forward.id == forward_id)
+            {
+                existing.session_id = session_id.to_string();
+                if owner_connection_id.is_some() {
+                    existing.owner_connection_id = owner_connection_id;
+                }
+                existing.forward_type = rule.forward_type;
+                existing.rule = stopped_rule(rule);
+                existing.mark_updated();
+                Some(existing.clone())
+            } else if let Some(owner_connection_id) = owner_connection_id {
+                let forward = PersistedForward::new(
+                    forward_id.to_string(),
+                    session_id.to_string(),
+                    Some(owner_connection_id),
+                    rule.forward_type,
+                    rule,
+                    false,
+                );
+                data.tombstones
+                    .retain(|tombstone| tombstone.id != forward_id);
+                data.forwards.push(forward.clone());
+                Some(forward)
+            } else {
+                None
+            };
+            Ok(saved)
+        })
     }
 
     pub fn persist_forward(&self, forward: PersistedForward) -> Result<(), SavedForwardError> {
-        let mut data = self.lock_data();
-        upsert_forward(&mut data.forwards, forward);
-        let forward_ids: HashSet<String> = data
-            .forwards
-            .iter()
-            .map(|forward| forward.id.clone())
-            .collect();
-        data.tombstones
-            .retain(|tombstone| !forward_ids.contains(&tombstone.id));
-        self.save_locked(&mut data)
+        self.commit_update(|data| {
+            upsert_forward(&mut data.forwards, forward);
+            let forward_ids: HashSet<String> = data
+                .forwards
+                .iter()
+                .map(|forward| forward.id.clone())
+                .collect();
+            data.tombstones
+                .retain(|tombstone| !forward_ids.contains(&tombstone.id));
+            Ok(())
+        })
     }
 
     pub fn delete_persisted_forward(&self, forward_id: &str) -> Result<(), SavedForwardError> {
-        let mut data = self.lock_data();
-        let Some(index) = data
-            .forwards
-            .iter()
-            .position(|forward| forward.id == forward_id)
-        else {
-            return Ok(());
-        };
-        let forward = data.forwards.remove(index);
-        if forward.owner_connection_id.is_some() {
-            upsert_tombstone(
-                &mut data.tombstones,
-                DeletedPersistedForwardTombstone {
-                    id: forward_id.to_string(),
-                    deleted_at: Utc::now(),
-                },
-            );
-        }
-        self.save_locked(&mut data)
+        self.commit_update_if(|data| {
+            let Some(index) = data
+                .forwards
+                .iter()
+                .position(|forward| forward.id == forward_id)
+            else {
+                return Ok(((), false));
+            };
+            let forward = data.forwards.remove(index);
+            if forward.owner_connection_id.is_some() {
+                upsert_tombstone(
+                    &mut data.tombstones,
+                    DeletedPersistedForwardTombstone {
+                        id: forward_id.to_string(),
+                        deleted_at: Utc::now(),
+                    },
+                );
+            }
+            Ok(((), true))
+        })
     }
 
     pub fn update_auto_start(
@@ -264,17 +328,18 @@ impl SavedForwardStore {
         forward_id: &str,
         auto_start: bool,
     ) -> Result<(), SavedForwardError> {
-        let mut data = self.lock_data();
-        let Some(forward) = data
-            .forwards
-            .iter_mut()
-            .find(|forward| forward.id == forward_id)
-        else {
-            return Err(SavedForwardError::NotFound(forward_id.to_string()));
-        };
-        forward.auto_start = auto_start;
-        forward.mark_updated();
-        self.save_locked(&mut data)
+        self.commit_update(|data| {
+            let Some(forward) = data
+                .forwards
+                .iter_mut()
+                .find(|forward| forward.id == forward_id)
+            else {
+                return Err(SavedForwardError::NotFound(forward_id.to_string()));
+            };
+            forward.auto_start = auto_start;
+            forward.mark_updated();
+            Ok(())
+        })
     }
 
     pub fn load_owned_forwards(&self, owner_connection_id: &str) -> Vec<PersistedForward> {
@@ -312,48 +377,48 @@ impl SavedForwardStore {
         owner_connection_id: &str,
         session_id: &str,
     ) -> Result<usize, SavedForwardError> {
-        let mut data = self.lock_data();
-        let mut count = 0;
-        for forward in &mut data.forwards {
-            if forward.owner_connection_id.as_deref() == Some(owner_connection_id)
-                && forward.session_id != session_id
-            {
-                forward.session_id = session_id.to_string();
-                forward.mark_updated();
-                count += 1;
+        self.commit_update(|data| {
+            let mut count = 0;
+            for forward in &mut data.forwards {
+                if forward.owner_connection_id.as_deref() == Some(owner_connection_id)
+                    && forward.session_id != session_id
+                {
+                    forward.session_id = session_id.to_string();
+                    forward.mark_updated();
+                    count += 1;
+                }
             }
-        }
-        self.save_locked(&mut data)?;
-        Ok(count)
+            Ok(count)
+        })
     }
 
     pub fn delete_owned_forwards(
         &self,
         owner_connection_id: &str,
     ) -> Result<usize, SavedForwardError> {
-        let mut data = self.lock_data();
-        let now = Utc::now();
-        let mut removed = Vec::new();
-        data.forwards.retain(|forward| {
-            if forward.owner_connection_id.as_deref() == Some(owner_connection_id) {
-                removed.push(forward.id.clone());
-                false
-            } else {
-                true
+        self.commit_update(|data| {
+            let now = Utc::now();
+            let mut removed = Vec::new();
+            data.forwards.retain(|forward| {
+                if forward.owner_connection_id.as_deref() == Some(owner_connection_id) {
+                    removed.push(forward.id.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            let count = removed.len();
+            for id in removed {
+                upsert_tombstone(
+                    &mut data.tombstones,
+                    DeletedPersistedForwardTombstone {
+                        id,
+                        deleted_at: now,
+                    },
+                );
             }
-        });
-        let count = removed.len();
-        for id in removed {
-            upsert_tombstone(
-                &mut data.tombstones,
-                DeletedPersistedForwardTombstone {
-                    id,
-                    deleted_at: now,
-                },
-            );
-        }
-        self.save_locked(&mut data)?;
-        Ok(count)
+            Ok(count)
+        })
     }
 
     pub fn apply_owned_forward_import_records(
@@ -362,14 +427,11 @@ impl SavedForwardStore {
         replace_owner_connection_ids: &HashSet<String>,
         merge_owner_connection_ids: &HashSet<String>,
     ) -> Result<usize, SavedForwardError> {
-        let mut data = self.lock_data();
-        let backup_forwards = data.forwards.clone();
-        let backup_tombstones = data.tombstones.clone();
-        let result = (|| {
+        self.commit_update(|data| {
             let SavedForwardData {
                 forwards,
                 tombstones,
-            } = &mut *data;
+            } = data;
             apply_owned_forward_import_records_locked(
                 forwards,
                 tombstones,
@@ -377,16 +439,8 @@ impl SavedForwardStore {
                 replace_owner_connection_ids,
                 merge_owner_connection_ids,
             )?;
-            self.save_locked(&mut data)?;
-            Ok::<usize, SavedForwardError>(records.len())
-        })();
-
-        if result.is_err() {
-            data.forwards = backup_forwards;
-            data.tombstones = backup_tombstones;
-            let _ = self.save_locked(&mut data);
-        }
-        result
+            Ok(records.len())
+        })
     }
 
     pub fn export_snapshot(&self) -> Result<SavedForwardsSyncSnapshot, SavedForwardError> {
@@ -399,24 +453,54 @@ impl SavedForwardStore {
         snapshot: SavedForwardsSyncSnapshot,
         valid_owner_connection_ids: &HashSet<String>,
     ) -> Result<ApplySavedForwardsSyncSnapshotResult, SavedForwardError> {
-        let mut data = self.lock_data();
-        let existing_by_id: HashMap<String, PersistedForward> = data
-            .forwards
-            .iter()
-            .cloned()
-            .map(|forward| (forward.id.clone(), forward))
-            .collect();
-        let tombstones_by_id: HashMap<String, DeletedPersistedForwardTombstone> = data
-            .tombstones
-            .iter()
-            .cloned()
-            .map(|tombstone| (tombstone.id.clone(), tombstone))
-            .collect();
-        let mut result = ApplySavedForwardsSyncSnapshotResult::default();
+        self.commit_update_if(|data| {
+            let existing_by_id: HashMap<String, PersistedForward> = data
+                .forwards
+                .iter()
+                .cloned()
+                .map(|forward| (forward.id.clone(), forward))
+                .collect();
+            let tombstones_by_id: HashMap<String, DeletedPersistedForwardTombstone> = data
+                .tombstones
+                .iter()
+                .cloned()
+                .map(|tombstone| (tombstone.id.clone(), tombstone))
+                .collect();
+            let mut result = ApplySavedForwardsSyncSnapshotResult::default();
 
-        for record in snapshot.records {
-            let record_updated_at = parse_sync_timestamp(&record.updated_at, "updated_at")?;
-            if record.deleted {
+            for record in snapshot.records {
+                let record_updated_at = parse_sync_timestamp(&record.updated_at, "updated_at")?;
+                if record.deleted {
+                    if existing_by_id
+                        .get(&record.id)
+                        .is_some_and(|existing| existing.sync_updated_at() > record_updated_at)
+                    {
+                        result.skipped += 1;
+                        continue;
+                    }
+                    data.forwards.retain(|forward| forward.id != record.id);
+                    upsert_tombstone(
+                        &mut data.tombstones,
+                        DeletedPersistedForwardTombstone {
+                            id: record.id,
+                            deleted_at: record_updated_at,
+                        },
+                    );
+                    result.applied += 1;
+                    continue;
+                }
+
+                let Some(payload) = record.payload else {
+                    result.skipped += 1;
+                    continue;
+                };
+                if tombstones_by_id
+                    .get(&record.id)
+                    .is_some_and(|tombstone| tombstone.deleted_at >= record_updated_at)
+                {
+                    result.skipped += 1;
+                    continue;
+                }
                 if existing_by_id
                     .get(&record.id)
                     .is_some_and(|existing| existing.sync_updated_at() > record_updated_at)
@@ -424,58 +508,27 @@ impl SavedForwardStore {
                     result.skipped += 1;
                     continue;
                 }
-                data.forwards.retain(|forward| forward.id != record.id);
-                upsert_tombstone(
-                    &mut data.tombstones,
-                    DeletedPersistedForwardTombstone {
-                        id: record.id,
-                        deleted_at: record_updated_at,
-                    },
+                let Some(owner_connection_id) = payload.owner_connection_id.as_ref() else {
+                    result.skipped += 1;
+                    continue;
+                };
+                if !valid_owner_connection_ids.contains(owner_connection_id) {
+                    result.skipped += 1;
+                    continue;
+                }
+
+                upsert_forward(
+                    &mut data.forwards,
+                    persisted_forward_from_sync_payload(payload, record_updated_at)?,
                 );
+                data.tombstones
+                    .retain(|tombstone| tombstone.id != record.id);
                 result.applied += 1;
-                continue;
             }
 
-            let Some(payload) = record.payload else {
-                result.skipped += 1;
-                continue;
-            };
-            if tombstones_by_id
-                .get(&record.id)
-                .is_some_and(|tombstone| tombstone.deleted_at >= record_updated_at)
-            {
-                result.skipped += 1;
-                continue;
-            }
-            if existing_by_id
-                .get(&record.id)
-                .is_some_and(|existing| existing.sync_updated_at() > record_updated_at)
-            {
-                result.skipped += 1;
-                continue;
-            }
-            let Some(owner_connection_id) = payload.owner_connection_id.as_ref() else {
-                result.skipped += 1;
-                continue;
-            };
-            if !valid_owner_connection_ids.contains(owner_connection_id) {
-                result.skipped += 1;
-                continue;
-            }
-
-            upsert_forward(
-                &mut data.forwards,
-                persisted_forward_from_sync_payload(payload, record_updated_at)?,
-            );
-            data.tombstones
-                .retain(|tombstone| tombstone.id != record.id);
-            result.applied += 1;
-        }
-
-        if result.applied > 0 {
-            self.save_locked(&mut data)?;
-        }
-        Ok(result)
+            let should_persist = result.applied > 0;
+            Ok((result, should_persist))
+        })
     }
 
     fn sorted_forwards(
@@ -499,13 +552,182 @@ impl SavedForwardStore {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn save_locked(&self, data: &mut SavedForwardData) -> Result<(), SavedForwardError> {
-        data.tombstones = active_tombstones(&data.tombstones);
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
+    fn commit_update<T>(
+        &self,
+        update: impl FnOnce(&mut SavedForwardData) -> Result<T, SavedForwardError>,
+    ) -> Result<T, SavedForwardError> {
+        self.commit_update_if(|data| update(data).map(|result| (result, true)))
+    }
+
+    fn commit_update_if<T>(
+        &self,
+        update: impl FnOnce(&mut SavedForwardData) -> Result<(T, bool), SavedForwardError>,
+    ) -> Result<T, SavedForwardError> {
+        let mut current = self.lock_data();
+        let mut candidate = current.clone();
+        let (result, should_persist) = update(&mut candidate)?;
+        if should_persist {
+            candidate.tombstones = active_tombstones(&candidate.tombstones);
+            self.persist_data(&candidate)?;
+            // Memory becomes visible only after the durable file replacement succeeds.
+            *current = candidate;
         }
+        Ok(result)
+    }
+
+    fn persist_data(&self, data: &SavedForwardData) -> Result<(), SavedForwardError> {
         let json = serde_json::to_vec_pretty(data)?;
-        fs::write(&self.path, json)?;
+        atomic_write_file(&self.path, &json)?;
+        Ok(())
+    }
+
+    fn persist_checkpoint(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        match &checkpoint.file_state {
+            SavedForwardFileState::Present(bytes) => {
+                atomic_write_file(&self.path, bytes).map_err(Into::into)
+            }
+            SavedForwardFileState::Missing => {
+                fail_before_atomic_replace_for_tests()?;
+                match fs::remove_file(&self.path) {
+                    Ok(()) => {
+                        let parent = parent_directory(&self.path);
+                        sync_parent_directory(parent)?;
+                        Ok(())
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error.into()),
+                }
+            }
+        }
+    }
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = parent_directory(path);
+    fs::create_dir_all(parent)?;
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "saved forward path has no file name",
+        )
+    })?;
+    let (temp_path, mut temp_file) = (0..MAX_ATOMIC_TEMP_ATTEMPTS)
+        .find_map(|_| {
+            let sequence = ATOMIC_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+            let temp_path = parent.join(temp_name);
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+            {
+                Ok(file) => Some(Ok((temp_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::AlreadyExists, "atomic temp path exhausted")
+        })?;
+
+    // The destination remains untouched until the complete temp file is durable.
+    let write_result = (|| {
+        temp_file.write_all(bytes)?;
+        temp_file.flush()?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        fail_before_atomic_replace_for_tests()?;
+        atomic_replace_file(&temp_path, path)?;
+        sync_parent_directory(parent)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+fn parent_directory(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+#[cfg(not(windows))]
+fn sync_parent_directory(parent: &Path) -> io::Result<()> {
+    // Unix requires the directory entry itself to be synced after rename or unlink.
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
+    // MoveFileExW uses WRITE_THROUGH below, which flushes the replacement operation.
+    Ok(())
+}
+
+#[cfg(test)]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other("injected failure before atomic replace"))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn inject_atomic_replace_failure() {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| fail.set(true));
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
         Ok(())
     }
 }
@@ -880,6 +1102,163 @@ mod tests {
             description: Some(description.to_string()),
             auto_start: true,
         }
+    }
+
+    fn persisted_forward(
+        id: &str,
+        session_id: &str,
+        owner_connection_id: Option<&str>,
+        port: u16,
+    ) -> PersistedForward {
+        // Tests use both owner-bound and local-only records to prove checkpoints are complete.
+        PersistedForward::new(
+            id.to_string(),
+            session_id.to_string(),
+            owner_connection_id.map(str::to_string),
+            ForwardType::Local,
+            sample_rule(id, port),
+            false,
+        )
+    }
+
+    #[test]
+    fn atomic_save_failure_preserves_file_and_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let store = SavedForwardStore::load(&path).unwrap();
+        store
+            .persist_forward(persisted_forward(
+                "forward-1",
+                "session-1",
+                Some("connection-1"),
+                8080,
+            ))
+            .unwrap();
+        let checkpoint = store.checkpoint().unwrap();
+        let original_file = fs::read(&path).unwrap();
+
+        inject_atomic_replace_failure();
+        let error = store.update_auto_start("forward-1", true).unwrap_err();
+
+        assert!(matches!(error, SavedForwardError::Io(_)));
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        assert_eq!(*store.lock_data(), checkpoint.data);
+        assert!(!store.load_persisted_forwards("session-1")[0].auto_start);
+    }
+
+    #[test]
+    fn checkpoint_restore_preserves_all_records_and_tombstones() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let store = SavedForwardStore::load(&path).unwrap();
+        store
+            .persist_forward(persisted_forward("local-only", "session-local", None, 7000))
+            .unwrap();
+        store
+            .persist_forward(persisted_forward(
+                "deleted-owner",
+                "session-owner",
+                Some("connection-1"),
+                8000,
+            ))
+            .unwrap();
+        store.delete_persisted_forward("deleted-owner").unwrap();
+        let checkpoint = store.checkpoint().unwrap();
+
+        store
+            .persist_forward(persisted_forward(
+                "replacement",
+                "session-new",
+                Some("connection-2"),
+                9000,
+            ))
+            .unwrap();
+        store.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(*store.lock_data(), checkpoint.data);
+        assert_eq!(
+            serde_json::from_slice::<SavedForwardData>(&fs::read(&path).unwrap()).unwrap(),
+            checkpoint.data
+        );
+        assert_eq!(store.load_persisted_forwards("session-local").len(), 1);
+        assert!(
+            store
+                .lock_data()
+                .tombstones
+                .iter()
+                .any(|tombstone| tombstone.id == "deleted-owner")
+        );
+    }
+
+    #[test]
+    fn checkpoint_restore_preserves_unknown_fields_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let original_file = br#"{
+  "forwards": [],
+  "tombstones": [],
+  "futureField": { "mustSurvive": true }
+}
+"#;
+        fs::write(&path, original_file).unwrap();
+        let store = SavedForwardStore::load(&path).unwrap();
+        let checkpoint = store.checkpoint().unwrap();
+
+        store
+            .persist_forward(persisted_forward("forward-1", "session-1", None, 8080))
+            .unwrap();
+        assert_ne!(fs::read(&path).unwrap(), original_file);
+
+        store.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        assert_eq!(*store.lock_data(), checkpoint.data);
+    }
+
+    #[test]
+    fn checkpoint_restore_recovers_missing_file_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let store = SavedForwardStore::load(&path).unwrap();
+        let checkpoint = store.checkpoint().unwrap();
+
+        store
+            .persist_forward(persisted_forward("forward-1", "session-1", None, 8080))
+            .unwrap();
+        assert!(path.exists());
+
+        store.replace_from_checkpoint(&checkpoint).unwrap();
+
+        assert!(!path.exists());
+        assert_eq!(*store.lock_data(), checkpoint.data);
+        assert!(store.load_persisted_forwards("session-1").is_empty());
+    }
+
+    #[test]
+    fn checkpoint_restore_failure_preserves_current_file_and_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let store = SavedForwardStore::load(&path).unwrap();
+        store
+            .persist_forward(persisted_forward(
+                "forward-1",
+                "session-1",
+                Some("connection-1"),
+                8080,
+            ))
+            .unwrap();
+        let prior_checkpoint = store.checkpoint().unwrap();
+        store.update_auto_start("forward-1", true).unwrap();
+        let current_data = store.lock_data().clone();
+        let current_file = fs::read(&path).unwrap();
+
+        inject_atomic_replace_failure();
+        let error = store.restore_checkpoint(&prior_checkpoint).unwrap_err();
+
+        assert!(matches!(error, SavedForwardError::Io(_)));
+        assert_eq!(*store.lock_data(), current_data);
+        assert_eq!(fs::read(&path).unwrap(), current_file);
+        assert!(store.load_persisted_forwards("session-1")[0].auto_start);
     }
 
     #[test]

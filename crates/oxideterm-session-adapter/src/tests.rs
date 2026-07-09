@@ -42,6 +42,7 @@ fn saved_connection(auth: SavedAuth) -> SavedConnection {
         last_used_at: None,
         updated_at: Some(now),
         color: None,
+        icon: None,
         tags: Vec::new(),
         post_connect_command: None,
         privilege_credentials: Vec::new(),

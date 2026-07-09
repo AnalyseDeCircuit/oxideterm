@@ -9,7 +9,7 @@ use std::{
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use crate::{NativeUpdateError, PlatformTarget, current_platform_target};
+use crate::{InstallFlavor, NativeUpdateError, PlatformTarget, current_platform_target};
 #[cfg(target_os = "windows")]
 use crate::{
     WindowsUpdateHelperOptions, windows_update_helper_arguments, windows_update_helper_path,
@@ -29,6 +29,7 @@ pub enum InstallPackageKind {
     LinuxAppImage,
     LinuxAppImageArchive,
     LinuxPackage,
+    PortableArchive,
     Unknown,
 }
 
@@ -59,16 +60,18 @@ pub struct NativeInstallContext {
     pub target: PlatformTarget,
     pub current_exe: PathBuf,
     pub process_id: u32,
-    pub portable: bool,
+    pub install_flavor: InstallFlavor,
 }
 
 impl NativeInstallContext {
     pub fn current(portable: bool) -> Result<Self, NativeUpdateError> {
+        let target = current_platform_target();
+        let current_exe = current_install_executable()?;
         Ok(Self {
-            target: current_platform_target(),
-            current_exe: current_install_executable()?,
+            install_flavor: InstallFlavor::infer(&target, &current_exe, portable),
+            target,
+            current_exe,
             process_id: std::process::id(),
-            portable,
         })
     }
 }
@@ -119,7 +122,7 @@ pub fn plan_native_install(
     let package_path = package_path.as_ref().to_path_buf();
     let package_kind = classify_package(&package_path);
 
-    if context.portable {
+    if context.install_flavor == InstallFlavor::Portable {
         return NativeInstallPlan {
             strategy: InstallStrategy::PortableManualReplacement,
             action: InstallActionKind::Manual,
@@ -133,76 +136,73 @@ pub fn plan_native_install(
         };
     }
 
-    let (strategy, action, requires_app_exit, summary) = match (context.target.os(), package_kind) {
-        ("macos", InstallPackageKind::MacDmg) => (
-            InstallStrategy::MacOpenDmg,
-            InstallActionKind::OpenPackage,
-            false,
-            "Open the DMG and let Finder complete installation.",
-        ),
-        ("macos", InstallPackageKind::MacAppBundle) => (
-            InstallStrategy::MacReplaceAppBundle,
-            InstallActionKind::LaunchReplacementScript,
-            true,
-            "Schedule .app bundle replacement after OxideTerm exits.",
-        ),
-        ("macos", InstallPackageKind::MacArchive) => (
-            InstallStrategy::MacReplaceAppArchive,
-            InstallActionKind::LaunchReplacementScript,
-            true,
-            "Schedule archived .app bundle replacement after OxideTerm exits.",
-        ),
-        ("windows", InstallPackageKind::WindowsMsi) => (
-            InstallStrategy::WindowsRunInstaller,
-            InstallActionKind::LaunchInstaller,
-            false,
-            "Launch the Windows installer with elevation.",
-        ),
-        ("windows", InstallPackageKind::WindowsExe) => (
-            InstallStrategy::WindowsRunInstaller,
-            InstallActionKind::LaunchInstaller,
-            true,
-            "Stage the Windows installer and apply it after OxideTerm exits.",
-        ),
-        ("windows", InstallPackageKind::WindowsInstallerArchive) => (
-            InstallStrategy::WindowsExtractAndRunInstaller,
-            InstallActionKind::LaunchInstaller,
-            false,
-            "Extract the Windows update archive and launch its installer with elevation.",
-        ),
-        ("linux", InstallPackageKind::LinuxAppImage)
-            if current_exe_is_appimage(&context.current_exe) =>
-        {
+    let (strategy, action, requires_app_exit, summary) =
+        match (context.target.os(), context.install_flavor, package_kind) {
+            ("macos", InstallFlavor::MacApp, InstallPackageKind::MacDmg) => (
+                InstallStrategy::MacOpenDmg,
+                InstallActionKind::OpenPackage,
+                false,
+                "Open the DMG and let Finder complete installation.",
+            ),
+            ("macos", InstallFlavor::MacApp, InstallPackageKind::MacAppBundle) => (
+                InstallStrategy::MacReplaceAppBundle,
+                InstallActionKind::LaunchReplacementScript,
+                true,
+                "Schedule .app bundle replacement after OxideTerm exits.",
+            ),
+            ("macos", InstallFlavor::MacApp, InstallPackageKind::MacArchive) => (
+                InstallStrategy::MacReplaceAppArchive,
+                InstallActionKind::LaunchReplacementScript,
+                true,
+                "Schedule archived .app bundle replacement after OxideTerm exits.",
+            ),
+            ("windows", InstallFlavor::WindowsNsis, InstallPackageKind::WindowsMsi) => (
+                InstallStrategy::WindowsRunInstaller,
+                InstallActionKind::LaunchInstaller,
+                false,
+                "Launch the Windows installer with elevation.",
+            ),
+            ("windows", InstallFlavor::WindowsNsis, InstallPackageKind::WindowsExe) => (
+                InstallStrategy::WindowsRunInstaller,
+                InstallActionKind::LaunchInstaller,
+                true,
+                "Stage the Windows installer and apply it after OxideTerm exits.",
+            ),
             (
+                "windows",
+                InstallFlavor::WindowsNsis,
+                InstallPackageKind::WindowsInstallerArchive,
+            ) => (
+                InstallStrategy::WindowsExtractAndRunInstaller,
+                InstallActionKind::LaunchInstaller,
+                false,
+                "Extract the Windows update archive and launch its installer.",
+            ),
+            ("linux", InstallFlavor::LinuxAppImage, InstallPackageKind::LinuxAppImage) => (
                 InstallStrategy::LinuxReplaceAppImage,
                 InstallActionKind::LaunchReplacementScript,
                 true,
                 "Schedule AppImage replacement after OxideTerm exits.",
-            )
-        }
-        ("linux", InstallPackageKind::LinuxAppImageArchive)
-            if current_exe_is_appimage(&context.current_exe) =>
-        {
-            (
+            ),
+            ("linux", InstallFlavor::LinuxAppImage, InstallPackageKind::LinuxAppImageArchive) => (
                 InstallStrategy::LinuxReplaceAppImageArchive,
                 InstallActionKind::LaunchReplacementScript,
                 true,
                 "Extract and schedule AppImage replacement after OxideTerm exits.",
-            )
-        }
-        ("linux", InstallPackageKind::LinuxPackage) => (
-            InstallStrategy::LinuxOpenPackage,
-            InstallActionKind::OpenPackage,
-            false,
-            "Open the Linux package with the desktop package installer.",
-        ),
-        _ => (
-            InstallStrategy::OpenPackage,
-            InstallActionKind::OpenPackage,
-            false,
-            "Open the update package for manual installation.",
-        ),
-    };
+            ),
+            ("linux", InstallFlavor::LinuxDeb, InstallPackageKind::LinuxPackage) => (
+                InstallStrategy::LinuxOpenPackage,
+                InstallActionKind::OpenPackage,
+                false,
+                "Open the Linux package with the desktop package installer.",
+            ),
+            _ => (
+                InstallStrategy::OpenPackage,
+                InstallActionKind::OpenPackage,
+                false,
+                "Open the update package for manual installation.",
+            ),
+        };
 
     NativeInstallPlan {
         strategy,
@@ -258,7 +258,11 @@ fn classify_package(path: &Path) -> InstallPackageKind {
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    if extension == "app" {
+    if (file_name.contains("_portable.") || file_name.contains("-portable."))
+        && (extension == "zip" || file_name.ends_with(".tar.gz") || extension == "tgz")
+    {
+        InstallPackageKind::PortableArchive
+    } else if extension == "app" {
         InstallPackageKind::MacAppBundle
     } else if extension == "dmg" {
         InstallPackageKind::MacDmg
@@ -283,14 +287,6 @@ fn classify_package(path: &Path) -> InstallPackageKind {
     } else {
         InstallPackageKind::Unknown
     }
-}
-
-fn current_exe_is_appimage(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.eq_ignore_ascii_case("appimage"))
-        .unwrap_or(false)
-        || std::env::var_os("APPIMAGE").is_some()
 }
 
 fn open_package(path: &Path) -> Result<(), NativeUpdateError> {
@@ -328,7 +324,7 @@ fn execute_windows_installer(
     plan: &NativeInstallPlan,
 ) -> Result<NativeInstallOutcome, NativeUpdateError> {
     match plan.package_kind {
-        InstallPackageKind::WindowsMsi => launch_windows_installer_elevated(
+        InstallPackageKind::WindowsMsi => launch_windows_installer_via_powershell(
             "msiexec.exe",
             &[
                 "/i".to_string(),
@@ -337,13 +333,15 @@ fn execute_windows_installer(
             ],
             &plan.package_path,
             false,
+            true,
         )?,
         InstallPackageKind::WindowsExe => {
-            launch_windows_installer_elevated(
+            launch_windows_installer_via_powershell(
                 &plan.package_path.to_string_lossy(),
                 &["/S".to_string(), "/OXIDETERM_UPDATE=1".to_string()],
                 &plan.package_path,
                 true,
+                false,
             )?;
             launch_windows_update_helper(plan)?;
         }
@@ -380,7 +378,12 @@ fn powershell_single_quoted(value: &str) -> String {
 }
 
 #[cfg(any(target_os = "windows", test))]
-fn windows_start_process_script(file_path: &str, arguments: &[String], wait: bool) -> String {
+fn windows_start_process_script(
+    file_path: &str,
+    arguments: &[String],
+    wait: bool,
+    elevate: bool,
+) -> String {
     let mut script = format!(
         "Start-Process -FilePath {}",
         powershell_single_quoted(file_path)
@@ -393,7 +396,9 @@ fn windows_start_process_script(file_path: &str, arguments: &[String], wait: boo
             .join(", ");
         script.push_str(&format!(" -ArgumentList @({argument_list})"));
     }
-    script.push_str(" -Verb RunAs");
+    if elevate {
+        script.push_str(" -Verb RunAs");
+    }
     if wait {
         script.push_str(" -Wait");
     }
@@ -434,35 +439,36 @@ fn launch_windows_update_helper(plan: &NativeInstallPlan) -> Result<(), NativeUp
 }
 
 #[cfg(target_os = "windows")]
-fn launch_windows_installer_elevated(
+fn launch_windows_installer_via_powershell(
     file_path: &str,
     arguments: &[String],
     retained_package_path: &Path,
     wait: bool,
+    elevate: bool,
 ) -> Result<(), NativeUpdateError> {
-    // Start-Process with runas is the Windows shell boundary that displays UAC
-    // when OxideTerm itself is not already elevated.
-    let script = windows_start_process_script(file_path, arguments, wait);
+    // Per-user NSIS updates run without UAC. MSI fallback packages may still
+    // request elevation, while the PowerShell bridge remains console-free.
+    let script = windows_start_process_script(file_path, arguments, wait, elevate);
     let mut command = Command::new("powershell");
     configure_windows_background_process(&mut command);
     let status = command
-            .arg("-NoProfile")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-Command")
-            .arg(script)
-            .status()
-            .map_err(|error| {
-                reveal_windows_update_package(retained_package_path);
-                NativeUpdateError::State(format!(
-                    "launch Windows installer with elevation failed: {error}; update package retained at {}",
-                    retained_package_path.display()
-                ))
-            })?;
+        .arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-Command")
+        .arg(script)
+        .status()
+        .map_err(|error| {
+            reveal_windows_update_package(retained_package_path);
+            NativeUpdateError::State(format!(
+                "launch Windows installer failed: {error}; update package retained at {}",
+                retained_package_path.display()
+            ))
+        })?;
     if !status.success() {
         reveal_windows_update_package(retained_package_path);
         return Err(NativeUpdateError::State(format!(
-            "launch Windows installer with elevation was cancelled or failed; update package retained at {}",
+            "launch Windows installer was cancelled or failed; update package retained at {}",
             retained_package_path.display()
         )));
     }
@@ -803,30 +809,35 @@ fn shell_escape_path(path: &Path) -> String {
 mod tests {
     use super::*;
 
-    fn context(os: &'static str, portable: bool, exe: &str) -> NativeInstallContext {
+    fn context(os: &'static str, install_flavor: InstallFlavor, exe: &str) -> NativeInstallContext {
         NativeInstallContext {
             target: PlatformTarget::new(os, "x86_64"),
             current_exe: PathBuf::from(exe),
             process_id: 42,
-            portable,
+            install_flavor,
         }
     }
 
     #[test]
     fn portable_updates_require_manual_folder_replacement() {
         let plan = plan_native_install(
-            "/tmp/OxideTerm.AppImage",
-            &context("linux", true, "/apps/OxideTerm.AppImage"),
+            "/tmp/OxideTerm_linux_x64_portable.tar.gz",
+            &context("linux", InstallFlavor::Portable, "/apps/oxideterm-native"),
         );
         assert_eq!(plan.strategy, InstallStrategy::PortableManualReplacement);
         assert_eq!(plan.action, InstallActionKind::Manual);
+        assert_eq!(plan.package_kind, InstallPackageKind::PortableArchive);
     }
 
     #[test]
     fn windows_installer_is_launched_directly() {
         let plan = plan_native_install(
             "C:/Temp/OxideTerm.msi",
-            &context("windows", false, "C:/Program Files/OxideTerm/OxideTerm.exe"),
+            &context(
+                "windows",
+                InstallFlavor::WindowsNsis,
+                "C:/Program Files/OxideTerm/OxideTerm.exe",
+            ),
         );
         assert_eq!(plan.strategy, InstallStrategy::WindowsRunInstaller);
         assert_eq!(plan.package_kind, InstallPackageKind::WindowsMsi);
@@ -839,7 +850,7 @@ mod tests {
             "C:/Temp/OxideTerm_setup.exe",
             &context(
                 "windows",
-                false,
+                InstallFlavor::WindowsNsis,
                 "C:/Users/me/AppData/Local/Programs/OxideTerm/oxideterm-native.exe",
             ),
         );
@@ -856,7 +867,11 @@ mod tests {
     fn windows_installer_archive_is_extracted_before_launch() {
         let plan = plan_native_install(
             "C:/Temp/OxideTerm_1.0.0_x64.msi.zip",
-            &context("windows", false, "C:/Program Files/OxideTerm/OxideTerm.exe"),
+            &context(
+                "windows",
+                InstallFlavor::WindowsNsis,
+                "C:/Program Files/OxideTerm/OxideTerm.exe",
+            ),
         );
         assert_eq!(
             plan.strategy,
@@ -868,7 +883,7 @@ mod tests {
         );
         assert_eq!(
             plan.summary,
-            "Extract the Windows update archive and launch its installer with elevation."
+            "Extract the Windows update archive and launch its installer."
         );
     }
 
@@ -891,21 +906,26 @@ mod tests {
                     "/promptrestart".to_string(),
                 ],
                 false,
+                true,
             ),
             "Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', 'C:/Temp/OxideTerm Setup.msi', '/promptrestart') -Verb RunAs"
         );
     }
 
     #[test]
-    fn windows_start_process_script_can_wait_for_staging() {
-        assert_eq!(
-            windows_start_process_script(
-                "C:/Temp/OxideTerm Setup.exe",
-                &["/S".to_string(), "/OXIDETERM_UPDATE=1".to_string()],
-                true,
-            ),
-            "Start-Process -FilePath 'C:/Temp/OxideTerm Setup.exe' -ArgumentList @('/S', '/OXIDETERM_UPDATE=1') -Verb RunAs -Wait"
+    fn per_user_nsis_update_waits_without_runas() {
+        let script = windows_start_process_script(
+            "C:/Temp/OxideTerm Setup.exe",
+            &["/S".to_string(), "/OXIDETERM_UPDATE=1".to_string()],
+            true,
+            false,
         );
+
+        assert_eq!(
+            script,
+            "Start-Process -FilePath 'C:/Temp/OxideTerm Setup.exe' -ArgumentList @('/S', '/OXIDETERM_UPDATE=1') -Wait"
+        );
+        assert!(!script.contains("RunAs"));
     }
 
     #[test]
@@ -923,7 +943,11 @@ mod tests {
     fn linux_appimage_replacement_requires_appimage_runtime() {
         let plan = plan_native_install(
             "/tmp/OxideTerm.AppImage",
-            &context("linux", false, "/opt/OxideTerm.AppImage"),
+            &context(
+                "linux",
+                InstallFlavor::LinuxAppImage,
+                "/opt/OxideTerm.AppImage",
+            ),
         );
         assert_eq!(plan.strategy, InstallStrategy::LinuxReplaceAppImage);
         assert!(plan.requires_app_exit);
@@ -933,7 +957,11 @@ mod tests {
     fn linux_appimage_archive_replacement_requires_appimage_runtime() {
         let plan = plan_native_install(
             "/tmp/OxideTerm.AppImage.tar.gz",
-            &context("linux", false, "/opt/OxideTerm.AppImage"),
+            &context(
+                "linux",
+                InstallFlavor::LinuxAppImage,
+                "/opt/OxideTerm.AppImage",
+            ),
         );
         assert_eq!(plan.strategy, InstallStrategy::LinuxReplaceAppImageArchive);
         assert_eq!(plan.package_kind, InstallPackageKind::LinuxAppImageArchive);
@@ -946,7 +974,7 @@ mod tests {
             "/tmp/OxideTerm.dmg",
             &context(
                 "macos",
-                false,
+                InstallFlavor::MacApp,
                 "/Applications/OxideTerm.app/Contents/MacOS/OxideTerm",
             ),
         );
@@ -957,16 +985,69 @@ mod tests {
     #[test]
     fn macos_archived_app_uses_replacement_strategy() {
         let plan = plan_native_install(
-            "/tmp/OxideTerm.app.tar.gz",
+            "/tmp/OxideTerm.app.zip",
             &context(
                 "macos",
-                false,
+                InstallFlavor::MacApp,
                 "/Applications/OxideTerm.app/Contents/MacOS/OxideTerm",
             ),
         );
         assert_eq!(plan.strategy, InstallStrategy::MacReplaceAppArchive);
         assert_eq!(plan.process_id, 42);
         assert!(plan.requires_app_exit);
+    }
+
+    #[test]
+    fn linux_deb_opens_with_the_package_installer() {
+        let plan = plan_native_install(
+            "/tmp/OxideTerm_linux_x64.deb",
+            &context(
+                "linux",
+                InstallFlavor::LinuxDeb,
+                "/opt/oxideterm/oxideterm-native",
+            ),
+        );
+
+        assert_eq!(plan.strategy, InstallStrategy::LinuxOpenPackage);
+        assert_eq!(plan.action, InstallActionKind::OpenPackage);
+        assert_eq!(plan.package_kind, InstallPackageKind::LinuxPackage);
+        assert!(!plan.requires_app_exit);
+    }
+
+    #[test]
+    fn every_platform_portable_package_uses_manual_folder_replacement() {
+        // Portable archives differ by platform, but all require replacing the
+        // self-contained folder instead of invoking an installed-package flow.
+        let cases = [
+            ("macos", "/tmp/OxideTerm_macos_x64_portable.tar.gz"),
+            ("windows", "C:/Temp/OxideTerm_windows_x64_portable.zip"),
+            ("linux", "/tmp/OxideTerm_linux_x64_portable.tar.gz"),
+        ];
+
+        for (os, package_path) in cases {
+            let plan = plan_native_install(
+                package_path,
+                &context(os, InstallFlavor::Portable, "/apps/oxideterm-native"),
+            );
+            assert_eq!(plan.strategy, InstallStrategy::PortableManualReplacement);
+            assert_eq!(plan.package_kind, InstallPackageKind::PortableArchive);
+            assert!(plan.requires_app_exit);
+        }
+    }
+
+    #[test]
+    fn mismatched_install_flavor_falls_back_to_manual_open() {
+        let plan = plan_native_install(
+            "/tmp/OxideTerm_linux_x64.AppImage",
+            &context(
+                "linux",
+                InstallFlavor::LinuxDeb,
+                "/opt/oxideterm/oxideterm-native",
+            ),
+        );
+
+        assert_eq!(plan.strategy, InstallStrategy::OpenPackage);
+        assert_eq!(plan.action, InstallActionKind::OpenPackage);
     }
 
     #[test]

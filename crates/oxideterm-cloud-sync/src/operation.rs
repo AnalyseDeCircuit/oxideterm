@@ -23,6 +23,7 @@ use oxideterm_quick_commands::{QuickCommand, QuickCommandCategory, QuickCommands
 use oxideterm_settings::{SettingsStore, export_oxide_settings_snapshot_json};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -1908,32 +1909,65 @@ fn merge_connection_records(
         let Some(remote_payload) = remote_record.payload.as_ref() else {
             continue;
         };
-        let Some(base_payload) = base_records
+        let Some(base_record) = base_records
             .get(remote_record.id.as_str())
             .filter(|record| !record.deleted)
-            .and_then(|record| record.payload.as_ref())
         else {
             continue;
         };
-        let Some(local_payload) = local_records
+        let Some(local_record) = local_records
             .get(remote_record.id.as_str())
             .filter(|record| !record.deleted)
-            .and_then(|record| record.payload.as_ref())
         else {
             continue;
         };
-        if let Some(merged_payload) = merge_structured_model_fields(
+        let Some(base_payload) = base_record.payload.as_ref() else {
+            continue;
+        };
+        let Some(local_payload) = local_record.payload.as_ref() else {
+            continue;
+        };
+        let merged_payload = merge_structured_model_fields(
             base_payload,
             local_payload,
             remote_payload,
             conflict_strategy,
-        )? {
+        )?;
+        let merged_options = merge_structured_model_fields(
+            &base_record.options,
+            &local_record.options,
+            &remote_record.options,
+            conflict_strategy,
+        )?;
+        let payload_changed = merged_payload.is_some();
+        let options_changed = merged_options.is_some();
+        if let Some(merged_payload) = merged_payload {
             remote_record.payload = Some(merged_payload);
+        }
+        if let Some(merged_options) = merged_options {
+            remote_record.options = merged_options;
+        }
+        if payload_changed || options_changed {
             remote_record.updated_at = merged_at.to_string();
+            remote_record.revision = saved_connection_record_revision(remote_record)?;
             changed = true;
         }
     }
     Ok(changed)
+}
+
+fn saved_connection_record_revision(
+    record: &oxideterm_connections::SavedConnectionSyncRecord,
+) -> Result<String> {
+    let payload = record
+        .payload
+        .as_ref()
+        .context("saved connection sync record is missing its payload")?;
+    let bytes = match record.options.as_ref() {
+        Some(options) => serde_json::to_vec(&(payload, options))?,
+        None => serde_json::to_vec(payload)?,
+    };
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 fn merge_forward_records(
@@ -2687,6 +2721,41 @@ fn include_managed_keys_in_connection_preflight(scope: &crate::SyncScope) -> boo
 mod tests {
     use super::*;
 
+    fn connection_sync_record(
+        options: oxideterm_connections::ConnectionOptions,
+    ) -> oxideterm_connections::SavedConnectionSyncRecord {
+        oxideterm_connections::SavedConnectionSyncRecord {
+            id: "conn-1".to_string(),
+            revision: "base-revision".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            deleted: false,
+            payload: Some(oxideterm_connections::ConnectionInfo {
+                id: "conn-1".to_string(),
+                name: "Production".to_string(),
+                group: None,
+                host: "example.test".to_string(),
+                port: 22,
+                username: "ops".to_string(),
+                auth_type: oxideterm_connections::AuthType::Agent,
+                key_path: None,
+                cert_path: None,
+                managed_key_id: None,
+                managed_key_name: None,
+                proxy_chain: Vec::new(),
+                upstream_proxy: oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                last_used_at: None,
+                color: None,
+                icon: None,
+                tags: Vec::new(),
+                agent_forwarding: false,
+                legacy_ssh_compatibility: false,
+                post_connect_command: None,
+            }),
+            options: Some(options),
+        }
+    }
+
     fn dirty_snapshot() -> CloudSyncLocalSnapshot {
         CloudSyncLocalSnapshot {
             metadata: crate::LocalSyncMetadata::default(),
@@ -2754,6 +2823,52 @@ mod tests {
 
         assert_eq!(merge_result["host"], "local.example.test");
         assert!(replace_result.is_none());
+    }
+
+    #[test]
+    fn connection_merge_preserves_independent_full_option_changes() {
+        let base_record =
+            connection_sync_record(oxideterm_connections::ConnectionOptions::default());
+        let mut local_record = base_record.clone();
+        local_record.options.as_mut().unwrap().compression = true;
+        let mut remote_record = base_record.clone();
+        remote_record.options.as_mut().unwrap().keep_alive_interval = 45;
+        let base = SavedConnectionsSyncSnapshot {
+            revision: "base".to_string(),
+            exported_at: "2026-01-01T00:00:00Z".to_string(),
+            records: vec![base_record],
+        };
+        let local = SavedConnectionsSyncSnapshot {
+            revision: "local".to_string(),
+            exported_at: "2026-01-01T00:00:00Z".to_string(),
+            records: vec![local_record],
+        };
+        let mut remote = SavedConnectionsSyncSnapshot {
+            revision: "remote".to_string(),
+            exported_at: "2026-01-01T00:00:00Z".to_string(),
+            records: vec![remote_record],
+        };
+
+        assert!(
+            merge_connection_records(
+                &mut remote,
+                &base,
+                &local,
+                &ConflictStrategy::Merge,
+                "2026-01-02T00:00:00Z",
+            )
+            .unwrap()
+        );
+
+        let merged_record = &remote.records[0];
+        let merged_options = merged_record.options.as_ref().unwrap();
+        assert!(merged_options.compression);
+        assert_eq!(merged_options.keep_alive_interval, 45);
+        assert_eq!(merged_record.updated_at, "2026-01-02T00:00:00Z");
+        assert_eq!(
+            merged_record.revision,
+            saved_connection_record_revision(merged_record).unwrap()
+        );
     }
 
     #[test]

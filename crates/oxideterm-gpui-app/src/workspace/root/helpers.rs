@@ -1325,13 +1325,128 @@ fn restored_saved_node_rank(origin: &NodeOrigin) -> u32 {
     }
 }
 
-fn write_session_tree_snapshot(path: &PathBuf, snapshot: &PersistedNodeTreeSnapshot) -> Result<()> {
+fn write_session_tree_snapshot(path: &Path, snapshot: &PersistedNodeTreeSnapshot) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let bytes = serde_json::to_vec_pretty(snapshot)?;
-    fs::write(path, bytes)?;
+    atomic_write_session_tree_file(path, &bytes)?;
     Ok(())
+}
+
+fn atomic_write_session_tree_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "session tree path has no file name",
+        )
+    })?;
+    let (temp_path, mut temp_file) = (0..MAX_SESSION_TREE_TEMP_ATTEMPTS)
+        .find_map(|_| {
+            let sequence = SESSION_TREE_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+            let temp_path = parent.join(temp_name);
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+            {
+                Ok(file) => Some(Ok((temp_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "session tree temp path exhausted",
+            )
+        })?;
+
+    // The previous snapshot remains visible until the complete replacement is durable.
+    let write_result = (|| {
+        temp_file.write_all(bytes)?;
+        temp_file.flush()?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        fail_before_session_tree_replace_for_tests()?;
+        replace_session_tree_file(&temp_path, path)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+#[cfg(test)]
+fn fail_before_session_tree_replace_for_tests() -> io::Result<()> {
+    FAIL_NEXT_SESSION_TREE_REPLACE.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other(
+                "injected failure before session tree replace",
+            ))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_session_tree_replace_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn inject_session_tree_replace_failure() {
+    FAIL_NEXT_SESSION_TREE_REPLACE.with(|fail| fail.set(true));
+}
+
+#[cfg(not(windows))]
+fn replace_session_tree_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_session_tree_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn persistable_session_tree_config(node: &NodeTreeSnapshotNode) -> Option<SshConfig> {

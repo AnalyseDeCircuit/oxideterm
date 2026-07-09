@@ -69,4 +69,33 @@ mod tests {
         assert_eq!(settings_ui_font_family("").as_ref(), expected);
     }
 
+    #[test]
+    fn failed_session_tree_replace_preserves_previous_snapshot() {
+        let tempdir = std::env::temp_dir().join(format!(
+            "oxideterm-session-tree-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&tempdir).unwrap();
+        let path = tempdir.join("session_tree.json");
+        let previous = PersistedNodeTreeSnapshot {
+            version: 1,
+            exported_at_ms: 1,
+            root_ids: Vec::new(),
+            nodes: Vec::new(),
+        };
+        write_session_tree_snapshot(&path, &previous).unwrap();
+        let previous_bytes = fs::read(&path).unwrap();
+        let replacement = PersistedNodeTreeSnapshot {
+            version: 1,
+            exported_at_ms: 2,
+            root_ids: Vec::new(),
+            nodes: Vec::new(),
+        };
+        inject_session_tree_replace_failure();
+
+        assert!(write_session_tree_snapshot(&path, &replacement).is_err());
+        assert_eq!(fs::read(path).unwrap(), previous_bytes);
+        let _ = fs::remove_dir_all(tempdir);
+    }
+
 }

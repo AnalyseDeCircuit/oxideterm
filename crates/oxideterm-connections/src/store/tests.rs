@@ -295,7 +295,12 @@ mod tests {
 
         assert_eq!(store.data.recent, vec!["conn-1"]);
         assert_eq!(
-            store.get("conn-1").unwrap().options.post_connect_command.as_deref(),
+            store
+                .get("conn-1")
+                .unwrap()
+                .options
+                .post_connect_command
+                .as_deref(),
             Some("echo ready")
         );
         store.save().unwrap();
@@ -786,7 +791,10 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(credential.connection_id, LOCAL_SHELL_PRIVILEGE_CONNECTION_ID);
+        assert_eq!(
+            credential.connection_id,
+            LOCAL_SHELL_PRIVILEGE_CONNECTION_ID
+        );
         assert_eq!(
             store
                 .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
@@ -1108,6 +1116,312 @@ mod tests {
     }
 
     #[test]
+    fn prepared_saved_connection_sync_rollback_preserves_file_and_keychain_secret() {
+        let path = temp_store_path("sync-prepare-rollback");
+        let mut target = ConnectionStore::load(&path).unwrap();
+        target
+            .upsert(request(
+                "conn-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("rollback-secret-marker")),
+                },
+            ))
+            .unwrap();
+        let keychain_id = match &target.get("conn-1").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected auth: {other:?}"),
+        };
+        let original_file = fs::read(&path).unwrap();
+
+        let mut source = load_empty_store("sync-prepare-rollback-source");
+        source.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        source.delete("conn-1").unwrap();
+        let prepared = target
+            .prepare_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+
+        assert!(target.get("conn-1").is_none());
+        assert_eq!(
+            target.keychain.get(&keychain_id).unwrap(),
+            "rollback-secret-marker"
+        );
+        assert!(!format!("{prepared:?}").contains("rollback-secret-marker"));
+
+        target
+            .rollback_prepared_saved_connections_snapshot(&prepared)
+            .unwrap();
+
+        assert!(target.get("conn-1").is_some());
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        assert_eq!(
+            target.keychain.get(&keychain_id).unwrap(),
+            "rollback-secret-marker"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn connection_store_checkpoint_restores_complete_data_and_exact_file() {
+        let path = temp_store_path("complete-checkpoint");
+        let mut store = ConnectionStore::load(&path).unwrap();
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let now = Utc::now();
+        store.data.groups.push("checkpoint-group-marker".to_string());
+        store.data.recent.push("conn-1".to_string());
+        store.data.connection_tombstones.push(DeletedConnectionTombstone {
+            id: "deleted-connection-marker".to_string(),
+            deleted_at: now,
+        });
+        store.data.managed_ssh_keys.push(ManagedSshKey {
+            id: "managed-key-marker".to_string(),
+            secret_id: "managed-secret-reference".to_string(),
+            name: "Managed checkpoint key".to_string(),
+            fingerprint: "SHA256:checkpoint".to_string(),
+            public_key: "ssh-ed25519 checkpoint".to_string(),
+            requires_passphrase: false,
+            origin: ManagedSshKeyOrigin::OxideImport,
+            created_at: now,
+            updated_at: now,
+        });
+        store
+            .data
+            .serial_profiles
+            .push(SerialProfile::new("Serial checkpoint", "/dev/tty-test"));
+        store
+            .data
+            .telnet_profiles
+            .push(TelnetProfile::new("Telnet checkpoint", "telnet.test", 23));
+        store
+            .data
+            .raw_tcp_profiles
+            .push(RawTcpProfile::new("TCP checkpoint", "tcp.test", 9000));
+        store
+            .data
+            .raw_udp_profiles
+            .push(RawUdpProfile::new("UDP checkpoint", "udp.test", 9001));
+        store.save().unwrap();
+        let original_data = serde_json::to_value(&store.data).unwrap();
+        let original_file = fs::read(&path).unwrap();
+        let checkpoint = store.create_checkpoint().unwrap();
+
+        store.data = ConnectionStoreData::default();
+        store.data.groups.push("replacement".to_string());
+        store.save().unwrap();
+        store.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(serde_json::to_value(&store.data).unwrap(), original_data);
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        assert_eq!(
+            serde_json::to_value(ConnectionStore::load(&path).unwrap().data).unwrap(),
+            original_data
+        );
+        let checkpoint_debug = format!("{checkpoint:?}");
+        assert!(!checkpoint_debug.contains("checkpoint-group-marker"));
+        assert!(!checkpoint_debug.contains("managed-secret-reference"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn connection_store_checkpoint_preserves_unknown_raw_fields() {
+        let path = temp_store_path("checkpoint-unknown-fields");
+        let original_file = serde_json::to_vec_pretty(&serde_json::json!({
+            "version": CONFIG_VERSION,
+            "groups": ["original"],
+            "futureCompatibleMarker": {
+                "nested": "must-survive-rollback"
+            }
+        }))
+        .unwrap();
+        fs::write(&path, &original_file).unwrap();
+        let mut store = ConnectionStore::load(&path).unwrap();
+        let checkpoint = store.create_checkpoint().unwrap();
+
+        store.data.groups.push("prepared".to_string());
+        store.save().unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("futureCompatibleMarker"));
+
+        store.restore_checkpoint(&checkpoint).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        assert!(fs::read_to_string(&path).unwrap().contains("must-survive-rollback"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn committed_saved_connection_sync_defers_secret_cleanup_until_finalize() {
+        let mut target = load_empty_store("sync-deferred-cleanup");
+        target
+            .upsert(request(
+                "conn-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("deferred-secret")),
+                },
+            ))
+            .unwrap();
+        let keychain_id = match &target.get("conn-1").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected auth: {other:?}"),
+        };
+        let privilege = target
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: None,
+                label: "Sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("deferred-privilege-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let privilege_keychain_id = privilege.keychain_id.unwrap();
+
+        let mut source = load_empty_store("sync-deferred-cleanup-source");
+        source.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        source.delete("conn-1").unwrap();
+        let prepared = target
+            .prepare_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+        let mut cleanup = target
+            .commit_prepared_saved_connections_snapshot(prepared)
+            .unwrap();
+
+        assert_eq!(cleanup.pending_keychain_entries(), 2);
+        assert_eq!(
+            target.keychain.get(&keychain_id).unwrap(),
+            "deferred-secret"
+        );
+
+        target
+            .finalize_saved_connections_sync_cleanup(&mut cleanup)
+            .unwrap();
+
+        assert_eq!(cleanup.pending_keychain_entries(), 0);
+        assert!(target.keychain.get(&keychain_id).is_err());
+        assert!(
+            target
+                .privilege_keychain
+                .get(&privilege_keychain_id)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dropping_prepared_saved_connection_sync_keeps_data_and_secret_for_explicit_recovery() {
+        let path = temp_store_path("sync-prepared-drop");
+        let mut target = ConnectionStore::load(&path).unwrap();
+        target
+            .upsert(request(
+                "conn-1",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("prepared-drop-secret")),
+                },
+            ))
+            .unwrap();
+        let keychain_id = match &target.get("conn-1").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected auth: {other:?}"),
+        };
+
+        let mut source = load_empty_store("sync-prepared-drop-source");
+        source.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        source.delete("conn-1").unwrap();
+        let prepared = target
+            .prepare_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+        drop(prepared);
+
+        assert!(target.get("conn-1").is_none());
+        assert!(ConnectionStore::load(&path).unwrap().get("conn-1").is_none());
+        assert_eq!(
+            target.keychain.get(&keychain_id).unwrap(),
+            "prepared-drop-secret"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_saved_connection_sync_prepare_restores_original_state() {
+        let path = temp_store_path("sync-prepare-save-failure");
+        let mut target = ConnectionStore::load(&path).unwrap();
+        target.upsert(request("local", SavedAuth::Agent)).unwrap();
+        let original_file = fs::read(&path).unwrap();
+
+        let mut source = load_empty_store("sync-prepare-save-failure-source");
+        source.upsert(request("remote", SavedAuth::Agent)).unwrap();
+        inject_atomic_replace_failure();
+
+        assert!(
+            target
+                .prepare_saved_connections_snapshot(
+                    source.export_saved_connections_snapshot().unwrap(),
+                    SavedConnectionsConflictStrategy::Replace,
+                )
+                .is_err()
+        );
+        assert!(target.get("local").is_some());
+        assert!(target.get("remote").is_none());
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_saved_connection_sync_rollback_can_be_retried() {
+        let path = temp_store_path("sync-rollback-retry");
+        let mut target = ConnectionStore::load(&path).unwrap();
+        target.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original_file = fs::read(&path).unwrap();
+
+        let mut source = load_empty_store("sync-rollback-retry-source");
+        source.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        source.delete("conn-1").unwrap();
+        let prepared = target
+            .prepare_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+        let prepared_file = fs::read(&path).unwrap();
+        inject_atomic_replace_failure();
+
+        assert!(
+            target
+                .rollback_prepared_saved_connections_snapshot(&prepared)
+                .is_err()
+        );
+        assert!(target.get("conn-1").is_none());
+        assert_eq!(fs::read(&path).unwrap(), prepared_file);
+
+        target
+            .rollback_prepared_saved_connections_snapshot(&prepared)
+            .unwrap();
+        assert!(target.get("conn-1").is_some());
+        assert_eq!(fs::read(&path).unwrap(), original_file);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn saved_connection_sync_apply_skip_reports_name_conflict() {
         let mut source = load_empty_store("sync-name-source");
         let mut source_req = request("remote-id", SavedAuth::Agent);
@@ -1128,6 +1442,146 @@ mod tests {
         assert_eq!(outcome.result.conflicts, 1);
         assert!(target.get("local-id").is_some());
         assert!(target.get("remote-id").is_none());
+    }
+
+    #[test]
+    fn saved_connection_sync_roundtrip_preserves_upstream_proxy_and_all_options() {
+        let mut source = load_empty_store("sync-all-fields-source");
+        let mut source_request = request("conn-1", SavedAuth::Agent);
+        source_request.name = "Production".to_string();
+        source_request.group = Some("Operations".to_string());
+        source_request.color = Some("#123456".to_string());
+        source_request.icon = Some("server".to_string());
+        source_request.tags = vec!["prod".to_string(), "critical".to_string()];
+        source.upsert(source_request).unwrap();
+        let source_connection = source.data.connections.first_mut().unwrap();
+        source_connection.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::HttpConnect,
+                host: "proxy.example.test".to_string(),
+                port: 8443,
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".to_string(),
+                    keychain_id: Some("proxy-keychain-id".to_string()),
+                    plaintext_password: None,
+                },
+                remote_dns: false,
+                no_proxy: "localhost,.internal".to_string(),
+            },
+        };
+        source_connection.options = ConnectionOptions {
+            keep_alive_interval: 37,
+            compression: true,
+            jump_host: Some("legacy-jump".to_string()),
+            term_type: Some("xterm-direct".to_string()),
+            agent_forwarding: true,
+            legacy_ssh_compatibility: true,
+            post_connect_command: Some("uname -a".to_string()),
+        };
+        source.save().unwrap();
+
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+        let mut target = load_empty_store("sync-all-fields-target");
+        target
+            .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace)
+            .unwrap();
+
+        let imported = target.get("conn-1").unwrap();
+        assert_eq!(imported.name, "Production");
+        assert_eq!(imported.group.as_deref(), Some("Operations"));
+        assert_eq!(imported.color.as_deref(), Some("#123456"));
+        assert_eq!(imported.icon.as_deref(), Some("server"));
+        assert_eq!(imported.tags, vec!["prod", "critical"]);
+        assert_eq!(imported.options.keep_alive_interval, 37);
+        assert!(imported.options.compression);
+        assert_eq!(imported.options.jump_host.as_deref(), Some("legacy-jump"));
+        assert_eq!(imported.options.term_type.as_deref(), Some("xterm-direct"));
+        assert!(imported.options.agent_forwarding);
+        assert!(imported.options.legacy_ssh_compatibility);
+        assert_eq!(
+            imported.options.post_connect_command.as_deref(),
+            Some("uname -a")
+        );
+        let SavedUpstreamProxyPolicy::Custom { proxy } = &imported.upstream_proxy else {
+            panic!("custom upstream proxy should survive sync");
+        };
+        assert_eq!(proxy.protocol, SavedUpstreamProxyProtocol::HttpConnect);
+        assert_eq!(proxy.host, "proxy.example.test");
+        assert_eq!(proxy.port, 8443);
+        assert!(!proxy.remote_dns);
+        assert_eq!(proxy.no_proxy, "localhost,.internal");
+        let SavedUpstreamProxyAuth::Password {
+            username,
+            keychain_id,
+            plaintext_password,
+        } = &proxy.auth
+        else {
+            panic!("proxy password metadata should survive sync");
+        };
+        assert_eq!(username, "proxy-user");
+        assert_eq!(keychain_id.as_deref(), Some("proxy-keychain-id"));
+        assert!(plaintext_password.is_none());
+    }
+
+    #[test]
+    fn saved_connection_sync_accepts_legacy_records_without_full_options() {
+        let mut source = load_empty_store("sync-legacy-options-source");
+        let mut source_request = request("conn-1", SavedAuth::Agent);
+        source_request.agent_forwarding = true;
+        source_request.legacy_ssh_compatibility = true;
+        source_request.post_connect_command = Some("whoami".to_string());
+        source.upsert(source_request).unwrap();
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+        let mut snapshot_json = serde_json::to_value(snapshot).unwrap();
+        snapshot_json["records"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("options");
+        let legacy_snapshot: SavedConnectionsSyncSnapshot =
+            serde_json::from_value(snapshot_json).unwrap();
+
+        let mut target = load_empty_store("sync-legacy-options-target");
+        target
+            .apply_saved_connections_snapshot(
+                legacy_snapshot,
+                SavedConnectionsConflictStrategy::Replace,
+            )
+            .unwrap();
+
+        let imported = target.get("conn-1").unwrap();
+        assert!(imported.options.agent_forwarding);
+        assert!(imported.options.legacy_ssh_compatibility);
+        assert_eq!(
+            imported.options.post_connect_command.as_deref(),
+            Some("whoami")
+        );
+        assert_eq!(imported.options.keep_alive_interval, 0);
+        assert!(!imported.options.compression);
+    }
+
+    #[test]
+    fn raw_udp_sync_rejects_late_invalid_record_without_partial_apply() {
+        let mut valid = RawUdpProfile::new("Valid", "127.0.0.1", 9000);
+        valid.id = "valid".to_string();
+        let mut invalid = RawUdpProfile::new("Invalid", "127.0.0.1", 9001);
+        invalid.id = "invalid".to_string();
+        invalid.remote_host.clear();
+        let snapshot = RawUdpProfilesSyncSnapshot {
+            revision: "test".to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            records: vec![valid, invalid],
+        };
+        let mut target = load_empty_store("raw-udp-atomic-apply");
+        let path = target.path().to_path_buf();
+
+        assert!(target.apply_raw_udp_profiles_snapshot(snapshot).is_err());
+        assert!(target.raw_udp_profiles().is_empty());
+        assert!(
+            ConnectionStore::load(path)
+                .unwrap()
+                .raw_udp_profiles()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1785,15 +2239,17 @@ mod tests {
                 .unwrap(),
             private_key.as_str()
         );
-        assert!(!serde_json::to_string(&info).unwrap().contains("PRIVATE KEY"));
+        assert!(
+            !serde_json::to_string(&info)
+                .unwrap()
+                .contains("PRIVATE KEY")
+        );
     }
 
     #[test]
     fn managed_key_secret_file_round_trips_large_private_key_material() {
-        let data_dir = std::env::temp_dir().join(format!(
-            "oxideterm-managed-key-secret-{}",
-            Uuid::new_v4()
-        ));
+        let data_dir =
+            std::env::temp_dir().join(format!("oxideterm-managed-key-secret-{}", Uuid::new_v4()));
         let config_key = [42u8; CONFIG_ENCRYPTION_KEY_LEN];
         let secret_id = "managed-key-large-rsa";
         let private_key = SecretString::from(format!(
@@ -1817,10 +2273,8 @@ mod tests {
     fn managed_key_create_falls_back_to_secret_file_for_large_rsa_keychain_failure() {
         let _config_key = with_config_encryption_key_for_tests([43u8; CONFIG_ENCRYPTION_KEY_LEN]);
         let mut store = load_empty_store("managed-key-large-rsa-fallback");
-        store.managed_keychain = ConnectionKeychain::with_max_secret_bytes_for_tests(
-            "com.oxideterm.managed-test",
-            256,
-        );
+        store.managed_keychain =
+            ConnectionKeychain::with_max_secret_bytes_for_tests("com.oxideterm.managed-test", 256);
         let private_key = generated_large_rsa_private_key_text();
 
         let info = store

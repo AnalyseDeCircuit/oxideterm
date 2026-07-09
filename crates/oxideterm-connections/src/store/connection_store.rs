@@ -6,6 +6,9 @@ impl ConnectionStore {
         if store.migrate_legacy_credentials()? {
             store.save()?;
         }
+        // Cleanup failures are durable metadata. Retry them on startup without
+        // blocking access to otherwise valid saved connections.
+        let _ = store.retry_persisted_keychain_cleanup();
         Ok(store)
     }
 
@@ -95,8 +98,8 @@ impl ConnectionStore {
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
         let data = encode_connection_store_data(&self.data, self.storage_format)?;
-        fs::write(&self.path, data)
-            .with_context(|| format!("failed to write {}", self.path.display()))
+        atomic_write_file(&self.path, &data)
+            .with_context(|| format!("failed to replace {}", self.path.display()))
     }
 
     fn data_dir(&self) -> Result<&Path> {
@@ -154,6 +157,24 @@ impl ConnectionStore {
                 "failed to delete managed SSH key secret from keychain ({keychain_error:#}) and encrypted file ({file_error:#})"
             )),
         }
+    }
+
+    fn retry_persisted_keychain_cleanup(&mut self) -> Result<()> {
+        let original_connection_ids = self.data.pending_keychain_cleanup.clone();
+        let original_privilege_ids = self.data.pending_privilege_keychain_cleanup.clone();
+        if original_connection_ids.is_empty() && original_privilege_ids.is_empty() {
+            return Ok(());
+        }
+
+        self.data.pending_keychain_cleanup = original_connection_ids
+            .into_iter()
+            .filter(|id| self.keychain.delete(id).is_err())
+            .collect();
+        self.data.pending_privilege_keychain_cleanup = original_privilege_ids
+            .into_iter()
+            .filter(|id| self.privilege_keychain.delete(id).is_err())
+            .collect();
+        self.save()
     }
 
     pub fn upsert(&mut self, request: SaveConnectionRequest) -> Result<ConnectionInfo> {
@@ -835,9 +856,9 @@ impl ConnectionStore {
         managed_keys: Vec<ImportedManagedSshKey>,
     ) -> Result<Vec<ConnectionInfo>> {
         let original_data = self.data.clone();
-        let original_keychain = self.snapshot_keychain_entries(&original_data);
-        let original_privilege_keychain = self.snapshot_privilege_keychain_entries(&original_data);
-        let original_managed_keychain = self.snapshot_managed_keychain_entries(&original_data);
+        let original_keychain = self.snapshot_keychain_entries(&original_data)?;
+        let original_privilege_keychain = self.snapshot_privilege_keychain_entries(&original_data)?;
+        let original_managed_keychain = self.snapshot_managed_keychain_entries(&original_data)?;
         let mut touched_keychain_ids = HashSet::new();
         let mut touched_privilege_keychain_ids = HashSet::new();
         let mut touched_managed_secret_ids = HashSet::new();
@@ -870,20 +891,37 @@ impl ConnectionStore {
 
         if let Err(error) = result {
             self.data = original_data;
-            let _ = self.save();
-            self.rollback_keychain_entries(&touched_keychain_ids, &original_keychain);
-            self.rollback_privilege_keychain_entries(
+            let mut rollback_errors = Vec::new();
+            if let Err(rollback_error) = self.save() {
+                rollback_errors.push(format!("connection file restore failed: {rollback_error:#}"));
+            }
+            if let Err(rollback_error) =
+                self.rollback_keychain_entries(&touched_keychain_ids, &original_keychain)
+            {
+                rollback_errors.push(format!("connection credential restore failed: {rollback_error:#}"));
+            }
+            if let Err(rollback_error) = self.rollback_privilege_keychain_entries(
                 &touched_privilege_keychain_ids,
                 &original_privilege_keychain,
-            );
-            self.rollback_managed_keychain_entries(
+            ) {
+                rollback_errors.push(format!("privilege credential restore failed: {rollback_error:#}"));
+            }
+            if let Err(rollback_error) = self.rollback_managed_keychain_entries(
                 &touched_managed_secret_ids,
                 &original_managed_keychain,
-            );
+            ) {
+                rollback_errors.push(format!("managed key restore failed: {rollback_error:#}"));
+            }
             if created_managed_secret_config_key {
                 rollback_created_config_key();
             }
-            return Err(error);
+            if rollback_errors.is_empty() {
+                return Err(error);
+            }
+            return Err(anyhow::anyhow!(
+                "connection import failed: {error:#}; rollback also failed: {}",
+                rollback_errors.join("; ")
+            ));
         }
 
         for keychain_id in &stale_old_keychain_ids {
@@ -1667,13 +1705,13 @@ impl ConnectionStore {
     fn snapshot_keychain_entries(
         &self,
         data: &ConnectionStoreData,
-    ) -> HashMap<String, Option<SecretString>> {
+    ) -> Result<HashMap<String, Option<SecretString>>> {
         data.connections
             .iter()
             .flat_map(collect_connection_keychain_ids)
             .map(|keychain_id| {
-                let value = self.keychain.get(&keychain_id).ok();
-                (keychain_id, value)
+                let value = self.keychain.get_optional(&keychain_id)?;
+                Ok((keychain_id, value))
             })
             .collect()
     }
@@ -1681,7 +1719,7 @@ impl ConnectionStore {
     fn snapshot_privilege_keychain_entries(
         &self,
         data: &ConnectionStoreData,
-    ) -> HashMap<String, Option<SecretString>> {
+    ) -> Result<HashMap<String, Option<SecretString>>> {
         data.connections
             .iter()
             .flat_map(collect_privilege_keychain_ids)
@@ -1691,8 +1729,8 @@ impl ConnectionStore {
                     .filter_map(|credential| credential.keychain_id.clone()),
             )
             .map(|keychain_id| {
-                let value = self.privilege_keychain.get(&keychain_id).ok();
-                (keychain_id, value)
+                let value = self.privilege_keychain.get_optional(&keychain_id)?;
+                Ok((keychain_id, value))
             })
             .collect()
     }
@@ -1700,12 +1738,12 @@ impl ConnectionStore {
     fn snapshot_managed_keychain_entries(
         &self,
         data: &ConnectionStoreData,
-    ) -> HashMap<String, Option<SecretString>> {
+    ) -> Result<HashMap<String, Option<SecretString>>> {
         data.managed_ssh_keys
             .iter()
             .map(|key| {
-                let value = self.get_managed_ssh_key_secret(&key.secret_id).ok();
-                (key.secret_id.clone(), value)
+                let value = self.get_managed_ssh_key_secret(&key.secret_id)?;
+                Ok((key.secret_id.clone(), Some(value)))
             })
             .collect()
     }
@@ -1714,51 +1752,66 @@ impl ConnectionStore {
         &self,
         touched_keychain_ids: &HashSet<String>,
         original_keychain: &HashMap<String, Option<SecretString>>,
-    ) {
+    ) -> Result<()> {
+        let mut errors = Vec::new();
         for keychain_id in touched_keychain_ids {
-            match original_keychain.get(keychain_id) {
+            let result = match original_keychain.get(keychain_id) {
                 Some(Some(secret)) => {
-                    let _ = self.keychain.store(keychain_id, secret);
+                    self.keychain.store(keychain_id, secret)
                 }
                 Some(None) | None => {
-                    let _ = self.keychain.delete(keychain_id);
+                    self.keychain.delete(keychain_id)
                 }
+            };
+            if let Err(error) = result {
+                errors.push(error.to_string());
             }
         }
+        rollback_keychain_result(errors)
     }
 
     fn rollback_privilege_keychain_entries(
         &self,
         touched_keychain_ids: &HashSet<String>,
         original_keychain: &HashMap<String, Option<SecretString>>,
-    ) {
+    ) -> Result<()> {
+        let mut errors = Vec::new();
         for keychain_id in touched_keychain_ids {
-            match original_keychain.get(keychain_id) {
+            let result = match original_keychain.get(keychain_id) {
                 Some(Some(secret)) => {
-                    let _ = self.privilege_keychain.store(keychain_id, secret);
+                    self.privilege_keychain.store(keychain_id, secret)
                 }
                 Some(None) | None => {
-                    let _ = self.privilege_keychain.delete(keychain_id);
+                    self.privilege_keychain.delete(keychain_id)
                 }
+            };
+            if let Err(error) = result {
+                errors.push(error.to_string());
             }
         }
+        rollback_keychain_result(errors)
     }
 
     fn rollback_managed_keychain_entries(
         &self,
         touched_secret_ids: &HashSet<String>,
         original_keychain: &HashMap<String, Option<SecretString>>,
-    ) {
+    ) -> Result<()> {
+        let mut errors = Vec::new();
         for secret_id in touched_secret_ids {
-            match original_keychain.get(secret_id) {
+            let result = match original_keychain.get(secret_id) {
                 Some(Some(secret)) => {
-                    let _ = self.store_managed_ssh_key_secret(secret_id, secret);
+                    self.store_managed_ssh_key_secret(secret_id, secret).map(|_| ())
                 }
                 Some(None) | None => {
-                    let _ = self.delete_managed_ssh_key_secret(secret_id);
+                    self.delete_managed_ssh_key_secret(secret_id)
                 }
+            };
+            if let Err(error) = result {
+                errors.push(error.to_string());
             }
         }
+        rollback_keychain_result(errors)
     }
 
     fn materialize_privilege_credentials(
@@ -1976,5 +2029,58 @@ impl ConnectionStore {
             .connection_tombstones
             .push(DeletedConnectionTombstone { id, deleted_at });
         true
+    }
+}
+
+#[cfg(test)]
+mod persistence_safety_tests {
+    use super::*;
+
+    fn persistence_test_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "oxideterm-persistence-{name}-{}.json",
+            Uuid::new_v4()
+        ))
+    }
+
+    #[test]
+    fn corrupt_connections_file_is_preserved() {
+        let path = persistence_test_path("corrupt");
+        let corrupt = b"{ not valid connections";
+        fs::write(&path, corrupt).unwrap();
+
+        assert!(ConnectionStore::load(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), corrupt);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn future_connections_file_is_preserved() {
+        let path = persistence_test_path("future");
+        let future = serde_json::to_vec_pretty(&serde_json::json!({
+            "version": CONFIG_VERSION + 1,
+            "connections": [],
+            "groups": []
+        }))
+        .unwrap();
+        fs::write(&path, &future).unwrap();
+
+        assert!(ConnectionStore::load(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), future);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_atomic_connections_replace_preserves_previous_file() {
+        let path = persistence_test_path("atomic");
+        let mut store = ConnectionStore::load(&path).unwrap();
+        store.save().unwrap();
+        let previous = fs::read(&path).unwrap();
+        store.data.groups.push("production".to_string());
+        inject_atomic_replace_failure();
+
+        assert!(store.save().is_err());
+        assert_eq!(fs::read(&path).unwrap(), previous);
+        let _ = fs::remove_file(path);
     }
 }

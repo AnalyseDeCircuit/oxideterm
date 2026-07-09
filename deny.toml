@@ -56,6 +56,7 @@ allow = [
     "Unicode-3.0",           # ICU 全家桶
     "MPL-2.0",               # cssparser、selectors 等
     "BSL-1.0",
+    "NCSA",                  # libfuzzer-sys development-only dependency
     "Apache-2.0 WITH LLVM-exception",  # target-lexicon
     "CC0-1.0",               # ← 新增
     "CDLA-Permissive-2.0",   # webpki-roots — permissive data license

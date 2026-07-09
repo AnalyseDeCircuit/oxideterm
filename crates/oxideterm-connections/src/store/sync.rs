@@ -1,4 +1,150 @@
+enum SavedConnectionsStoreFileCheckpoint {
+    Missing,
+    Present(Vec<u8>),
+}
+
+/// Opaque rollback state for the complete connection store.
+///
+/// The checkpoint owns every `ConnectionStoreData` field and the exact
+/// persisted bytes, but its debug representation never exposes either value.
+/// It deliberately does not read or copy keychain secrets, so operations that
+/// create new keychain entries must separately track those entries for cleanup.
+#[must_use = "connection store checkpoints should be restored or deliberately discarded"]
+pub struct ConnectionStoreCheckpoint {
+    store_path: PathBuf,
+    original_data: ConnectionStoreData,
+    original_storage_format: ConnectionStoreStorageFormat,
+    original_file: SavedConnectionsStoreFileCheckpoint,
+}
+
+impl fmt::Debug for ConnectionStoreCheckpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ConnectionStoreCheckpoint")
+            .field("store_path", &self.store_path)
+            .field("contents", &"[redacted complete connection store checkpoint]")
+            .finish()
+    }
+}
+
+/// Opaque rollback state for a prepared saved-connections sync operation.
+///
+/// Dropping this handle does not perform I/O and therefore does not roll back
+/// prepared data. It also never deletes stale keychain entries. Callers must
+/// explicitly restore the handle or commit it into a retryable cleanup handle.
+#[must_use = "prepared sync changes must be committed or rolled back"]
+pub struct PreparedSavedConnectionsSync {
+    checkpoint: ConnectionStoreCheckpoint,
+    outcome: ApplySavedConnectionsSyncOutcome,
+    pending_keychain_ids: Vec<String>,
+    pending_privilege_keychain_ids: Vec<String>,
+}
+
+impl PreparedSavedConnectionsSync {
+    pub fn outcome(&self) -> &ApplySavedConnectionsSyncOutcome {
+        &self.outcome
+    }
+}
+
+impl fmt::Debug for PreparedSavedConnectionsSync {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PreparedSavedConnectionsSync")
+            .field("store_path", &self.checkpoint.store_path)
+            .field("outcome", &self.outcome)
+            .field("pending_keychain_entries", &self.pending_keychain_ids.len())
+            .field(
+                "pending_privilege_keychain_entries",
+                &self.pending_privilege_keychain_ids.len(),
+            )
+            .field("checkpoint", &"[redacted connection store checkpoint]")
+            .finish()
+    }
+}
+
+/// Retryable cleanup handle created only after prepared data is committed.
+///
+/// Failed keychain deletions remain pending so callers can retry without
+/// rolling back already committed connection data.
+#[must_use = "committed sync cleanup should be finalized"]
+pub struct SavedConnectionsSyncCleanup {
+    store_path: PathBuf,
+    outcome: ApplySavedConnectionsSyncOutcome,
+    pending_keychain_ids: Vec<String>,
+    pending_privilege_keychain_ids: Vec<String>,
+}
+
+impl SavedConnectionsSyncCleanup {
+    pub fn outcome(&self) -> &ApplySavedConnectionsSyncOutcome {
+        &self.outcome
+    }
+
+    pub fn pending_keychain_entries(&self) -> usize {
+        self.pending_keychain_ids.len() + self.pending_privilege_keychain_ids.len()
+    }
+}
+
+impl fmt::Debug for SavedConnectionsSyncCleanup {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SavedConnectionsSyncCleanup")
+            .field("store_path", &self.store_path)
+            .field("outcome", &self.outcome)
+            .field("pending_keychain_entries", &self.pending_keychain_ids.len())
+            .field(
+                "pending_privilege_keychain_entries",
+                &self.pending_privilege_keychain_ids.len(),
+            )
+            .finish()
+    }
+}
+
 impl ConnectionStore {
+    pub fn create_checkpoint(&self) -> Result<ConnectionStoreCheckpoint> {
+        Ok(ConnectionStoreCheckpoint {
+            store_path: self.path.clone(),
+            original_data: self.data.clone(),
+            original_storage_format: self.storage_format,
+            original_file: self.capture_connection_store_file()?,
+        })
+    }
+
+    pub fn restore_checkpoint(&mut self, checkpoint: &ConnectionStoreCheckpoint) -> Result<()> {
+        self.ensure_saved_connections_sync_store(&checkpoint.store_path)?;
+
+        // Restore disk first. If the write fails, the current in-memory model
+        // remains aligned with the current file and restoration can retry.
+        match &checkpoint.original_file {
+            SavedConnectionsStoreFileCheckpoint::Missing => {
+                if self.path.exists() {
+                    fs::remove_file(&self.path).with_context(|| {
+                        format!("failed to remove current store {}", self.path.display())
+                    })?;
+                    let parent = self
+                        .path
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                        .unwrap_or_else(|| Path::new("."));
+                    sync_directory(parent).with_context(|| {
+                        format!("failed to sync store directory {}", parent.display())
+                    })?;
+                }
+            }
+            SavedConnectionsStoreFileCheckpoint::Present(bytes) => {
+                atomic_write_file(&self.path, bytes).with_context(|| {
+                    format!("failed to restore connection store {}", self.path.display())
+                })?;
+            }
+        }
+
+        // This clone restores connections, groups, all profile types,
+        // tombstones, recent entries, managed-key metadata, and local privilege
+        // metadata as one in-memory state transition.
+        self.data = checkpoint.original_data.clone();
+        self.storage_format = checkpoint.original_storage_format;
+        Ok(())
+    }
+
     pub fn export_saved_connections_snapshot(&self) -> Result<SavedConnectionsSyncSnapshot> {
         build_saved_connections_sync_snapshot(&self.data)
     }
@@ -35,10 +181,27 @@ impl ConnectionStore {
         snapshot: SavedConnectionsSyncSnapshot,
         strategy: SavedConnectionsConflictStrategy,
     ) -> Result<ApplySavedConnectionsSyncOutcome> {
-        let original_data = self.data.clone();
+        let prepared = self.prepare_saved_connections_snapshot(snapshot, strategy)?;
+        let mut cleanup = self.commit_prepared_saved_connections_snapshot(prepared)?;
+        let outcome = cleanup.outcome().clone();
+
+        // Preserve the legacy one-shot API's best-effort cleanup semantics.
+        // Transaction coordinators should use the explicit prepare/rollback/
+        // commit/finalize API so failed cleanup remains available for retry.
+        let _ = self.finalize_saved_connections_sync_cleanup(&mut cleanup);
+        Ok(outcome)
+    }
+
+    pub fn prepare_saved_connections_snapshot(
+        &mut self,
+        snapshot: SavedConnectionsSyncSnapshot,
+        strategy: SavedConnectionsConflictStrategy,
+    ) -> Result<PreparedSavedConnectionsSync> {
+        let checkpoint = self.create_checkpoint()?;
         let mut result = ApplySavedConnectionsSyncSnapshotResult::default();
         let mut deleted_connection_ids = Vec::new();
         let mut keychain_ids_to_delete = Vec::new();
+        let mut privilege_keychain_ids_to_delete = Vec::new();
 
         let apply_result = (|| {
             let existing_by_id: HashMap<String, SavedConnection> = self
@@ -61,10 +224,9 @@ impl ConnectionStore {
                 )?;
 
                 if record.deleted {
-                    if existing_by_id
-                        .get(&record.id)
-                        .is_some_and(|existing| connection_sync_updated_at(existing) > record_updated_at)
-                    {
+                    if existing_by_id.get(&record.id).is_some_and(|existing| {
+                        connection_sync_updated_at(existing) > record_updated_at
+                    }) {
                         result.skipped += 1;
                         result.conflicts += 1;
                         continue;
@@ -75,6 +237,8 @@ impl ConnectionStore {
                     {
                         deleted_connection_ids.push(removed.id.clone());
                         keychain_ids_to_delete.extend(collect_connection_keychain_ids(&removed));
+                        privilege_keychain_ids_to_delete
+                            .extend(collect_privilege_keychain_ids(&removed));
                         result.applied += 1;
                     } else if self.upsert_connection_tombstone(record.id.clone(), record_updated_at)
                     {
@@ -105,7 +269,9 @@ impl ConnectionStore {
                     self.data
                         .connections
                         .iter()
-                        .find(|candidate| candidate.name == payload.name && candidate.id != record.id)
+                        .find(|candidate| {
+                            candidate.name == payload.name && candidate.id != record.id
+                        })
                         .cloned()
                 } else {
                     None
@@ -131,6 +297,7 @@ impl ConnectionStore {
                 let baseline = existing_by_id.as_ref().or(existing_by_name.as_ref());
                 let next_connection = build_saved_connection_from_sync_payload(
                     &payload,
+                    record.options.as_ref(),
                     record_updated_at,
                     baseline,
                     baseline.is_some() && strategy.preserves_local_auth(),
@@ -138,9 +305,13 @@ impl ConnectionStore {
 
                 if let Some(existing) = baseline {
                     let existing_keychain_ids: HashSet<String> =
-                        collect_connection_keychain_ids(existing).into_iter().collect();
+                        collect_connection_keychain_ids(existing)
+                            .into_iter()
+                            .collect();
                     let next_keychain_ids: HashSet<String> =
-                        collect_connection_keychain_ids(&next_connection).into_iter().collect();
+                        collect_connection_keychain_ids(&next_connection)
+                            .into_iter()
+                            .collect();
                     keychain_ids_to_delete.extend(
                         existing_keychain_ids
                             .difference(&next_keychain_ids)
@@ -162,28 +333,125 @@ impl ConnectionStore {
         })();
 
         if let Err(error) = apply_result {
-            self.data = original_data;
-            let _ = self.save();
-            return Err(error);
+            self.restore_checkpoint(&checkpoint)
+                .context("failed to restore saved connections after sync preparation failed")?;
+            return Err(error.context("failed to prepare saved connections sync"));
         }
 
-        for keychain_id in keychain_ids_to_delete {
-            let _ = self.keychain.delete(&keychain_id);
-        }
+        keychain_ids_to_delete.sort();
+        keychain_ids_to_delete.dedup();
+        privilege_keychain_ids_to_delete.sort();
+        privilege_keychain_ids_to_delete.dedup();
 
-        Ok(ApplySavedConnectionsSyncOutcome {
-            result,
-            deleted_connection_ids,
+        Ok(PreparedSavedConnectionsSync {
+            checkpoint,
+            outcome: ApplySavedConnectionsSyncOutcome {
+                result,
+                deleted_connection_ids,
+            },
+            pending_keychain_ids: keychain_ids_to_delete,
+            pending_privilege_keychain_ids: privilege_keychain_ids_to_delete,
         })
+    }
+
+    pub fn rollback_prepared_saved_connections_snapshot(
+        &mut self,
+        prepared: &PreparedSavedConnectionsSync,
+    ) -> Result<()> {
+        self.restore_checkpoint(&prepared.checkpoint)
+    }
+
+    pub fn commit_prepared_saved_connections_snapshot(
+        &self,
+        prepared: PreparedSavedConnectionsSync,
+    ) -> Result<SavedConnectionsSyncCleanup> {
+        self.ensure_saved_connections_sync_store(&prepared.checkpoint.store_path)?;
+        Ok(SavedConnectionsSyncCleanup {
+            store_path: prepared.checkpoint.store_path,
+            outcome: prepared.outcome,
+            pending_keychain_ids: prepared.pending_keychain_ids,
+            pending_privilege_keychain_ids: prepared.pending_privilege_keychain_ids,
+        })
+    }
+
+    pub fn finalize_saved_connections_sync_cleanup(
+        &mut self,
+        cleanup: &mut SavedConnectionsSyncCleanup,
+    ) -> Result<()> {
+        self.ensure_saved_connections_sync_store(&cleanup.store_path)?;
+        let mut pending_keychain_ids = std::mem::take(&mut cleanup.pending_keychain_ids);
+        pending_keychain_ids.append(&mut self.data.pending_keychain_cleanup);
+        pending_keychain_ids.sort();
+        pending_keychain_ids.dedup();
+        let mut failed_keychain_ids = Vec::new();
+
+        for keychain_id in pending_keychain_ids {
+            if self.keychain.delete(&keychain_id).is_err() {
+                failed_keychain_ids.push(keychain_id);
+            }
+        }
+
+        let mut pending_privilege_keychain_ids =
+            std::mem::take(&mut cleanup.pending_privilege_keychain_ids);
+        pending_privilege_keychain_ids.append(&mut self.data.pending_privilege_keychain_cleanup);
+        pending_privilege_keychain_ids.sort();
+        pending_privilege_keychain_ids.dedup();
+        let mut failed_privilege_keychain_ids = Vec::new();
+        for keychain_id in pending_privilege_keychain_ids {
+            if self.privilege_keychain.delete(&keychain_id).is_err() {
+                failed_privilege_keychain_ids.push(keychain_id);
+            }
+        }
+
+        self.data.pending_keychain_cleanup = failed_keychain_ids.clone();
+        self.data.pending_privilege_keychain_cleanup = failed_privilege_keychain_ids.clone();
+        cleanup.pending_keychain_ids = failed_keychain_ids;
+        cleanup.pending_privilege_keychain_ids = failed_privilege_keychain_ids;
+        self.save()
+            .context("failed to persist connection keychain cleanup state")?;
+        if cleanup.pending_keychain_ids.is_empty()
+            && cleanup.pending_privilege_keychain_ids.is_empty()
+        {
+            Ok(())
+        } else {
+            bail!(
+                "failed to delete {} stale connection keychain entries",
+                cleanup.pending_keychain_entries()
+            )
+        }
+    }
+
+    fn capture_connection_store_file(&self) -> Result<SavedConnectionsStoreFileCheckpoint> {
+        match fs::read(&self.path) {
+            Ok(bytes) => Ok(SavedConnectionsStoreFileCheckpoint::Present(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(SavedConnectionsStoreFileCheckpoint::Missing)
+            }
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to checkpoint {}", self.path.display()))
+            }
+        }
+    }
+
+    fn ensure_saved_connections_sync_store(&self, expected_path: &Path) -> Result<()> {
+        if self.path == expected_path {
+            Ok(())
+        } else {
+            bail!("saved connections sync handle belongs to a different store")
+        }
     }
 
     pub fn apply_serial_profiles_snapshot(
         &mut self,
         snapshot: SerialProfilesSyncSnapshot,
     ) -> Result<usize> {
+        // Validate the complete batch before mutating store data so a bad late
+        // record cannot leave earlier profiles applied in memory.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
         let mut applied = 0usize;
         for profile in snapshot.records {
-            profile.validate()?;
             if let Some(existing) = self
                 .data
                 .serial_profiles
@@ -210,9 +478,13 @@ impl ConnectionStore {
         &mut self,
         snapshot: RawTcpProfilesSyncSnapshot,
     ) -> Result<usize> {
+        // Validate the complete batch before mutating store data so a bad late
+        // record cannot leave earlier profiles applied in memory.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
         let mut applied = 0usize;
         for profile in snapshot.records {
-            profile.validate()?;
             if let Some(existing) = self
                 .data
                 .raw_tcp_profiles
@@ -239,9 +511,13 @@ impl ConnectionStore {
         &mut self,
         snapshot: RawUdpProfilesSyncSnapshot,
     ) -> Result<usize> {
+        // Validate the complete batch before mutating store data so a bad late
+        // record cannot leave earlier profiles applied in memory.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
         let mut applied = 0usize;
         for profile in snapshot.records {
-            profile.validate()?;
             if let Some(existing) = self
                 .data
                 .raw_udp_profiles
@@ -267,6 +543,7 @@ impl ConnectionStore {
 
 fn build_saved_connection_from_sync_payload(
     payload: &ConnectionInfo,
+    synced_options: Option<&ConnectionOptions>,
     record_updated_at: DateTime<Utc>,
     existing: Option<&SavedConnection>,
     preserve_auth: bool,
@@ -290,13 +567,17 @@ fn build_saved_connection_from_sync_payload(
         username: non_empty(payload.username.trim(), "Username")?.to_string(),
         auth,
         proxy_chain,
-        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
-        options: ConnectionOptions {
-            agent_forwarding: payload.agent_forwarding,
-            legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
-            post_connect_command: payload.post_connect_command.clone(),
-            ..Default::default()
-        },
+        upstream_proxy: payload.upstream_proxy.clone(),
+        options: synced_options
+            .cloned()
+            .unwrap_or_else(|| ConnectionOptions {
+                // Older snapshots exposed only these three option fields through
+                // ConnectionInfo, so retain that wire-compatible fallback.
+                agent_forwarding: payload.agent_forwarding,
+                legacy_ssh_compatibility: payload.legacy_ssh_compatibility,
+                post_connect_command: payload.post_connect_command.clone(),
+                ..Default::default()
+            }),
         created_at: parse_connection_sync_timestamp(&payload.created_at, "connection created_at")?,
         last_used_at: payload
             .last_used_at
@@ -334,7 +615,14 @@ fn build_saved_connections_sync_snapshot(
         &records
             .iter()
             // The exported record includes updated_at, so the snapshot revision must change with it.
-            .map(|record| (&record.id, &record.revision, &record.updated_at, record.deleted))
+            .map(|record| {
+                (
+                    &record.id,
+                    &record.revision,
+                    &record.updated_at,
+                    record.deleted,
+                )
+            })
             .collect::<Vec<_>>(),
     )?;
 
@@ -406,12 +694,14 @@ fn build_saved_connection_sync_record(
     connection: &SavedConnection,
 ) -> Result<SavedConnectionSyncRecord> {
     let payload = ConnectionInfo::from(connection);
+    let options = connection.options.clone();
     Ok(SavedConnectionSyncRecord {
         id: connection.id.clone(),
-        revision: sha256_hex(&payload)?,
+        revision: sha256_hex(&(&payload, &options))?,
         updated_at: connection_sync_updated_at(connection).to_rfc3339(),
         deleted: false,
         payload: Some(payload),
+        options: Some(options),
     })
 }
 
@@ -428,6 +718,7 @@ fn build_saved_connection_tombstone_record(
         updated_at: tombstone.deleted_at.to_rfc3339(),
         deleted: true,
         payload: None,
+        options: None,
     })
 }
 

@@ -2,7 +2,7 @@ use std::{
     mem::size_of,
     sync::{
         Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicIsize, Ordering},
+        atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering},
         mpsc,
     },
     thread,
@@ -24,11 +24,12 @@ use windows::{
                 AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
                 DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
                 GetMessageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, LoadImageW, MF_SEPARATOR,
-                MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW, SW_HIDE, SW_RESTORE,
-                SW_SHOW, SetForegroundWindow, ShowWindowAsync, TPM_NONOTIFY, TPM_RETURNCMD,
-                TPM_RIGHTBUTTON, TRACK_POPUP_MENU_FLAGS, TranslateMessage, WINDOW_EX_STYLE,
-                WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
-                WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
+                MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
+                RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow,
+                ShowWindowAsync, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+                TRACK_POPUP_MENU_FLAGS, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
+                WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
+                WNDCLASSW, WS_OVERLAPPED,
             },
         },
     },
@@ -50,6 +51,7 @@ const TRAY_MENU_QUIT: u32 = 1006;
 
 static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
 static TRAY_HWND: AtomicIsize = AtomicIsize::new(0);
+static TASKBAR_CREATED_MESSAGE: AtomicU32 = AtomicU32::new(0);
 static TRAY_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static KEEP_RUNNING_ON_CLOSE: AtomicBool = AtomicBool::new(true);
@@ -179,6 +181,11 @@ fn start_tray_thread_once() -> anyhow::Result<()> {
 
 fn run_tray_message_loop() -> anyhow::Result<()> {
     let module = unsafe { GetModuleHandleW(None).context("unable to get module handle")? };
+    let taskbar_created_message = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
+    if taskbar_created_message == 0 {
+        return Err(anyhow!("failed to register TaskbarCreated message"));
+    }
+    TASKBAR_CREATED_MESSAGE.store(taskbar_created_message, Ordering::SeqCst);
     let class_name = w!("OxideTermTrayWindow");
     let window_class = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
@@ -202,7 +209,9 @@ fn run_tray_message_loop() -> anyhow::Result<()> {
             0,
             0,
             0,
-            Some(windows::Win32::UI::WindowsAndMessaging::HWND_MESSAGE),
+            // TaskbarCreated is broadcast only to top-level windows. Keep this
+            // window hidden, but do not make it a message-only HWND.
+            None,
             None,
             Some(module.into()),
             None,
@@ -229,6 +238,15 @@ unsafe extern "system" fn tray_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if is_taskbar_created_message(message, TASKBAR_CREATED_MESSAGE.load(Ordering::SeqCst)) {
+        // Explorer removes notification icons when its taskbar restarts. Add
+        // the existing icon again and restore the versioned callback contract.
+        if let Err(error) = add_tray_icon(hwnd) {
+            eprintln!("failed to restore OxideTerm tray icon: {error:#}");
+        }
+        return LRESULT(0);
+    }
+
     match message {
         TRAY_CALLBACK_MESSAGE => {
             match tray_notification_code(lparam) {
@@ -262,6 +280,12 @@ fn tray_notification_code(lparam: LPARAM) -> u32 {
     // Routing by the low-word notification code keeps both modern NIN_* and
     // older mouse-message callbacks working.
     (lparam.0 as u32) & 0xffff
+}
+
+fn is_taskbar_created_message(message: u32, registered_message: u32) -> bool {
+    // Registration failure returns zero, which must never classify a regular
+    // window message as an Explorer restart notification.
+    registered_message != 0 && message == registered_message
 }
 
 fn add_tray_icon(hwnd: HWND) -> anyhow::Result<()> {
@@ -377,6 +401,21 @@ mod tests {
         let packed_lparam = LPARAM(((0x4321_u32 << 16) | WM_CONTEXTMENU) as isize);
 
         assert_eq!(tray_notification_code(packed_lparam), WM_CONTEXTMENU);
+    }
+
+    #[test]
+    fn taskbar_created_message_requires_registered_match() {
+        const REGISTERED_MESSAGE: u32 = 0xc123;
+
+        assert!(is_taskbar_created_message(
+            REGISTERED_MESSAGE,
+            REGISTERED_MESSAGE
+        ));
+        assert!(!is_taskbar_created_message(0, 0));
+        assert!(!is_taskbar_created_message(
+            REGISTERED_MESSAGE + 1,
+            REGISTERED_MESSAGE
+        ));
     }
 }
 

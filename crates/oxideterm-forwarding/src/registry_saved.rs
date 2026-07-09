@@ -4,8 +4,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use crate::{
-    ApplySavedForwardsSyncSnapshotResult, PersistedForward, SavedForwardError, SavedForwardStore,
-    SavedForwardsSyncSnapshot,
+    ApplySavedForwardsSyncSnapshotResult, PersistedForward, SavedForwardCheckpoint,
+    SavedForwardError, SavedForwardStore, SavedForwardsSyncSnapshot,
 };
 
 /// Saved-forward facade used by headless crates that must not pull in SSH or GPUI runtime code.
@@ -23,6 +23,38 @@ impl ForwardingRegistry {
         Self {
             saved_store: Some(Arc::new(saved_store)),
         }
+    }
+
+    /// Captures every persisted forward record for owner-level compensation.
+    pub fn checkpoint_saved_forwards(
+        &self,
+    ) -> Result<Option<SavedForwardCheckpoint>, SavedForwardError> {
+        self.saved_store
+            .as_ref()
+            .map(|store| store.checkpoint())
+            .transpose()
+    }
+
+    /// Replaces the complete saved-forward state through the owner store.
+    pub fn replace_saved_forwards(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            return Ok(());
+        };
+        store.replace_from_checkpoint(checkpoint)
+    }
+
+    /// Restores the complete saved-forward state after a coordinated failure.
+    pub fn restore_saved_forwards(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            return Ok(());
+        };
+        store.restore_checkpoint(checkpoint)
     }
 
     pub fn delete_owned_forwards(

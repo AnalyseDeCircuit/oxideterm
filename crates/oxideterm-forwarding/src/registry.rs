@@ -9,7 +9,8 @@ use oxideterm_ssh::SshConnectionHandle;
 use crate::{
     ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingError,
     ForwardingManager, OwnedForwardImportRecord, PersistedForward, PortDetectionProfiler,
-    PortDetectionSnapshot, SavedForwardError, SavedForwardStore, SavedForwardsSyncSnapshot,
+    PortDetectionSnapshot, SavedForwardCheckpoint, SavedForwardError, SavedForwardStore,
+    SavedForwardsSyncSnapshot,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -297,6 +298,38 @@ impl ForwardingRegistry {
 
     pub fn saved_store(&self) -> Option<Arc<SavedForwardStore>> {
         self.saved_store.clone()
+    }
+
+    /// Captures every persisted forward record for owner-level compensation.
+    pub fn checkpoint_saved_forwards(
+        &self,
+    ) -> Result<Option<SavedForwardCheckpoint>, SavedForwardError> {
+        self.saved_store
+            .as_ref()
+            .map(|store| store.checkpoint())
+            .transpose()
+    }
+
+    /// Replaces the complete saved-forward state through the owner store.
+    pub fn replace_saved_forwards(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            return Ok(());
+        };
+        store.replace_from_checkpoint(checkpoint)
+    }
+
+    /// Restores the complete saved-forward state after a coordinated failure.
+    pub fn restore_saved_forwards(
+        &self,
+        checkpoint: &SavedForwardCheckpoint,
+    ) -> Result<(), SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            return Ok(());
+        };
+        store.restore_checkpoint(checkpoint)
     }
 
     pub fn sync_persisted_forward_rule(

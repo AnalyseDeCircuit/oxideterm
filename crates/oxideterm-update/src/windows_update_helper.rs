@@ -148,8 +148,20 @@ pub fn apply_staged_windows_update(install_dir: &Path) -> io::Result<()> {
     }
 
     remove_path(&staging_dir)?;
-    remove_path(&old_dir)?;
+    // Keep the replaced files until the updated app confirms that its initial
+    // workspace opened. This retention does not perform automatic rollback.
     Ok(())
+}
+
+/// Removes files retained after a successful replacement once startup is confirmed.
+///
+/// This cleanup is idempotent and does not restore files from the old directory.
+pub fn confirm_applied_windows_update(install_dir: &Path) -> io::Result<()> {
+    let old_dir = install_dir.join(WINDOWS_UPDATE_OLD_DIR);
+    if !old_dir.exists() {
+        return Ok(());
+    }
+    remove_path(&old_dir)
 }
 
 #[derive(Debug)]
@@ -412,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn staged_update_replaces_files_and_skips_running_helper() {
+    fn staged_update_replaces_files_and_retains_old_files() {
         let temp = tempfile::tempdir().unwrap();
         let install_dir = temp.path();
         fs::create_dir_all(install_dir.join("resources")).unwrap();
@@ -447,7 +459,38 @@ mod tests {
             "old helper"
         );
         assert!(!staging.exists());
-        assert!(!install_dir.join(WINDOWS_UPDATE_OLD_DIR).exists());
+        let old_dir = install_dir.join(WINDOWS_UPDATE_OLD_DIR);
+        assert!(old_dir.exists());
+        assert_eq!(
+            fs::read_to_string(old_dir.join("oxideterm-native.exe")).unwrap(),
+            "old app"
+        );
+        assert_eq!(
+            fs::read_to_string(old_dir.join("resources/config.json")).unwrap(),
+            "old config"
+        );
+    }
+
+    #[test]
+    fn confirmed_update_removes_retained_old_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let old_dir = temp.path().join(WINDOWS_UPDATE_OLD_DIR);
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::write(old_dir.join("oxideterm-native.exe"), "old app").unwrap();
+
+        confirm_applied_windows_update(temp.path()).unwrap();
+
+        assert!(!old_dir.exists());
+    }
+
+    #[test]
+    fn confirming_without_old_directory_is_idempotent() {
+        let temp = tempfile::tempdir().unwrap();
+
+        confirm_applied_windows_update(temp.path()).unwrap();
+        confirm_applied_windows_update(temp.path()).unwrap();
+
+        assert!(!temp.path().join(WINDOWS_UPDATE_OLD_DIR).exists());
     }
 
     #[test]

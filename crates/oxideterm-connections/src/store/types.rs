@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::{SecretString, keychain::ConnectionKeychain};
 
 pub const CONFIG_VERSION: u32 = 1;
@@ -949,6 +947,10 @@ pub struct ConnectionStoreData {
     pub raw_udp_profiles: Vec<RawUdpProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_keychain_cleanup: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_privilege_keychain_cleanup: Vec<String>,
 }
 
 impl Default for ConnectionStoreData {
@@ -965,6 +967,8 @@ impl Default for ConnectionStoreData {
             raw_tcp_profiles: Vec::new(),
             raw_udp_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
+            pending_keychain_cleanup: Vec::new(),
+            pending_privilege_keychain_cleanup: Vec::new(),
         }
     }
 }
@@ -1039,6 +1043,10 @@ pub struct SavedConnectionSyncRecord {
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<ConnectionInfo>,
+    /// Full connection options were added after the initial sync format. Keep
+    /// this optional so existing cloud snapshots remain readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<ConnectionOptions>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

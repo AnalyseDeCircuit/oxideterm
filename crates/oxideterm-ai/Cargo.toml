@@ -37,6 +37,7 @@ zstd = "0.13"
 block2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSError", "NSString"] }
+security-framework = "3.7"
 
 [dev-dependencies]
 tempfile = "3.23"

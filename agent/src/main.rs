@@ -743,42 +743,114 @@ fn symbol_patterns_for_path(path: &Path) -> Option<Vec<CompiledSymbolPattern>> {
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     let specs: &[(&str, &str)] = match extension.as_str() {
         "rs" => &[
-            ("function", r"\b(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("struct", r"\b(?:pub(?:\([^)]*\))?\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("enum", r"\b(?:pub(?:\([^)]*\))?\s+)?enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("trait", r"\b(?:pub(?:\([^)]*\))?\s+)?trait\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("typeAlias", r"\b(?:pub(?:\([^)]*\))?\s+)?type\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("constant", r"\b(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            (
+                "function",
+                r"\b(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "struct",
+                r"\b(?:pub(?:\([^)]*\))?\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "enum",
+                r"\b(?:pub(?:\([^)]*\))?\s+)?enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "trait",
+                r"\b(?:pub(?:\([^)]*\))?\s+)?trait\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "typeAlias",
+                r"\b(?:pub(?:\([^)]*\))?\s+)?type\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "constant",
+                r"\b(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
         ],
         "py" | "pyw" => &[
-            ("function", r"\b(?:async\s+)?def\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            (
+                "function",
+                r"\b(?:async\s+)?def\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
             ("class", r"\bclass\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
         ],
         "js" | "mjs" | "cjs" | "jsx" | "ts" | "mts" | "cts" | "tsx" => &[
-            ("function", r"\b(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
-            ("class", r"\b(?:export\s+)?class\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
-            ("interface", r"\b(?:export\s+)?interface\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
-            ("typeAlias", r"\b(?:export\s+)?type\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
-            ("enum", r"\b(?:export\s+)?enum\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
-            ("constant", r"\b(?:export\s+)?(?:const|let|var)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"),
+            (
+                "function",
+                r"\b(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+            ),
+            (
+                "class",
+                r"\b(?:export\s+)?class\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+            ),
+            (
+                "interface",
+                r"\b(?:export\s+)?interface\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+            ),
+            (
+                "typeAlias",
+                r"\b(?:export\s+)?type\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+            ),
+            (
+                "enum",
+                r"\b(?:export\s+)?enum\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+            ),
+            (
+                "constant",
+                r"\b(?:export\s+)?(?:const|let|var)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+            ),
         ],
         "go" => &[
-            ("function", r"\bfunc\s+(?:\([^)]*\)\s*)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("struct", r"\btype\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+struct\b"),
-            ("interface", r"\btype\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+interface\b"),
+            (
+                "function",
+                r"\bfunc\s+(?:\([^)]*\)\s*)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "struct",
+                r"\btype\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+struct\b",
+            ),
+            (
+                "interface",
+                r"\btype\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+interface\b",
+            ),
         ],
         "java" | "kt" | "kts" | "cs" | "swift" => &[
-            ("class", r"\b(?:public\s+|private\s+|internal\s+|open\s+|final\s+|abstract\s+|data\s+|sealed\s+|partial\s+|static\s+)*class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("struct", r"\b(?:public\s+|private\s+|internal\s+|readonly\s+)*struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("interface", r"\b(?:public\s+|private\s+|internal\s+)*(?:interface|protocol)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("enum", r"\b(?:public\s+|private\s+|internal\s+)*enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("function", r"\b(?:public\s+|private\s+|internal\s+|static\s+|override\s+|func\s+)*func\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            (
+                "class",
+                r"\b(?:public\s+|private\s+|internal\s+|open\s+|final\s+|abstract\s+|data\s+|sealed\s+|partial\s+|static\s+)*class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "struct",
+                r"\b(?:public\s+|private\s+|internal\s+|readonly\s+)*struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "interface",
+                r"\b(?:public\s+|private\s+|internal\s+)*(?:interface|protocol)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "enum",
+                r"\b(?:public\s+|private\s+|internal\s+)*enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "function",
+                r"\b(?:public\s+|private\s+|internal\s+|static\s+|override\s+|func\s+)*func\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
         ],
         "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hxx" => &[
             ("class", r"\bclass\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("struct", r"\b(?:typedef\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("enum", r"\b(?:typedef\s+)?enum(?:\s+class)?\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("typeAlias", r"\b(?:typedef|using)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
+            (
+                "struct",
+                r"\b(?:typedef\s+)?struct\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "enum",
+                r"\b(?:typedef\s+)?enum(?:\s+class)?\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
+            (
+                "typeAlias",
+                r"\b(?:typedef|using)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+            ),
             ("module", r"\bnamespace\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
         ],
         "rb" => &[
@@ -792,7 +864,10 @@ fn symbol_patterns_for_path(path: &Path) -> Option<Vec<CompiledSymbolPattern>> {
         ],
         "sh" | "bash" | "zsh" => &[
             ("function", r"\bfunction\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"),
-            ("function", r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)"),
+            (
+                "function",
+                r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)",
+            ),
         ],
         _ => return None,
     };
@@ -1102,10 +1177,7 @@ mod tests {
     }
 
     fn test_root(name: &str) -> PathBuf {
-        let root = env::temp_dir().join(format!(
-            "oxideterm-agent-{name}-{}",
-            std::process::id()
-        ));
+        let root = env::temp_dir().join(format!("oxideterm-agent-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         root
     }

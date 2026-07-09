@@ -484,11 +484,11 @@ fn wasm_unpack_ptr_len(packed: i64) -> Result<(usize, usize), PluginError> {
     Ok((ptr, len))
 }
 
-fn wasm_execution_error(
+pub(crate) fn wasm_execution_error(
     code: &'static str,
     plugin_id: &str,
     action: &str,
-    error: anyhow::Error,
+    error: wasmtime::Error,
 ) -> PluginError {
     if let Some(exit) = error.downcast_ref::<wasmtime_wasi::I32Exit>() {
         if exit.0 == 0 {

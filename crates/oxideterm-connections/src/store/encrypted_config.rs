@@ -10,15 +10,28 @@ const MANAGED_SSH_KEY_SECRET_FILE_FORMAT: &str = "oxideterm.managed-ssh-key-secr
 const MANAGED_SSH_KEY_SECRET_FILE_VERSION: u32 = 1;
 const MANAGED_SSH_KEY_SECRET_FILE_ALGORITHM: &str = "chacha20poly1305";
 const MANAGED_SSH_KEY_SECRET_NONCE_LEN: usize = 12;
-#[cfg(target_os = "macos")]
-const MACOS_KEYCHAIN_COMMAND_TIMEOUT_SECS: u64 = 30;
+const MAX_ATOMIC_TEMP_ATTEMPTS: usize = 128;
 
-use std::sync::{Mutex, OnceLock};
+use std::{
+    ffi::OsString,
+    fs::OpenOptions,
+    io::{self, Write},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use chacha20poly1305::KeyInit as _;
 
 type ConfigEncryptionKey = zeroize::Zeroizing<[u8; CONFIG_ENCRYPTION_KEY_LEN]>;
 static CONFIG_ENCRYPTION_KEY_CACHE: OnceLock<Mutex<Option<ConfigEncryptionKey>>> = OnceLock::new();
+static ATOMIC_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_ATOMIC_REPLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionStoreStorageFormat {
@@ -66,16 +79,40 @@ fn decode_connection_store_data(bytes: &[u8]) -> Result<LoadedConnectionStoreDat
             )
         })?;
         let data = decrypt_connection_store_data(envelope, &*key)?;
+        validate_connection_store_version(&data)?;
         return Ok(LoadedConnectionStoreData {
             data,
             format: ConnectionStoreStorageFormat::Encrypted,
         });
     }
 
+    let data = serde_json::from_value(document).context("failed to parse plaintext connections")?;
+    validate_connection_store_version(&data)?;
     Ok(LoadedConnectionStoreData {
-        data: serde_json::from_value(document).context("failed to parse plaintext connections")?,
+        data,
         format: ConnectionStoreStorageFormat::Plaintext,
     })
+}
+
+fn validate_connection_store_version(data: &ConnectionStoreData) -> Result<()> {
+    if data.version > CONFIG_VERSION {
+        bail!(
+            "connections version {} is newer than supported version {CONFIG_VERSION}",
+            data.version
+        );
+    }
+    if let Some(connection) = data
+        .connections
+        .iter()
+        .find(|connection| connection.version > CONFIG_VERSION)
+    {
+        bail!(
+            "connection {} uses newer version {} than supported version {CONFIG_VERSION}",
+            connection.id,
+            connection.version
+        );
+    }
+    Ok(())
 }
 
 fn encode_connection_store_data(
@@ -221,12 +258,179 @@ fn write_managed_ssh_key_secret_file(
     let envelope = encrypt_managed_ssh_key_secret(private_key, key)?;
     let bytes =
         serde_json::to_vec_pretty(&envelope).context("failed to serialize managed SSH key secret")?;
-    let temp_path = path.with_extension("json.tmp");
-    fs::write(&temp_path, bytes)
-        .with_context(|| format!("failed to write {}", temp_path.display()))?;
-    fs::rename(&temp_path, &path)
-        .with_context(|| format!("failed to finalize {}", path.display()))?;
+    atomic_write_file(&path, &bytes)
+        .with_context(|| format!("failed to finalize {}", path.display()))
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "atomic write path has no file name")
+    })?;
+    let (temp_path, mut temp_file) = (0..MAX_ATOMIC_TEMP_ATTEMPTS)
+        .find_map(|_| {
+            let sequence = ATOMIC_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+            let temp_path = parent.join(temp_name);
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+            {
+                Ok(file) => Some(Ok((temp_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "atomic temp path exhausted"))?;
+
+    // Secret-bearing stores commit only after the complete temp file is durable.
+    let write_result = (|| {
+        temp_file.write_all(bytes)?;
+        temp_file.flush()?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        fail_before_atomic_replace_for_tests()?;
+        atomic_replace_file(&temp_path, path)?;
+        sync_directory(parent)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+#[cfg(unix)]
+fn sync_directory(directory: &Path) -> io::Result<()> {
+    fs::File::open(directory)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_directory(directory: &Path) -> io::Result<()> {
+    use std::{ffi::c_void, os::windows::ffi::OsStrExt};
+
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+    const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+    const OPEN_EXISTING: u32 = 3;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const INVALID_HANDLE_VALUE: *mut c_void = -1isize as *mut c_void;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn CreateFileW(
+            file_name: *const u16,
+            desired_access: u32,
+            share_mode: u32,
+            security_attributes: *mut c_void,
+            creation_disposition: u32,
+            flags_and_attributes: u32,
+            template_file: *mut c_void,
+        ) -> *mut c_void;
+        fn FlushFileBuffers(file: *mut c_void) -> i32;
+        fn CloseHandle(object: *mut c_void) -> i32;
+    }
+
+    let wide_path = directory
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // FILE_FLAG_BACKUP_SEMANTICS is required to open a directory handle.
+    let handle = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null_mut(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+
+    let flush_result = unsafe { FlushFileBuffers(handle) };
+    let flush_error = (flush_result == 0).then(io::Error::last_os_error);
+    let close_result = unsafe { CloseHandle(handle) };
+    if let Some(error) = flush_error {
+        return Err(error);
+    }
+    if close_result == 0 {
+        return Err(io::Error::last_os_error());
+    }
     Ok(())
+}
+
+#[cfg(test)]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other("injected failure before atomic replace"))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn inject_atomic_replace_failure() {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| fail.set(true));
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn read_managed_ssh_key_secret_file(
@@ -468,137 +672,29 @@ fn delete_config_key_secret() -> Result<()> {
     result
 }
 
-#[cfg(target_os = "macos")]
 fn load_system_config_key_secret() -> Result<Option<zeroize::Zeroizing<String>>> {
+    #[cfg(target_os = "macos")]
     authenticate_macos_keychain_access("OxideTerm needs to unlock your encrypted connections")?;
-    // Tauri stores the local config key in the macOS generic password store.
-    // Calling `security` directly avoids keyring backends that can block a
-    // headless CLI while preserving the same service/account lookup.
-    let output = run_macos_security_command(
-        vec![
-            "find-generic-password".to_string(),
-            "-s".to_string(),
-            CONFIG_KEYCHAIN_SERVICE.to_string(),
-            "-a".to_string(),
-            config_keychain_account(),
-            "-w".to_string(),
-        ],
-        "lookup local config key",
-    )?;
-    if output.status.success() {
-        let secret = String::from_utf8(output.stdout)
-            .context("local config key from macOS keychain is not UTF-8")?;
-        let secret = zeroize::Zeroizing::new(secret.trim_end_matches(['\r', '\n']).to_string());
-        return Ok(Some(secret));
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("could not be found") {
-        return Ok(None);
-    }
-    Err(anyhow::anyhow!(
-        "failed to load local config key from macOS keychain: {}",
-        stderr.trim()
-    ))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn load_system_config_key_secret() -> Result<Option<zeroize::Zeroizing<String>>> {
     let entry = config_keychain_entry()?;
     match entry.get_password() {
+        // Move the backend String directly into a zeroizing owner.
         Ok(secret) => Ok(Some(zeroize::Zeroizing::new(secret))),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => Err(error).context("failed to load local config key from OS keychain"),
     }
 }
 
-#[cfg(target_os = "macos")]
 fn store_system_config_key_secret(secret: &str) -> Result<()> {
-    let output = run_macos_security_command(
-        vec![
-            "add-generic-password".to_string(),
-            "-U".to_string(),
-            "-s".to_string(),
-            CONFIG_KEYCHAIN_SERVICE.to_string(),
-            "-a".to_string(),
-            config_keychain_account(),
-            "-w".to_string(),
-            secret.to_string(),
-            "-A".to_string(),
-        ],
-        "store local config key",
-    )?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "failed to store local config key in macOS keychain"
-        ))
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn store_system_config_key_secret(secret: &str) -> Result<()> {
+    // keyring's apple-native backend never places the master key in process argv.
     config_keychain_entry()?
         .set_password(secret)
         .context("failed to store local config key in OS keychain")
 }
 
-#[cfg(target_os = "macos")]
 fn delete_system_config_key_secret() -> Result<()> {
-    let output = run_macos_security_command(
-        vec![
-            "delete-generic-password".to_string(),
-            "-s".to_string(),
-            CONFIG_KEYCHAIN_SERVICE.to_string(),
-            "-a".to_string(),
-            config_keychain_account(),
-        ],
-        "delete local config key",
-    )?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("could not be found") {
-        return Ok(());
-    }
-    Err(anyhow::anyhow!(
-        "failed to delete local config key from macOS keychain: {}",
-        stderr.trim()
-    ))
-}
-
-#[cfg(target_os = "macos")]
-fn run_macos_security_command(
-    args: Vec<String>,
-    action: &str,
-) -> Result<std::process::Output> {
-    let mut child = std::process::Command::new("security")
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to run macOS security command to {action}"))?;
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(MACOS_KEYCHAIN_COMMAND_TIMEOUT_SECS);
-    loop {
-        if child
-            .try_wait()
-            .with_context(|| format!("failed to poll macOS security command to {action}"))?
-            .is_some()
-        {
-            return child
-                .wait_with_output()
-                .with_context(|| format!("failed to collect macOS security output to {action}"));
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!(
-                "macOS keychain authorization timed out while trying to {action}; approve the keychain prompt and retry"
-            );
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    match config_keychain_entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error).context("failed to delete local config key from OS keychain"),
     }
 }
 
@@ -658,15 +754,6 @@ fn authenticate_macos_keychain_access(reason: &str) -> Result<()> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn delete_system_config_key_secret() -> Result<()> {
-    match config_keychain_entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(error).context("failed to delete local config key from OS keychain"),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
 fn config_keychain_entry() -> Result<keyring::Entry> {
     keyring::Entry::new(CONFIG_KEYCHAIN_SERVICE, &config_keychain_account())
         .context("failed to open local config keychain entry")

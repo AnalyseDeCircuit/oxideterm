@@ -13,6 +13,7 @@ use oxideterm_plugin_protocol::{
 };
 
 use super::*;
+use crate::runtime::wasm_execution_error;
 
 fn unique_temp_dir(name: &str) -> PathBuf {
     let millis = SystemTime::now()
@@ -158,6 +159,21 @@ async fn wasm_runtime_dispatches_command_and_event_over_memory_abi() {
             value: serde_json::json!({ "eventHandled": true })
         }
     );
+}
+
+#[test]
+fn wasm_execution_error_preserves_wasi_exit_status() {
+    // Wasmtime 46 exposes execution failures through its own error type.
+    let error = wasmtime::Error::new(wasmtime_wasi::I32Exit(7));
+    let plugin_error = wasm_execution_error(
+        "wasm_handler_failed",
+        "com.example.runtime",
+        "execute native WASM plugin handler",
+        error,
+    );
+
+    assert_eq!(plugin_error.code, "wasm_exit_status");
+    assert!(plugin_error.message.contains("status 7"));
 }
 
 fn wasm_noop_start_module() -> Vec<u8> {

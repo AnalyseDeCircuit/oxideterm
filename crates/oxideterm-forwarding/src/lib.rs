@@ -59,8 +59,8 @@ pub use registry_saved::ForwardingRegistry;
 pub use saved::{
     ApplySavedForwardsSyncSnapshotResult, DeletedPersistedForwardTombstone,
     FORWARD_TOMBSTONE_RETENTION_DAYS, OwnedForwardImportRecord, PersistedForward,
-    PersistedForwardDto, SavedForwardError, SavedForwardStore, SavedForwardSyncRecord,
-    SavedForwardsSyncSnapshot,
+    PersistedForwardDto, SavedForwardCheckpoint, SavedForwardError, SavedForwardStore,
+    SavedForwardSyncRecord, SavedForwardsSyncSnapshot,
 };
 #[cfg(feature = "runtime")]
 pub use x11::X11ForwardBridge;

@@ -3,8 +3,11 @@
 
 use std::{
     collections::HashMap,
-    fs,
+    ffi::OsString,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -21,6 +24,13 @@ use crate::{
 pub const SETTINGS_FILENAME: &str = "settings.json";
 const MAX_SETTINGS_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const BOOTSTRAP_FILENAME: &str = "bootstrap.json";
+const MAX_ATOMIC_TEMP_ATTEMPTS: usize = 128;
+static ATOMIC_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_ATOMIC_REPLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct BootstrapConfig {
@@ -76,6 +86,32 @@ pub struct SettingsStore {
     path: PathBuf,
     settings: PersistedSettings,
     updated_at: u64,
+    writes_blocked: bool,
+}
+
+enum SettingsFileCheckpoint {
+    Missing,
+    Present(Vec<u8>),
+}
+
+/// Opaque rollback state for the exact settings file and in-memory envelope.
+#[must_use = "settings checkpoints should be restored or deliberately discarded"]
+pub struct SettingsStoreCheckpoint {
+    path: PathBuf,
+    settings: PersistedSettings,
+    updated_at: u64,
+    writes_blocked: bool,
+    file: SettingsFileCheckpoint,
+}
+
+impl std::fmt::Debug for SettingsStoreCheckpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SettingsStoreCheckpoint")
+            .field("path", &self.path)
+            .field("contents", &"[redacted settings checkpoint]")
+            .finish()
+    }
 }
 
 fn now_ms() -> u64 {
@@ -215,7 +251,7 @@ fn save_bootstrap_config(config: &BootstrapConfig) -> Result<()> {
     }
     let bytes =
         serde_json::to_vec_pretty(config).context("failed to serialize bootstrap config")?;
-    fs::write(path, bytes).context("failed to write bootstrap config")
+    atomic_write_file(&path, &bytes).context("failed to write bootstrap config")
 }
 
 fn bootstrap_data_dir() -> Option<PathBuf> {
@@ -268,12 +304,22 @@ fn read_envelope(path: &Path) -> Result<Option<(Value, u64)>> {
     }
     let contents = fs::read_to_string(path).context("failed to read settings file")?;
     if contents.trim().is_empty() {
-        return Ok(None);
+        return Err(anyhow!("settings file is empty"));
     }
     let value: Value = serde_json::from_str(&contents).context("failed to parse settings file")?;
     if value.get("settings").is_some() {
+        let envelope_version = value
+            .get("version")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow!("settings envelope version is missing or invalid"))?;
+        if envelope_version > u64::from(SETTINGS_SCHEMA_VERSION) {
+            return Err(anyhow!(
+                "settings envelope version {envelope_version} is newer than supported version {SETTINGS_SCHEMA_VERSION}"
+            ));
+        }
         let updated_at = value
             .get("updatedAt")
+            .or_else(|| value.get("updated_at"))
             .and_then(Value::as_u64)
             .unwrap_or_else(now_ms);
         Ok(Some((value["settings"].clone(), updated_at)))
@@ -283,7 +329,10 @@ fn read_envelope(path: &Path) -> Result<Option<(Value, u64)>> {
 }
 
 fn write_envelope(path: &Path, settings: &PersistedSettings, updated_at: u64) -> Result<()> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent).context("failed to create settings directory")?;
     }
     let envelope = SettingsEnvelope {
@@ -295,10 +344,128 @@ fn write_envelope(path: &Path, settings: &PersistedSettings, updated_at: u64) ->
     if json.len() as u64 > MAX_SETTINGS_FILE_BYTES {
         return Err(anyhow!("settings snapshot exceeds size limit"));
     }
-    let temp_path = path.with_extension("json.tmp");
-    fs::write(&temp_path, json).context("failed to write settings temp file")?;
-    fs::rename(&temp_path, path).context("failed to replace settings file")?;
+    atomic_write_file(path, &json).context("failed to replace settings file")
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic write path has no file name",
+        )
+    })?;
+    let (temp_path, mut temp_file) = (0..MAX_ATOMIC_TEMP_ATTEMPTS)
+        .find_map(|_| {
+            let sequence = ATOMIC_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+            let temp_path = parent.join(temp_name);
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+            {
+                Ok(file) => Some(Ok((temp_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::AlreadyExists, "atomic temp path exhausted")
+        })?;
+
+    // The destination is untouched until a complete, durable temp file is ready.
+    let write_result = (|| {
+        temp_file.write_all(bytes)?;
+        temp_file.flush()?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        fail_before_atomic_replace_for_tests()?;
+        atomic_replace_file(&temp_path, path)?;
+        sync_directory(parent)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+#[cfg(not(windows))]
+fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_directory(_path: &Path) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other("injected failure before atomic replace"))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn inject_atomic_replace_failure() {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| fail.set(true));
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 impl SettingsStore {
@@ -309,6 +476,7 @@ impl SettingsStore {
             path: path.into(),
             settings,
             updated_at: 0,
+            writes_blocked: true,
         }
     }
 
@@ -326,6 +494,7 @@ impl SettingsStore {
             path,
             settings: load.settings,
             updated_at: load.updated_at,
+            writes_blocked: load.recovered_from_corrupt_file,
         })
     }
 
@@ -345,7 +514,57 @@ impl SettingsStore {
         &self.path
     }
 
+    pub fn create_checkpoint(&self) -> Result<SettingsStoreCheckpoint> {
+        let file = match fs::read(&self.path) {
+            Ok(bytes) => SettingsFileCheckpoint::Present(bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                SettingsFileCheckpoint::Missing
+            }
+            Err(error) => return Err(error).context("failed to checkpoint settings file"),
+        };
+        Ok(SettingsStoreCheckpoint {
+            path: self.path.clone(),
+            settings: self.settings.clone(),
+            updated_at: self.updated_at,
+            writes_blocked: self.writes_blocked,
+            file,
+        })
+    }
+
+    pub fn restore_checkpoint(&mut self, checkpoint: &SettingsStoreCheckpoint) -> Result<()> {
+        if self.path != checkpoint.path {
+            return Err(anyhow!("settings checkpoint belongs to a different store"));
+        }
+        // Restore disk first so memory continues to describe the current file
+        // if the durable rollback itself fails.
+        match &checkpoint.file {
+            SettingsFileCheckpoint::Missing => {
+                if self.path.exists() {
+                    fs::remove_file(&self.path).context("failed to remove settings file")?;
+                    let parent = self
+                        .path
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                        .unwrap_or_else(|| Path::new("."));
+                    sync_directory(parent).context("failed to sync settings directory")?;
+                }
+            }
+            SettingsFileCheckpoint::Present(bytes) => {
+                atomic_write_file(&self.path, bytes).context("failed to restore settings file")?;
+            }
+        }
+        self.settings = checkpoint.settings.clone();
+        self.updated_at = checkpoint.updated_at;
+        self.writes_blocked = checkpoint.writes_blocked;
+        Ok(())
+    }
+
     pub fn save(&mut self) -> Result<SettingsSaveResult> {
+        if self.writes_blocked {
+            return Err(anyhow!(
+                "refusing to overwrite an unreadable or newer settings file"
+            ));
+        }
         let saved = save_settings_to_path(&self.path, self.settings.clone())?;
         self.settings = saved.settings.clone();
         self.updated_at = saved.updated_at;
@@ -353,8 +572,16 @@ impl SettingsStore {
     }
 
     pub fn replace_and_save(&mut self, settings: PersistedSettings) -> Result<SettingsSaveResult> {
-        self.settings = settings;
-        self.save()
+        if self.writes_blocked {
+            return Err(anyhow!(
+                "refusing to overwrite an unreadable or newer settings file"
+            ));
+        }
+        // Commit the in-memory replacement only after the durable file swap succeeds.
+        let saved = save_settings_to_path(&self.path, settings)?;
+        self.settings = saved.settings.clone();
+        self.updated_at = saved.updated_at;
+        Ok(saved)
     }
 }
 
@@ -367,8 +594,8 @@ pub fn load_settings_from_path(
     let mut migration_warnings = Vec::new();
     let mut validation_warnings = Vec::new();
 
-    let (raw, updated_at) = match read_envelope(path) {
-        Ok(Some((raw, updated_at))) => (raw, updated_at),
+    let (raw, updated_at, should_persist) = match read_envelope(path) {
+        Ok(Some((raw, updated_at))) => (raw, updated_at, true),
         Ok(None) => {
             let raw = if let Some(entries) = legacy_local_storage {
                 migrated_from_legacy_local_storage = true;
@@ -377,19 +604,21 @@ pub fn load_settings_from_path(
             } else {
                 PersistedSettings::default().to_value()
             };
-            (raw, now_ms())
+            (raw, now_ms(), true)
         }
         Err(err) => {
             recovered_from_corrupt_file = true;
             migration_warnings.push(format!("Recovered from unreadable settings file: {}", err));
-            (PersistedSettings::default().to_value(), now_ms())
+            (PersistedSettings::default().to_value(), now_ms(), false)
         }
     };
 
     let sanitized = sanitize_settings_value(raw)?;
     migration_warnings.extend(sanitized.migration_warnings);
     validation_warnings.extend(sanitized.validation_warnings);
-    write_envelope(path, &sanitized.settings, updated_at)?;
+    if should_persist {
+        write_envelope(path, &sanitized.settings, updated_at)?;
+    }
 
     Ok(SettingsLoadResult {
         settings: sanitized.settings,
@@ -663,5 +892,107 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(raw["version"], SETTINGS_SCHEMA_VERSION);
         assert!(raw.get("settings").is_some());
+    }
+
+    #[test]
+    fn corrupt_settings_are_preserved_and_block_later_saves() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("settings.json");
+        let corrupt = b"{ not valid settings";
+        fs::write(&path, corrupt).unwrap();
+
+        let mut store = SettingsStore::load_from_path(&path, None).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), corrupt);
+        assert!(store.save().is_err());
+        assert_eq!(fs::read(&path).unwrap(), corrupt);
+    }
+
+    #[test]
+    fn future_settings_envelope_is_preserved() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("settings.json");
+        let future = serde_json::to_vec_pretty(&json!({
+            "version": SETTINGS_SCHEMA_VERSION + 1,
+            "settings": PersistedSettings::default().to_value(),
+            "updated_at": 42
+        }))
+        .unwrap();
+        fs::write(&path, &future).unwrap();
+
+        let load = load_settings_from_path(&path, None).unwrap();
+
+        assert!(load.recovered_from_corrupt_file);
+        assert_eq!(fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn failed_atomic_settings_replace_preserves_previous_file() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("settings.json");
+        let mut store = SettingsStore::load_from_path(&path, None).unwrap();
+        let previous = fs::read(&path).unwrap();
+        store.settings_mut().terminal.font_size = 19;
+        inject_atomic_replace_failure();
+
+        assert!(store.save().is_err());
+        assert_eq!(fs::read(&path).unwrap(), previous);
+    }
+
+    #[test]
+    fn failed_settings_replacement_preserves_in_memory_value() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("settings.json");
+        let mut store = SettingsStore::load_from_path(&path, None).unwrap();
+        let previous = store.settings().clone();
+        let mut replacement = previous.clone();
+        replacement.terminal.font_size = 19;
+        inject_atomic_replace_failure();
+
+        assert!(store.replace_and_save(replacement).is_err());
+        assert_eq!(store.settings(), &previous);
+    }
+
+    #[test]
+    fn settings_checkpoint_restores_exact_file_and_timestamp() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("settings.json");
+        let mut store = SettingsStore::load_from_path(&path, None).unwrap();
+        let checkpoint = store.create_checkpoint().unwrap();
+        let original_bytes = fs::read(&path).unwrap();
+        let original_updated_at = store.updated_at();
+        let mut replacement = store.settings().clone();
+        replacement.terminal.font_size = 19;
+        store.replace_and_save(replacement).unwrap();
+
+        store.restore_checkpoint(&checkpoint).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), original_bytes);
+        assert_eq!(store.updated_at(), original_updated_at);
+        assert_eq!(
+            store.settings(),
+            &SettingsStore::load_from_path(&path, None).unwrap().settings
+        );
+    }
+
+    #[test]
+    fn settings_checkpoint_restores_missing_file_state() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("settings.json");
+        let store = SettingsStore::from_read_only(&path, PersistedSettings::default());
+        let checkpoint = store.create_checkpoint().unwrap();
+        fs::write(&path, b"replacement").unwrap();
+        let mut store = store;
+
+        store.restore_checkpoint(&checkpoint).unwrap();
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn future_settings_value_is_rejected_before_normalization() {
+        let future = json!({ "version": SETTINGS_SCHEMA_VERSION + 1 });
+
+        assert!(sanitize_settings_value(future).is_err());
     }
 }

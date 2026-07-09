@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, experiment/rust-native-v2]
     paths:
       - 'agent/**'
       - 'crates/**'
@@ -14,7 +15,7 @@ on:
       - '.github/workflows/ci.yml'
       - '.github/workflows/native-package.yml'
   pull_request:
-    branches: [main]
+    branches: [main, experiment/rust-native-v2]
 
 permissions:
   contents: read
@@ -30,15 +31,16 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          toolchain: 1.94.1
           components: rustfmt
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-on-failure: false
 
@@ -59,16 +61,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          toolchain: 1.94.1
           components: rustfmt
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: ./agent -> target
           cache-on-failure: false
@@ -91,32 +94,55 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
       - name: Audit native locale catalogs
         run: python scripts/audit_i18n.py
 
+      - name: Test native packaging helpers
+        run: python -m unittest scripts/test_package_native.py scripts/test_verify_native_package.py
+
+      - name: Verify third-party notices
+        run: |
+          python scripts/generate_third_party_notices.py --cwd . --output THIRD_PARTY_NOTICES.md --title "Third-Party Notices (Native / Rust Workspace)" --exclude-prefix oxideterm- --check
+          python scripts/generate_third_party_notices.py --cwd agent --output THIRD_PARTY_NOTICES.md --title "Third-Party Notices (OxideTerm Agent)" --exclude-name oxideterm-agent --check
+
   cargo-deny:
     name: License & dependency audit
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Maintenance notices are tracked separately; security vulnerabilities remain blocking.
+      - name: cargo deny advisories (workspace)
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          manifest-path: Cargo.toml
+          command: check
+          command-arguments: -A unmaintained advisories
 
       - name: cargo deny (workspace)
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
         with:
           manifest-path: Cargo.toml
           command: check
           command-arguments: licenses bans
 
+      - name: cargo deny advisories (agent)
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
+        with:
+          manifest-path: agent/Cargo.toml
+          command: check
+          command-arguments: --config agent/deny.toml -A unmaintained advisories
+
       - name: cargo deny (agent)
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2
         with:
           manifest-path: agent/Cargo.toml
           command: check

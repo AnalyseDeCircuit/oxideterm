@@ -33,13 +33,14 @@ pub use install::{
     plan_native_install,
 };
 pub use manifest::{NativeUpdateAsset, NativeUpdateManifest, NativeUpdatePackage};
-pub use platform::{PlatformTarget, current_platform_target};
+pub use platform::{InstallFlavor, PlatformTarget, current_platform_target};
 pub use state::{
     NativeUpdateStage, PersistedUpdateState, ResumableUpdateStatus, TauriUpdaterEvent,
 };
 pub use version::{VersionOrdering, compare_versions, is_update_newer};
 pub use windows_update_helper::{
     WINDOWS_UPDATE_HELPER_RELATIVE, WINDOWS_UPDATE_OLD_DIR, WINDOWS_UPDATE_STAGING_DIR,
-    WindowsUpdateHelperOptions, apply_staged_windows_update, parse_windows_update_helper_options,
-    run_windows_update_helper, windows_update_helper_arguments, windows_update_helper_path,
+    WindowsUpdateHelperOptions, apply_staged_windows_update, confirm_applied_windows_update,
+    parse_windows_update_helper_options, run_windows_update_helper,
+    windows_update_helper_arguments, windows_update_helper_path,
 };

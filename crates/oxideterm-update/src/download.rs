@@ -26,9 +26,10 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::{
-    NativeUpdateManifest, NativeUpdatePackage, NativeUpdateStage, PersistedUpdateState,
-    PlatformTarget, ResumableUpdateStatus, TauriUpdaterEvent, current_platform_target,
-    endpoint_for_channel, integrity::verify_minisign_signature, state::now_millis,
+    InstallFlavor, NativeUpdateManifest, NativeUpdatePackage, NativeUpdateStage,
+    PersistedUpdateState, PlatformTarget, ResumableUpdateStatus, TauriUpdaterEvent,
+    current_platform_target, endpoint_for_channel, integrity::verify_minisign_signature,
+    state::now_millis,
 };
 
 const STATE_FILE_NAME: &str = "state.json";
@@ -81,14 +82,20 @@ pub struct NativeUpdateRequest {
     pub channel: UpdateChannel,
     pub current_version: String,
     pub target: PlatformTarget,
+    pub install_flavor: InstallFlavor,
 }
 
 impl NativeUpdateRequest {
-    pub fn current(channel: UpdateChannel, current_version: impl Into<String>) -> Self {
+    pub fn current(
+        channel: UpdateChannel,
+        current_version: impl Into<String>,
+        install_flavor: InstallFlavor,
+    ) -> Self {
         Self {
             channel,
             current_version: current_version.into(),
             target: current_platform_target(),
+            install_flavor,
         }
     }
 }
@@ -154,7 +161,11 @@ impl NativeUpdateClient {
         let manifest: NativeUpdateManifest =
             serde_json::from_slice(&bytes).map_err(NativeUpdateError::ManifestJson)?;
 
-        match manifest.select_package(&request.current_version, &request.target) {
+        match manifest.select_package(
+            &request.current_version,
+            &request.target,
+            request.install_flavor,
+        ) {
             Some(package) => Ok(NativeUpdateStatus::Available(package)),
             None if manifest.platforms.is_empty() => Ok(NativeUpdateStatus::UpToDate),
             None if crate::is_update_newer(&manifest.version, &request.current_version) => {

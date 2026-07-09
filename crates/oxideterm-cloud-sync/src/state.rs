@@ -3,8 +3,11 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
+    ffi::OsString,
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use anyhow::{Context, Result};
@@ -16,6 +19,19 @@ use crate::{
     StructuredDirtySections, StructuredLocalState, StructuredSectionRevisions, SyncScope,
     normalize_sync_scope,
 };
+
+const CLOUD_SYNC_STATE_VERSION: u32 = 1;
+const MAX_ATOMIC_TEMP_ATTEMPTS: usize = 128;
+static ATOMIC_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_ATOMIC_REPLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn default_cloud_sync_state_version() -> u32 {
+    CLOUD_SYNC_STATE_VERSION
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +127,8 @@ impl CloudSyncHistoryEntry {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudSyncPersistedState {
+    #[serde(default = "default_cloud_sync_state_version")]
+    pub version: u32,
     #[serde(default)]
     pub settings: CloudSyncSettings,
     #[serde(default)]
@@ -168,6 +186,7 @@ pub struct CloudSyncPersistedState {
 impl Default for CloudSyncPersistedState {
     fn default() -> Self {
         Self {
+            version: CLOUD_SYNC_STATE_VERSION,
             settings: CloudSyncSettings::default(),
             sync_scope: RawSyncScope::default(),
             status: CloudSyncStatus::Idle,
@@ -262,9 +281,9 @@ impl CloudSyncStateStore {
     pub fn load(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut state = match fs::read_to_string(&path) {
-            Ok(contents) if !contents.trim().is_empty() => serde_json::from_str(&contents)
+            Ok(contents) if !contents.trim().is_empty() => decode_cloud_sync_state(&contents)
                 .with_context(|| format!("failed to parse cloud sync state {}", path.display()))?,
-            Ok(_) => CloudSyncPersistedState::default(),
+            Ok(_) => anyhow::bail!("cloud sync state {} is empty", path.display()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 CloudSyncPersistedState::default()
             }
@@ -295,15 +314,151 @@ impl CloudSyncStateStore {
     }
 
     pub fn save(&self) -> Result<()> {
-        if let Some(parent) = self.path.parent() {
+        if self.state.version > CLOUD_SYNC_STATE_VERSION {
+            anyhow::bail!(
+                "cloud sync state version {} is newer than supported version {CLOUD_SYNC_STATE_VERSION}",
+                self.state.version
+            );
+        }
+        if let Some(parent) = self
+            .path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             fs::create_dir_all(parent).with_context(|| {
                 format!("failed to create cloud sync state dir {}", parent.display())
             })?;
         }
         let bytes = serde_json::to_vec_pretty(&self.state)
             .context("failed to serialize cloud sync state")?;
-        fs::write(&self.path, bytes)
-            .with_context(|| format!("failed to write cloud sync state {}", self.path.display()))
+        atomic_write_file(&self.path, &bytes)
+            .with_context(|| format!("failed to replace cloud sync state {}", self.path.display()))
+    }
+}
+
+fn decode_cloud_sync_state(contents: &str) -> Result<CloudSyncPersistedState> {
+    let document: serde_json::Value =
+        serde_json::from_str(contents).context("cloud sync state is not valid JSON")?;
+    if let Some(version) = document.get("version") {
+        let version = version
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("cloud sync state version is invalid"))?;
+        if version > u64::from(CLOUD_SYNC_STATE_VERSION) {
+            anyhow::bail!(
+                "cloud sync state version {version} is newer than supported version {CLOUD_SYNC_STATE_VERSION}"
+            );
+        }
+    }
+    serde_json::from_value(document).context("cloud sync state has an invalid shape")
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic write path has no file name",
+        )
+    })?;
+    let (temp_path, mut temp_file) = (0..MAX_ATOMIC_TEMP_ATTEMPTS)
+        .find_map(|_| {
+            let sequence = ATOMIC_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+            let temp_path = parent.join(temp_name);
+            match OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&temp_path)
+            {
+                Ok(file) => Some(Ok((temp_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::AlreadyExists, "atomic temp path exhausted")
+        })?;
+
+    // Runtime state becomes visible only after a complete, durable temp file exists.
+    let write_result = (|| {
+        temp_file.write_all(bytes)?;
+        temp_file.flush()?;
+        temp_file.sync_all()?;
+        drop(temp_file);
+        fail_before_atomic_replace_for_tests()?;
+        atomic_replace_file(&temp_path, path)
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+#[cfg(test)]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| {
+        if fail.replace(false) {
+            Err(io::Error::other("injected failure before atomic replace"))
+        } else {
+            Ok(())
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn fail_before_atomic_replace_for_tests() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn inject_atomic_replace_failure() {
+    FAIL_NEXT_ATOMIC_REPLACE.with(|fail| fail.set(true));
+}
+
+#[cfg(not(windows))]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn atomic_replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -512,5 +667,54 @@ mod tests {
             state.last_known_remote_revision.as_deref(),
             Some("keep-revision")
         );
+    }
+
+    #[test]
+    fn corrupt_cloud_sync_state_is_preserved() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-cloud-state-corrupt-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let corrupt = b"{ not valid state";
+        fs::write(&path, corrupt).unwrap();
+
+        assert!(CloudSyncStateStore::load(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), corrupt);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn future_cloud_sync_state_is_preserved() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-cloud-state-future-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let future = serde_json::to_vec_pretty(&serde_json::json!({
+            "version": CLOUD_SYNC_STATE_VERSION + 1,
+            "revisionSeq": 99
+        }))
+        .unwrap();
+        fs::write(&path, &future).unwrap();
+
+        assert!(CloudSyncStateStore::load(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), future);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn failed_atomic_cloud_state_replace_preserves_previous_file() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-cloud-state-atomic-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let mut store = CloudSyncStateStore::load(&path).unwrap();
+        store.save().unwrap();
+        let previous = fs::read(&path).unwrap();
+        store.state_mut().revision_seq = 7;
+        inject_atomic_replace_failure();
+
+        assert!(store.save().is_err());
+        assert_eq!(fs::read(&path).unwrap(), previous);
+        let _ = fs::remove_file(path);
     }
 }

@@ -45,12 +45,14 @@ mod virtual_list;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
-    fs,
+    ffi::OsString,
+    fs::{self, OpenOptions},
     hash::{Hash, Hasher},
-    path::PathBuf,
+    io::{self, Write},
+    path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime},
 };
@@ -1397,6 +1399,14 @@ struct PersistedNodeTreeNode {
     config: Option<SshConfig>,
     created_at_ms: u64,
     generation: u64,
+}
+
+const MAX_SESSION_TREE_TEMP_ATTEMPTS: usize = 128;
+static SESSION_TREE_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_SESSION_TREE_REPLACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 // Root workspace pieces are included from here to preserve private access

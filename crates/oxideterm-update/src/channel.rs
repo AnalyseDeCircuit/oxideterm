@@ -4,7 +4,7 @@
 use oxideterm_settings::UpdateChannel;
 
 pub const STABLE_UPDATE_ENDPOINT: &str =
-    "https://github.com/AnalyseDeCircuit/oxideterm/releases/latest/download/latest.json";
+    "https://github.com/AnalyseDeCircuit/oxideterm/releases/download/updater-stable/latest.json";
 pub const BETA_UPDATE_ENDPOINT: &str =
     "https://github.com/AnalyseDeCircuit/oxideterm/releases/download/updater-beta/latest.json";
 pub const GPUI_PREVIEW_UPDATE_ENDPOINT: &str = "https://github.com/AnalyseDeCircuit/oxideterm/releases/download/updater-gpui-preview/latest.json";
@@ -38,5 +38,15 @@ mod tests {
             endpoint_for_channel(UpdateChannel::GpuiPreview).url,
             endpoint_for_channel(UpdateChannel::Beta).url
         );
+    }
+
+    #[test]
+    fn stable_channel_uses_the_pinned_manifest_lane() {
+        assert_eq!(
+            endpoint_for_channel(UpdateChannel::Stable).url,
+            STABLE_UPDATE_ENDPOINT
+        );
+        assert!(STABLE_UPDATE_ENDPOINT.contains("/releases/download/updater-stable/"));
+        assert!(!STABLE_UPDATE_ENDPOINT.contains("/releases/latest/"));
     }
 }

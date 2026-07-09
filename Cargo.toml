@@ -70,6 +70,8 @@ resolver = "2"
 gpui = { path = "crates/gpui" }
 russh = { path = "crates/russh" }
 russh-sftp = { path = "crates/russh-sftp" }
+# This upstream revision is the unreleased quick-xml 0.41 security update for wayland-scanner.
+wayland-scanner = { git = "https://github.com/Smithay/wayland-rs.git", rev = "d07c4f91f28b42e5a485823ffd9d8d5a210b1053" }
 
 [workspace.package]
 edition = "2024"
@@ -167,8 +169,8 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 unicode-width = "0.2.2"
 uuid = { version = "1.23", features = ["v4", "serde"] }
-wasmtime = { version = "39.0.0", default-features = false, features = ["cranelift", "runtime", "std"] }
-wasmtime-wasi = { version = "39.0.0", default-features = false, features = ["p1"] }
+wasmtime = { version = "46.0.1", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime-wasi = { version = "46.0.1", default-features = false, features = ["p1"] }
 windows = "0.61"
 windows-core = "0.61"
 whoami = "1.6"

@@ -17,6 +17,7 @@ This preview focuses on cloud sync reliability, saved connection editing, termin
 - Terminal font features now flow from persisted settings into GPUI terminal rendering instead of always disabling ligature shaping.
 - Windows native auto-update now stages NSIS payloads first and lets a small update helper finish replacement after OxideTerm exits.
 - The Windows update helper keeps an `old` rollback directory during replacement and uses Restart Manager best-effort handle release before moving staged files into place.
+- The Windows installer now exposes shortcut options, with Start Menu shortcuts enabled by default and desktop shortcuts available as an opt-in component.
 
 ## 2.0.0-gpui-preview.14
 

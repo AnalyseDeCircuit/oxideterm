@@ -8,6 +8,7 @@ mod assets;
 mod bundled_fonts;
 mod keybindings;
 mod logging;
+mod migration_snapshot;
 mod platform;
 mod single_instance;
 mod workspace;
@@ -120,6 +121,13 @@ fn main() {
         eprintln!("failed to initialize OxideTerm portable runtime: {error}");
         std::process::exit(1);
     }
+    // Only the primary process may snapshot mutable stores. This still runs
+    // before SettingsStore or ConnectionStore can perform migrations.
+    let settings_path = oxideterm_settings::default_settings_path();
+    if let Err(error) = migration_snapshot::ensure_pre_2_0_migration_snapshot(&settings_path) {
+        eprintln!("failed to create the pre-2.0 migration snapshot: {error:#}");
+        std::process::exit(1);
+    }
     let ssh_launch =
         single_instance::read_ssh_launch_file(ssh_launch_path).unwrap_or_else(|error| {
             eprintln!("failed to read SSH launch request: {error}");
@@ -145,7 +153,8 @@ fn main() {
     };
 
     let application = Application::new().with_assets(NativeAssets);
-    application.on_reopen(|cx| {
+    let reopen_single_instance_rx = single_instance_rx.clone();
+    application.on_reopen(move |cx| {
         if !cx.windows().is_empty() {
             oxideterm_desktop_presence::show_main_window();
             return;
@@ -154,9 +163,12 @@ fn main() {
         // macOS keeps the application alive after closing the last window.
         // Reopening from the Dock should create a fresh workspace window
         // instead of leaving the app windowless.
-        if let Err(error) =
-            open_main_workspace_window(cx, None, desktop_presence_menu_from_settings(), None)
-        {
+        if let Err(error) = open_main_workspace_window(
+            cx,
+            None,
+            desktop_presence_menu_from_settings(),
+            Some(reopen_single_instance_rx.clone()),
+        ) {
             eprintln!(
                 "OxideTerm could not reopen a native GPUI window: {error:#}\n\
                  Try updating GPU drivers, disabling incompatible graphics layers, \
@@ -165,7 +177,6 @@ fn main() {
         }
     });
 
-    let mut single_instance_rx = Some(single_instance_rx);
     application.run(move |cx: &mut App| {
         oxideterm_desktop_presence::set_keep_running_on_close(
             startup_settings.general.minimize_to_tray_on_close,
@@ -204,12 +215,11 @@ fn main() {
         let desktop_presence_menu = desktop_presence_menu(&I18n::new(locale_from_settings(
             startup_settings.general.language,
         )));
-        let initial_single_instance_rx = single_instance_rx.take();
         if let Err(err) = open_main_workspace_window(
             cx,
             ssh_launch,
             desktop_presence_menu,
-            initial_single_instance_rx,
+            Some(single_instance_rx.clone()),
         ) {
             eprintln!(
                 "OxideTerm could not open a native GPUI window: {err:#}\n\
@@ -218,8 +228,28 @@ fn main() {
                  or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
             );
             cx.quit();
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        if let Err(error) = confirm_windows_update_after_initial_workspace() {
+            eprintln!("failed to confirm the applied Windows update: {error}");
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+fn confirm_windows_update_after_initial_workspace() -> std::io::Result<()> {
+    // Reaching this point confirms window and workspace construction. The old
+    // files are recovery artifacts only and can now be removed without rollback.
+    let current_exe = std::env::current_exe()?;
+    let install_dir = current_exe.parent().ok_or_else(|| {
+        std::io::Error::other(format!(
+            "current executable has no install directory: {}",
+            current_exe.display()
+        ))
+    })?;
+    oxideterm_update::confirm_applied_windows_update(install_dir)
 }
 
 fn default_window_bounds(cx: &mut App) -> Bounds<gpui::Pixels> {

@@ -37,6 +37,17 @@ WINDOWS_UPDATE_HELPER_DIR = "tools"
 WINDOWS_UPDATE_STAGING_DIR = "install"
 WINDOWS_UPDATE_FLAG = "OXIDETERM_UPDATE"
 PORTABLE_MARKER_FILENAME = "portable"
+PACKAGE_VERSION_FILENAME = "VERSION"
+RELEASE_DOCUMENTS = (
+    (ROOT_DIR / "LICENSE", "LICENSE"),
+    (ROOT_DIR / "NOTICE", "NOTICE"),
+    (ROOT_DIR / "README.md", "README.md"),
+    (ROOT_DIR / "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
+    (
+        ROOT_DIR / "agent" / "THIRD_PARTY_NOTICES.md",
+        "AGENT_THIRD_PARTY_NOTICES.md",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -89,6 +100,16 @@ def normalized_version(raw: str) -> str:
         if raw.startswith(prefix):
             raw = raw[len(prefix) :]
     return raw
+
+
+def validate_release_version(raw: str, version: str) -> None:
+    """Reject artifacts whose filename version differs from the compiled version."""
+    compiled_version = workspace_version()
+    if version != compiled_version:
+        raise RuntimeError(
+            f"release version {version!r} from {raw!r} does not match "
+            f"workspace version {compiled_version!r}; run scripts/bump_version.py first"
+        )
 
 
 def release_channel(raw: str, version: str) -> str:
@@ -180,6 +201,21 @@ def copy_tree(src: Path, dst: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
+
+
+def copy_release_documents(dst: Path) -> None:
+    """Copy the license and generated dependency notices shipped with binaries."""
+    dst.mkdir(parents=True, exist_ok=True)
+    for source, destination_name in RELEASE_DOCUMENTS:
+        if not source.is_file():
+            raise FileNotFoundError(f"release document not found: {source}")
+        shutil.copy2(source, dst / destination_name)
+
+
+def write_package_version(dst: Path, version: str) -> None:
+    """Persist the exact workspace version inside every release package."""
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / PACKAGE_VERSION_FILENAME).write_text(f"{version}\n", encoding="utf-8")
 
 
 def copy_agent_resources(dst: Path, *, encode_binaries: bool) -> None:
@@ -439,21 +475,128 @@ def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
 
 def macos_codesign_command(codesign: str, app_dir: Path) -> list[str]:
     command = [codesign, "--force", "--deep"]
+    signing_identity = os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() or "-"
+    if signing_identity != "-":
+        command.extend(["--options", "runtime", "--timestamp"])
     if MACOS_ENTITLEMENTS.exists():
         # Keep ad-hoc preview builds aligned with the app bundle metadata.
         # Without these entitlements, macOS can block local/private-network
         # traffic even when Info.plist contains the usage description.
         command.extend(["--entitlements", str(MACOS_ENTITLEMENTS)])
-    command.extend(["--sign", "-", str(app_dir)])
+    command.extend(["--sign", signing_identity, str(app_dir)])
     return command
 
 
-def sign_macos_app_bundle(app_dir: Path) -> None:
+def sign_macos_path(path: Path) -> None:
     codesign = require_tool("codesign")
     # Ad-hoc signing does not notarize the app, but it keeps stripped preview
     # bundles launchable on Apple Silicon instead of producing a damaged-app error.
-    run(macos_codesign_command(codesign, app_dir))
-    run([codesign, "--verify", "--verbose", str(app_dir)])
+    run(macos_codesign_command(codesign, path))
+    run([codesign, "--verify", "--verbose", str(path)])
+
+
+def is_macos_binary(path: Path) -> bool:
+    """Return whether `path` contains Mach-O code that needs its own signature."""
+    if not path.is_file():
+        return False
+    file_tool = require_tool("file")
+    description = subprocess.check_output(
+        [file_tool, "-b", str(path)], text=True, stderr=subprocess.DEVNULL
+    )
+    return "Mach-O" in description
+
+
+def sign_macos_portable_tree(package_root: Path) -> None:
+    """Sign every Mach-O payload because a portable directory is not a bundle."""
+    for candidate in sorted(package_root.rglob("*")):
+        if is_macos_binary(candidate):
+            sign_macos_path(candidate)
+
+
+def notarize_macos_portable_tree(package_root: Path) -> None:
+    """Submit signed command-line payloads in Apple's supported ZIP container."""
+    submission = DIST_DIR / f".{package_root.name}-notarization.zip"
+    zip_macos_app_bundle(package_root, submission)
+    try:
+        notarize_macos_artifact(submission, staple=False)
+    finally:
+        submission.unlink(missing_ok=True)
+
+
+def notarize_macos_artifact(path: Path, *, staple: bool) -> bool:
+    """Submit an artifact when App Store Connect API credentials are configured."""
+    key_path = os.environ.get("MACOS_NOTARY_KEY_PATH", "").strip()
+    key_id = os.environ.get("MACOS_NOTARY_KEY_ID", "").strip()
+    issuer_id = os.environ.get("MACOS_NOTARY_ISSUER_ID", "").strip()
+    configured = [bool(key_path), bool(key_id), bool(issuer_id)]
+    if not any(configured):
+        return False
+    if not all(configured):
+        raise RuntimeError("macOS notarization requires key path, key id, and issuer id")
+    if os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() in ("", "-"):
+        raise RuntimeError("macOS notarization requires a Developer ID signing identity")
+
+    run(
+        [
+            "xcrun",
+            "notarytool",
+            "submit",
+            str(path),
+            "--key",
+            key_path,
+            "--key-id",
+            key_id,
+            "--issuer",
+            issuer_id,
+            "--wait",
+        ]
+    )
+    if staple:
+        run(["xcrun", "stapler", "staple", str(path)])
+    return True
+
+
+def find_signtool() -> str | None:
+    found = shutil.which("signtool")
+    if found:
+        return found
+    kits_root = os.environ.get("ProgramFiles(x86)")
+    if not kits_root:
+        return None
+    candidates = sorted(
+        Path(kits_root).glob("Windows Kits/10/bin/*/x64/signtool.exe"),
+        reverse=True,
+    )
+    return str(candidates[0]) if candidates else None
+
+
+def sign_windows_file(path: Path) -> None:
+    """Authenticode-sign a release file using a pre-imported certificate."""
+    thumbprint = os.environ.get("WINDOWS_SIGN_CERT_SHA1", "").strip().replace(" ", "")
+    if not thumbprint:
+        return
+    signtool = find_signtool()
+    if not signtool:
+        raise RuntimeError("WINDOWS_SIGN_CERT_SHA1 is set but signtool was not found")
+    timestamp_url = os.environ.get(
+        "WINDOWS_SIGN_TIMESTAMP_URL", "http://timestamp.digicert.com"
+    )
+    run(
+        [
+            signtool,
+            "sign",
+            "/fd",
+            "SHA256",
+            "/td",
+            "SHA256",
+            "/tr",
+            timestamp_url,
+            "/sha1",
+            thumbprint,
+            str(path),
+        ]
+    )
+    run([signtool, "verify", "/pa", "/v", str(path)])
 
 
 def zip_macos_app_bundle(app_dir: Path, dest: Path) -> None:
@@ -475,9 +618,15 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
     shutil.copy2(binary, binary_dest)
     make_executable(binary_dest)
     copy_runtime_resources(package_root / "resources", target)
-    for name in ("LICENSE", "NOTICE", "README.md"):
-        shutil.copy2(ROOT_DIR / name, package_root / name)
+    copy_release_documents(package_root)
+    write_package_version(package_root, version)
     (package_root / PORTABLE_MARKER_FILENAME).touch()
+
+    if "apple-darwin" in target:
+        # Standalone helpers are outside an app bundle, so each Mach-O file must
+        # be signed and included in its own notarization submission.
+        sign_macos_portable_tree(package_root)
+        notarize_macos_portable_tree(package_root)
 
     if "windows" in target:
         archive_windows_portable(
@@ -503,8 +652,8 @@ def stage_windows_installer_root(
     shutil.copy2(binary, installer_root / binary.name)
     shutil.copy2(update_helper, installer_root / WINDOWS_UPDATE_HELPER_DIR / update_helper.name)
     copy_runtime_resources(installer_root / "resources", target)
-    for name in ("LICENSE", "NOTICE", "README.md"):
-        shutil.copy2(ROOT_DIR / name, installer_root / name)
+    copy_release_documents(installer_root)
+    write_package_version(installer_root, version)
     return installer_root
 
 
@@ -521,6 +670,7 @@ def create_windows_installer(
         raise RuntimeError("makensis not found; install NSIS before packaging Windows installers")
 
     update_helper = build_windows_update_helper(target, target_was_explicit)
+    sign_windows_file(update_helper)
     installer_root = stage_windows_installer_root(binary, target, version, label, update_helper)
     installer_path = DIST_DIR / f"OxideTerm_{version}_{label}-setup.exe"
     script_path = DIST_DIR / f"OxideTerm_{version}_{label}.nsi"
@@ -536,6 +686,7 @@ def create_windows_installer(
     )
     script_path.write_text(script + "\n", encoding="utf-8")
     run([makensis, str(script_path)])
+    sign_windows_file(installer_path)
     shutil.rmtree(installer_root)
     script_path.unlink(missing_ok=True)
 
@@ -566,9 +717,12 @@ InstallDirRegKey HKCU "Software\\{identity.windows_registry_key}" "InstallDir"
 Icon "{nsis_path(icon_path)}"
 UninstallIcon "{nsis_path(icon_path)}"
 BrandingText "{identity.app_name}"
+VIProductVersion "{windows_numeric_version(version)}"
+VIAddVersionKey /LANG=1033 "ProductVersion" "{nsis_string(version)}"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -587,7 +741,8 @@ oxide_update_mode:
   SetSilent silent
 FunctionEnd
 
-Section "Install"
+Section "Application Files"
+  SectionIn RO
   StrCmp $IsOxideUpdate "1" update_install normal_install
 
 normal_install:
@@ -600,8 +755,6 @@ normal_install:
   WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "DisplayVersion" "{nsis_string(version)}"
   WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "Publisher" "AnalyseDeCircuit"
   WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}" "UninstallString" "$\\"$INSTDIR\\Uninstall.exe$\\""
-  CreateDirectory "$SMPROGRAMS\\{identity.app_name}"
-  CreateShortcut "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
   Goto install_done
 
 update_install:
@@ -621,7 +774,21 @@ update_install:
 install_done:
 SectionEnd
 
+Section "Start Menu Shortcut"
+  StrCmp $IsOxideUpdate "1" start_menu_shortcut_done
+  CreateDirectory "$SMPROGRAMS\\{identity.app_name}"
+  CreateShortcut "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
+start_menu_shortcut_done:
+SectionEnd
+
+Section /o "Desktop Shortcut"
+  StrCmp $IsOxideUpdate "1" desktop_shortcut_done
+  CreateShortcut "$DESKTOP\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
+desktop_shortcut_done:
+SectionEnd
+
 Section "Uninstall"
+  Delete "$DESKTOP\\{identity.app_name}.lnk"
   Delete "$SMPROGRAMS\\{identity.app_name}\\{identity.app_name}.lnk"
   RMDir "$SMPROGRAMS\\{identity.app_name}"
   DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{identity.windows_uninstall_key}"
@@ -649,13 +816,21 @@ def create_macos_app(
     make_executable(app_binary)
     shutil.copy2(RESOURCE_DIR / "icons" / "icon.icns", resources / "icon.icns")
     copy_runtime_resources(resources, target)
+    copy_release_documents(resources / "licenses")
+    write_package_version(resources / "licenses", version)
 
     plist = build_macos_info_plist(version, identity)
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump(plist, file)
 
-    sign_macos_app_bundle(app_dir)
-    zip_macos_app_bundle(app_dir, DIST_DIR / f"OxideTerm_{version}_{label}.app.zip")
+    sign_macos_path(app_dir)
+    app_zip = DIST_DIR / f"OxideTerm_{version}_{label}.app.zip"
+    zip_macos_app_bundle(app_dir, app_zip)
+    if notarize_macos_artifact(app_zip, staple=False):
+        # The ZIP is only the submission container. Staple the accepted ticket
+        # to the application itself, then rebuild the distributable archive.
+        run(["xcrun", "stapler", "staple", str(app_dir)])
+        zip_macos_app_bundle(app_dir, app_zip)
 
     if shutil.which("hdiutil"):
         dmg_root = DIST_DIR / f"dmg-{label}"
@@ -664,6 +839,7 @@ def create_macos_app(
         dmg_root.mkdir()
         shutil.copytree(app_dir, dmg_root / f"{identity.app_name}.app")
         (dmg_root / "Applications").symlink_to("/Applications")
+        dmg_path = DIST_DIR / f"OxideTerm_{version}_{label}.dmg"
         run(
             [
                 "hdiutil",
@@ -675,9 +851,10 @@ def create_macos_app(
                 "-ov",
                 "-format",
                 "UDZO",
-                str(DIST_DIR / f"OxideTerm_{version}_{label}.dmg"),
+                str(dmg_path),
             ]
         )
+        notarize_macos_artifact(dmg_path, staple=True)
         shutil.rmtree(dmg_root)
 
     shutil.rmtree(app_dir)
@@ -693,9 +870,32 @@ def linux_deb_arch(target: str) -> str:
     return mapping[target]
 
 
-def linux_deb_dependencies(target: str) -> str:
-    dependencies = ["libc6 (>= 2.31)", "libgcc-s1"]
-    return ", ".join(dependencies)
+def parse_dpkg_shlibdeps_output(output: str) -> str:
+    """Extract the dependency expression emitted by dpkg-shlibdeps."""
+    prefix = "shlibs:Depends="
+    for line in output.splitlines():
+        if line.startswith(prefix):
+            dependencies = line[len(prefix) :].strip()
+            if dependencies:
+                return dependencies
+    raise RuntimeError("dpkg-shlibdeps did not report shlibs:Depends")
+
+
+def linux_deb_dependencies(binary: Path, scratch_dir: Path) -> str:
+    """Resolve Debian runtime dependencies from the final linked executable."""
+    dpkg_shlibdeps = require_tool("dpkg-shlibdeps")
+    debian_dir = scratch_dir / "debian"
+    debian_dir.mkdir(parents=True, exist_ok=True)
+    (debian_dir / "control").write_text(
+        "Source: oxideterm\nPackage: oxideterm\nArchitecture: any\nDescription: OxideTerm\n",
+        encoding="utf-8",
+    )
+    output = subprocess.check_output(
+        [dpkg_shlibdeps, "-O", "-e", str(binary)],
+        cwd=scratch_dir,
+        text=True,
+    )
+    return parse_dpkg_shlibdeps_output(output)
 
 
 def linux_deb_version(version: str) -> str:
@@ -703,6 +903,18 @@ def linux_deb_version(version: str) -> str:
     # use '-' inside the upstream version, so store them as '~' for valid
     # package metadata while keeping release asset filenames unchanged.
     return version.replace("-", "~")
+
+
+def windows_numeric_version(version: str) -> str:
+    """Convert SemVer to the four numeric fields required by NSIS version info."""
+    core = version.split("-", 1)[0]
+    components = core.split(".")
+    if len(components) != 3 or any(not part.isdigit() for part in components):
+        raise RuntimeError(f"Windows package version is not SemVer: {version}")
+    numeric = [int(part) for part in components] + [0]
+    if any(part > 65535 for part in numeric):
+        raise RuntimeError(f"Windows package version component exceeds 65535: {version}")
+    return ".".join(str(part) for part in numeric)
 
 
 def linux_appimage_arch(target: str) -> str:
@@ -769,6 +981,9 @@ def create_linux_appimage(
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
     copy_runtime_resources(usr_bin / "resources", target, encode_agent_binaries=True)
+    document_root = appdir / "usr" / "share" / "doc" / identity.linux_package_name
+    copy_release_documents(document_root)
+    write_package_version(document_root, version)
 
     applications_dir = appdir / "usr" / "share" / "applications"
     applications_dir.mkdir(parents=True)
@@ -822,8 +1037,11 @@ def create_linux_deb(
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
     copy_runtime_resources(app_root / "resources", target)
-    for name in ("LICENSE", "NOTICE", "README.md"):
-        shutil.copy2(ROOT_DIR / name, app_root / name)
+    copy_release_documents(app_root)
+    write_package_version(app_root, version)
+    document_root = deb_root / "usr" / "share" / "doc" / identity.linux_package_name
+    copy_release_documents(document_root)
+    write_package_version(document_root, version)
 
     applications_dir = deb_root / "usr" / "share" / "applications"
     applications_dir.mkdir(parents=True)
@@ -836,15 +1054,16 @@ def create_linux_deb(
 
     control_dir = deb_root / "DEBIAN"
     control_dir.mkdir(parents=True)
-    # Keep dependencies intentionally small; GPUI links the native libraries
-    # through the CI image while the application resources stay self-contained.
+    shlibdeps_dir = deb_root / "shlibdeps"
+    dependencies = linux_deb_dependencies(app_binary, shlibdeps_dir)
+    shutil.rmtree(shlibdeps_dir)
     control = f"""Package: {identity.linux_package_name}
 Version: {linux_deb_version(version)}
 Section: utils
 Priority: optional
 Architecture: {linux_deb_arch(target)}
 Maintainer: AnalyseDeCircuit <noreply@oxideterm.app>
-Depends: {linux_deb_dependencies(target)}
+Depends: {dependencies}
 Description: OxideTerm native SSH workspace
  Local-first SSH workspace with terminal, SFTP, port forwarding, and AI context.
 """
@@ -860,6 +1079,7 @@ def main() -> None:
     target = sys.argv[1] if target_was_explicit else host_triple()
     raw_version = raw_release_version()
     version = normalized_version(raw_version)
+    validate_release_version(raw_version, version)
     identity = release_identity(raw_version, version)
     label = target_label(target)
 
@@ -878,7 +1098,10 @@ def main() -> None:
     build_remote_desktop_helpers(target, target_was_explicit)
     app_binary = build_app(target, target_was_explicit)
     if "windows" in target:
+        sign_windows_file(app_binary)
         create_windows_installer(app_binary, target, target_was_explicit, version, label, identity)
+    if "apple-darwin" in target:
+        sign_macos_path(app_binary)
     # Every target should publish a self-contained portable artifact; Windows
     # additionally ships an NSIS installer for users who prefer installation.
     create_portable_package(app_binary, target, version, label)

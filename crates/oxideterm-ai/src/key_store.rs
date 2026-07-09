@@ -12,75 +12,6 @@ use zeroize::Zeroizing;
 const AI_KEYCHAIN_SERVICE: &str = "com.oxideterm.ai";
 const AI_KEYCHAIN_TOUCH_ID_REASON: &str = "OxideTerm needs to access your AI API key";
 
-#[cfg(target_os = "macos")]
-mod mac_keychain {
-    use std::process::Command;
-
-    use zeroize::{Zeroize, Zeroizing};
-
-    pub fn store(service: &str, account: &str, password: &str) -> Result<(), String> {
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-s", service, "-a", account])
-            .output();
-
-        let output = Command::new("security")
-            .args([
-                "add-generic-password",
-                "-s",
-                service,
-                "-a",
-                account,
-                "-w",
-                password,
-                "-A",
-            ])
-            .output()
-            .map_err(|error| format!("security CLI: {error}"))?;
-
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("security add-generic-password: {}", stderr.trim()))
-        }
-    }
-
-    pub fn get(service: &str, account: &str) -> Result<Zeroizing<String>, String> {
-        let mut output = Command::new("security")
-            .args(["find-generic-password", "-s", service, "-a", account, "-w"])
-            .output()
-            .map_err(|error| format!("security CLI: {error}"))?;
-
-        if output.status.success() {
-            // `security -w` writes the secret into stdout; move it into a
-            // zeroizing String and wipe the process output buffer immediately.
-            let secret = Zeroizing::new(
-                String::from_utf8_lossy(&output.stdout)
-                    .trim_end_matches('\n')
-                    .to_string(),
-            );
-            output.stdout.zeroize();
-            Ok(secret)
-        } else {
-            Err("not found".to_string())
-        }
-    }
-
-    pub fn delete(service: &str, account: &str) {
-        let _ = Command::new("security")
-            .args(["delete-generic-password", "-s", service, "-a", account])
-            .output();
-    }
-
-    pub fn exists(service: &str, account: &str) -> bool {
-        Command::new("security")
-            .args(["find-generic-password", "-s", service, "-a", account])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-}
-
 #[derive(Clone)]
 pub struct AiProviderKeyStore {
     service: String,
@@ -240,12 +171,6 @@ impl AiProviderKeyStore {
             Ok(false) => {}
             Err(_) => return false,
         }
-        #[cfg(target_os = "macos")]
-        {
-            if mac_keychain::exists(&self.service, &self.account(provider_id)) {
-                return true;
-            }
-        }
         self.entry(provider_id)
             .map(|entry| credential_exists_without_secret_read(&entry))
             .unwrap_or(false)
@@ -260,10 +185,6 @@ impl AiProviderKeyStore {
                         "failed to delete AI provider key from portable keystore for {provider_id}"
                     )
                 });
-        }
-        #[cfg(target_os = "macos")]
-        {
-            mac_keychain::delete(&self.service, &self.account(provider_id));
         }
         match self.entry(provider_id)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -335,20 +256,9 @@ impl AiProviderKeyStore {
         &self,
         provider_id: &str,
     ) -> Result<Option<Zeroizing<String>>> {
-        let account = self.account(provider_id);
-        if let Ok(secret) = mac_keychain::get(&self.service, &account) {
-            return Ok(Some(secret));
-        }
-
         match self.entry(provider_id)?.get_password() {
-            Ok(secret) => {
-                // Older native builds used keyring's default macOS ACL. After
-                // the explicit biometric gate succeeds, migrate to Tauri's
-                // `security -A` storage so future reads avoid binary ACL prompts.
-                let secret = Zeroizing::new(secret);
-                let _ = mac_keychain::store(&self.service, &account, secret.as_str());
-                Ok(Some(secret))
-            }
+            // Move the backend-owned String directly into a zeroizing owner.
+            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error)
                 .with_context(|| format!("failed to load AI provider key for {provider_id}")),
@@ -367,20 +277,10 @@ impl AiProviderKeyStore {
             });
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            mac_keychain::store(&self.service, &self.account(provider_id), api_key)
-                .map_err(anyhow::Error::msg)
-                .with_context(|| format!("failed to save AI provider key for {provider_id}"))?;
-            return Ok(());
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            self.entry(provider_id)?
-                .set_password(api_key)
-                .with_context(|| format!("failed to save AI provider key for {provider_id}"))
-        }
+        // keyring's apple-native backend keeps the secret out of process argv.
+        self.entry(provider_id)?
+            .set_password(api_key)
+            .with_context(|| format!("failed to save AI provider key for {provider_id}"))
     }
 
     fn account(&self, provider_id: &str) -> String {
@@ -468,20 +368,34 @@ fn credential_exists_without_secret_read(entry: &Entry) -> bool {
     // Touch ID/keychain unlock prompts. Use keyring's platform credential
     // lookup when available and fall back to get_password only on stores that
     // do not expose an existence probe.
-    platform_credential_exists(entry).unwrap_or_else(|| {
-        matches!(
-            entry.get_password(),
-            Ok(_) | Err(keyring::Error::Ambiguous(_))
-        )
+    platform_credential_exists(entry).unwrap_or_else(|| match entry.get_password() {
+        Ok(secret) => {
+            // Some backends do not expose metadata-only lookup. Move their
+            // temporary String into a zeroizing owner immediately.
+            let _secret = Zeroizing::new(secret);
+            true
+        }
+        Err(keyring::Error::Ambiguous(_)) => true,
+        Err(_) => false,
     })
 }
 
 #[cfg(target_os = "macos")]
 fn platform_credential_exists(entry: &Entry) -> Option<bool> {
-    entry
+    use security_framework::item::{ItemClass, ItemSearchOptions};
+
+    let credential = entry
         .get_credential()
-        .downcast_ref::<keyring::macos::MacCredential>()
-        .map(|credential| credential.get_credential().is_ok())
+        .downcast_ref::<keyring::macos::MacCredential>()?;
+    let mut search = ItemSearchOptions::new();
+    search
+        .class(ItemClass::generic_password())
+        .service(&credential.service)
+        .account(&credential.account)
+        .load_attributes(true)
+        .limit(1)
+        .skip_authenticated_items(true);
+    Some(search.search().is_ok_and(|items| !items.is_empty()))
 }
 
 #[cfg(target_os = "windows")]
@@ -547,5 +461,19 @@ mod tests {
         store.finish_provider_key_read(&provider_id);
         waiter.join().expect("waiter thread");
         assert!(acquired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn native_key_store_does_not_spawn_the_macos_security_cli() {
+        // This source-level invariant avoids touching the real keychain while
+        // preventing secrets from being reintroduced into child-process argv.
+        let source = include_str!("key_store.rs");
+        for keychain_command in [
+            ["add-generic", "-password"].concat(),
+            ["find-generic", "-password"].concat(),
+            ["delete-generic", "-password"].concat(),
+        ] {
+            assert!(!source.contains(&keychain_command));
+        }
     }
 }
