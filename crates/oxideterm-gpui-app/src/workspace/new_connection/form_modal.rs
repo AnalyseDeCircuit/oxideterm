@@ -254,7 +254,11 @@ impl WorkspaceApp {
                                                 .child(self.render_remote_desktop_form_branch(protocol, cx))
                                         })
                                         .when(
-                                            !serial_mode && !telnet_mode && !raw_udp_mode && !remote_desktop_mode,
+                                            !serial_mode
+                                                && !telnet_mode
+                                                && !raw_tcp_mode
+                                                && !raw_udp_mode
+                                                && !remote_desktop_mode,
                                             |content| {
                                                 content
                                 .when(!prompt_mode && !drill_down_mode, |content| {

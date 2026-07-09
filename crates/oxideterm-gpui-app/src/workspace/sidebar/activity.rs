@@ -17,13 +17,17 @@ impl WorkspaceApp {
             (SidebarSection::Assistant, LucideIcon::Sparkles),
             (SidebarSection::HostTools, LucideIcon::Wrench),
         ];
-        let bottom_items = [
+        let mut bottom_items = vec![
             (SidebarSection::Workspace, LucideIcon::Square),
             (SidebarSection::Files, LucideIcon::FolderOpen),
-            (SidebarSection::Monitor, LucideIcon::Monitor),
             (SidebarSection::Notifications, LucideIcon::Bell),
             (SidebarSection::Settings, LucideIcon::Settings),
         ];
+        if !cfg!(target_os = "windows") {
+            // WSL Graphics now lives under Connections on Windows, not as an
+            // independent activity-bar tool.
+            bottom_items.insert(2, (SidebarSection::Monitor, LucideIcon::Monitor));
+        }
 
         let mut bar = div()
             .w(px(self.tokens.metrics.activity_bar_width))
@@ -162,9 +166,6 @@ impl WorkspaceApp {
             SidebarSection::Monitor if cfg!(target_os = "macos") => self
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::Launcher),
-            SidebarSection::Monitor if cfg!(target_os = "windows") => self
-                .active_tab()
-                .is_some_and(|tab| tab.kind == TabKind::Graphics),
             SidebarSection::Notifications => self
                 .active_tab()
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter),
@@ -333,8 +334,6 @@ impl WorkspaceApp {
                         this.open_file_manager_tab(window, cx);
                     } else if section == SidebarSection::Monitor && cfg!(target_os = "macos") {
                         this.open_launcher_tab(window, cx);
-                    } else if section == SidebarSection::Monitor && cfg!(target_os = "windows") {
-                        this.open_graphics_tab(window, cx);
                     } else if section == SidebarSection::Notifications {
                         this.open_notification_center_tab(window, cx);
                     } else if section == SidebarSection::Assistant {
@@ -373,9 +372,6 @@ impl WorkspaceApp {
             SidebarSection::Files => self.i18n.t("sidebar.panels.files"),
             SidebarSection::Monitor if cfg!(target_os = "macos") => {
                 self.i18n.t("launcher.tabTitle")
-            }
-            SidebarSection::Monitor if cfg!(target_os = "windows") => {
-                self.i18n.t("graphics.tab_title")
             }
             SidebarSection::Monitor => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Notifications => self.i18n.t("sidebar.panels.notifications"),

@@ -48,6 +48,22 @@ impl WorkspaceApp {
                 )
                 .flex_none(),
             )
+            .when(cfg!(target_os = "windows"), |toolbar| {
+                toolbar.child(
+                    self.render_toolbar_button(
+                        LucideIcon::AppWindow,
+                        self.i18n.t("graphics.tab_title"),
+                        ButtonVariant::Outline,
+                        has_background,
+                        show_primary_labels,
+                        cx.listener(|this, _event, window, cx| {
+                            this.open_graphics_tab(window, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .flex_none(),
+                )
+            })
             .child(
                 self.render_toolbar_button(
                     LucideIcon::Network,
