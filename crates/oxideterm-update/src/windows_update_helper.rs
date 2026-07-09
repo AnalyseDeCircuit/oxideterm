@@ -311,12 +311,12 @@ fn configure_helper_child_process(_command: &mut Command) {}
 fn wait_for_process_exit(pid: u32) {
     use windows::Win32::{
         Foundation::{CloseHandle, WAIT_OBJECT_0},
-        System::Threading::{OpenProcess, SYNCHRONIZE, WaitForSingleObject},
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
     };
 
     // Waiting is best-effort: if the process is already gone or inaccessible,
     // the replacement path still proceeds and relies on filesystem errors.
-    let Ok(handle) = (unsafe { OpenProcess(SYNCHRONIZE, false, pid) }) else {
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }) else {
         return;
     };
     loop {
