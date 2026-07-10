@@ -81,15 +81,14 @@ use gpui::{
     SharedString, Styled, StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle,
     WeakEntity, Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
 };
-use oxideterm_backend_classification::{BackendErrorClass, classify_message};
 use oxideterm_connection_monitor::{
     CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
     ConnectionPoolMonitorStats, DockerActionKind, FilesystemCommandCapability,
-    FilesystemEntrySeverity, FilesystemFilter, LogCommandCapability, LogPreset, MetricsSource,
-    MonitorListRow, MonitorMetricKind, MonitorSectionKind, MonitorValueLevel,
-    PackageCommandCapability, PackageFilter, PortCommandCapability, PortFilter, ProcessActionKind,
-    ProcessCommandCapability, ProcessFilter, ProcessSort, ProfilerRegistry, ProfilerUpdate,
-    ResourceDockerContainer, ResourceDockerStatus, ResourceFilesystemEntry,
+    FilesystemEntrySeverity, FilesystemFilter, HostToolActionOutcome, LogCommandCapability,
+    LogPreset, MetricsSource, MonitorListRow, MonitorMetricKind, MonitorSectionKind,
+    MonitorValueLevel, PackageCommandCapability, PackageFilter, PortCommandCapability, PortFilter,
+    ProcessActionKind, ProcessCommandCapability, ProcessFilter, ProcessSort, ProfilerRegistry,
+    ProfilerUpdate, ResourceDockerContainer, ResourceDockerStatus, ResourceFilesystemEntry,
     ResourceFilesystemSnapshot, ResourceFilesystemStatus, ResourceLogEntry, ResourceLogSnapshot,
     ResourceLogStatus, ResourceMetrics, ResourcePackageEntry, ResourcePackageSnapshot,
     ResourcePackageStatus, ResourcePortEntry, ResourcePortSnapshot, ResourcePortStatus,
@@ -108,24 +107,23 @@ use oxideterm_connection_monitor::{
     build_service_follow_logs_command, build_service_logs_command, build_tmux_action_command,
     build_tmux_attach_command, build_tmux_new_session_command, build_tmux_snapshot_command,
     compact_monitor_row_signature, compact_monitor_rows, disk_list_rows,
-    docker_action_failure_message, docker_action_succeeded, docker_action_success_message,
-    docker_row_signature, docker_state_label_key, filesystem_attention_label_keys,
-    filesystem_entry_severity, filesystem_filter_label_key, filesystem_kind_label_key,
-    filesystem_read_only_label_key, filesystem_row_signature, format_bytes, format_rate,
-    gpu_list_rows, gpu_memory_percent, gpu_memory_summary, gpu_utilization_percent,
-    interface_list_rows, log_level_label_key, log_preset_label_key, log_row_signature,
+    docker_action_failure_message, docker_action_succeeded, docker_row_signature,
+    docker_state_label_key, filesystem_attention_label_keys, filesystem_entry_severity,
+    filesystem_filter_label_key, filesystem_kind_label_key, filesystem_read_only_label_key,
+    filesystem_row_signature, format_bytes, format_rate, gpu_list_rows, gpu_memory_percent,
+    gpu_memory_summary, gpu_utilization_percent, host_tool_capture_failure_message,
+    interface_list_rows, interpret_docker_action_output, interpret_process_action_output,
+    interpret_scheduled_task_action_output, interpret_service_action_output,
+    interpret_tmux_action_output, log_level_label_key, log_preset_label_key, log_row_signature,
     metrics_source_label_key, package_filter_label_key, package_row_signature,
     package_status_label_key, parse_log_snapshot, parse_package_snapshot, parse_port_snapshot,
     percent_level, port_endpoint, port_filter_label_key, port_is_risky_exposure,
-    port_row_signature, port_state_label_key, process_action_failure_message,
-    process_action_succeeded, process_action_success_message, process_display_command,
-    process_display_name, process_row_signature, process_state_label_key,
-    resource_metrics_is_rtt_only, rtt_level, scheduled_task_active_label_key,
-    scheduled_task_enabled_label_key, scheduled_task_filter_label_key,
-    scheduled_task_row_signature, scheduled_task_source_label_key, service_action_failure_message,
-    service_action_succeeded, service_action_success_message, service_enabled_label_key,
-    service_row_signature, service_state_label_key, tmux_action_failure_message,
-    tmux_action_succeeded, tmux_action_success_message, tmux_session_row_signature,
+    port_row_signature, port_state_label_key, process_display_command, process_display_name,
+    process_row_signature, process_state_label_key, resource_metrics_is_rtt_only, rtt_level,
+    scheduled_task_active_label_key, scheduled_task_enabled_label_key,
+    scheduled_task_filter_label_key, scheduled_task_row_signature, scheduled_task_source_label_key,
+    service_action_failure_message, service_action_succeeded, service_enabled_label_key,
+    service_row_signature, service_state_label_key, tmux_session_row_signature,
     top_process_list_rows, visible_docker_rows, visible_filesystem_rows, visible_log_rows,
     visible_package_rows, visible_port_rows, visible_process_rows, visible_scheduled_task_rows,
     visible_service_rows, visible_tmux_session_rows,
@@ -198,14 +196,15 @@ use oxideterm_sftp::{
     probe_tar_support, tar_download_directory, tar_upload_directory,
 };
 use oxideterm_ssh::{
-    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState,
-    MAX_RETAINED_RECONNECT_JOBS, NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
-    NodeState, NodeStateEvent, NodeTreeExpansion, NodeTreeSnapshot, NodeTreeSnapshotNode,
-    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
+    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionState, ConnectionTraceEvent,
+    ConnectionTraceMode, ConnectionTracePlan, ConnectionTraceStage, ConnectionTraceState,
+    ConnectionTraceStatus, MAX_RETAINED_RECONNECT_JOBS, NodeId, NodeOrigin, NodeReadiness,
+    NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent, NodeTreeExpansion, NodeTreeSnapshot,
+    NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
     ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
     ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
-    ReconnectPhase, ReconnectSnapshot, SshConfig, SshConnectionRegistry, SshTransportClient,
-    TerminalEndpoint, UpstreamProxyConfig,
+    ReconnectPhase, ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig,
+    SshConnectionRegistry, SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
@@ -904,8 +903,7 @@ pub(crate) struct WorkspaceApp {
     connection_trace_tx: std::sync::mpsc::Sender<ConnectionTraceEvent>,
     connection_trace_rx: std::sync::mpsc::Receiver<ConnectionTraceEvent>,
     connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
-    connection_trace_nodes: HashMap<NodeId, ConnectionTraceNodeContext>,
-    connection_trace_attempt_seq: u64,
+    connection_trace_state: ConnectionTraceState,
     zen_hint_expires_at: Option<Instant>,
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
@@ -1088,48 +1086,6 @@ struct AcpAgentProbeResult {
     last_error_kind: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectionTraceStage {
-    Queued,
-    Preparing,
-    OpeningTransport,
-    SshHandshake,
-    HostKey,
-    Authentication,
-    Pty,
-    ShellReady,
-    Ready,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectionTraceStatus {
-    Running,
-    Ready,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectionTraceMode {
-    Connect,
-    Reconnect,
-}
-
-#[derive(Clone, Debug)]
-struct ConnectionTraceEvent {
-    attempt_id: String,
-    node_id: NodeId,
-    stage: ConnectionTraceStage,
-    status: ConnectionTraceStatus,
-    progress: f32,
-    elapsed_ms: u64,
-    detail: Option<String>,
-    label: Option<String>,
-    step_index: Option<u32>,
-    total_steps: Option<u32>,
-    mode: ConnectionTraceMode,
-}
-
 #[derive(Clone, Debug)]
 struct ActiveConnectionTrace {
     visible: bool,
@@ -1139,22 +1095,6 @@ struct ActiveConnectionTrace {
     show_generation: u64,
     flush_generation: u64,
     expires_at: Option<Instant>,
-}
-
-#[derive(Clone, Debug)]
-struct ConnectionTraceNodeContext {
-    attempt_id: String,
-    label: Option<String>,
-    step_index: Option<u32>,
-    total_steps: Option<u32>,
-    mode: ConnectionTraceMode,
-}
-
-#[derive(Clone, Debug)]
-struct ConnectionTracePlan {
-    attempt_id: String,
-    mode: ConnectionTraceMode,
-    node_ids: Vec<NodeId>,
 }
 
 #[derive(Clone, Debug)]

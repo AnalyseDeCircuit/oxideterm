@@ -1647,11 +1647,11 @@ impl WorkspaceApp {
             }
             Ok(output) => {
                 dialog.output = None;
-                dialog.error = Some(host_schedule_capture_failure_message(
+                dialog.error = Some(host_tool_capture_failure_message(
                     &output.stdout,
                     &output.stderr,
                     output.exit_code,
-                    self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
+                    &self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
                 ));
             }
             Err(error) => {
@@ -1668,25 +1668,25 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                self.push_host_schedule_toast(
-                    self.i18n_replace(
-                        host_schedule_action_success_key(&delivery.request.action),
-                        &[("name", delivery.request.task_name.clone())],
-                    ),
-                    TerminalNoticeVariant::Success,
-                );
-            }
             Ok(output) => {
-                self.push_host_schedule_toast(
-                    host_schedule_capture_failure_message(
-                        &output.stdout,
-                        &output.stderr,
-                        output.exit_code,
-                        self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
-                    ),
-                    TerminalNoticeVariant::Error,
+                let success_message = self.i18n_replace(
+                    host_schedule_action_success_key(&delivery.request.action),
+                    &[("name", delivery.request.task_name.clone())],
                 );
+                match interpret_scheduled_task_action_output(
+                    &output.stdout,
+                    &output.stderr,
+                    output.exit_code,
+                    success_message,
+                    &self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
+                ) {
+                    HostToolActionOutcome::Succeeded { message } => {
+                        self.push_host_schedule_toast(message, TerminalNoticeVariant::Success);
+                    }
+                    HostToolActionOutcome::Failed { message } => {
+                        self.push_host_schedule_toast(message, TerminalNoticeVariant::Error);
+                    }
+                }
             }
             Err(error) => {
                 self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
@@ -2025,23 +2025,5 @@ fn host_schedule_action_success_key(action: &ScheduledTaskActionKind) -> &'stati
         ScheduledTaskActionKind::RunNow { .. } => "sidebar.host_schedules.toast.run_now_started",
         ScheduledTaskActionKind::Enable { .. } => "sidebar.host_schedules.toast.enable_succeeded",
         ScheduledTaskActionKind::Disable { .. } => "sidebar.host_schedules.toast.disable_succeeded",
-    }
-}
-
-fn host_schedule_capture_failure_message(
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-    fallback: String,
-) -> String {
-    let reason = stderr
-        .lines()
-        .chain(stdout.lines())
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or(fallback.as_str());
-    match exit_code {
-        Some(code) => format!("{reason} (exit {code})"),
-        None => reason.to_string(),
     }
 }

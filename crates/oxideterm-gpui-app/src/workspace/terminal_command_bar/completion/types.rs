@@ -121,23 +121,6 @@ pub(in crate::workspace) struct TerminalFigSpec {
     pub(super) args: TerminalFigArgType,
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct TerminalShellToken {
-    pub(super) value: String,
-    pub(super) start: usize,
-    pub(super) end: usize,
-    pub(super) quote: Option<char>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct TerminalShellParseResult {
-    pub(super) reliable: bool,
-    pub(super) tokens: Vec<TerminalShellToken>,
-    pub(super) current_token: TerminalShellToken,
-    pub(super) current_token_index: isize,
-    pub(super) command_name: Option<String>,
-}
-
 pub(super) struct TerminalPathParts {
     pub(super) directory: String,
     pub(super) query: String,

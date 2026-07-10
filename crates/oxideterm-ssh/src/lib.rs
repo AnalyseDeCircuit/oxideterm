@@ -11,6 +11,7 @@
 mod capability;
 mod config;
 mod connection_registry;
+mod connection_trace;
 mod host_key;
 mod local_paths;
 mod monitor;
@@ -31,6 +32,12 @@ pub use connection_registry::{
     HEARTBEAT_INTERVAL, KeepaliveProbeResult, ProbeConnectionStatus, RemoteEnvInfo,
     SftpSessionState, SshConnectionHandle, SshConnectionRegistry, WS_BRIDGE_HEARTBEAT_INTERVAL,
     WS_BRIDGE_HEARTBEAT_TIMEOUT,
+};
+pub use connection_trace::{
+    ConnectionTraceEvent, ConnectionTraceMode, ConnectionTracePlan, ConnectionTraceStage,
+    ConnectionTraceState, ConnectionTraceStatus, SshAlgorithmDiagnosticKind,
+    SshAlgorithmNegotiationDiagnostic, connection_trace_failure_stage,
+    parse_algorithm_negotiation_error, server_offers_legacy_cipher, server_only_offers_ssh_rsa,
 };
 pub use host_key::{
     HostKeyStatus, check_host_key, check_host_key_with_upstream_proxy, remove_host_key,

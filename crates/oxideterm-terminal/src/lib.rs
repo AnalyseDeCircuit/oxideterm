@@ -35,6 +35,7 @@ mod process;
 mod process_lifecycle;
 mod search;
 mod session;
+mod shell_completion;
 mod shell_integration;
 
 pub use alacritty_terminal::term::TermMode;
@@ -65,6 +66,12 @@ pub use session::{
     TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor, TerminalResize,
     TerminalSession, TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
     serial_list_ports,
+};
+pub use shell_completion::{
+    TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,
+    is_likely_secret_terminal_command, load_local_shell_history_commands,
+    normalize_terminal_autosuggest_command, terminal_autosuggest_fuzzy_score,
+    tokenize_terminal_command_line,
 };
 pub use shell_integration::{
     ShellIntegrationEvent, ShellIntegrationEventKind, ShellIntegrationLifecycleState,

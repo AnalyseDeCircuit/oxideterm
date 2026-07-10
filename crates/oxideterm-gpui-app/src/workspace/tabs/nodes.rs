@@ -2077,7 +2077,7 @@ impl WorkspaceApp {
         }
         self.connecting_node_locks.insert(node_id.clone());
         let trace_plan = ConnectionTracePlan {
-            attempt_id: self.next_connection_trace_attempt_id(),
+            attempt_id: self.connection_trace_state.next_attempt_id(),
             mode: trace_mode,
             node_ids: vec![node_id.clone()],
         };
@@ -2140,7 +2140,7 @@ impl WorkspaceApp {
         }
 
         let trace_plan = ConnectionTracePlan {
-            attempt_id: self.next_connection_trace_attempt_id(),
+            attempt_id: self.connection_trace_state.next_attempt_id(),
             mode: trace_mode,
             node_ids: nodes_to_connect.clone(),
         };

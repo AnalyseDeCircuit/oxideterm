@@ -1194,22 +1194,18 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match delivery.result {
-            Ok(output) if service_action_succeeded(output.exit_code) => {
-                self.push_host_service_toast(
-                    service_action_success_message(&output.stdout, &output.stderr),
-                    TerminalNoticeVariant::Success,
-                );
-            }
-            Ok(output) => {
-                self.push_host_service_toast(
-                    service_action_failure_message(
-                        &output.stdout,
-                        &output.stderr,
-                        output.exit_code,
-                    ),
-                    TerminalNoticeVariant::Error,
-                );
-            }
+            Ok(output) => match interpret_service_action_output(
+                &output.stdout,
+                &output.stderr,
+                output.exit_code,
+            ) {
+                HostToolActionOutcome::Succeeded { message } => {
+                    self.push_host_service_toast(message, TerminalNoticeVariant::Success);
+                }
+                HostToolActionOutcome::Failed { message } => {
+                    self.push_host_service_toast(message, TerminalNoticeVariant::Error);
+                }
+            },
             Err(error) => {
                 self.push_host_service_toast(error, TerminalNoticeVariant::Error);
             }

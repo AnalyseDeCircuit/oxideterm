@@ -12,7 +12,6 @@ mod history_provider;
 mod path_provider;
 mod quick_command_provider;
 mod render;
-mod tokenizer;
 mod types;
 
 pub(self) use common::{
@@ -21,20 +20,21 @@ pub(self) use common::{
 };
 pub(self) use fig_provider::{active_fig_arg_type, terminal_command_fig_suggestions};
 pub(self) use fig_specs::{
+    normalize_terminal_path_token, should_run_terminal_path_provider, terminal_command_bar_now_ms,
+};
+pub(self) use oxideterm_terminal::{TerminalShellParseResult, TerminalShellToken};
+pub(self) use oxideterm_terminal::{
     escape_terminal_path_for_shell, is_likely_secret_terminal_command,
     load_local_shell_history_commands, normalize_terminal_autosuggest_command,
-    normalize_terminal_path_token, should_run_terminal_path_provider,
-    terminal_autosuggest_fuzzy_score, terminal_command_bar_now_ms,
+    terminal_autosuggest_fuzzy_score, tokenize_terminal_command_line,
 };
 pub(self) use quick_command_provider::{
     infer_terminal_ssh_identity_from_buffer, terminal_cwd_looks_remote,
 };
-pub(self) use tokenizer::tokenize_terminal_command_line;
 pub(self) use types::{
     TerminalCommandContext, TerminalCommandContextType, TerminalFigArgType, TerminalFigOptionSpec,
     TerminalFigSpec, TerminalFigSubcommandSpec, TerminalHistoryEntry, TerminalHistorySource,
     TerminalPathCacheEntry, TerminalPathCompletionCache, TerminalPathEntry, TerminalPathParts,
-    TerminalShellParseResult, TerminalShellToken,
 };
 
 // Preserve the settings UI path while keeping the implementation module private.

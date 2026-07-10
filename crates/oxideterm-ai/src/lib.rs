@@ -17,6 +17,7 @@ mod slash;
 pub mod stream_state;
 mod streaming;
 mod suggestions;
+mod target_projection;
 mod tool_protocol;
 mod tool_result_protocol;
 mod touch_id;
@@ -107,6 +108,12 @@ pub use streaming::stream_chat_completion;
 pub use suggestions::{
     AiSuggestionParseResult, ai_has_partial_suggestions_block, ai_visible_suggestion_content,
     parse_ai_suggestions,
+};
+pub use target_projection::{
+    AiIdeTargetInput, AiRawTcpTargetInput, AiRawUdpTargetInput, AiSftpTargetInput,
+    AiTargetProjection, connect_result_terminal_projection, ide_workspace_target_projection,
+    opened_local_terminal_projection, raw_tcp_terminal_label, raw_tcp_terminal_metadata,
+    raw_udp_terminal_label, raw_udp_terminal_metadata, sftp_target_projection,
 };
 pub use tool_protocol::{
     AiOrchestratorObligation, AiOrchestratorObligationMode, ai_classify_orchestrator_obligation,

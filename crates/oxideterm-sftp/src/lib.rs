@@ -7,6 +7,7 @@
 //! transfer semantics. Keeping that boundary explicit mirrors the Tauri backend
 //! where SFTP is acquired from a node connection rather than from terminal UI.
 
+mod archive;
 mod conflict;
 mod error;
 mod path_utils;
@@ -18,6 +19,10 @@ mod text_diff;
 mod transfer_manager;
 mod types;
 
+pub use archive::{
+    ArchiveExtractionError, ArchiveExtractionPlan, ArchiveKind, archive_kind,
+    plan_archive_extraction, shell_quote,
+};
 pub use conflict::{
     ConflictTarget, ConflictTransfer, TransferConflict, find_transfer_conflicts,
     source_not_newer_than_target,

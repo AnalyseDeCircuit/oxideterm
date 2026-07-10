@@ -1,36 +1,49 @@
 pub(in crate::workspace) const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
 pub(in crate::workspace) const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
 
+fn ai_target_projection(target: &AiOrchestratorTarget) -> oxideterm_ai::AiTargetProjection {
+    // Runtime snapshots stay app-owned; only their content-free DTO shape crosses
+    // into the AI domain projection layer.
+    oxideterm_ai::AiTargetProjection {
+        id: target.id.clone(),
+        kind: target.kind.clone(),
+        label: target.label.clone(),
+        state: target.state.clone(),
+        capabilities: target.capabilities.clone(),
+        refs: target.refs.clone(),
+        metadata: target.metadata.clone(),
+    }
+}
+
+fn ai_target_from_projection(projection: oxideterm_ai::AiTargetProjection) -> AiOrchestratorTarget {
+    AiOrchestratorTarget {
+        id: projection.id,
+        kind: projection.kind,
+        label: projection.label,
+        state: projection.state,
+        capabilities: projection.capabilities,
+        refs: projection.refs,
+        metadata: projection.metadata,
+        terminal_buffer: None,
+        terminal_screen: None,
+    }
+}
+
 pub(in crate::workspace) fn ai_sftp_target_for_node(
     node_id: &NodeId,
     node: &WorkspaceSshNode,
     sftp_session_id: String,
 ) -> AiOrchestratorTarget {
-    let mut refs = BTreeMap::new();
-    refs.insert("nodeId".to_string(), node_id.0.clone());
-    refs.insert("sessionId".to_string(), sftp_session_id.clone());
-    if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
-        refs.insert("connectionId".to_string(), saved_connection_id.clone());
-    }
     // Tauri exposes SFTP targets from node runtime state, not from the SFTP tab
     // itself, so keep the target shape node-scoped even when a tab is open.
-    AiOrchestratorTarget {
-        id: format!("sftp-session:{sftp_session_id}"),
-        kind: "sftp-session".to_string(),
-        label: format!("SFTP {}", node.config.host),
-        state: "connected".to_string(),
-        capabilities: vec![
-            "filesystem.read".to_string(),
-            "filesystem.write".to_string(),
-            "state.list".to_string(),
-        ],
-        refs,
-        metadata: serde_json::json!({
-            "host": node.config.host,
-        }),
-        terminal_buffer: None,
-        terminal_screen: None,
-    }
+    ai_target_from_projection(oxideterm_ai::sftp_target_projection(
+        oxideterm_ai::AiSftpTargetInput {
+            node_id: node_id.0.clone(),
+            session_id: sftp_session_id,
+            connection_id: node.saved_connection_id.clone(),
+            host: node.config.host.clone(),
+        },
+    ))
 }
 
 pub(in crate::workspace) fn ai_connect_result_terminal_target(
@@ -39,56 +52,34 @@ pub(in crate::workspace) fn ai_connect_result_terminal_target(
     node_id: Option<&str>,
     connection_id: Option<&str>,
 ) -> AiOrchestratorTarget {
-    let mut refs = BTreeMap::new();
-    if let Some(node_id) = node_id {
-        refs.insert("nodeId".to_string(), node_id.to_string());
-    }
-    if let Some(session_id) = target.refs.get("sessionId") {
-        refs.insert("sessionId".to_string(), session_id.clone());
-    }
-    if let Some(connection_id) = connection_id {
-        refs.insert("connectionId".to_string(), connection_id.to_string());
-    }
     // Tauri connect_target synthesizes a terminal target for the connection
     // result; regular discovery keeps terminal refs limited to session/tab.
-    AiOrchestratorTarget {
-        id: target.id.clone(),
-        kind: target.kind.clone(),
-        label: format!("{original_label} terminal"),
-        state: target.state.clone(),
-        capabilities: target.capabilities.clone(),
-        refs,
-        metadata: serde_json::json!({ "terminalType": "terminal" }),
-        terminal_buffer: target.terminal_buffer.clone(),
-        terminal_screen: target.terminal_screen.clone(),
-    }
+    let projection = oxideterm_ai::connect_result_terminal_projection(
+        &ai_target_projection(target),
+        original_label,
+        node_id,
+        connection_id,
+    );
+    let mut projected_target = ai_target_from_projection(projection);
+    // Sampled terminal content remains owned by the app runtime and is attached
+    // only after the pure target projection has completed.
+    projected_target.terminal_buffer = target.terminal_buffer.clone();
+    projected_target.terminal_screen = target.terminal_screen.clone();
+    projected_target
 }
 
 pub(in crate::workspace) fn ai_opened_local_terminal_target(
     target: &AiOrchestratorTarget,
 ) -> AiOrchestratorTarget {
-    let mut refs = BTreeMap::new();
-    if let Some(session_id) = target.refs.get("sessionId") {
-        refs.insert("sessionId".to_string(), session_id.clone());
-    }
     // Tauri returns a synthetic local-terminal target from open_app_surface,
     // not the richer target-discovery snapshot that carries tab metadata.
-    AiOrchestratorTarget {
-        id: target.id.clone(),
-        kind: target.kind.clone(),
-        label: target.label.clone(),
-        state: target.state.clone(),
-        capabilities: target.capabilities.clone(),
-        refs,
-        metadata: serde_json::json!({ "terminalType": "local_terminal" }),
-        terminal_buffer: None,
-        terminal_screen: None,
-    }
+    ai_target_from_projection(oxideterm_ai::opened_local_terminal_projection(
+        &ai_target_projection(target),
+    ))
 }
 
 pub(in crate::workspace) fn ai_raw_tcp_terminal_label(config: &RawTcpSessionConfig) -> String {
-    let scheme = if config.tls.enabled { "TLS" } else { "TCP" };
-    format!("{scheme} {}", config.endpoint_label())
+    oxideterm_ai::raw_tcp_terminal_label(&ai_raw_tcp_target_input(config))
 }
 
 pub(in crate::workspace) fn ai_raw_tcp_terminal_metadata(
@@ -96,24 +87,25 @@ pub(in crate::workspace) fn ai_raw_tcp_terminal_metadata(
 ) -> serde_json::Value {
     // Keep the AI target schema explicit so local socket sessions do not inherit
     // shell-oriented behavior from ordinary local terminals.
-    serde_json::json!({
-        "terminalType": "raw_tcp",
-        "terminalTransport": "raw_tcp",
-        "host": config.host,
-        "port": config.port,
-        "lineEnding": format!("{:?}", config.line_ending).to_lowercase(),
-        "displayMode": format!("{:?}", config.display_mode).to_lowercase(),
-        "sendMode": format!("{:?}", config.send_mode).to_lowercase(),
-        "tls": {
-            "enabled": config.tls.enabled,
-            "verification": format!("{:?}", config.tls.verification).to_lowercase(),
-            "serverName": config.tls.server_name,
-        },
-    })
+    oxideterm_ai::raw_tcp_terminal_metadata(&ai_raw_tcp_target_input(config))
+}
+
+fn ai_raw_tcp_target_input(config: &RawTcpSessionConfig) -> oxideterm_ai::AiRawTcpTargetInput {
+    oxideterm_ai::AiRawTcpTargetInput {
+        endpoint_label: config.endpoint_label(),
+        host: config.host.clone(),
+        port: config.port,
+        line_ending: format!("{:?}", config.line_ending).to_lowercase(),
+        display_mode: format!("{:?}", config.display_mode).to_lowercase(),
+        send_mode: format!("{:?}", config.send_mode).to_lowercase(),
+        tls_enabled: config.tls.enabled,
+        tls_verification: format!("{:?}", config.tls.verification).to_lowercase(),
+        tls_server_name: config.tls.server_name.clone(),
+    }
 }
 
 pub(in crate::workspace) fn ai_raw_udp_terminal_label(config: &RawUdpSessionConfig) -> String {
-    format!("UDP {}", config.remote_endpoint_label())
+    oxideterm_ai::raw_udp_terminal_label(&ai_raw_udp_target_input(config))
 }
 
 pub(in crate::workspace) fn ai_raw_udp_terminal_metadata(
@@ -121,17 +113,20 @@ pub(in crate::workspace) fn ai_raw_udp_terminal_metadata(
 ) -> serde_json::Value {
     // UDP targets are datagram-oriented local sockets, so expose enough shape
     // for tools to avoid stream-only assumptions.
-    serde_json::json!({
-        "terminalType": "raw_udp",
-        "terminalTransport": "raw_udp",
-        "remoteHost": config.remote_host,
-        "remotePort": config.remote_port,
-        "localBindHost": config.local_bind_host,
-        "localBindPort": config.local_bind_port,
-        "lineEnding": format!("{:?}", config.line_ending).to_lowercase(),
-        "displayMode": format!("{:?}", config.display_mode).to_lowercase(),
-        "sendMode": format!("{:?}", config.send_mode).to_lowercase(),
-    })
+    oxideterm_ai::raw_udp_terminal_metadata(&ai_raw_udp_target_input(config))
+}
+
+fn ai_raw_udp_target_input(config: &RawUdpSessionConfig) -> oxideterm_ai::AiRawUdpTargetInput {
+    oxideterm_ai::AiRawUdpTargetInput {
+        remote_endpoint_label: config.remote_endpoint_label(),
+        remote_host: config.remote_host.clone(),
+        remote_port: config.remote_port,
+        local_bind_host: config.local_bind_host.clone(),
+        local_bind_port: config.local_bind_port,
+        line_ending: format!("{:?}", config.line_ending).to_lowercase(),
+        display_mode: format!("{:?}", config.display_mode).to_lowercase(),
+        send_mode: format!("{:?}", config.send_mode).to_lowercase(),
+    }
 }
 
 pub(in crate::workspace) fn ai_ide_workspace_target_for_node(
@@ -141,42 +136,17 @@ pub(in crate::workspace) fn ai_ide_workspace_target_for_node(
     project_root_path: Option<String>,
     project_name: Option<String>,
 ) -> AiOrchestratorTarget {
-    let mut refs = BTreeMap::new();
-    refs.insert("nodeId".to_string(), node_id.0.clone());
-    if let Some(active_editor_tab_id) = active_editor_tab_id.as_ref() {
-        refs.insert("tabId".to_string(), active_editor_tab_id.clone());
-    }
-    if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
-        refs.insert("connectionId".to_string(), saved_connection_id.clone());
-    }
-    let mut metadata = serde_json::Map::new();
-    if let Some(project_root_path) = project_root_path {
-        metadata.insert("rootPath".to_string(), serde_json::json!(project_root_path));
-    }
-    metadata.insert(
-        "activeTabId".to_string(),
-        active_editor_tab_id
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null),
-    );
     // Tauri's IDE target is keyed by node id and carries the active editor tab
     // separately; it never uses the outer app tab id as the workspace tab ref.
-    AiOrchestratorTarget {
-        id: format!("ide-workspace:{}", node_id.0),
-        kind: "ide-workspace".to_string(),
-        label: project_name.unwrap_or_else(|| "IDE workspace".to_string()),
-        state: "connected".to_string(),
-        capabilities: vec![
-            "filesystem.read".to_string(),
-            "filesystem.write".to_string(),
-            "navigation.open".to_string(),
-            "state.list".to_string(),
-        ],
-        refs,
-        metadata: serde_json::Value::Object(metadata),
-        terminal_buffer: None,
-        terminal_screen: None,
-    }
+    ai_target_from_projection(oxideterm_ai::ide_workspace_target_projection(
+        oxideterm_ai::AiIdeTargetInput {
+            node_id: node_id.0.clone(),
+            connection_id: node.saved_connection_id.clone(),
+            active_editor_tab_id,
+            project_root_path,
+            project_name,
+        },
+    ))
 }
 
 impl WorkspaceApp {

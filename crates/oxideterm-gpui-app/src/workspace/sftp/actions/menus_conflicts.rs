@@ -69,15 +69,20 @@ impl WorkspaceApp {
         } else {
             file.path.clone()
         };
-        let Some(command) =
-            sftp_extract_archive_command(&file.name, &archive_path, &remote_directory)
-        else {
-            self.push_sftp_toast(
-                self.i18n.t("sftp.toast.unsupported_archive"),
-                Some(file.name),
-                TerminalNoticeVariant::Error,
-            );
-            return;
+        let command = match oxideterm_sftp::plan_archive_extraction(
+            &file.name,
+            &archive_path,
+            &remote_directory,
+        ) {
+            Ok(plan) => plan.command,
+            Err(oxideterm_sftp::ArchiveExtractionError::UnsupportedArchive { .. }) => {
+                self.push_sftp_toast(
+                    self.i18n.t("sftp.toast.unsupported_archive"),
+                    Some(file.name),
+                    TerminalNoticeVariant::Error,
+                );
+                return;
+            }
         };
 
         let router = self.node_router.clone();
@@ -563,63 +568,11 @@ fn sftp_i18n_partial_detail(
         .replace("{{skipped}}", &skipped.to_string())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SftpExtractArchiveKind {
-    Zip,
-    Tar,
-    TarGzip,
-    TarBzip2,
-    TarXz,
-    TarZstd,
-}
-
-fn sftp_extract_archive_command(
-    file_name: &str,
-    archive_path: &str,
-    destination_path: &str,
-) -> Option<String> {
-    let archive_kind = sftp_extract_archive_kind(file_name)?;
-    let archive = sftp_shell_quote(archive_path);
-    let destination = sftp_shell_quote(destination_path);
-    // Keep extraction non-destructive until SFTP has an archive conflict dialog.
-    let command = match archive_kind {
-        SftpExtractArchiveKind::Zip => format!("unzip -nq {archive} -d {destination}"),
-        SftpExtractArchiveKind::Tar => format!("tar -k -xf {archive} -C {destination}"),
-        SftpExtractArchiveKind::TarGzip => format!("tar -k -xzf {archive} -C {destination}"),
-        SftpExtractArchiveKind::TarBzip2 => format!("tar -k -xjf {archive} -C {destination}"),
-        SftpExtractArchiveKind::TarXz => format!("tar -k -xJf {archive} -C {destination}"),
-        SftpExtractArchiveKind::TarZstd => {
-            format!("tar -k --zstd -xf {archive} -C {destination}")
-        }
-    };
-    Some(command)
-}
-
 pub(in crate::workspace) fn sftp_extract_archive_kind(
     file_name: &str,
-) -> Option<SftpExtractArchiveKind> {
-    let lower = file_name.to_ascii_lowercase();
-    if lower.ends_with(".zip") {
-        Some(SftpExtractArchiveKind::Zip)
-    } else if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        Some(SftpExtractArchiveKind::TarGzip)
-    } else if lower.ends_with(".tar.bz2") || lower.ends_with(".tbz") || lower.ends_with(".tbz2") {
-        Some(SftpExtractArchiveKind::TarBzip2)
-    } else if lower.ends_with(".tar.xz") || lower.ends_with(".txz") {
-        Some(SftpExtractArchiveKind::TarXz)
-    } else if lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
-        Some(SftpExtractArchiveKind::TarZstd)
-    } else if lower.ends_with(".tar") {
-        Some(SftpExtractArchiveKind::Tar)
-    } else {
-        None
-    }
-}
-
-fn sftp_shell_quote(value: &str) -> String {
-    // Remote extraction is dispatched through the user's shell, so every
-    // path segment must be quoted as data instead of shell syntax.
-    format!("'{}'", value.replace('\'', "'\\''"))
+) -> Option<oxideterm_sftp::ArchiveKind> {
+    // Keep menu capability checks on the same domain rule used for command planning.
+    oxideterm_sftp::archive_kind(file_name)
 }
 
 fn format_sftp_remote_extract_error(output: oxideterm_ssh::SshCommandOutput) -> String {
@@ -639,52 +592,4 @@ fn format_sftp_remote_extract_error(output: oxideterm_ssh::SshCommandOutput) -> 
         message.push_str(" (output truncated)");
     }
     message
-}
-
-#[cfg(test)]
-mod sftp_extract_archive_tests {
-    use super::*;
-
-    #[test]
-    fn sftp_extract_archive_command_quotes_zip_paths() {
-        let command = sftp_extract_archive_command("backup.zip", "/srv/a b/backup.zip", "/srv/a b")
-            .expect("zip archives should be extractable");
-
-        assert_eq!(command, "unzip -nq '/srv/a b/backup.zip' -d '/srv/a b'");
-    }
-
-    #[test]
-    fn sftp_extract_archive_command_handles_tar_variants() {
-        assert_eq!(
-            sftp_extract_archive_command("app.tar", "/tmp/app.tar", "/tmp"),
-            Some("tar -k -xf '/tmp/app.tar' -C '/tmp'".to_string())
-        );
-        assert_eq!(
-            sftp_extract_archive_command("app.tgz", "/tmp/app.tgz", "/tmp"),
-            Some("tar -k -xzf '/tmp/app.tgz' -C '/tmp'".to_string())
-        );
-        assert_eq!(
-            sftp_extract_archive_command("app.tar.xz", "/tmp/app.tar.xz", "/tmp"),
-            Some("tar -k -xJf '/tmp/app.tar.xz' -C '/tmp'".to_string())
-        );
-    }
-
-    #[test]
-    fn sftp_extract_archive_command_escapes_single_quotes() {
-        let command = sftp_extract_archive_command("it.zip", "/srv/it's/it.zip", "/srv/it's")
-            .expect("zip archives should be extractable");
-
-        assert_eq!(
-            command,
-            "unzip -nq '/srv/it'\\''s/it.zip' -d '/srv/it'\\''s'"
-        );
-    }
-
-    #[test]
-    fn sftp_extract_archive_command_rejects_unsupported_files() {
-        assert_eq!(
-            sftp_extract_archive_command("notes.txt", "/tmp/notes.txt", "/tmp"),
-            None
-        );
-    }
 }

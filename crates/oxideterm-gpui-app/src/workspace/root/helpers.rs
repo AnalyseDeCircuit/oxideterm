@@ -631,9 +631,9 @@ impl WorkspaceApp {
         &self,
         error: &str,
     ) -> Option<(String, String)> {
-        let diagnostic = parse_ssh_algorithm_negotiation_error(error)?;
-        let kind_label = self.i18n.t(diagnostic.kind.label_key());
-        let summary_key = diagnostic.kind.summary_key(&diagnostic.server_algorithms);
+        let diagnostic = oxideterm_ssh::parse_algorithm_negotiation_error(error)?;
+        let kind_label = self.i18n.t(ssh_algorithm_kind_label_key(diagnostic.kind));
+        let summary_key = ssh_algorithm_summary_key(diagnostic.kind, &diagnostic.server_algorithms);
         let summary = self.i18n.t(summary_key).replace("{{kind}}", &kind_label);
         let no_common = self
             .i18n
@@ -719,11 +719,6 @@ impl WorkspaceApp {
         ))
     }
 
-    pub(in crate::workspace) fn next_connection_trace_attempt_id(&mut self) -> String {
-        self.connection_trace_attempt_seq = self.connection_trace_attempt_seq.wrapping_add(1);
-        format!("native-connection-{}", self.connection_trace_attempt_seq)
-    }
-
     pub(in crate::workspace) fn connection_trace_plan_for_node(
         &mut self,
         node_id: &NodeId,
@@ -739,14 +734,14 @@ impl WorkspaceApp {
                 .and_then(|snapshot| snapshot.parent_id);
         }
         path.reverse();
-        let start_index = path
-            .iter()
-            .position(|candidate| !self.connection_trace_node_is_ready(candidate))?;
-        Some(ConnectionTracePlan {
-            attempt_id: self.next_connection_trace_attempt_id(),
-            mode,
-            node_ids: path[start_index..].to_vec(),
-        })
+        let path = path
+            .into_iter()
+            .map(|candidate| {
+                let ready = self.connection_trace_node_is_ready(&candidate);
+                (candidate, ready)
+            })
+            .collect::<Vec<_>>();
+        self.connection_trace_state.plan_for_path(mode, &path)
     }
 
     pub(in crate::workspace) fn connection_trace_node_is_ready(&self, node_id: &NodeId) -> bool {
@@ -771,41 +766,9 @@ impl WorkspaceApp {
         plan: Option<&ConnectionTracePlan>,
         parent_id: Option<&NodeId>,
     ) {
-        let Some((attempt_id, mode, step_index, total_steps)) = plan
-            .and_then(|plan| {
-                let step = plan
-                    .node_ids
-                    .iter()
-                    .position(|candidate| candidate == node_id)?;
-                Some((
-                    plan.attempt_id.clone(),
-                    plan.mode,
-                    (step + 1) as u32,
-                    plan.node_ids.len() as u32,
-                ))
-            })
-            .or_else(|| {
-                Some((
-                    self.next_connection_trace_attempt_id(),
-                    ConnectionTraceMode::Connect,
-                    1,
-                    1,
-                ))
-            })
-        else {
-            return;
-        };
         let label = self.ssh_nodes.get(node_id).map(|node| node.title.clone());
-        self.connection_trace_nodes.insert(
-            node_id.clone(),
-            ConnectionTraceNodeContext {
-                attempt_id: attempt_id.clone(),
-                label: label.clone(),
-                step_index: Some(step_index),
-                total_steps: Some(total_steps),
-                mode,
-            },
-        );
+        self.connection_trace_state
+            .begin(node_id.clone(), label, plan);
         self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Queued, 5.0, None);
         self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Preparing, 15.0, None);
         self.emit_connection_trace_stage(
@@ -841,7 +804,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn finish_connection_trace_success(&mut self, node_id: &NodeId) {
-        if self.connection_trace_nodes.contains_key(node_id) {
+        if self.connection_trace_state.contains(node_id) {
             self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Pty, 86.0, None);
             self.emit_connection_trace_stage(node_id, ConnectionTraceStage::ShellReady, 96.0, None);
             self.emit_connection_trace_event(
@@ -851,7 +814,7 @@ impl WorkspaceApp {
                 100.0,
                 None,
             );
-            self.connection_trace_nodes.remove(node_id);
+            self.connection_trace_state.finish(node_id);
         }
     }
 
@@ -860,8 +823,8 @@ impl WorkspaceApp {
         node_id: &NodeId,
         detail: Option<String>,
     ) {
-        if self.connection_trace_nodes.contains_key(node_id) {
-            let stage = connection_trace_failure_stage(detail.as_deref());
+        if self.connection_trace_state.contains(node_id) {
+            let stage = oxideterm_ssh::connection_trace_failure_stage(detail.as_deref());
             self.emit_connection_trace_event(
                 node_id,
                 stage,
@@ -869,12 +832,12 @@ impl WorkspaceApp {
                 100.0,
                 detail,
             );
-            self.connection_trace_nodes.remove(node_id);
+            self.connection_trace_state.finish(node_id);
         }
     }
 
     pub(in crate::workspace) fn cancel_connection_trace_for_node(&mut self, node_id: &NodeId) {
-        if self.connection_trace_nodes.contains_key(node_id) {
+        if self.connection_trace_state.contains(node_id) {
             self.emit_connection_trace_event(
                 node_id,
                 ConnectionTraceStage::Authentication,
@@ -882,7 +845,7 @@ impl WorkspaceApp {
                 100.0,
                 None,
             );
-            self.connection_trace_nodes.remove(node_id);
+            self.connection_trace_state.finish(node_id);
         }
     }
 
@@ -894,22 +857,12 @@ impl WorkspaceApp {
         progress: f32,
         detail: Option<String>,
     ) {
-        let Some(context) = self.connection_trace_nodes.get(node_id) else {
-            return;
-        };
-        let _ = self.connection_trace_tx.send(ConnectionTraceEvent {
-            attempt_id: context.attempt_id.clone(),
-            node_id: node_id.clone(),
-            stage,
-            status,
-            progress,
-            elapsed_ms: 0,
-            detail,
-            label: context.label.clone(),
-            step_index: context.step_index,
-            total_steps: context.total_steps,
-            mode: context.mode,
-        });
+        if let Some(event) = self
+            .connection_trace_state
+            .event(node_id, stage, status, progress, detail)
+        {
+            let _ = self.connection_trace_tx.send(event);
+        }
     }
 
     pub(in crate::workspace) fn log_reconnect_phase(
@@ -1373,42 +1326,6 @@ pub(in crate::workspace) fn connection_error_is_proxy_hop_unsupported(error: &st
             || error.contains("unsupported auth"))
 }
 
-pub(in crate::workspace) fn connection_trace_failure_stage(
-    error: Option<&str>,
-) -> ConnectionTraceStage {
-    let Some(error) = error else {
-        return ConnectionTraceStage::Authentication;
-    };
-    let error = error.to_ascii_lowercase();
-
-    if error.contains("node not found")
-        || error.contains("already connecting")
-        || error.contains("already connected")
-    {
-        return ConnectionTraceStage::Preparing;
-    }
-    if error.contains("algorithm negotiation failed") {
-        return ConnectionTraceStage::SshHandshake;
-    }
-
-    match classify_message(&error) {
-        BackendErrorClass::Disconnected
-        | BackendErrorClass::PortInUse
-        | BackendErrorClass::Timeout => ConnectionTraceStage::OpeningTransport,
-        BackendErrorClass::HostKey => ConnectionTraceStage::HostKey,
-        // Tauri's backend emits most transport `connect()` failures after the
-        // authentication stage has started, so auth/proxy-agent/cancelled
-        // failures keep the same terminal stage while detail carries the class.
-        BackendErrorClass::Auth
-        | BackendErrorClass::Cancelled
-        | BackendErrorClass::PermissionDenied
-        | BackendErrorClass::Unsupported
-        | BackendErrorClass::Conflict
-        | BackendErrorClass::NotFound
-        | BackendErrorClass::Other => ConnectionTraceStage::Authentication,
-    }
-}
-
 pub(in crate::workspace) fn saved_origin_config(
     store: &ConnectionStore,
     settings: &PersistedSettings,
@@ -1426,141 +1343,53 @@ pub(in crate::workspace) fn saved_origin_config(
             hop_index,
         } => {
             let connection = store.get(saved_connection_id)?;
-            saved_manual_preset_hop_config(store, settings, connection, *hop_index)
+            oxideterm_session_adapter::ssh_config_for_saved_connection_hop(
+                store, settings, connection, *hop_index,
+            )
         }
         NodeOrigin::AutoRoute { .. } | NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => None,
     }
 }
 
-pub(in crate::workspace) fn saved_manual_preset_hop_config(
-    store: &ConnectionStore,
-    settings: &PersistedSettings,
-    connection: &oxideterm_connections::SavedConnection,
-    hop_index: u32,
-) -> Option<SshConfig> {
-    let hop_index = hop_index as usize;
-    if hop_index < connection.proxy_chain.len() {
-        let hop = &connection.proxy_chain[hop_index];
-        return Some(SshConfig {
-            host: hop.host.clone(),
-            port: hop.port,
-            username: hop.username.clone(),
-            auth: oxideterm_session_adapter::auth_method_from_saved_auth(store, &hop.auth)?,
-            proxy_chain: None,
-            upstream_proxy: oxideterm_session_adapter::upstream_proxy_config_from_saved_policy(
-                store,
-                settings,
-                &connection.upstream_proxy,
-            ),
-            agent_forwarding: hop.agent_forwarding,
-            strict_host_key_checking: true,
-            ..SshConfig::default()
-        });
-    }
-
-    if hop_index == connection.proxy_chain.len() {
-        let mut target = oxideterm_session_adapter::ssh_config_from_saved_connection(
-            store, settings, connection,
-        )?;
-        target.proxy_chain = None;
-        return Some(target);
-    }
-
-    None
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SshAlgorithmDiagnosticKind {
-    KeyExchange,
-    HostKey,
-    Cipher,
-    Mac,
-    Compression,
-}
-
-impl SshAlgorithmDiagnosticKind {
-    pub(in crate::workspace) fn label_key(self) -> &'static str {
-        match self {
-            Self::KeyExchange => "connections.trace.diagnostics.kind.key_exchange",
-            Self::HostKey => "connections.trace.diagnostics.kind.host_key",
-            Self::Cipher => "connections.trace.diagnostics.kind.cipher",
-            Self::Mac => "connections.trace.diagnostics.kind.mac",
-            Self::Compression => "connections.trace.diagnostics.kind.compression",
-        }
-    }
-
-    pub(in crate::workspace) fn summary_key(self, server_algorithms: &[String]) -> &'static str {
-        match self {
-            Self::KeyExchange => "connections.trace.diagnostics.summary.key_exchange",
-            Self::HostKey if server_only_offers_ssh_rsa(server_algorithms) => {
-                "connections.trace.diagnostics.summary.host_key_ssh_rsa"
-            }
-            Self::HostKey => "connections.trace.diagnostics.summary.host_key",
-            Self::Cipher if server_offers_legacy_cipher(server_algorithms) => {
-                "connections.trace.diagnostics.summary.cipher_legacy"
-            }
-            Self::Cipher => "connections.trace.diagnostics.summary.cipher",
-            Self::Mac => "connections.trace.diagnostics.summary.mac",
-            Self::Compression => "connections.trace.diagnostics.summary.compression",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::workspace) struct SshAlgorithmNegotiationDiagnostic {
+pub(in crate::workspace) fn ssh_algorithm_kind_label_key(
     kind: SshAlgorithmDiagnosticKind,
-    client_algorithms: Vec<String>,
-    server_algorithms: Vec<String>,
+) -> &'static str {
+    match kind {
+        SshAlgorithmDiagnosticKind::KeyExchange => {
+            "connections.trace.diagnostics.kind.key_exchange"
+        }
+        SshAlgorithmDiagnosticKind::HostKey => "connections.trace.diagnostics.kind.host_key",
+        SshAlgorithmDiagnosticKind::Cipher => "connections.trace.diagnostics.kind.cipher",
+        SshAlgorithmDiagnosticKind::Mac => "connections.trace.diagnostics.kind.mac",
+        SshAlgorithmDiagnosticKind::Compression => "connections.trace.diagnostics.kind.compression",
+    }
 }
 
-pub(in crate::workspace) fn parse_ssh_algorithm_negotiation_error(
-    error: &str,
-) -> Option<SshAlgorithmNegotiationDiagnostic> {
-    // The transport layer exposes algorithm lists through this stable display
-    // shape until connection trace events carry structured diagnostic payloads.
-    let prefix = "SSH algorithm negotiation failed: no common ";
-    let after_prefix = error.split_once(prefix)?.1;
-    let (kind_text, after_kind) = after_prefix.split_once(" algorithm. Client offered: ")?;
-    let kind = match kind_text {
-        "key exchange" => SshAlgorithmDiagnosticKind::KeyExchange,
-        "host key" => SshAlgorithmDiagnosticKind::HostKey,
-        "cipher" => SshAlgorithmDiagnosticKind::Cipher,
-        "MAC" => SshAlgorithmDiagnosticKind::Mac,
-        "compression" => SshAlgorithmDiagnosticKind::Compression,
-        _ => return None,
-    };
-    let (client_text, server_text) = after_kind.split_once("; server offered: ")?;
-    Some(SshAlgorithmNegotiationDiagnostic {
-        kind,
-        client_algorithms: parse_debug_algorithm_list(client_text),
-        server_algorithms: parse_debug_algorithm_list(server_text),
-    })
-}
-
-pub(in crate::workspace) fn parse_debug_algorithm_list(list: &str) -> Vec<String> {
-    let mut algorithms = Vec::new();
-    let mut current = String::new();
-    let mut in_string = false;
-    let mut escaping = false;
-    for ch in list.chars() {
-        if in_string {
-            if escaping {
-                current.push(ch);
-                escaping = false;
-            } else if ch == '\\' {
-                escaping = true;
-            } else if ch == '"' {
-                algorithms.push(current.clone());
-                current.clear();
-                in_string = false;
-            } else {
-                current.push(ch);
-            }
-        } else if ch == '"' {
-            in_string = true;
+pub(in crate::workspace) fn ssh_algorithm_summary_key(
+    kind: SshAlgorithmDiagnosticKind,
+    server_algorithms: &[String],
+) -> &'static str {
+    match kind {
+        SshAlgorithmDiagnosticKind::KeyExchange => {
+            "connections.trace.diagnostics.summary.key_exchange"
+        }
+        SshAlgorithmDiagnosticKind::HostKey
+            if oxideterm_ssh::server_only_offers_ssh_rsa(server_algorithms) =>
+        {
+            "connections.trace.diagnostics.summary.host_key_ssh_rsa"
+        }
+        SshAlgorithmDiagnosticKind::HostKey => "connections.trace.diagnostics.summary.host_key",
+        SshAlgorithmDiagnosticKind::Cipher
+            if oxideterm_ssh::server_offers_legacy_cipher(server_algorithms) =>
+        {
+            "connections.trace.diagnostics.summary.cipher_legacy"
+        }
+        SshAlgorithmDiagnosticKind::Cipher => "connections.trace.diagnostics.summary.cipher",
+        SshAlgorithmDiagnosticKind::Mac => "connections.trace.diagnostics.summary.mac",
+        SshAlgorithmDiagnosticKind::Compression => {
+            "connections.trace.diagnostics.summary.compression"
         }
     }
-    algorithms
 }
 
 pub(in crate::workspace) fn format_algorithm_list(algorithms: &[String]) -> String {
@@ -1571,101 +1400,17 @@ pub(in crate::workspace) fn format_algorithm_list(algorithms: &[String]) -> Stri
     }
 }
 
-pub(in crate::workspace) fn server_only_offers_ssh_rsa(algorithms: &[String]) -> bool {
-    !algorithms.is_empty()
-        && algorithms
-            .iter()
-            .all(|algorithm| algorithm == "ssh-rsa" || algorithm == "ssh-rsa-cert-v01@openssh.com")
-}
-
-pub(in crate::workspace) fn server_offers_legacy_cipher(algorithms: &[String]) -> bool {
-    algorithms.iter().any(|algorithm| {
-        algorithm.contains("-cbc") || algorithm.contains("3des") || algorithm.contains("arcfour")
-    })
-}
-
 #[cfg(test)]
 mod helper_tests {
     use super::*;
 
     #[test]
-    pub(in crate::workspace) fn trace_failure_stage_matches_tauri_pre_connect_errors() {
-        assert_eq!(
-            connection_trace_failure_stage(Some("Node abc is already connecting")),
-            ConnectionTraceStage::Preparing
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("Parent node hop has no SSH connection")),
-            ConnectionTraceStage::OpeningTransport
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("Connection failed: network unreachable")),
-            ConnectionTraceStage::OpeningTransport
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some(
-                "SSH algorithm negotiation failed: no common key exchange algorithm"
-            )),
-            ConnectionTraceStage::SshHandshake
-        );
-    }
-
-    #[test]
-    pub(in crate::workspace) fn trace_failure_stage_keeps_host_key_and_auth_classes() {
-        assert_eq!(
-            connection_trace_failure_stage(Some("Host key changed for example.com")),
-            ConnectionTraceStage::HostKey
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("Authentication failed: permission denied")),
-            ConnectionTraceStage::Authentication
-        );
-    }
-
-    #[test]
-    pub(in crate::workspace) fn trace_failure_stage_covers_proxy_hop_and_manual_cancel_classes() {
-        assert_eq!(
-            connection_trace_failure_stage(Some(
-                "proxy_hop_kbi_unsupported: keyboard-interactive authentication is not supported for proxy chain hops"
-            )),
-            ConnectionTraceStage::Authentication
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("USER_CANCELLED")),
-            ConnectionTraceStage::Authentication
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("retry exhausted after network timeout")),
-            ConnectionTraceStage::OpeningTransport
-        );
-        assert_eq!(
-            connection_trace_failure_stage(Some("known_hosts entry mismatch")),
-            ConnectionTraceStage::HostKey
-        );
-    }
-
-    #[test]
-    pub(in crate::workspace) fn parses_algorithm_negotiation_lists_from_transport_error() {
-        let diagnostic = parse_ssh_algorithm_negotiation_error(
-            "SSH algorithm negotiation failed: no common key exchange algorithm. Client offered: [\"curve25519-sha256\", \"diffie-hellman-group14-sha256\"]; server offered: [\"diffie-hellman-group1-sha1\"]",
-        )
-        .expect("algorithm diagnostic should parse");
-
-        assert_eq!(diagnostic.kind, SshAlgorithmDiagnosticKind::KeyExchange);
-        assert_eq!(
-            diagnostic.client_algorithms,
-            ["curve25519-sha256", "diffie-hellman-group14-sha256"]
-        );
-        assert_eq!(diagnostic.server_algorithms, ["diffie-hellman-group1-sha1"]);
-    }
-
-    #[test]
     pub(in crate::workspace) fn classifies_ssh_rsa_host_key_as_specific_legacy_case() {
         let algorithms = vec!["ssh-rsa".to_string()];
 
-        assert!(server_only_offers_ssh_rsa(&algorithms));
+        assert!(oxideterm_ssh::server_only_offers_ssh_rsa(&algorithms));
         assert_eq!(
-            SshAlgorithmDiagnosticKind::HostKey.summary_key(&algorithms),
+            ssh_algorithm_summary_key(SshAlgorithmDiagnosticKind::HostKey, &algorithms),
             "connections.trace.diagnostics.summary.host_key_ssh_rsa"
         );
     }
@@ -1674,9 +1419,9 @@ mod helper_tests {
     pub(in crate::workspace) fn classifies_cbc_cipher_as_legacy_case() {
         let algorithms = vec!["aes128-cbc".to_string(), "3des-cbc".to_string()];
 
-        assert!(server_offers_legacy_cipher(&algorithms));
+        assert!(oxideterm_ssh::server_offers_legacy_cipher(&algorithms));
         assert_eq!(
-            SshAlgorithmDiagnosticKind::Cipher.summary_key(&algorithms),
+            ssh_algorithm_summary_key(SshAlgorithmDiagnosticKind::Cipher, &algorithms),
             "connections.trace.diagnostics.summary.cipher_legacy"
         );
     }

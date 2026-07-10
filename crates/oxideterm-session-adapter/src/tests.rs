@@ -17,7 +17,10 @@ use crate::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
     sftp_runtime_settings_from_settings, terminal_encoding_from_settings,
 };
-use crate::{ssh_config_from_saved_connection, upstream_proxy_config_from_saved_policy};
+use crate::{
+    ssh_config_for_saved_connection_hop, ssh_config_from_saved_connection,
+    upstream_proxy_config_from_saved_policy,
+};
 
 fn temp_connection_store(name: &str) -> (ConnectionStore, std::path::PathBuf) {
     let path = std::env::temp_dir().join(format!(
@@ -102,6 +105,33 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
     assert_eq!(chain[0].username, "ops");
     assert!(chain[0].agent_forwarding);
     assert!(chain[0].legacy_ssh_compatibility);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn saved_connection_hops_become_independent_runtime_configs() {
+    let (store, path) = temp_connection_store("materialized-hops");
+    let mut connection = saved_connection(SavedAuth::Agent);
+    connection.proxy_chain = vec![SavedProxyHop {
+        host: "jump.example.com".to_string(),
+        port: 2222,
+        username: "ops".to_string(),
+        auth: SavedAuth::Agent,
+        agent_forwarding: true,
+        legacy_ssh_compatibility: true,
+    }];
+    let settings = PersistedSettings::default();
+
+    let jump = ssh_config_for_saved_connection_hop(&store, &settings, &connection, 0)
+        .expect("saved jump should become a runtime config");
+    let target = ssh_config_for_saved_connection_hop(&store, &settings, &connection, 1)
+        .expect("target should follow the materialized jumps");
+
+    assert_eq!(jump.host, "jump.example.com");
+    assert!(jump.proxy_chain.is_none());
+    assert_eq!(target.host, "target.example.com");
+    assert!(target.proxy_chain.is_none());
+    assert!(ssh_config_for_saved_connection_hop(&store, &settings, &connection, 2).is_none());
     let _ = std::fs::remove_file(path);
 }
 

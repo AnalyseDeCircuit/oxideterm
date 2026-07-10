@@ -1,7 +1,9 @@
 use super::*;
+#[cfg(test)]
+use oxideterm_connections::is_literal_ssh_config_alias_query;
 use oxideterm_connections::{
-    canonical_ssh_config_alias, is_literal_ssh_config_alias_query, list_ssh_config_hosts,
-    resolve_ssh_config_alias, saved_connection_from_ssh_host,
+    canonical_ssh_config_alias, list_ssh_config_hosts, resolve_ssh_config_alias,
+    saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::{

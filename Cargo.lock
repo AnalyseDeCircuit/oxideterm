@@ -7733,6 +7733,7 @@ dependencies = [
  "base64",
  "dashmap",
  "dirs 5.0.1",
+ "oxideterm-backend-classification",
  "oxideterm-connection-monitor",
  "oxideterm-portable-runtime",
  "oxideterm-sftp",

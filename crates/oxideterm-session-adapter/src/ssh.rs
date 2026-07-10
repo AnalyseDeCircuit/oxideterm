@@ -54,3 +54,39 @@ pub fn proxy_chain_config_from_saved_connection(
         })
         .collect()
 }
+
+pub fn ssh_config_for_saved_connection_hop(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    connection: &SavedConnection,
+    hop_index: u32,
+) -> Option<SshConfig> {
+    let hop_index = hop_index as usize;
+    if let Some(hop) = connection.proxy_chain.get(hop_index) {
+        return Some(SshConfig {
+            host: hop.host.clone(),
+            port: hop.port,
+            username: hop.username.clone(),
+            auth: auth_method_from_saved_auth(store, &hop.auth)?,
+            proxy_chain: None,
+            upstream_proxy: upstream_proxy_config_from_saved_policy(
+                store,
+                settings,
+                &connection.upstream_proxy,
+            ),
+            agent_forwarding: hop.agent_forwarding,
+            strict_host_key_checking: true,
+            ..SshConfig::default()
+        });
+    }
+
+    if hop_index == connection.proxy_chain.len() {
+        let mut target = ssh_config_from_saved_connection(store, settings, connection)?;
+        // Each node in a materialized chain connects through its parent, so the
+        // per-node config must not recursively apply the persisted proxy chain.
+        target.proxy_chain = None;
+        return Some(target);
+    }
+
+    None
+}

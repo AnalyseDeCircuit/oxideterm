@@ -6,6 +6,7 @@
 //! This crate owns the UI-consumed monitor shapes and profiler state contract.
 //! SSH registries feed it snapshots; GPUI surfaces render it.
 
+mod action;
 mod capture;
 mod docker;
 mod filesystem;
@@ -22,6 +23,11 @@ mod stats;
 mod summary;
 mod tmux;
 
+pub use action::{
+    HostToolActionOutcome, host_tool_capture_failure_message, interpret_docker_action_output,
+    interpret_process_action_output, interpret_scheduled_task_action_output,
+    interpret_service_action_output, interpret_tmux_action_output,
+};
 pub use docker::{
     DockerActionAvailability, DockerActionCommand, DockerActionKind, DockerCaptureCommand,
     ResourceDockerContainer, ResourceDockerSnapshot, ResourceDockerStatus,
