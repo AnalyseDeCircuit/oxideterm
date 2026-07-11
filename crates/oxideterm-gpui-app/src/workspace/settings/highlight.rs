@@ -23,7 +23,7 @@ impl WorkspaceApp {
                 .border_1()
                 .border_color(rgb(self.tokens.ui.border))
                 .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-                .shadow(oxideterm_gpui_ui::tauri_card_shadow(self.tokens.ui.bg_card))
+                .shadow(oxideterm_gpui_ui::theme_card_shadow(&self.tokens))
                 .p(px(self.tokens.metrics.settings_card_padding))
                 .flex()
                 .flex_col()

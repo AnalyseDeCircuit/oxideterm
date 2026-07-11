@@ -66,7 +66,13 @@ impl WorkspaceApp {
                 .child(section),
         );
 
-        panel.into_any_element()
+        // Repository sampling redraws the panel without restarting its entrance.
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "terminal-git-branch-picker-enter",
+            panel,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(super) fn render_terminal_git_context_header(
@@ -1406,11 +1412,15 @@ impl WorkspaceApp {
             .justify_center()
             .gap(px(8.0))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            ))
+            .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                self.render_loading_icon(
+                    "terminal-git-branches-loading",
+                    14.0,
+                    rgb(self.tokens.ui.text_muted),
+                )
+            } else {
+                Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted))
+            })
             .child(message)
             .into_any_element()
     }

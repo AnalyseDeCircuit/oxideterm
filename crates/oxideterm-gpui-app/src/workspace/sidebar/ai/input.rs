@@ -301,7 +301,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_ai_safety_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         // Tauri DropdownMenuContent uses w-64 and opens upward from the compact status bar.
-        div()
+        let menu = div()
             .w(px(256.0))
             .overflow_hidden()
             .rounded(px(self.tokens.radii.lg))
@@ -378,8 +378,13 @@ impl WorkspaceApp {
                     },
                     cx,
                 ),
-            )
-            .into_any_element()
+            );
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "ai-safety-menu-enter",
+            menu,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(in crate::workspace) fn render_ai_safety_menu_item(
@@ -668,7 +673,7 @@ impl WorkspaceApp {
             warning: percentage > 70.0,
             danger: percentage > 85.0,
         };
-        ai_context_popover(&self.tokens)
+        let popover = ai_context_popover(&self.tokens)
             .child(ai_context_popover_header(
                 &self.tokens,
                 self.i18n.t("ai.context.breakdown"),
@@ -812,8 +817,13 @@ impl WorkspaceApp {
                             ),
                         )
                 },
-            )
-            .into_any_element()
+            );
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "ai-context-popover-enter",
+            popover,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(in crate::workspace) fn render_ai_context_breakdown_row(
@@ -1073,7 +1083,13 @@ impl WorkspaceApp {
                 ),
             );
         }
-        popup.into_any_element()
+        // Candidate updates preserve one open autocomplete timeline.
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "ai-chat-autocomplete-enter",
+            popup,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(in crate::workspace) fn apply_ai_chat_autocomplete_candidate(

@@ -162,7 +162,7 @@ pub fn ai_chat_input_chips(tokens: &ThemeTokens) -> Div {
 }
 
 pub fn ai_chat_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
-    div()
+    let frame = div()
         .relative()
         .w_full()
         .min_w_0()
@@ -179,9 +179,9 @@ pub fn ai_chat_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
             tokens,
             tokens.ui.bg_panel,
             AI_CHAT_INPUT_PANEL_ALPHA,
-        ))
-        .shadow_sm()
-        .when(focused, |frame| frame.shadow_md())
+        ));
+    // Focus changes the border role; elevation remains a stable card cue.
+    crate::surface::theme_card_surface_shadow(frame, tokens)
 }
 
 pub fn ai_chat_input_editor(tokens: &ThemeTokens, editor: impl IntoElement) -> Div {
@@ -298,7 +298,7 @@ pub fn ai_autocomplete_popup(tokens: &ThemeTokens, id: impl Into<ElementId>) -> 
         .border_1()
         .border_color(bg_alpha(tokens, tokens.ui.border, 0x99))
         .bg(rgb(tokens.ui.bg))
-        .shadow_lg()
+        .shadow(crate::surface::theme_overlay_shadow(tokens))
 }
 
 pub fn ai_autocomplete_item(
@@ -408,7 +408,7 @@ pub fn ai_message_body(
     role: AiMessageRole,
     content: impl IntoElement,
 ) -> Div {
-    div()
+    let body = div()
         .w_full()
         .min_w_0()
         .mt(px(tokens.spacing.one))
@@ -423,9 +423,13 @@ pub fn ai_message_body(
                 .bg(bg_alpha(tokens, tokens.ui.accent, AI_USER_BUBBLE_BG_ALPHA))
                 .px(px(tokens.spacing.three))
                 .py(px(tokens.spacing.two))
-                .shadow_sm()
         })
-        .child(content)
+        .child(content);
+    if role == AiMessageRole::User {
+        crate::surface::theme_card_surface_shadow(body, tokens)
+    } else {
+        body
+    }
 }
 
 pub fn ai_message_action(

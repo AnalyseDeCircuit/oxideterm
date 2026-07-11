@@ -1,6 +1,8 @@
 use gpui::{CursorStyle, Div, IntoElement, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
 use oxideterm_theme::ThemeTokens;
 
+use crate::surface::theme_overlay_surface_shadow;
+
 const MENU_SURFACE_ALPHA: u32 = 0xf2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,14 +23,14 @@ pub(crate) fn menu_chrome_spec(tokens: &ThemeTokens) -> MenuChromeSpec {
 pub(crate) fn menu_surface_chrome(tokens: &ThemeTokens) -> Div {
     let chrome = menu_chrome_spec(tokens);
     // All floating menu variants share one elevation and corner contract.
-    div()
+    let surface = div()
         .overflow_hidden()
         .rounded(px(chrome.surface_radius))
         .border_1()
         .border_color(rgb(tokens.ui.border))
         .bg(rgba((tokens.ui.bg_elevated << 8) | chrome.surface_alpha))
-        .text_color(rgb(tokens.ui.text))
-        .shadow_lg()
+        .text_color(rgb(tokens.ui.text));
+    theme_overlay_surface_shadow(surface, tokens)
 }
 
 pub(crate) fn menu_item_chrome(tokens: &ThemeTokens, left_padding: f32, right_padding: f32) -> Div {

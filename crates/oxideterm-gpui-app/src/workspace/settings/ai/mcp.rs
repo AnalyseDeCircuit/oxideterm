@@ -442,13 +442,21 @@ impl WorkspaceApp {
         // Keep loading/disabled behavior in the shared button primitive so the
         // connecting state cannot still submit.
         options.loading = connecting;
-        self.workspace_toolbar_action_button(
-            label,
-            Some(Self::render_lucide_icon(
-                icon,
+        let icon = if connecting {
+            self.render_loading_icon(
+                (
+                    gpui::SharedString::from(format!("mcp-connect-spinner-{}", config.id)),
+                    0usize,
+                ),
                 AI_MCP_ACTION_ICON,
                 rgb(self.tokens.ui.text),
-            )),
+            )
+        } else {
+            Self::render_lucide_icon(icon, AI_MCP_ACTION_ICON, rgb(self.tokens.ui.text))
+        };
+        self.workspace_toolbar_action_button(
+            label,
+            Some(icon),
             options,
             cx.listener(move |this, _event, _window, cx| {
                 let registry = this.ai.runtime.mcp_registry.clone();
@@ -493,8 +501,8 @@ impl WorkspaceApp {
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(color))
             .when(status == "connecting", |badge| {
-                badge.child(Self::render_lucide_icon(
-                    LucideIcon::LoaderCircle,
+                badge.child(self.render_loading_icon(
+                    "mcp-status-connecting",
                     AI_MCP_STATUS_ICON,
                     rgb(color),
                 ))

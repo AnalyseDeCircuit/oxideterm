@@ -393,7 +393,12 @@ impl WorkspaceApp {
                 .anchor(Corner::TopLeft)
                 .position(gpui::point(px(placement.x), px(placement.y)))
                 .position_mode(AnchoredPositionMode::Window)
-                .child(overlay_content_boundary(popup)),
+                .child(oxideterm_gpui_ui::motion::fade_in(
+                    &self.tokens,
+                    "session-manager-batch-move-enter",
+                    overlay_content_boundary(popup),
+                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                )),
         )
         .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
         .into_any_element()

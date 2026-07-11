@@ -249,67 +249,72 @@ impl WorkspaceApp {
                 },
             ));
 
-        Some(
-            div()
-                .absolute()
-                .left(px(self.tokens.metrics.activity_bar_width))
-                .bottom(px(4.0))
-                .w(px(DETACHED_TERMINAL_POPOVER_WIDTH))
-                .overflow_hidden()
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(theme.border))
-                .bg(rgba(
-                    (theme.bg_elevated << 8) | DETACHED_TERMINAL_POPOVER_ALPHA,
-                ))
-                .shadow_lg()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .border_b_1()
-                        .border_color(rgb(theme.border))
-                        // Browser popovers clip the painted header through the
-                        // parent radius; GPUI must align to the inner border curve.
-                        .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
-                        .bg(rgba((theme.bg << 8) | DETACHED_TERMINAL_HEADER_ALPHA))
-                        .px(px(12.0))
-                        .py(px(8.0))
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .line_height(px(16.0))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(theme.text_muted))
-                                .child(self.i18n.t("local_shell.background.title")),
-                        )
-                        .child(
-                            div()
-                                .size(px(20.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(self.tokens.radii.sm))
-                                .cursor_pointer()
-                                .hover(|button| button.bg(rgb(theme.bg_hover)))
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::X,
-                                    12.0,
-                                    rgb(theme.text_muted),
-                                ))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.detached_local_terminals_popover_open = false;
-                                        cx.notify();
-                                    }),
-                                ),
-                        ),
-                )
-                .child(list)
-                .into_any_element(),
-        )
+        let popover = div()
+            .absolute()
+            .left(px(self.tokens.metrics.activity_bar_width))
+            .bottom(px(4.0))
+            .w(px(DETACHED_TERMINAL_POPOVER_WIDTH))
+            .overflow_hidden()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(rgba(
+                (theme.bg_elevated << 8) | DETACHED_TERMINAL_POPOVER_ALPHA,
+            ))
+            .shadow_lg()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(rgb(theme.border))
+                    // Browser popovers clip the painted header through the
+                    // parent radius; GPUI must align to the inner border curve.
+                    .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
+                    .bg(rgba((theme.bg << 8) | DETACHED_TERMINAL_HEADER_ALPHA))
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .line_height(px(16.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("local_shell.background.title")),
+                    )
+                    .child(
+                        div()
+                            .size(px(20.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover(|button| button.bg(rgb(theme.bg_hover)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                12.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.detached_local_terminals_popover_open = false;
+                                    cx.notify();
+                                }),
+                            ),
+                    ),
+            )
+            .child(list);
+
+        Some(oxideterm_gpui_ui::motion::slide_fade_in_y(
+            &self.tokens,
+            "detached-local-terminals-popover-enter",
+            popover,
+            4.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        ))
     }
 
     fn sorted_detached_local_terminal_sessions(&self) -> Vec<DetachedLocalTerminalSession> {

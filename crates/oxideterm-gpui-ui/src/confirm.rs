@@ -78,7 +78,7 @@ pub fn confirm_dialog_with_focus(
     let on_cancel = Rc::new(on_cancel);
     let on_backdrop_cancel = on_cancel.clone();
 
-    dismissible_dialog_backdrop()
+    let dialog = dismissible_dialog_backdrop()
         .on_mouse_down(MouseButton::Left, move |event, window, cx| {
             // Tauri useConfirm wraps Radix Dialog and maps onOpenChange(false)
             // to cancel, so an outside pointer-down must follow the same path.
@@ -215,6 +215,13 @@ pub fn confirm_dialog_with_focus(
                             .on_mouse_down(MouseButton::Left, on_confirm),
                         ),
                 ),
-        )
-        .into_any_element()
+        );
+    // Confirm dialogs share one event island, so animate the completed island
+    // without changing outside-click or focused-action behavior.
+    crate::motion::fade_in(
+        tokens,
+        "confirm-dialog-enter",
+        dialog,
+        crate::motion::MotionDuration::Control,
+    )
 }

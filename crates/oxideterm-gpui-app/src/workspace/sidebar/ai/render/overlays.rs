@@ -71,7 +71,8 @@ impl WorkspaceApp {
         let panel_right = f32::from(panel_anchor.bounds.right());
         let panel_width = f32::from(panel_anchor.bounds.size.width);
 
-        let (corner, anchor_x, anchor_y, popup) = if self.ai.chat.conversation_list_open {
+        let (corner, anchor_x, anchor_y, motion_id, popup) = if self.ai.chat.conversation_list_open
+        {
             let top = self
                 .select_anchors
                 .get(&SelectAnchorId::AiConversationList)
@@ -84,6 +85,7 @@ impl WorkspaceApp {
                 Corner::TopLeft,
                 panel_left + AI_TOP_FLOATING_INSET_X,
                 top,
+                Some("ai-conversation-list-enter"),
                 self.render_ai_conversation_dropdown(dropdown_width, cx),
             )
         } else if self.ai.chat.menu_open {
@@ -98,7 +100,13 @@ impl WorkspaceApp {
                 panel_right,
             );
             let top = f32::from(anchor.bounds.bottom()) + AI_FLOATING_GAP / 2.0;
-            (Corner::TopLeft, left, top, self.render_ai_chat_menu(cx))
+            (
+                Corner::TopLeft,
+                left,
+                top,
+                Some("ai-chat-menu-enter"),
+                self.render_ai_chat_menu(cx),
+            )
         } else if self.ai.models.selector_open
             && self.ai.models.selector_scope == Some(AiModelSelectorScope::Sidebar)
         {
@@ -112,6 +120,7 @@ impl WorkspaceApp {
                     panel_right,
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                Some("ai-model-selector-enter"),
                 self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(), cx),
             )
         } else if self.ai.chat.safety_menu_open {
@@ -125,6 +134,7 @@ impl WorkspaceApp {
                     panel_right,
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                None,
                 self.render_ai_safety_menu(cx),
             )
         } else if self.ai.chat.context_popover_open {
@@ -138,10 +148,22 @@ impl WorkspaceApp {
                     panel_right,
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                None,
                 self.render_ai_context_popover(cx),
             )
         } else {
             return None;
+        };
+
+        let popup = if let Some(motion_id) = motion_id {
+            oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                motion_id,
+                div().child(popup),
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            )
+        } else {
+            popup
         };
 
         Some(

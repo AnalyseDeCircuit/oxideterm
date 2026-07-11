@@ -650,6 +650,16 @@ impl WorkspaceApp {
                 }),
             ));
         }
+        // Highlight changes redraw the select without restarting its entrance.
+        let popup = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            (
+                gpui::SharedString::from(format!("cloud-sync-select-enter-{select:?}")),
+                0usize,
+            ),
+            overlay_content_boundary(popup),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
 
         Some(
             popover_backdrop()
@@ -677,7 +687,7 @@ impl WorkspaceApp {
                                 px(self.tokens.metrics.settings_select_popup_gap),
                             ))
                             .position_mode(AnchoredPositionMode::Window)
-                            .child(overlay_content_boundary(popup)),
+                            .child(popup),
                     )
                     .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
                 )

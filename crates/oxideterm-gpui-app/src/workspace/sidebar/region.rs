@@ -37,6 +37,46 @@ pub(in crate::workspace) fn context_sidebar_resize_hotzone_chrome() -> gpui::Sta
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn render_animated_sidebar_region(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let expanded_width = self.sidebar_panel_width();
+        let expanded = !self.sidebar_collapsed;
+        let content = div()
+            .flex_none()
+            .w(px(expanded_width))
+            .h_full()
+            .child(self.render_sidebar_region(cx));
+        oxideterm_gpui_ui::motion::horizontal_reveal(
+            &self.tokens,
+            "workspace-left-sidebar-motion",
+            content,
+            expanded_width,
+            expanded,
+        )
+    }
+
+    pub(in crate::workspace) fn render_animated_context_sidebar_frame(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let expanded_width = self.ai.chat.sidebar_width;
+        let expanded = self.context_sidebar_visible();
+        let content = div()
+            .flex_none()
+            .w(px(expanded_width))
+            .h_full()
+            .child(self.render_context_right_sidebar_frame(cx));
+        oxideterm_gpui_ui::motion::horizontal_reveal(
+            &self.tokens,
+            "workspace-right-sidebar-motion",
+            content,
+            expanded_width,
+            expanded,
+        )
+    }
+
     pub(in crate::workspace) fn render_sidebar_region(
         &mut self,
         cx: &mut Context<Self>,

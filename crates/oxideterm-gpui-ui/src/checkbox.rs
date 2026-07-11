@@ -31,6 +31,10 @@ pub fn checkbox_with(
 ) -> Div {
     let theme = tokens.ui;
     let has_label = !label.is_empty();
+    let mark_animation_id = (
+        gpui::SharedString::from(format!("checkbox-mark-{label}")),
+        checked as usize,
+    );
     let checkbox = div()
         .flex()
         .flex_row()
@@ -66,14 +70,17 @@ pub fn checkbox_with(
                 .when(options.focused, |box_el| {
                     box_el.shadow(checkbox_focus_ring(tokens))
                 })
-                .when(checked, |box_el| {
-                    box_el.child(
-                        svg()
-                            .path(CHECKBOX_ICON_PATH)
-                            .size(px(tokens.metrics.ui_checkbox_icon_size))
-                            .text_color(rgb(CHECKBOX_CHECKED_TEXT)),
-                    )
-                }),
+                // Keep the mark mounted so both checking and unchecking can
+                // animate without delaying the input state transition.
+                .child(crate::motion::animated_checkmark(
+                    tokens,
+                    mark_animation_id,
+                    svg()
+                        .path(CHECKBOX_ICON_PATH)
+                        .size(px(tokens.metrics.ui_checkbox_icon_size))
+                        .text_color(rgb(CHECKBOX_CHECKED_TEXT)),
+                    checked,
+                )),
         );
 
     if has_label {

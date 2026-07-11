@@ -1605,12 +1605,15 @@ impl WorkspaceApp {
                                         cx.notify();
                                     }),
                                 )
-                                .child(Self::render_lucide_icon(
-                                    if is_expanded {
-                                        LucideIcon::ChevronDown
-                                    } else {
-                                        LucideIcon::ChevronRight
-                                    },
+                                .child(self.render_animated_chevron(
+                                    (
+                                        gpui::SharedString::from(format!(
+                                            "native-plugin-chevron-{}",
+                                            plugin.manifest.id
+                                        )),
+                                        is_expanded as usize,
+                                    ),
+                                    is_expanded,
                                     16.0,
                                     rgb(theme.text_muted),
                                 )),

@@ -509,6 +509,44 @@ impl WorkspaceApp {
             .text_color(color)
             .into_any_element()
     }
+
+    pub(in crate::workspace) fn render_animated_chevron(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        expanded: bool,
+        size: f32,
+        color: Rgba,
+    ) -> AnyElement {
+        // A single right-facing asset keeps state changes continuous instead
+        // of swapping two unrelated SVG trees between renders.
+        oxideterm_gpui_ui::motion::animated_chevron(
+            &self.tokens,
+            id,
+            svg()
+                .path(LucideIcon::ChevronRight.path())
+                .size(px(size))
+                .text_color(color),
+            expanded,
+        )
+    }
+
+    pub(in crate::workspace) fn render_loading_icon(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        size: f32,
+        color: Rgba,
+    ) -> AnyElement {
+        // Spinner frames are requested only while callers render a genuine
+        // loading state; static status icons continue using render_lucide_icon.
+        oxideterm_gpui_ui::motion::animated_spinner(
+            &self.tokens,
+            id,
+            svg()
+                .path(LucideIcon::LoaderCircle.path())
+                .size(px(size))
+                .text_color(color),
+        )
+    }
 }
 
 pub(in crate::workspace) fn native_plugin_sidebar_icon(icon: &str) -> LucideIcon {

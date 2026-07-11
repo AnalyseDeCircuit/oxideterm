@@ -965,6 +965,13 @@ impl WorkspaceApp {
                 &settings,
             ));
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
+        self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
+        self.context_sidebar_motion_generation =
+            self.context_sidebar_motion_generation.wrapping_add(1);
+        self.sidebar_rendered = !settings.sidebar_ui.collapsed;
+        self.context_sidebar_rendered = !settings.sidebar_ui.ai_sidebar_collapsed
+            && !settings.sidebar_ui.zen_mode
+            && settings.ai.enabled;
         self.sidebar_width = settings.sidebar_ui.width as f32;
         self.ai.chat.sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
             .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);

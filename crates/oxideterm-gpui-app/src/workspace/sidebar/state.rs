@@ -1,6 +1,70 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn set_sidebar_collapsed_with_motion(
+        &mut self,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_collapsed = collapsed;
+        self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
+        let generation = self.sidebar_motion_generation;
+        if !collapsed {
+            self.sidebar_rendered = true;
+            return;
+        }
+        if !self.tokens.motion.enabled {
+            self.sidebar_rendered = false;
+            return;
+        }
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        // Keep the panel mounted until its closing transition completes.
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.sidebar_collapsed && this.sidebar_motion_generation == generation {
+                    this.sidebar_rendered = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn set_context_sidebar_rendered_with_motion(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.context_sidebar_motion_generation =
+            self.context_sidebar_motion_generation.wrapping_add(1);
+        let generation = self.context_sidebar_motion_generation;
+        if visible {
+            self.context_sidebar_rendered = true;
+            return;
+        }
+        if !self.tokens.motion.enabled {
+            self.context_sidebar_rendered = false;
+            return;
+        }
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        // Delayed unmount makes the right sidebar's collapse animation observable.
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if !this.context_sidebar_visible()
+                    && this.context_sidebar_motion_generation == generation
+                {
+                    this.context_sidebar_rendered = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(in crate::workspace) fn persist_sidebar_settings(&mut self) {
         self.settings_store.settings_mut().sidebar_ui.collapsed = self.sidebar_collapsed;
         self.settings_store.settings_mut().sidebar_ui.width = self.sidebar_width.round() as i64;
@@ -39,14 +103,14 @@ impl WorkspaceApp {
             self.bootstrap_native_plugin_runtime(cx);
         }
         if self.sidebar_collapsed {
-            self.sidebar_collapsed = false;
+            self.set_sidebar_collapsed_with_motion(false, cx);
         }
         self.persist_sidebar_settings();
         cx.notify();
     }
 
     pub(in crate::workspace) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
-        self.sidebar_collapsed = !self.sidebar_collapsed;
+        self.set_sidebar_collapsed_with_motion(!self.sidebar_collapsed, cx);
         self.sidebar_resizing = false;
         self.persist_sidebar_settings();
         cx.notify();
@@ -160,6 +224,7 @@ impl WorkspaceApp {
             .settings_mut()
             .sidebar_ui
             .ai_sidebar_collapsed = false;
+        self.set_context_sidebar_rendered_with_motion(true, cx);
         if panel == ContextSidebarPanel::Assistant {
             self.ensure_ai_chat_initialized();
             self.bootstrap_ai_mcp_registry();
@@ -182,6 +247,7 @@ impl WorkspaceApp {
             .settings_mut()
             .sidebar_ui
             .ai_sidebar_collapsed = true;
+        self.set_context_sidebar_rendered_with_motion(false, cx);
         self.ai.chat.sidebar_resizing = false;
         self.clear_ai_sidebar_keyboard_focus();
         self.close_ai_sidebar_popovers();

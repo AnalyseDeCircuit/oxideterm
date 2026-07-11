@@ -23,7 +23,7 @@ pub enum AiInlineNoticeKind {
 }
 
 pub fn ai_inline_panel_shell(tokens: &ThemeTokens, left: f32, top: f32) -> Div {
-    div()
+    let panel = div()
         .absolute()
         .w(px(AI_INLINE_PANEL_WIDTH))
         .left(px(left))
@@ -32,8 +32,8 @@ pub fn ai_inline_panel_shell(tokens: &ThemeTokens, left: f32, top: f32) -> Div {
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgb(tokens.ui.border))
-        .bg(rgb(tokens.ui.bg_elevated))
-        .shadow_xl()
+        .bg(rgb(tokens.ui.bg_elevated));
+    crate::surface::theme_overlay_surface_shadow(panel, tokens)
 }
 
 pub fn ai_inline_loading_bar(tokens: &ThemeTokens) -> Div {
@@ -160,7 +160,7 @@ pub fn ai_inline_command_preview(
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.two))
         .text_size(px(tokens.metrics.ui_text_sm))
-        .text_color(rgb(tokens.ui.accent))
+        .text_color(rgb(tokens.ui.text))
         .whitespace_normal()
         .child(content)
         .when(loading_cursor, |preview| {
@@ -235,6 +235,6 @@ pub fn ai_inline_model_selector_slot(tokens: &ThemeTokens, selector: impl IntoEl
 pub fn ai_inline_icon(tokens: &ThemeTokens, icon: impl IntoElement) -> Div {
     div()
         .flex_none()
-        .text_color(rgb(tokens.ui.accent))
+        .text_color(rgb(tokens.ui.text_muted))
         .child(icon)
 }

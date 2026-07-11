@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum LucideIcon {
     Activity,
     AlertCircle,

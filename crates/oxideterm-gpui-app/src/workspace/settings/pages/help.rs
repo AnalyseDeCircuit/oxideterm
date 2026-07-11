@@ -782,7 +782,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.workspace_toolbar_action_button(
             label,
-            Some(Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text)).into_any_element()),
+            Some(if matches!(icon, LucideIcon::LoaderCircle) {
+                self.render_loading_icon("help-update-checking", 14.0, rgb(self.tokens.ui.text))
+            } else {
+                Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text))
+            }),
             ToolbarButtonOptions {
                 button: ButtonOptions {
                     variant: ButtonVariant::Outline,

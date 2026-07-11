@@ -229,7 +229,13 @@ impl WorkspaceApp {
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
+            sidebar_rendered: !settings.sidebar_ui.collapsed,
+            sidebar_motion_generation: 0,
             sidebar_width: settings.sidebar_ui.width as f32,
+            context_sidebar_rendered: !settings.sidebar_ui.ai_sidebar_collapsed
+                && !settings.sidebar_ui.zen_mode
+                && settings.ai.enabled,
+            context_sidebar_motion_generation: 0,
             ai,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             active_context_sidebar_tool: ContextSidebarTool::Monitor,

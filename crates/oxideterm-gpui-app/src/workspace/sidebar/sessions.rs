@@ -636,11 +636,25 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(8.0))
                     .child(self.render_session_status_dot(status))
-                    .child(Self::render_lucide_icon(
-                        status.icon,
-                        SESSION_TREE_ICON_SIZE,
-                        rgb(status.text_color),
-                    ))
+                    .child(if matches!(status.icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon(
+                            (
+                                gpui::SharedString::from(format!(
+                                    "session-focus-connecting-{:?}",
+                                    row.node_id
+                                )),
+                                0usize,
+                            ),
+                            SESSION_TREE_ICON_SIZE,
+                            rgb(status.text_color),
+                        )
+                    } else {
+                        Self::render_lucide_icon(
+                            status.icon,
+                            SESSION_TREE_ICON_SIZE,
+                            rgb(status.text_color),
+                        )
+                    })
                     .child(
                         div()
                             .min_w(px(0.0))
@@ -1307,20 +1321,32 @@ impl WorkspaceApp {
             })
             .hover(move |row| row.bg(rgb(theme.bg_hover)))
             .opacity(status.opacity)
-            .child(Self::render_lucide_icon(
-                if expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
+            .child(self.render_animated_chevron(
+                (
+                    gpui::SharedString::from(format!("session-node-chevron-{}", node_id.0)),
+                    expanded as usize,
+                ),
+                expanded,
                 12.0,
                 muted_text,
             ))
-            .child(div().ml_1().mr_2().child(Self::render_lucide_icon(
-                status.icon,
-                SESSION_TREE_ICON_SIZE,
-                row_text,
-            )))
+            .child(
+                div()
+                    .ml_1()
+                    .mr_2()
+                    .child(if matches!(status.icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon(
+                            (
+                                gpui::SharedString::from(format!("session-connecting-{node_id:?}")),
+                                0usize,
+                            ),
+                            SESSION_TREE_ICON_SIZE,
+                            row_text,
+                        )
+                    } else {
+                        Self::render_lucide_icon(status.icon, SESSION_TREE_ICON_SIZE, row_text)
+                    }),
+            )
             .child(
                 div()
                     .min_w(px(0.0))

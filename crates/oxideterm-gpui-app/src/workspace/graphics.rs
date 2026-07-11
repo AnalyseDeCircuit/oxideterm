@@ -1262,7 +1262,11 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(10.0))
-                    .child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
+                    .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon("graphics-status-loading", 16.0, rgb(color))
+                    } else {
+                        Self::render_lucide_icon(icon, 16.0, rgb(color))
+                    })
                     .child(
                         div()
                             .text_size(px(13.0))
@@ -1321,7 +1325,11 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(12.0))
                     .text_align(gpui::TextAlign::Center)
-                    .child(Self::render_lucide_icon(icon, 28.0, rgb(color)))
+                    .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon("graphics-center-loading", 28.0, rgb(color))
+                    } else {
+                        Self::render_lucide_icon(icon, 28.0, rgb(color))
+                    })
                     .child(
                         div()
                             .max_w(px(GRAPHICS_SELECTOR_MAX_W))

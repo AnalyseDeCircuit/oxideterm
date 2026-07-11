@@ -132,17 +132,17 @@ pub fn ai_context_usage_indicator(
 }
 
 pub fn ai_context_popover(tokens: &ThemeTokens) -> Div {
-    div()
+    let popover = div()
         .w(px(AI_CONTEXT_POPOVER_WIDTH))
         .overflow_hidden()
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
         .bg(rgb(tokens.ui.bg_panel))
-        .shadow_lg()
         // Keep wheel input local to the popover, matching browser popover
         // scroll chaining rules even when the compact panel has no scrollbar.
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+    crate::surface::theme_overlay_surface_shadow(popover, tokens)
 }
 
 pub fn ai_context_popover_header(
@@ -263,7 +263,7 @@ pub fn ai_model_selector_trigger(
 }
 
 pub fn ai_model_selector_panel(tokens: &ThemeTokens, up: bool) -> Div {
-    div()
+    let panel = div()
         .absolute()
         .left_0()
         .right_0()
@@ -277,8 +277,8 @@ pub fn ai_model_selector_panel(tokens: &ThemeTokens, up: bool) -> Div {
             tokens.ui.border,
             AI_CHAT_INPUT_BORDER_ALPHA,
         ))
-        .bg(rgb(tokens.ui.bg_panel))
-        .shadow_lg()
+        .bg(rgb(tokens.ui.bg_panel));
+    crate::surface::theme_overlay_surface_shadow(panel, tokens)
 }
 
 pub fn ai_model_selector_row(

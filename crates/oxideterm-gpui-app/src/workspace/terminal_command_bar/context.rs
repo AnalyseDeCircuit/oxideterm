@@ -249,7 +249,12 @@ impl WorkspaceApp {
             }
         };
 
-        panel.child(body).into_any_element()
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "terminal-cwd-picker-enter",
+            panel.child(body),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(super) fn render_terminal_cwd_entry_list(
@@ -669,11 +674,15 @@ impl WorkspaceApp {
             .justify_center()
             .gap(px(8.0))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            ))
+            .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                self.render_loading_icon(
+                    "terminal-cwd-loading",
+                    14.0,
+                    rgb(self.tokens.ui.text_muted),
+                )
+            } else {
+                Self::render_lucide_icon(icon, 14.0, rgb(self.tokens.ui.text_muted))
+            })
             .child(message)
             .into_any_element()
     }
@@ -945,7 +954,12 @@ impl WorkspaceApp {
             )
         };
         panel = panel.child(body);
-        panel.into_any_element()
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "terminal-project-picker-enter",
+            panel,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(super) fn render_terminal_project_header(

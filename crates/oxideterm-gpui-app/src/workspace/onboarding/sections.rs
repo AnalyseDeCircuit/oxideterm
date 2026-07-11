@@ -1057,11 +1057,15 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(Self::render_lucide_icon(
-                        icon,
-                        24.0,
-                        rgb(self.tokens.ui.text_muted),
-                    )),
+                    .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon(
+                            "onboarding-import-loading",
+                            24.0,
+                            rgb(self.tokens.ui.text_muted),
+                        )
+                    } else {
+                        Self::render_lucide_icon(icon, 24.0, rgb(self.tokens.ui.text_muted))
+                    }),
             )
             .child(
                 div()

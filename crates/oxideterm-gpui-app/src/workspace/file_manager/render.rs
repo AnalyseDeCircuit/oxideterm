@@ -1007,8 +1007,8 @@ impl WorkspaceApp {
                         .gap(px(8.0))
                         .text_size(px(FILE_MANAGER_TEXT_XS))
                         .text_color(rgb(theme.text_muted))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::LoaderCircle,
+                        .child(self.render_loading_icon(
+                            "file-manager-list-loading",
                             20.0,
                             rgb(theme.text_muted),
                         ))

@@ -720,8 +720,8 @@ impl Render for WorkspaceApp {
                     .when(!zen_mode, |layout| {
                         layout.child(self.render_activity_bar(cx))
                     })
-                    .when(!zen_mode && !self.sidebar_collapsed, |layout| {
-                        layout.child(self.render_sidebar_region(cx))
+                    .when(!zen_mode && self.sidebar_rendered, |layout| {
+                        layout.child(self.render_animated_sidebar_region(cx))
                     })
                     .child(
                         div()
@@ -755,11 +755,11 @@ impl Render for WorkspaceApp {
                                     ),
                             ),
                     )
-                    .when(self.context_sidebar_visible(), |layout| {
+                    .when(!zen_mode && self.context_sidebar_rendered, |layout| {
                         // Keep the right sidebar as one root child. Splitting
                         // the gutter and content here makes resize hit-testing
                         // easy to regress on scroll-heavy Host Tools pages.
-                        layout.child(self.render_context_right_sidebar_frame(cx))
+                        layout.child(self.render_animated_context_sidebar_frame(cx))
                     }),
             )
             .when(

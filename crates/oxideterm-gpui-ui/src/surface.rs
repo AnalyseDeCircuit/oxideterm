@@ -6,6 +6,8 @@ const TAURI_CARD_DARK_SHADOW_2_ALPHA: u32 = 0x40; // Tauri --theme-card-shadow r
 const TAURI_CARD_LIGHT_SHADOW_1_ALPHA: u32 = 0x14; // Tauri light --theme-card-shadow rgba(0,0,0,0.08).
 const TAURI_CARD_LIGHT_SHADOW_2_ALPHA: u32 = 0x0d; // Tauri light --theme-card-shadow rgba(0,0,0,0.05).
 const TAURI_CARD_LIGHT_LUMA_THRESHOLD: f32 = 0.55;
+const LOW_SURFACE_SEPARATION: f32 = 0.035;
+const MEDIUM_SURFACE_SEPARATION: f32 = 0.08;
 const SEMANTIC_SURFACE_STRONG_ALPHA: u32 = 0xf2;
 const SEMANTIC_SURFACE_PANEL_ALPHA: u32 = 0xe6;
 const SEMANTIC_SURFACE_SOFT_ALPHA: u32 = 0xcc;
@@ -13,6 +15,16 @@ const SEMANTIC_SURFACE_INSET_ALPHA: u32 = 0x99;
 const SEMANTIC_SURFACE_BORDER_ALPHA: u32 = 0x80;
 const SEMANTIC_SURFACE_STRONG_BORDER_ALPHA: u32 = 0x99;
 const SEMANTIC_SURFACE_ACTIVE_ALPHA: u32 = 0x33;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ThemeElevationSpec {
+    panel_border_alpha: u32,
+    card_border_alpha: u32,
+    card_near_shadow_alpha: u32,
+    card_far_shadow_alpha: u32,
+    overlay_near_shadow_alpha: u32,
+    overlay_far_shadow_alpha: u32,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SurfaceKind {
@@ -100,34 +112,39 @@ pub fn semantic_surface(tokens: &ThemeTokens, options: SurfaceOptions) -> Div {
 
     // Semantic surfaces keep old Tauri shadows available, but the caller now
     // chooses by native surface kind instead of by migration history.
-    if let Some(shadow_color) = chrome.shadow_color {
-        tauri_glass_surface_shadow(surface, shadow_color)
-    } else {
-        surface
+    match options.kind {
+        SurfaceKind::Inspector => theme_card_surface_shadow(surface, tokens),
+        SurfaceKind::ElevatedPopover | SurfaceKind::TerminalOverlay => {
+            theme_overlay_surface_shadow(surface, tokens)
+        }
+        _ => surface,
     }
 }
 
 pub fn surface_chrome(tokens: &ThemeTokens, options: SurfaceOptions) -> SurfaceChrome {
     let theme = tokens.ui;
+    let elevation = theme_elevation_spec(tokens);
     let (base, alpha, border_alpha, radius, shadow_color) = match options.kind {
         SurfaceKind::Panel => (
             theme.bg_panel,
             SEMANTIC_SURFACE_PANEL_ALPHA,
-            SEMANTIC_SURFACE_BORDER_ALPHA,
+            elevation.panel_border_alpha,
             tokens.radii.lg,
             None,
         ),
         SurfaceKind::ElevatedPopover => (
             theme.bg_elevated,
             SEMANTIC_SURFACE_STRONG_ALPHA,
-            SEMANTIC_SURFACE_STRONG_BORDER_ALPHA,
+            elevation
+                .card_border_alpha
+                .max(SEMANTIC_SURFACE_STRONG_BORDER_ALPHA),
             tokens.radii.lg,
             Some(theme.bg_elevated),
         ),
         SurfaceKind::InsetGroup => (
             theme.bg_sunken,
             SEMANTIC_SURFACE_INSET_ALPHA,
-            SEMANTIC_SURFACE_BORDER_ALPHA,
+            elevation.panel_border_alpha,
             tokens.radii.md,
             None,
         ),
@@ -149,7 +166,7 @@ pub fn surface_chrome(tokens: &ThemeTokens, options: SurfaceOptions) -> SurfaceC
         SurfaceKind::Inspector => (
             theme.bg_card,
             SEMANTIC_SURFACE_SOFT_ALPHA,
-            SEMANTIC_SURFACE_BORDER_ALPHA,
+            elevation.card_border_alpha,
             tokens.radii.lg,
             None,
         ),
@@ -252,6 +269,22 @@ pub fn tauri_card_surface(
         .shadow(tauri_card_shadow(color))
 }
 
+pub fn theme_card_surface(
+    surface: Div,
+    tokens: &ThemeTokens,
+    has_background_image: bool,
+    background_alpha: u32,
+) -> Div {
+    // New GPUI surfaces use the active palette for both fill and elevation;
+    // the legacy color-only helper remains available for migration safety.
+    let surface = surface.bg(color_for_background(
+        tokens.ui.bg_card,
+        has_background_image,
+        background_alpha,
+    ));
+    theme_card_surface_shadow(surface, tokens)
+}
+
 pub fn tauri_glass_surface_shadow(surface: Div, color: u32) -> Div {
     // Some Tauri panels keep their own slash-opacity class, but bg-theme-bg-card
     // still receives the shared --theme-card-shadow. This helper lets callers
@@ -271,20 +304,96 @@ pub fn tauri_card_shadow(color: u32) -> Vec<BoxShadow> {
             TAURI_CARD_DARK_SHADOW_2_ALPHA,
         )
     };
+    shadows_with_alpha(near_alpha, far_alpha, 3.0, 12.0)
+}
+
+pub fn theme_card_shadow(tokens: &ThemeTokens) -> Vec<BoxShadow> {
+    let elevation = theme_elevation_spec(tokens);
+    // Theme-aware cards preserve material identity while avoiding one fixed
+    // dark shadow recipe across every built-in and custom palette.
+    shadows_with_alpha(
+        elevation.card_near_shadow_alpha,
+        elevation.card_far_shadow_alpha,
+        3.0,
+        12.0,
+    )
+}
+
+pub fn theme_overlay_shadow(tokens: &ThemeTokens) -> Vec<BoxShadow> {
+    let elevation = theme_elevation_spec(tokens);
+    // Floating surfaces must remain visibly above cards in every palette.
+    shadows_with_alpha(
+        elevation.overlay_near_shadow_alpha,
+        elevation.overlay_far_shadow_alpha,
+        5.0,
+        18.0,
+    )
+}
+
+pub fn theme_card_surface_shadow(surface: Div, tokens: &ThemeTokens) -> Div {
+    surface.shadow(theme_card_shadow(tokens))
+}
+
+pub fn theme_overlay_surface_shadow(surface: Div, tokens: &ThemeTokens) -> Div {
+    surface.shadow(theme_overlay_shadow(tokens))
+}
+
+fn shadows_with_alpha(
+    near_alpha: u32,
+    far_alpha: u32,
+    near_blur: f32,
+    far_blur: f32,
+) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
             color: Hsla::from(rgba(near_alpha)),
             offset: point(px(0.0), px(1.0)),
-            blur_radius: px(3.0),
+            blur_radius: px(near_blur),
             spread_radius: px(0.0),
         },
         BoxShadow {
             color: Hsla::from(rgba(far_alpha)),
             offset: point(px(0.0), px(4.0)),
-            blur_radius: px(12.0),
+            blur_radius: px(far_blur),
             spread_radius: px(0.0),
         },
     ]
+}
+
+fn theme_elevation_spec(tokens: &ThemeTokens) -> ThemeElevationSpec {
+    let ui = tokens.ui;
+    let card_separation = (color_luma(ui.bg_card) - color_luma(ui.bg)).abs();
+    let panel_separation = (color_luma(ui.bg_panel) - color_luma(ui.bg)).abs();
+    let light = color_luma(ui.bg) >= TAURI_CARD_LIGHT_LUMA_THRESHOLD;
+
+    let (card_border_alpha, panel_border_alpha) = if card_separation < LOW_SURFACE_SEPARATION {
+        (0xb3, 0x8f)
+    } else if card_separation < MEDIUM_SURFACE_SEPARATION {
+        (0x99, 0x73)
+    } else {
+        (0x80, 0x66)
+    };
+    let panel_border_alpha = if panel_separation < LOW_SURFACE_SEPARATION {
+        panel_border_alpha.max(0x80)
+    } else {
+        panel_border_alpha
+    };
+    let (card_near, card_far) = if light {
+        (0x18, 0x0f)
+    } else if card_separation < LOW_SURFACE_SEPARATION {
+        (0x52, 0x30)
+    } else {
+        (0x3d, 0x24)
+    };
+
+    ThemeElevationSpec {
+        panel_border_alpha,
+        card_border_alpha,
+        card_near_shadow_alpha: card_near,
+        card_far_shadow_alpha: card_far,
+        overlay_near_shadow_alpha: (card_near + 0x14).min(0x66),
+        overlay_far_shadow_alpha: (card_far + 0x10).min(0x40),
+    }
 }
 
 fn color_luma(color: u32) -> f32 {
@@ -347,5 +456,53 @@ mod tests {
         assert_eq!(row.background, rgb(tokens.ui.bg_active));
         assert_eq!(row.radius, tokens.radii.md);
         assert_eq!(row.padding, tokens.spacing.two);
+    }
+
+    #[test]
+    fn representative_theme_matrix_preserves_visible_card_and_overlay_hierarchy() {
+        for theme_id in [
+            "default",
+            "oxide",
+            "verdigris",
+            "paper-oxide",
+            "synthwave-84",
+            "spring-rice",
+        ] {
+            let tokens = ThemeTokens::from_builtin(oxideterm_theme::theme_by_id(theme_id));
+            let elevation = theme_elevation_spec(&tokens);
+            let card = surface_chrome(&tokens, SurfaceOptions::new(SurfaceKind::Inspector));
+            let overlay =
+                surface_chrome(&tokens, SurfaceOptions::new(SurfaceKind::ElevatedPopover));
+
+            assert!(card.bordered, "{theme_id} card border");
+            assert!(overlay.bordered, "{theme_id} overlay border");
+            assert!(
+                elevation.overlay_near_shadow_alpha > elevation.card_near_shadow_alpha,
+                "{theme_id} near shadow hierarchy"
+            );
+            assert!(
+                elevation.overlay_far_shadow_alpha > elevation.card_far_shadow_alpha,
+                "{theme_id} far shadow hierarchy"
+            );
+            assert!(elevation.card_near_shadow_alpha <= 0x52);
+            assert!(elevation.overlay_near_shadow_alpha <= 0x66);
+        }
+    }
+
+    #[test]
+    fn custom_low_contrast_palette_gets_extra_surface_separation() {
+        let mut tokens = oxideterm_theme::default_tokens();
+        // Custom themes enter the UI as raw colors, so elevation must derive
+        // from the palette rather than from a built-in theme identifier.
+        tokens.ui.bg = 0x202122;
+        tokens.ui.bg_panel = 0x222324;
+        tokens.ui.bg_card = 0x242526;
+        tokens.ui.bg_elevated = 0x292a2b;
+        let elevation = theme_elevation_spec(&tokens);
+
+        assert_eq!(elevation.card_border_alpha, 0xb3);
+        assert_eq!(elevation.panel_border_alpha, 0x8f);
+        assert_eq!(elevation.card_near_shadow_alpha, 0x52);
+        assert!(elevation.overlay_near_shadow_alpha > elevation.card_near_shadow_alpha);
     }
 }

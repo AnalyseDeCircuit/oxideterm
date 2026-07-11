@@ -289,7 +289,7 @@ impl WorkspaceApp {
         };
         div()
             .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.accent))
+            .text_color(rgb(self.tokens.ui.accent_secondary))
             .opacity(if disabled { 0.45 } else { 1.0 })
             .cursor_pointer()
             .hover(|style| style.text_color(rgb(self.tokens.ui.accent_hover)))
@@ -519,7 +519,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.sm))
             .bg(rgba((self.tokens.ui.accent << 8) | 0x20))
             .text_size(px(10.0))
-            .text_color(rgb(self.tokens.ui.accent))
+            .text_color(rgb(self.tokens.ui.accent_secondary))
             .child(
                 self.i18n
                     .t("settings_view.connections.ssh_config.already_imported"),

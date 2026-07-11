@@ -83,7 +83,7 @@ pub(super) fn folder_icon(is_open: bool, is_git: bool, tokens: &ThemeTokens) -> 
             (true, false) => "lucide/folder-open.svg",
             (false, false) => "lucide/folder.svg",
         },
-        color: tokens.ui.accent,
+        color: tokens.ui.text_secondary,
     }
 }
 

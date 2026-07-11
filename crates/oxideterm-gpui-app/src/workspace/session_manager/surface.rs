@@ -370,7 +370,7 @@ impl WorkspaceApp {
         self.active_sidebar_section = SidebarSection::Connections;
         self.needs_active_pane_focus = false;
         if self.sidebar_collapsed {
-            self.sidebar_collapsed = false;
+            self.set_sidebar_collapsed_with_motion(false, cx);
         }
         window.focus(&self.focus_handle);
         self.reveal_active_tab(window);

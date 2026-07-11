@@ -36,14 +36,15 @@ fn toast_text(tokens: &ThemeTokens, text: String) -> Div {
         .child(text)
 }
 
-pub fn toast(tokens: &ThemeTokens, view: ToastView) -> Div {
+pub fn toast(tokens: &ThemeTokens, view: ToastView) -> AnyElement {
+    let animation_id = gpui::ElementId::Name(format!("toast-enter-{}", view.title).into());
     let (border, bg, text) = match view.variant {
         ToastVariant::Default => (tokens.ui.border, tokens.ui.bg_elevated, tokens.ui.text),
         ToastVariant::Success => (tokens.ui.success, tokens.ui.success, tokens.ui.success),
         ToastVariant::Error => (tokens.ui.error, tokens.ui.error, tokens.ui.error),
         ToastVariant::Warning => (tokens.ui.warning, tokens.ui.warning, tokens.ui.warning),
     };
-    div()
+    let toast = div()
         .relative()
         .flex()
         .w_full()
@@ -101,7 +102,14 @@ pub fn toast(tokens: &ThemeTokens, view: ToastView) -> Div {
                     )
                 }),
         )
-        .when_some(view.close, |toast, close| toast.child(close))
+        .when_some(view.close, |toast, close| toast.child(close));
+    crate::motion::slide_fade_in_x(
+        tokens,
+        animation_id,
+        toast,
+        8.0,
+        crate::motion::MotionDuration::Control,
+    )
 }
 
 pub fn toast_action(tokens: &ThemeTokens, label: impl Into<String>) -> Div {

@@ -334,7 +334,12 @@ impl WorkspaceApp {
                     .anchor(Corner::TopLeft)
                     .position(gpui::point(px(placement.x), px(placement.y)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(overlay_content_boundary(popup)),
+                    .child(oxideterm_gpui_ui::motion::fade_in(
+                        &self.tokens,
+                        "file-manager-context-menu-enter",
+                        overlay_content_boundary(popup),
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                    )),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             cx,
@@ -1057,7 +1062,7 @@ impl WorkspaceApp {
                             .child(Self::render_lucide_icon(
                                 LucideIcon::HardDrive,
                                 16.0,
-                                rgb(self.tokens.ui.accent),
+                                rgb(self.tokens.ui.text_secondary),
                             ))
                             .child(
                                 div()
@@ -1434,15 +1439,19 @@ impl WorkspaceApp {
                 .text_color(rgb(FILE_MANAGER_BLUE))
                 .cursor_pointer()
                 .opacity(if loading { 0.5 } else { 1.0 })
-                .child(Self::render_lucide_icon(
-                    if loading {
-                        LucideIcon::LoaderCircle
-                    } else {
-                        LucideIcon::Hash
-                    },
-                    FILE_MANAGER_ICON_SM,
-                    rgb(FILE_MANAGER_BLUE),
-                ))
+                .child(if loading {
+                    self.render_loading_icon(
+                        "file-manager-checksum-loading",
+                        FILE_MANAGER_ICON_SM,
+                        rgb(FILE_MANAGER_BLUE),
+                    )
+                } else {
+                    Self::render_lucide_icon(
+                        LucideIcon::Hash,
+                        FILE_MANAGER_ICON_SM,
+                        rgb(FILE_MANAGER_BLUE),
+                    )
+                })
                 .child(if loading {
                     self.i18n.t("fileManager.propCalculating")
                 } else {

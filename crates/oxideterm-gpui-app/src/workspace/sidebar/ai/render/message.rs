@@ -167,8 +167,15 @@ impl WorkspaceApp {
                             12.0,
                             rgb(self.tokens.ui.text_muted),
                         ),
-                        Self::render_lucide_icon(
-                            LucideIcon::ChevronRight,
+                        self.render_animated_chevron(
+                            (
+                                gpui::SharedString::from(format!(
+                                    "thinking-chevron-{}",
+                                    message.id
+                                )),
+                                thinking_expanded as usize,
+                            ),
+                            thinking_expanded,
                             12.0,
                             rgb(self.tokens.ui.text_muted),
                         ),
@@ -195,17 +202,20 @@ impl WorkspaceApp {
                     ),
                 );
             } else {
-                let chevron = if thinking_expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                };
                 let thinking_message_id = message.id.clone();
                 let thinking_header = ai_thinking_header(
                     &self.tokens,
                     self.i18n.t("ai.thinking.thought"),
                     message.is_streaming,
-                    Self::render_lucide_icon(chevron, 12.0, rgb(self.tokens.ui.text_muted)),
+                    self.render_animated_chevron(
+                        (
+                            gpui::SharedString::from(format!("thinking-chevron-{}", message.id)),
+                            thinking_expanded as usize,
+                        ),
+                        thinking_expanded,
+                        12.0,
+                        rgb(self.tokens.ui.text_muted),
+                    ),
                     Self::render_lucide_icon(
                         LucideIcon::Brain,
                         12.0,
@@ -867,12 +877,12 @@ impl WorkspaceApp {
                     .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
                     .cursor_pointer()
                     .hover(|style| style.text_color(rgb(self.tokens.ui.text_muted)))
-                    .child(Self::render_lucide_icon(
-                        if expanded {
-                            LucideIcon::ChevronDown
-                        } else {
-                            LucideIcon::ChevronRight
-                        },
+                    .child(self.render_animated_chevron(
+                        (
+                            gpui::SharedString::from(format!("raw-tool-chevron-{expanded_key}")),
+                            expanded as usize,
+                        ),
+                        expanded,
                         12.0,
                         rgba((self.tokens.ui.text_muted << 8) | 0x99),
                     ))
@@ -939,8 +949,14 @@ impl WorkspaceApp {
                 &self.tokens,
                 self.i18n.t("ai.thinking.thought"),
                 Self::render_lucide_icon(LucideIcon::Brain, 12.0, rgb(self.tokens.ui.text_muted)),
-                Self::render_lucide_icon(
-                    LucideIcon::ChevronRight,
+                self.render_animated_chevron(
+                    (
+                        gpui::SharedString::from(format!(
+                            "thinking-stream-chevron-{thinking_key}"
+                        )),
+                        thinking_expanded as usize,
+                    ),
+                    thinking_expanded,
                     12.0,
                     rgb(self.tokens.ui.text_muted),
                 ),
@@ -969,16 +985,19 @@ impl WorkspaceApp {
         }
 
         let toggle_key = thinking_key.clone();
-        let chevron = if thinking_expanded {
-            LucideIcon::ChevronDown
-        } else {
-            LucideIcon::ChevronRight
-        };
         let header = ai_thinking_header(
             &self.tokens,
             self.i18n.t("ai.thinking.thought"),
             streaming,
-            Self::render_lucide_icon(chevron, 12.0, rgb(self.tokens.ui.text_muted)),
+            self.render_animated_chevron(
+                (
+                    gpui::SharedString::from(format!("thinking-stream-chevron-{thinking_key}")),
+                    thinking_expanded as usize,
+                ),
+                thinking_expanded,
+                12.0,
+                rgb(self.tokens.ui.text_muted),
+            ),
             Self::render_lucide_icon(LucideIcon::Brain, 12.0, rgb(self.tokens.ui.text_muted)),
         )
         .on_mouse_down(
@@ -1115,12 +1134,12 @@ impl WorkspaceApp {
                             cx,
                         ),
                     ))
-                    .child(Self::render_lucide_icon(
-                        if show_condensed {
-                            LucideIcon::ChevronDown
-                        } else {
-                            LucideIcon::ChevronRight
-                        },
+                    .child(self.render_animated_chevron(
+                        (
+                            gpui::SharedString::from(format!("tool-condensed-chevron-{expanded_key}")),
+                            show_condensed as usize,
+                        ),
+                        show_condensed,
                         12.0,
                         rgba((self.tokens.ui.text_muted << 8) | 0x80),
                     ))
@@ -1221,22 +1240,33 @@ impl WorkspaceApp {
                     &self.tokens,
                     &view,
                     expanded,
-                    Self::render_lucide_icon(
-                        ai_tool_status_icon(status),
-                        12.0,
-                        rgb(ai_tool_status_color(&self.tokens, status)),
-                    ),
+                    if matches!(status, AiToolStatus::Running | AiToolStatus::Approved) {
+                        self.render_loading_icon(
+                            (
+                                gpui::SharedString::from(format!("ai-tool-status-{expansion_key}")),
+                                0usize,
+                            ),
+                            12.0,
+                            rgb(ai_tool_status_color(&self.tokens, status)),
+                        )
+                    } else {
+                        Self::render_lucide_icon(
+                            ai_tool_status_icon(status),
+                            12.0,
+                            rgb(ai_tool_status_color(&self.tokens, status)),
+                        )
+                    },
                     Self::render_lucide_icon(
                         LucideIcon::Wrench,
                         12.0,
                         rgba((self.tokens.ui.text_muted << 8) | 0x99),
                     ),
-                    Self::render_lucide_icon(
-                        if expanded {
-                            LucideIcon::ChevronDown
-                        } else {
-                            LucideIcon::ChevronRight
-                        },
+                    self.render_animated_chevron(
+                        (
+                            gpui::SharedString::from(format!("tool-call-chevron-{expansion_key}")),
+                            expanded as usize,
+                        ),
+                        expanded,
                         12.0,
                         rgba((self.tokens.ui.text_muted << 8) | 0x80),
                     ),
@@ -1380,8 +1410,8 @@ impl WorkspaceApp {
                     .py(px(self.tokens.spacing.two))
                     .text_size(px(11.0))
                     .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::LoaderCircle,
+                    .child(self.render_loading_icon(
+                        "ai-awaiting-tool-summary",
                         14.0,
                         rgba((self.tokens.ui.accent << 8) | 0xb3),
                     ))

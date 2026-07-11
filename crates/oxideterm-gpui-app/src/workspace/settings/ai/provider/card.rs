@@ -178,12 +178,15 @@ impl WorkspaceApp {
                     .when(!active_provider, |row| {
                         row.child(self.ai_provider_active_button(provider, active_provider, cx))
                     })
-                    .child(Self::render_lucide_icon(
-                        if expanded {
-                            LucideIcon::ChevronDown
-                        } else {
-                            LucideIcon::ChevronRight
-                        },
+                    .child(self.render_animated_chevron(
+                        (
+                            gpui::SharedString::from(format!(
+                                "ai-provider-chevron-{}",
+                                provider.id
+                            )),
+                            expanded as usize,
+                        ),
+                        expanded,
                         16.0,
                         rgb(self.tokens.ui.text_muted),
                     )),

@@ -123,11 +123,19 @@ impl WorkspaceApp {
                                 cx,
                             ))
                     })
-                    .child(Self::render_lucide_icon(
-                        preview_icon,
-                        FILE_MANAGER_ICON_MD,
-                        rgb(theme.text_muted),
-                    ))
+                    .child(if matches!(preview_icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon(
+                            "file-manager-preview-header-loading",
+                            FILE_MANAGER_ICON_MD,
+                            rgb(theme.text_muted),
+                        )
+                    } else {
+                        Self::render_lucide_icon(
+                            preview_icon,
+                            FILE_MANAGER_ICON_MD,
+                            rgb(theme.text_muted),
+                        )
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -1754,11 +1762,15 @@ impl WorkspaceApp {
             .justify_center()
             .gap(px(10.0))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(Self::render_lucide_icon(
-                icon,
-                40.0,
-                rgb(self.tokens.ui.text_muted),
-            ))
+            .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                self.render_loading_icon(
+                    "file-manager-preview-loading",
+                    40.0,
+                    rgb(self.tokens.ui.text_muted),
+                )
+            } else {
+                Self::render_lucide_icon(icon, 40.0, rgb(self.tokens.ui.text_muted))
+            })
             .child(div().text_size(px(FILE_MANAGER_TEXT_SM)).child(
                 self.render_selectable_text_scoped(
                     "file-manager-preview-status-title",

@@ -8,10 +8,7 @@
 //! JSON shape, color normalization, and editor value conversion.
 
 use oxideterm_settings::PersistedSettings;
-use oxideterm_theme::{
-    AppUiColors, BUILT_IN_THEMES, TerminalTheme, ThemeTokens, derive_ui_colors_from_terminal,
-    theme_by_id,
-};
+use oxideterm_theme::{AppUiColors, BUILT_IN_THEMES, TerminalTheme, ThemeTokens, theme_by_id};
 
 pub const CUSTOM_THEME_PREFIX: &str = "custom:";
 const CUSTOM_THEME_IMPORT_VERSION: u64 = 1;
@@ -239,7 +236,9 @@ pub fn theme_editor_from_settings(
         .unwrap_or_else(|| {
             let duplicate_theme = fallback_id.clone();
             let terminal = theme_by_id(&duplicate_theme).terminal;
-            let ui = derive_ui_colors_from_terminal(terminal);
+            // Built-in duplication must preserve the same calibrated UI
+            // palette that the running application renders.
+            let ui = ThemeTokens::from_builtin(theme_by_id(&duplicate_theme)).ui;
             (default_name, duplicate_theme, terminal, ui)
         });
 
@@ -525,7 +524,9 @@ pub fn editor_terminal_theme(colors: &[String]) -> TerminalTheme {
 }
 
 pub fn editor_ui_colors(colors: &[String]) -> AppUiColors {
-    let fallback = derive_ui_colors_from_terminal(theme_by_id("azurite").terminal);
+    // Invalid editor fields fall back to the visible built-in Azurite palette,
+    // including its explicit UI overrides rather than a mechanical derivation.
+    let fallback = ThemeTokens::from_builtin(theme_by_id("azurite")).ui;
     let color = |index: usize, fallback: u32| {
         colors
             .get(index)
@@ -729,6 +730,44 @@ mod tests {
     fn custom_theme_slug_keeps_cjk_and_collapses_separators() {
         assert_eq!(slugify_custom_theme_name("My 主题!!"), "my-主题");
         assert_eq!(slugify_custom_theme_name("!!!"), "untitled");
+    }
+
+    #[test]
+    fn builtin_material_theme_display_names_remain_stable() {
+        // Theme names encode product and material identity and must not drift
+        // when their internal palettes are recalibrated.
+        for (id, display_name) in [
+            ("oxide", "Oxide"),
+            ("verdigris", "Verdigris"),
+            ("silver-oxide", "Silver Oxide"),
+            ("cuprite", "Cuprite"),
+            ("chromium-oxide", "Chromium Oxide"),
+            ("paper-oxide", "Paper Oxide"),
+            ("magnetite", "Magnetite"),
+            ("cobalt", "Cobalt"),
+            ("ochre", "Ochre"),
+            ("azurite", "Azurite"),
+            ("malachite", "Malachite"),
+            ("hematite", "Hematite"),
+            ("bismuth", "Bismuth"),
+        ] {
+            assert_eq!(theme_display_name(id), display_name);
+        }
+    }
+
+    #[test]
+    fn builtin_theme_duplication_preserves_calibrated_ui_palette() {
+        let mut settings = PersistedSettings::default();
+        settings.terminal.theme = "oxide".to_string();
+
+        let editor = theme_editor_from_settings(&settings, None, "Oxide Copy".to_string());
+        let expected = ThemeTokens::from_builtin(theme_by_id("oxide"));
+
+        assert_eq!(
+            editor.terminal_colors,
+            terminal_theme_to_colors(expected.terminal)
+        );
+        assert_eq!(editor.ui_colors, app_ui_colors_to_colors(expected.ui));
     }
 
     #[test]

@@ -133,8 +133,6 @@ pub fn context_menu_content(tokens: &ThemeTokens) -> Div {
         .min_w(px(tokens.metrics.ui_menu_min_width))
         .p(px(tokens.metrics.ui_menu_padding))
         .line_height(px(context_menu_line_height(tokens)))
-        // Context menus float above other overlays and need stronger elevation.
-        .shadow_xl()
 }
 
 pub fn context_menu_sub_content(tokens: &ThemeTokens) -> Div {

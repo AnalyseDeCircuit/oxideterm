@@ -47,9 +47,9 @@ pub fn settings_appearance_card_shell(
         .gap(px(tokens.metrics.settings_card_gap))
         .child(header)
         .children(rows);
-    oxideterm_gpui_ui::tauri_card_surface(
+    oxideterm_gpui_ui::theme_card_surface(
         card,
-        tokens.ui.bg_card,
+        tokens,
         background_active,
         SETTINGS_BG_ACTIVE_SURFACE_ALPHA,
     )

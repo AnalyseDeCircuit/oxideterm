@@ -723,12 +723,12 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 )
-                .child(Self::render_lucide_icon(
-                    if expanded {
-                        LucideIcon::ChevronDown
-                    } else {
-                        LucideIcon::ChevronRight
-                    },
+                .child(self.render_animated_chevron(
+                    (
+                        gpui::SharedString::from(format!("session-group-chevron-{group}")),
+                        expanded as usize,
+                    ),
+                    expanded,
                     16.0,
                     rgb(theme.text_muted),
                 ))

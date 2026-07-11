@@ -229,20 +229,30 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .overflow_hidden()
                             .child(
-                                self.terminal_command_action_button(
-                                    if input_collapsed {
-                                        LucideIcon::ChevronRight
-                                    } else {
-                                        LucideIcon::ChevronDown
+                                oxideterm_gpui_ui::button::icon_button(
+                                    &self.tokens,
+                                    self.render_animated_chevron(
+                                        (
+                                            "terminal-command-input-chevron",
+                                            (!input_collapsed) as usize,
+                                        ),
+                                        !input_collapsed,
+                                        14.0,
+                                        rgb(theme.text_muted),
+                                    ),
+                                    IconButtonOptions {
+                                        background: Some(if input_collapsed {
+                                            rgba((theme.bg_hover << 8) | 0x99)
+                                        } else {
+                                            rgba(0x00000000)
+                                        }),
+                                        hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                                        ..IconButtonOptions::opaque_toolbar(24.0, ButtonRadius::Md)
                                     },
-                                    rgb(theme.text_muted),
-                                    false,
-                                    Some(if input_collapsed {
-                                        rgba((theme.bg_hover << 8) | 0x99)
-                                    } else {
-                                        rgba(0x00000000)
-                                    }),
-                                    |this, _event, _window, cx| {
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _event, _window, cx| {
                                         this.terminal_command_input_collapsed =
                                             !this.terminal_command_input_collapsed;
                                         // Collapsing is visual-only. Keep the draft, but release
@@ -259,8 +269,7 @@ impl WorkspaceApp {
                                         this.clear_workspace_tooltip(input_toggle_tooltip_id, cx);
                                         cx.stop_propagation();
                                         cx.notify();
-                                    },
-                                    cx,
+                                    }),
                                 )
                                 .id(input_toggle_tooltip_id)
                                 .on_mouse_move({
@@ -878,7 +887,13 @@ impl WorkspaceApp {
             );
         }
 
-        menu.into_any_element()
+        // Target toggles redraw the persistent menu without replaying its entrance.
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "terminal-broadcast-menu-enter",
+            menu,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(super) fn render_terminal_broadcast_menu_action(

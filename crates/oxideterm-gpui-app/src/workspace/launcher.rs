@@ -1128,11 +1128,19 @@ impl WorkspaceApp {
             .justify_center()
             .gap(px(12.0))
             .px(px(32.0))
-            .child(Self::render_lucide_icon(
-                icon,
-                if action.is_some() { 32.0 } else { 24.0 },
-                rgba((icon_color << 8) | 0xcc),
-            ))
+            .child(if matches!(icon, LucideIcon::LoaderCircle) {
+                self.render_loading_icon(
+                    "launcher-center-loading",
+                    if action.is_some() { 32.0 } else { 24.0 },
+                    rgba((icon_color << 8) | 0xcc),
+                )
+            } else {
+                Self::render_lucide_icon(
+                    icon,
+                    if action.is_some() { 32.0 } else { 24.0 },
+                    rgba((icon_color << 8) | 0xcc),
+                )
+            })
             .child(
                 div()
                     .text_size(px(14.0))

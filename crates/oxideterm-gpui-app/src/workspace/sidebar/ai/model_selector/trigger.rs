@@ -14,7 +14,11 @@ impl WorkspaceApp {
         if enabled_providers.is_empty() {
             return ai_model_selector_no_provider_button(
                 &self.tokens,
-                Self::render_lucide_icon(LucideIcon::Settings, 12.0, rgb(self.tokens.ui.accent)),
+                Self::render_lucide_icon(
+                    LucideIcon::Settings,
+                    12.0,
+                    rgb(self.tokens.ui.text_muted),
+                ),
                 self.i18n.t("ai.model_selector.no_provider"),
             )
             .on_mouse_down(
@@ -50,11 +54,6 @@ impl WorkspaceApp {
                     && self.ai_model_selector_provider_is_online(provider)
             })
             .unwrap_or(false);
-        let chevron = if selector_open {
-            LucideIcon::ChevronDown
-        } else {
-            LucideIcon::ChevronRight
-        };
         let trigger = ai_model_selector_trigger_compact(
             &self.tokens,
             model_selector_truncated_label(&display),
@@ -64,7 +63,15 @@ impl WorkspaceApp {
                 selector_open,
                 self.ai.models.selector_focus_origin,
             ),
-            Self::render_lucide_icon(chevron, 12.0, rgb(self.tokens.ui.text_muted)),
+            self.render_animated_chevron(
+                (
+                    "ai-model-selector-trigger-chevron",
+                    selector_open as usize,
+                ),
+                selector_open,
+                12.0,
+                rgb(self.tokens.ui.text_muted),
+            ),
         )
         .on_mouse_down(
             MouseButton::Left,
@@ -91,7 +98,7 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        ai_model_selector_dropdown(&self.tokens, AiModelSelectorPlacement::Up)
+        let dropdown = ai_model_selector_dropdown(&self.tokens, AiModelSelectorPlacement::Up)
             .child(self.render_ai_model_selector_search(cx))
             .child(self.render_ai_model_selector_list(providers, cx))
             .child(
@@ -112,8 +119,14 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 ),
-            )
-            .into_any_element()
+            );
+        // Provider status updates must not restart the open dropdown timeline.
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "ai-model-selector-enter",
+            dropdown,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(in crate::workspace) fn render_ai_model_selector_search(

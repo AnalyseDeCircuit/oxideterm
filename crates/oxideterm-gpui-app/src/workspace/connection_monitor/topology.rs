@@ -821,7 +821,7 @@ impl WorkspaceApp {
                 ));
         }
 
-        context_menu_event_boundary(
+        let menu_body = context_menu_event_boundary(
             div()
                 .absolute()
                 .left(px(menu.x))
@@ -898,7 +898,17 @@ impl WorkspaceApp {
                     cx,
                 )),
         )
-        .into_any_element()
+        .into_any_element();
+
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            (
+                gpui::SharedString::from(format!("topology-node-menu-enter-{menu_key}")),
+                0usize,
+            ),
+            div().child(menu_body),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     fn render_topology_menu_action(

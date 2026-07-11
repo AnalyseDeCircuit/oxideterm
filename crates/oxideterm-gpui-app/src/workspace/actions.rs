@@ -146,6 +146,11 @@ impl WorkspaceApp {
         settings.sidebar_ui.zen_mode = entering;
         if entering {
             self.sidebar_collapsed = true;
+            self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
+            self.context_sidebar_motion_generation =
+                self.context_sidebar_motion_generation.wrapping_add(1);
+            self.sidebar_rendered = false;
+            self.context_sidebar_rendered = false;
             settings.sidebar_ui.collapsed = true;
             settings.sidebar_ui.ai_sidebar_collapsed = true;
             self.clear_ai_sidebar_keyboard_focus();
@@ -161,6 +166,8 @@ impl WorkspaceApp {
             .detach();
         } else {
             self.sidebar_collapsed = false;
+            self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
+            self.sidebar_rendered = true;
             settings.sidebar_ui.collapsed = false;
             self.zen_hint_expires_at = None;
         }

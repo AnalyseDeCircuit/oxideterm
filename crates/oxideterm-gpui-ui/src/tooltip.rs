@@ -1,12 +1,14 @@
-use gpui::{Div, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{AnyElement, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
 use oxideterm_theme::ThemeTokens;
 
 pub fn tooltip_content(
     tokens: &ThemeTokens,
     label: impl Into<String>,
     shortcut: Option<String>,
-) -> Div {
-    div()
+) -> AnyElement {
+    let label = label.into();
+    let animation_id = gpui::ElementId::Name(format!("tooltip-enter-{label}").into());
+    let tooltip = div()
         .rounded(px(tokens.radii.xs))
         .border_1()
         .border_color(rgb(tokens.ui.border))
@@ -21,7 +23,7 @@ pub fn tooltip_content(
                 .flex()
                 .items_center()
                 .gap(px(tokens.spacing.two))
-                .child(label.into())
+                .child(label)
                 .when_some(shortcut, |row, shortcut| {
                     row.child(
                         div()
@@ -37,5 +39,11 @@ pub fn tooltip_content(
                             .child(shortcut),
                     )
                 }),
-        )
+        );
+    crate::motion::fade_in(
+        tokens,
+        animation_id,
+        tooltip,
+        crate::motion::MotionDuration::Micro,
+    )
 }

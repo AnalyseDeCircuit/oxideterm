@@ -566,6 +566,16 @@ impl WorkspaceApp {
         } else {
             (Corner::TopLeft, anchor.bounds.bottom_left(), popup_gap)
         };
+        // Keep the timeline stable across option highlighting and form redraws.
+        let popup = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            (
+                gpui::SharedString::from(format!("new-connection-select-enter-{select_id:?}")),
+                0usize,
+            ),
+            popup,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
 
         Some(
             popover_backdrop()
@@ -920,14 +930,14 @@ impl WorkspaceApp {
         // Proxy-chain expand/collapse is an icon-only toolbar action in the
         // Tauri form. Use the shared primitive so hover and future focus state
         // stay aligned with other new-connection toolbar controls.
-        self.workspace_icon_action_button(
-            if expanded {
-                LucideIcon::ChevronDown
-            } else {
-                LucideIcon::ChevronRight
-            },
-            16.0,
-            rgb(self.tokens.ui.text),
+        oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            self.render_animated_chevron(
+                ("proxy-chain-chevron", expanded as usize),
+                expanded,
+                16.0,
+                rgb(self.tokens.ui.text),
+            ),
             IconButtonOptions {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
                 ..IconButtonOptions::opaque_toolbar(
@@ -935,15 +945,17 @@ impl WorkspaceApp {
                     ButtonRadius::Md,
                 )
             },
-            |this, _event, _window, cx| {
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
                 if let Some(form) = this.new_connection_form.as_mut() {
                     form.proxy_chain_expanded = !form.proxy_chain_expanded;
                     form.field_focused = false;
                 }
                 cx.stop_propagation();
                 cx.notify();
-            },
-            cx,
+            }),
         )
         .into_any_element()
     }

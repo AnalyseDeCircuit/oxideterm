@@ -581,7 +581,13 @@ impl WorkspaceApp {
                 .child(sidebar)
                 .child(body),
         );
-        popover.into_any_element()
+        oxideterm_gpui_ui::motion::slide_fade_in_y(
+            &self.tokens,
+            "quick-commands-popover-enter",
+            popover,
+            4.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     fn render_quick_command_category_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {

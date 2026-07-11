@@ -1408,12 +1408,12 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t(title_key).to_uppercase(),
             summary,
-            Self::render_lucide_icon(
-                if expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
+            self.render_animated_chevron(
+                (
+                    gpui::SharedString::from(format!("ai-section-chevron-{title_key}")),
+                    expanded as usize,
+                ),
+                expanded,
                 16.0,
                 rgb(self.tokens.ui.text_muted),
             ),
@@ -1558,12 +1558,12 @@ impl WorkspaceApp {
             self.i18n.t("settings_view.ai.model_reasoning_overrides"),
             self.i18n
                 .t("settings_view.ai.model_reasoning_overrides_hint"),
-            Self::render_lucide_icon(
-                if self.settings_page.ai_model_reasoning_expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
+            self.render_animated_chevron(
+                (
+                    "ai-model-reasoning-chevron",
+                    self.settings_page.ai_model_reasoning_expanded as usize,
+                ),
+                self.settings_page.ai_model_reasoning_expanded,
                 16.0,
                 rgb(self.tokens.ui.text_muted),
             ),
@@ -1599,12 +1599,14 @@ impl WorkspaceApp {
                 .t("settings_view.ai.model_reasoning_provider_summary")
                 .replace("{{count}}", &panel.model_count.to_string())
                 .replace("{{overrides}}", &panel.override_count.to_string()),
-            Self::render_lucide_icon(
-                if expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
+            self.render_animated_chevron(
+                (
+                    gpui::SharedString::from(format!(
+                        "ai-model-reasoning-provider-chevron-{provider_id}"
+                    )),
+                    expanded as usize,
+                ),
+                expanded,
                 14.0,
                 rgb(self.tokens.ui.text_muted),
             ),
@@ -1774,12 +1776,12 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t("settings_view.ai.model_context_windows"),
             self.i18n.t("settings_view.ai.model_context_windows_hint"),
-            Self::render_lucide_icon(
-                if self.settings_page.ai_context_windows_expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
+            self.render_animated_chevron(
+                (
+                    "ai-context-windows-chevron",
+                    self.settings_page.ai_context_windows_expanded as usize,
+                ),
+                self.settings_page.ai_context_windows_expanded,
                 16.0,
                 rgb(self.tokens.ui.text_muted),
             ),
@@ -1816,12 +1818,12 @@ impl WorkspaceApp {
                 .t("settings_view.ai.ctx_provider_summary")
                 .replace("{{count}}", &panel.model_count.to_string())
                 .replace("{{overrides}}", &panel.override_count.to_string()),
-            Self::render_lucide_icon(
-                if expanded {
-                    LucideIcon::ChevronDown
-                } else {
-                    LucideIcon::ChevronRight
-                },
+            self.render_animated_chevron(
+                (
+                    gpui::SharedString::from(format!("ai-context-provider-chevron-{provider_id}")),
+                    expanded as usize,
+                ),
+                expanded,
                 14.0,
                 rgb(self.tokens.ui.text_muted),
             ),

@@ -276,8 +276,9 @@ impl WorkspaceApp {
         let hint = if self.tokens.motion.enabled {
             hint.with_animation(
                 ("detached-tab-return-drop-hint", drag.tab_id.0),
-                Animation::new(Duration::from_millis(
-                    self.tokens.motion.scaled_duration_ms(840),
+                Animation::new(oxideterm_gpui_ui::motion::scaled_duration(
+                    &self.tokens,
+                    840,
                 ))
                 .repeat(),
                 |hint, delta| {
@@ -286,7 +287,7 @@ impl WorkspaceApp {
                     } else {
                         (1.0 - delta) * 2.0
                     };
-                    hint.opacity(0.74 + pulse * 0.2)
+                    hint.opacity(0.74 + oxideterm_gpui_ui::motion::ease_in_out_cubic(pulse) * 0.2)
                 },
             )
             .into_any_element()
@@ -376,8 +377,9 @@ impl WorkspaceApp {
             preview
                 .with_animation(
                     ("tab-detach-drag-preview", drag.tab_id.0),
-                    Animation::new(Duration::from_millis(
-                        self.tokens.motion.scaled_duration_ms(760),
+                    Animation::new(oxideterm_gpui_ui::motion::scaled_duration(
+                        &self.tokens,
+                        760,
                     ))
                     .repeat(),
                     |preview, delta| {
@@ -386,7 +388,9 @@ impl WorkspaceApp {
                         } else {
                             (1.0 - delta) * 2.0
                         };
-                        preview.opacity(0.82 + pulse * 0.16)
+                        preview.opacity(
+                            0.82 + oxideterm_gpui_ui::motion::ease_in_out_cubic(pulse) * 0.16,
+                        )
                     },
                 )
                 .into_any_element()
@@ -475,8 +479,9 @@ impl WorkspaceApp {
             preview
                 .with_animation(
                     ("detached-tab-return-drag-preview", drag.tab_id.0),
-                    Animation::new(Duration::from_millis(
-                        self.tokens.motion.scaled_duration_ms(760),
+                    Animation::new(oxideterm_gpui_ui::motion::scaled_duration(
+                        &self.tokens,
+                        760,
                     ))
                     .repeat(),
                     |preview, delta| {
@@ -485,7 +490,9 @@ impl WorkspaceApp {
                         } else {
                             (1.0 - delta) * 2.0
                         };
-                        preview.opacity(0.82 + pulse * 0.16)
+                        preview.opacity(
+                            0.82 + oxideterm_gpui_ui::motion::ease_in_out_cubic(pulse) * 0.16,
+                        )
                     },
                 )
                 .into_any_element()
@@ -563,6 +570,12 @@ impl WorkspaceApp {
                     ),
                 ),
         );
+        let menu_body = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            ("tab-context-menu-enter", menu.tab_id.0),
+            overlay_content_boundary(menu_body),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
 
         Some(
             self.workspace_context_menu_backdrop(
@@ -571,7 +584,7 @@ impl WorkspaceApp {
                         .anchor(Corner::TopLeft)
                         .position(gpui::point(px(placement.x), px(placement.y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(overlay_content_boundary(menu_body)),
+                        .child(menu_body),
                 )
                 .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
                 cx,

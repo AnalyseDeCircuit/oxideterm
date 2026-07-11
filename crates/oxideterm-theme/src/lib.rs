@@ -473,6 +473,7 @@ pub enum UiMotionProfile {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiMotion {
     pub enabled: bool,
+    pub spatial_enabled: bool,
     pub short_duration_ms: u64,
     pub normal_duration_ms: u64,
     pub long_duration_ms: u64,
@@ -482,6 +483,7 @@ impl UiMotion {
     pub const fn normal() -> Self {
         Self {
             enabled: true,
+            spatial_enabled: true,
             short_duration_ms: 120,
             normal_duration_ms: 200,
             long_duration_ms: 300,
@@ -492,12 +494,14 @@ impl UiMotion {
         match profile {
             UiMotionProfile::Off => Self {
                 enabled: false,
+                spatial_enabled: false,
                 short_duration_ms: 0,
                 normal_duration_ms: 0,
                 long_duration_ms: 0,
             },
             UiMotionProfile::Reduced => Self {
                 enabled: true,
+                spatial_enabled: false,
                 short_duration_ms: 80,
                 normal_duration_ms: 120,
                 long_duration_ms: 150,
@@ -505,6 +509,7 @@ impl UiMotion {
             UiMotionProfile::Normal => Self::normal(),
             UiMotionProfile::Fast => Self {
                 enabled: true,
+                spatial_enabled: true,
                 short_duration_ms: 70,
                 normal_duration_ms: 110,
                 long_duration_ms: 160,
@@ -812,7 +817,47 @@ mod tests {
 
     #[test]
     fn has_all_tauri_builtin_themes() {
-        assert_eq!(BUILT_IN_THEMES.len(), 31);
+        const EXPECTED_THEME_IDS: [&str; 31] = [
+            "default",
+            "oxide",
+            "dracula",
+            "nord",
+            "solarized-dark",
+            "one-dark",
+            "monokai",
+            "catppuccin-mocha",
+            "github-dark",
+            "verdigris",
+            "silver-oxide",
+            "cuprite",
+            "chromium-oxide",
+            "paper-oxide",
+            "magnetite",
+            "cobalt",
+            "ochre",
+            "tokyo-night",
+            "gruvbox-dark",
+            "rose-pine",
+            "kanagawa",
+            "synthwave-84",
+            "azurite",
+            "malachite",
+            "hematite",
+            "bismuth",
+            "fairy-floss",
+            "sakura",
+            "hot-pink",
+            "spring-rice",
+            "spring-green",
+        ];
+        assert_eq!(BUILT_IN_THEMES.len(), EXPECTED_THEME_IDS.len());
+        assert_eq!(
+            BUILT_IN_THEMES
+                .iter()
+                .map(|theme| theme.id)
+                .collect::<Vec<_>>(),
+            EXPECTED_THEME_IDS
+        );
         let unique_ids = BUILT_IN_THEMES
             .iter()
             .map(|theme| theme.id)
@@ -834,10 +879,10 @@ mod tests {
     #[test]
     fn applies_tauri_css_theme_overrides() {
         let oxide = ThemeTokens::from_builtin(theme_by_id("oxide")).ui;
-        assert_eq!(oxide.bg_panel, 0x4a2613);
-        assert_eq!(oxide.bg_card, 0x522c17);
-        assert_eq!(oxide.border, 0x6d3c20);
-        assert_eq!(oxide.text_muted, 0xd4b49a);
+        assert_eq!(oxide.bg_panel, 0x291c16);
+        assert_eq!(oxide.bg_card, 0x33231b);
+        assert_eq!(oxide.border, 0x493126);
+        assert_eq!(oxide.text_muted, 0x9d887b);
 
         let github = ThemeTokens::from_builtin(theme_by_id("github-dark")).ui;
         assert_eq!(github.bg_panel, 0x161b22);
@@ -904,7 +949,104 @@ mod tests {
                     theme.id
                 );
             }
+            if [
+                "oxide",
+                "verdigris",
+                "silver-oxide",
+                "cuprite",
+                "chromium-oxide",
+                "paper-oxide",
+                "magnetite",
+                "cobalt",
+                "ochre",
+                "azurite",
+                "malachite",
+                "hematite",
+                "bismuth",
+            ]
+            .contains(&theme.id)
+            {
+                for (label, foreground, background, minimum) in [
+                    ("text/card", ui.text, ui.bg_card, 4.5),
+                    ("heading/background", ui.text_heading, ui.bg, 4.5),
+                    ("heading/card", ui.text_heading, ui.bg_card, 4.5),
+                    ("accent/background", ui.accent, ui.bg, 3.0),
+                ] {
+                    let ratio = color_contrast_ratio(foreground, background);
+                    assert!(
+                        ratio >= minimum,
+                        "{} {label} contrast {ratio:.2} is below {minimum:.1}",
+                        theme.id
+                    );
+                }
+                for (label, background) in [
+                    ("background", ui.bg),
+                    ("panel", ui.bg_panel),
+                    ("card", ui.bg_card),
+                ] {
+                    let ratio = color_contrast_ratio(ui.text_muted, background);
+                    assert!(
+                        ratio >= 3.0,
+                        "{} muted/{label} contrast {ratio:.2} is below 3.0",
+                        theme.id
+                    );
+                }
+            }
         }
+    }
+
+    #[test]
+    fn material_theme_accents_preserve_their_named_color_identity() {
+        let accent = |id| ThemeTokens::from_builtin(theme_by_id(id)).ui.accent;
+        let channels = |color: u32| {
+            (
+                ((color >> 16) & 0xff) as i32,
+                ((color >> 8) & 0xff) as i32,
+                (color & 0xff) as i32,
+            )
+        };
+
+        let (oxide_r, oxide_g, oxide_b) = channels(accent("oxide"));
+        assert!(oxide_r > oxide_g && oxide_g > oxide_b);
+        let (verdigris_r, verdigris_g, verdigris_b) = channels(accent("verdigris"));
+        assert!(verdigris_g > verdigris_b && verdigris_b > verdigris_r);
+        let (silver_r, silver_g, silver_b) = channels(accent("silver-oxide"));
+        assert!(
+            [silver_r, silver_g, silver_b].iter().max().unwrap()
+                - [silver_r, silver_g, silver_b].iter().min().unwrap()
+                <= 5
+        );
+
+        for id in ["cuprite", "hematite"] {
+            let (red, green, blue) = channels(accent(id));
+            assert!(
+                red > green && red > blue,
+                "{id} keeps an iron/copper red accent"
+            );
+        }
+        for id in ["chromium-oxide", "malachite"] {
+            let (red, green, blue) = channels(accent(id));
+            assert!(
+                green > red && green > blue,
+                "{id} keeps a mineral green accent"
+            );
+        }
+        for id in ["cobalt", "azurite"] {
+            let (red, green, blue) = channels(accent(id));
+            assert!(
+                blue > green && green > red,
+                "{id} keeps a mineral blue accent"
+            );
+        }
+        let (ochre_r, ochre_g, ochre_b) = channels(accent("ochre"));
+        assert!(ochre_r > ochre_g && ochre_g > ochre_b);
+        let (bismuth_r, bismuth_g, bismuth_b) = channels(accent("bismuth"));
+        assert!(bismuth_r > bismuth_g && bismuth_b > bismuth_g);
+
+        let paper = ThemeTokens::from_builtin(theme_by_id("paper-oxide")).ui;
+        assert!(color_relative_luminance(paper.bg) > 0.75);
+        let magnetite = ThemeTokens::from_builtin(theme_by_id("magnetite")).ui;
+        assert!(color_relative_luminance(magnetite.bg) < 0.03);
     }
 
     #[test]
@@ -912,14 +1054,17 @@ mod tests {
         let mut tokens = default_tokens();
         tokens.apply_motion(UiMotionProfile::Reduced);
         assert!(tokens.motion.enabled);
+        assert!(!tokens.motion.spatial_enabled);
         assert!(tokens.motion.normal_duration_ms < UiMotion::normal().normal_duration_ms);
 
         tokens.apply_motion(UiMotionProfile::Off);
         assert!(!tokens.motion.enabled);
+        assert!(!tokens.motion.spatial_enabled);
         assert_eq!(tokens.motion.long_duration_ms, 0);
         assert_eq!(tokens.motion.scaled_duration_ms(840), 0);
 
         tokens.apply_motion(UiMotionProfile::Fast);
+        assert!(tokens.motion.spatial_enabled);
         assert!(tokens.motion.scaled_duration_ms(840) < 840);
     }
 }

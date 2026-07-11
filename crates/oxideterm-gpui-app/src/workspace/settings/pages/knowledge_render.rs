@@ -636,11 +636,7 @@ impl WorkspaceApp {
         } else {
             self.tokens.ui.text_muted
         };
-        let chevron = if self.settings_page.knowledge_embedding_config_expanded {
-            LucideIcon::ChevronDown
-        } else {
-            LucideIcon::ChevronRight
-        };
+        let embeddings_expanded = self.settings_page.knowledge_embedding_config_expanded;
 
         div()
             .rounded(px(self.tokens.radii.lg))
@@ -746,8 +742,9 @@ impl WorkspaceApp {
                                 rgb(self.tokens.ui.text),
                             ))
                             .child(self.i18n.t("settings_view.knowledge.configure_embeddings"))
-                            .child(Self::render_lucide_icon(
-                                chevron,
+                            .child(self.render_animated_chevron(
+                                ("knowledge-embedding-chevron", embeddings_expanded as usize),
+                                embeddings_expanded,
                                 KNOWLEDGE_INLINE_ICON_SIZE,
                                 rgb(self.tokens.ui.text_muted),
                             ))

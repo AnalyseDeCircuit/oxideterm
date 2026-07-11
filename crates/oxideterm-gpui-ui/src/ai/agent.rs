@@ -510,7 +510,7 @@ pub fn ai_agent_code_badge(tokens: &ThemeTokens, label: impl Into<String>) -> Di
         .px(px(tokens.spacing.one + tokens.spacing.one / 2.0))
         .py(px(tokens.spacing.one / 2.0))
         .text_size(px(AI_TEXT_12))
-        .text_color(rgb(tokens.ui.accent))
+        .text_color(rgb(tokens.ui.text_secondary))
         .child(label.into())
 }
 

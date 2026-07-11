@@ -248,8 +248,22 @@ where
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
 }
 
-pub fn dialog_overlay(_tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
-    dialog_backdrop().child(dialog).into_any_element()
+pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
+    let dialog = crate::motion::slide_fade_in_y(
+        tokens,
+        "dialog-content-enter",
+        div().child(dialog),
+        6.0,
+        crate::motion::MotionDuration::Overlay,
+    );
+    // The backdrop and content retain the existing event island; animation is
+    // applied only to visual wrappers and never delays focus or dismissal.
+    crate::motion::fade_in(
+        tokens,
+        "dialog-backdrop-enter",
+        dialog_backdrop().child(dialog),
+        crate::motion::MotionDuration::Control,
+    )
 }
 
 pub fn modal_container(tokens: &ThemeTokens) -> Div {

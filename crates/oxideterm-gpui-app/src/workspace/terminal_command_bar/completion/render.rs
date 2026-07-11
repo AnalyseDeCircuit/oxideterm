@@ -172,7 +172,13 @@ impl WorkspaceApp {
                     )),
             );
         }
-        menu.into_any_element()
+        // Suggestion refreshes keep one timeline while the popup remains mounted.
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "terminal-command-suggestions-enter",
+            menu,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 }
 

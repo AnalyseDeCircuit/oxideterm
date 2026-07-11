@@ -224,9 +224,7 @@ impl WorkspaceApp {
         } else {
             ""
         };
-        let icon = if form.password_loading {
-            LucideIcon::LoaderCircle
-        } else if form.password_visible {
+        let icon = if form.password_visible {
             LucideIcon::EyeOff
         } else {
             LucideIcon::Eye
@@ -248,29 +246,50 @@ impl WorkspaceApp {
                     ),
                 )
                 .child(
-                    self.workspace_icon_action_button(
-                        icon,
-                        TAURI_PASSWORD_ICON_SIZE,
-                        rgb(self.tokens.ui.text_muted),
-                        IconButtonOptions {
-                            loading: form.password_loading,
-                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                            // Tauri places the reveal affordance inside the
-                            // password input as an icon-only toolbar button.
-                            // Keep size/radius/loading in the shared primitive
-                            // so password-like controls do not hand-roll div
-                            // opacity and cursor semantics.
-                            ..IconButtonOptions::opaque_toolbar(
-                                TAURI_PASSWORD_ICON_BUTTON_SIZE,
-                                ButtonRadius::Sm,
-                            )
-                        },
-                        |this, _event, _window, cx| {
-                            this.toggle_edit_saved_password_visibility(cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    )
+                    if form.password_loading {
+                        oxideterm_gpui_ui::button::icon_button(
+                            &self.tokens,
+                            self.render_loading_icon(
+                                "saved-password-loading",
+                                TAURI_PASSWORD_ICON_SIZE,
+                                rgb(self.tokens.ui.text_muted),
+                            ),
+                            IconButtonOptions {
+                                loading: true,
+                                hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                                ..IconButtonOptions::opaque_toolbar(
+                                    TAURI_PASSWORD_ICON_BUTTON_SIZE,
+                                    ButtonRadius::Sm,
+                                )
+                            },
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            |_event, _window, cx| {
+                                cx.stop_propagation();
+                            },
+                        )
+                    } else {
+                        self.workspace_icon_action_button(
+                            icon,
+                            TAURI_PASSWORD_ICON_SIZE,
+                            rgb(self.tokens.ui.text_muted),
+                            IconButtonOptions {
+                                hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                                // Tauri places the reveal affordance inside the
+                                // password input as an icon-only toolbar button.
+                                ..IconButtonOptions::opaque_toolbar(
+                                    TAURI_PASSWORD_ICON_BUTTON_SIZE,
+                                    ButtonRadius::Sm,
+                                )
+                            },
+                            |this, _event, _window, cx| {
+                                this.toggle_edit_saved_password_visibility(cx);
+                                cx.stop_propagation();
+                            },
+                            cx,
+                        )
+                    }
                     .absolute()
                     .right(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
                     .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET)),
@@ -2156,15 +2175,19 @@ impl WorkspaceApp {
                     )
                     .child(self.workspace_toolbar_action_button(
                         self.i18n.t("modals.new_connection.serial_refresh_ports"),
-                        Some(Self::render_lucide_icon(
-                            if loading {
-                                LucideIcon::LoaderCircle
-                            } else {
-                                LucideIcon::RefreshCw
-                            },
-                            14.0,
-                            rgb(self.tokens.ui.text),
-                        )),
+                        Some(if loading {
+                            self.render_loading_icon(
+                                "serial-ports-loading",
+                                14.0,
+                                rgb(self.tokens.ui.text),
+                            )
+                        } else {
+                            Self::render_lucide_icon(
+                                LucideIcon::RefreshCw,
+                                14.0,
+                                rgb(self.tokens.ui.text),
+                            )
+                        }),
                         ToolbarButtonOptions {
                             button: ButtonOptions {
                                 variant: ButtonVariant::Outline,

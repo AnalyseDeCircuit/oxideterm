@@ -291,10 +291,12 @@ impl WorkspaceApp {
                 .has_background_image(self.settings_background_active()),
         );
         // Settings cards already own their inner padding and children, so only
-        // the shared chrome colors are applied here.
-        card.rounded(px(chrome.radius))
+        // shared chrome and theme-aware elevation are applied here.
+        let card = card
+            .rounded(px(chrome.radius))
             .border_color(chrome.border)
-            .bg(chrome.background)
+            .bg(chrome.background);
+        oxideterm_gpui_ui::theme_card_surface_shadow(card, &self.tokens)
     }
 
     pub(in crate::workspace) fn text_badge(&self, label: String, color: u32) -> AnyElement {
@@ -427,7 +429,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(theme.border))
             .bg(self.settings_panel_background(theme.bg_card))
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .shadow(oxideterm_gpui_ui::theme_card_shadow(&self.tokens))
             .p(px(8.0));
 
         for page in TerminalSettingsPage::all() {
@@ -495,7 +497,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(theme.border))
             .bg(self.settings_panel_background(theme.bg_card))
-            .shadow(oxideterm_gpui_ui::tauri_card_shadow(theme.bg_card))
+            .shadow(oxideterm_gpui_ui::theme_card_shadow(&self.tokens))
             .p(px(8.0));
 
         for page in AiSettingsPage::all() {

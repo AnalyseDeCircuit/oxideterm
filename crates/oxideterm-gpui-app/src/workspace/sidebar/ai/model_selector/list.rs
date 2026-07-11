@@ -75,12 +75,15 @@ impl WorkspaceApp {
             let header = ai_model_selector_provider_header(
                 &self.tokens,
                 provider.name.clone(),
-                Self::render_lucide_icon(
-                    if expanded {
-                        LucideIcon::ChevronDown
-                    } else {
-                        LucideIcon::ChevronRight
-                    },
+                self.render_animated_chevron(
+                    (
+                        gpui::SharedString::from(format!(
+                            "model-provider-chevron-{}",
+                            provider.id
+                        )),
+                        expanded as usize,
+                    ),
+                    expanded,
                     12.0,
                     rgb(self.tokens.ui.accent),
                 ),
