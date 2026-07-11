@@ -98,7 +98,15 @@ impl WorkspaceApp {
         let content = oxideterm_gpui_ui::motion::fade_in(
             &self.tokens,
             SharedString::from(format!("host-tools-page-{active_tool:?}")),
-            div().size_full().child(content),
+            div()
+                .w_full()
+                .min_w_0()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .child(content),
             oxideterm_gpui_ui::motion::MotionDuration::Micro,
         );
         div()

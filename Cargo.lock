@@ -7782,6 +7782,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tracing",
+ "uuid",
  "windows 0.61.3",
 ]
 

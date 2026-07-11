@@ -82,7 +82,7 @@ impl SshPtySession {
             let consumer = config.consumer.clone();
             let prompt_handler = config.prompt_handler.clone();
             let managed_key_resolver = config.managed_key_resolver.clone();
-            let shell_startup_input = config.remote_metadata_startup_input();
+            let shell_bootstrap = config.remote_metadata_bootstrap();
             runtime_handle.spawn(async move {
                 let mut client = SshTransportClient::new(ssh_config);
                 if let Some(prompt_handler) = prompt_handler {
@@ -91,7 +91,7 @@ impl SshPtySession {
                 if let Some(resolver) = managed_key_resolver {
                     client = client.with_managed_key_resolver(resolver);
                 }
-                client = client.with_shell_startup_input(shell_startup_input);
+                client = client.with_shell_bootstrap(shell_bootstrap);
                 let result = match (registry, consumer) {
                     (Some(registry), Some(consumer)) => {
                         client.connect_shell_with_registry(registry, consumer).await

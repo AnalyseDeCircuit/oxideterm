@@ -320,7 +320,11 @@ impl SshConnectionHandle {
                     } => {
                         exit_status = Some(status);
                     }
-                    ChannelMsg::Eof | ChannelMsg::Close => break,
+                    // EOF only closes the remote output stream. ExitStatus can
+                    // still follow, so wait for Close before evaluating the
+                    // command result.
+                    ChannelMsg::Eof => {}
+                    ChannelMsg::Close => break,
                     _ => {}
                 }
                 if output.len() > max_output_size {

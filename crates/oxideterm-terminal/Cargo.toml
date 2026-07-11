@@ -21,6 +21,7 @@ serialport.workspace = true
 tokio.workspace = true
 tokio-native-tls = "0.3"
 tracing.workspace = true
+uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }

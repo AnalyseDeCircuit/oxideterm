@@ -281,6 +281,47 @@ pub struct SshCommandOutput {
     pub truncated: bool,
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub struct SshShellBootstrap {
+    stage_command: String,
+    launch_input: String,
+    cleanup_command: String,
+}
+
+impl SshShellBootstrap {
+    pub fn new(stage_command: String, launch_input: String, cleanup_command: String) -> Self {
+        Self {
+            stage_command,
+            launch_input,
+            cleanup_command,
+        }
+    }
+
+    pub fn stage_command(&self) -> &str {
+        &self.stage_command
+    }
+
+    pub fn launch_input(&self) -> &str {
+        &self.launch_input
+    }
+
+    pub fn cleanup_command(&self) -> &str {
+        &self.cleanup_command
+    }
+}
+
+impl std::fmt::Debug for SshShellBootstrap {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Bootstrap commands contain the private OSC session token and must stay redacted.
+        formatter
+            .debug_struct("SshShellBootstrap")
+            .field("stage_command", &"<redacted>")
+            .field("launch_input_bytes", &self.launch_input.len())
+            .field("cleanup_command", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub enum SshTransportCommand {
     Data(Vec<u8>),
@@ -529,7 +570,7 @@ pub struct SshTransportClient {
     config: SshConfig,
     prompt_handler: Option<Arc<dyn SshPromptHandler>>,
     managed_key_resolver: Option<ManagedKeyResolver>,
-    shell_startup_input: Option<String>,
+    shell_bootstrap: Option<SshShellBootstrap>,
 }
 
 include!("transport/connection.rs");
