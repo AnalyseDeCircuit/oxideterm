@@ -226,7 +226,13 @@ impl WorkspaceApp {
             scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::horizontal_reveal(
                 &self.tokens,
                 ("workspace-tab-open", tab_id.0),
-                div().w(px(tab_width)).h_full().child(tab_element),
+                // The animated wrapper is the scroll viewport's direct flex
+                // child, so it must retain the tab width for overflow measurement.
+                div()
+                    .w(px(tab_width))
+                    .h_full()
+                    .flex_none()
+                    .child(tab_element),
                 tab_width,
                 true,
             ));

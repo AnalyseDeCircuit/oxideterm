@@ -166,7 +166,9 @@
   },
   "plugin": {
     "manager_title": "プラグイン管理",
-    "manager_description": "Native プラグインは native runtime（manifest-only / WASM / process）を使用します。Tauri legacy-js プラグインは検出、確認、アンインストールはできますが、native 版では実行できません。",
+    "manager_description": "インストール済みプラグインの管理とレジストリの閲覧",
+    "compatibility_title": "互換性",
+    "manager_compatibility_notice": "ネイティブプラグインはマニフェスト、WASM、または別プロセスを使用できます。Tauri 版の旧 JavaScript プラグインは引き続き確認またはアンインストールできますが、ネイティブ版では実行できません。",
     "native_description": "native のプラグインホストはまだ有効化されていません。",
     "native_empty_title": "native ではプラグインシステムは未対応です",
     "native_empty_description": "OxideTerm native はプラグイン入口を保持しますが、WebView を使わないプラグイン API は設計中です。インストール、有効化、マーケット、ランタイム操作はまだ提供しません。",

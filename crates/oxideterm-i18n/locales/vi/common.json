@@ -166,7 +166,9 @@
   },
   "plugin": {
     "manager_title": "Quản lý plugin",
-    "manager_description": "Plugin native dùng native runtime (manifest-only / WASM / process); plugin Tauri legacy-js có thể được phát hiện, xem thông tin hoặc gỡ cài đặt, nhưng không chạy trong bản native.",
+    "manager_description": "Quản lý các plugin đã cài đặt và duyệt kho plugin",
+    "compatibility_title": "Khả năng tương thích",
+    "manager_compatibility_notice": "Plugin gốc có thể dùng tệp khai báo, WASM hoặc một tiến trình riêng. Plugin JavaScript cũ từ phiên bản Tauri vẫn có thể được xem hoặc gỡ cài đặt, nhưng không thể chạy trong phiên bản gốc.",
     "native_description": "Máy chủ plugin native chưa được bật.",
     "native_empty_title": "Hệ thống plugin chưa khả dụng trong native",
     "native_empty_description": "OxideTerm native giữ lối vào plugin trong khi API plugin không dùng WebView đang được thiết kế. Cài đặt, bật, chợ plugin và thao tác runtime chưa được cung cấp.",

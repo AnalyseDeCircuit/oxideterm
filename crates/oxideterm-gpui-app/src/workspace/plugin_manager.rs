@@ -12,7 +12,7 @@ use oxideterm_plugin_runtime_install as runtime_install;
 use std::{process::Command, sync::mpsc};
 
 const PLUGIN_MANAGER_DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 4;
+const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 5;
 const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
 const PLUGIN_MANAGER_SECTION_LIST_OVERSCAN: usize = 1;
 // Tauri PluginManagerView uses text-[11px] for URL hints and legal copy.
@@ -225,8 +225,45 @@ impl WorkspaceApp {
                 .into_any_element(),
             2 => self.render_native_plugin_actions_card(has_background, cx),
             3 => self.render_native_plugin_tabbed_content(has_background, cx),
+            4 => self.render_native_plugin_compatibility_notice(has_background),
             _ => div().into_any_element(),
         }
+    }
+
+    fn render_native_plugin_compatibility_notice(&self, has_background: bool) -> AnyElement {
+        let theme = self.tokens.ui;
+        self.native_plugin_card_surface(has_background)
+            .flex()
+            .items_start()
+            .gap(px(12.0))
+            .child(Self::render_lucide_icon(
+                LucideIcon::Info,
+                18.0,
+                rgb(theme.accent),
+            ))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_heading))
+                            .child(self.i18n.t("plugin.compatibility_title")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(18.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("plugin.manager_compatibility_notice")),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn native_plugin_card_surface(&self, has_background: bool) -> Div {

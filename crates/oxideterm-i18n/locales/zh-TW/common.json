@@ -166,7 +166,9 @@
   },
   "plugin": {
     "manager_title": "外掛管理器",
-    "manager_description": "Native 外掛使用 native runtime（manifest-only / WASM / process）；Tauri legacy-js 外掛只能被發現、解除安裝或查看資訊，不能在 native 版本中執行。",
+    "manager_description": "管理已安裝的外掛並瀏覽外掛倉庫",
+    "compatibility_title": "相容性說明",
+    "manager_compatibility_notice": "原生外掛可以使用外掛清單、WASM 或獨立處理程序。Tauri 版本的舊版 JavaScript 外掛仍可檢視或解除安裝，但無法在原生版本中執行。",
     "native_description": "native 外掛宿主尚未啟用。",
     "native_empty_title": "native 暫未啟用外掛系統",
     "native_empty_description": "OxideTerm native 會保留外掛入口，但非 WebView 外掛 API 仍在設計中。這裡暫不提供安裝、啟用、市集或執行階段操作。",

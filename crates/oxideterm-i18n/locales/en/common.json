@@ -166,7 +166,9 @@
   },
   "plugin": {
     "manager_title": "Plugin Manager",
-    "manager_description": "Native plugins use the native runtime (manifest-only / WASM / process); Tauri legacy-js plugins can be discovered, inspected, or uninstalled, but cannot run in the native build.",
+    "manager_description": "Manage installed plugins and browse the plugin registry",
+    "compatibility_title": "Compatibility",
+    "manager_compatibility_notice": "Native plugins can use a manifest, WASM, or a separate process. Legacy JavaScript plugins from the Tauri version remain available for inspection or removal, but cannot run in the native version.",
     "cloud_sync": {
       "panel_title": "Oxide Cloud Sync",
       "backend": {

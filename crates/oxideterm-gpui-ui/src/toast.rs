@@ -152,6 +152,8 @@ pub fn toast_close(tokens: &ThemeTokens) -> Div {
         .child(
             svg()
                 .path("lucide/x.svg")
-                .size(px(tokens.metrics.ui_toast_close_size)),
+                .size(px(tokens.metrics.ui_toast_close_size))
+                // GPUI SVG elements do not inherit the parent text color.
+                .text_color(rgb(tokens.ui.text_muted)),
         )
 }
