@@ -248,18 +248,42 @@ impl WorkspaceApp {
             .h_full()
             .flex_none()
             .w(px(closing.width))
+            .relative()
             .px(px(self.tokens.metrics.tab_padding_x))
             .flex()
             .items_center()
             .gap(px(self.tokens.metrics.tab_gap))
             .border_r_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
-            .text_color(rgb(theme.text_muted))
+            .bg(rgb(if closing.was_active {
+                theme.bg_panel
+            } else {
+                theme.bg
+            }))
+            .text_color(rgb(if closing.was_active {
+                theme.text
+            } else {
+                theme.text_muted
+            }))
+            .when(closing.was_active, |tab| {
+                tab.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h(px(self.tokens.metrics.tab_active_accent_height))
+                        .bg(rgb(theme.accent)),
+                )
+            })
             .child(Self::render_lucide_icon(
                 tab_kind_icon(&closing.kind),
                 self.tokens.metrics.tab_icon_size,
-                rgb(theme.text_muted),
+                rgb(if closing.was_active {
+                    theme.text
+                } else {
+                    theme.text_muted
+                }),
             ))
             .child(
                 div()

@@ -564,6 +564,7 @@ struct ClosingTabVisual {
     title: String,
     width: f32,
     visual_index: usize,
+    was_active: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

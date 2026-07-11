@@ -857,6 +857,7 @@ impl WorkspaceApp {
                 title: self.tab_display_title(tab),
                 width: self.tab_visual_width(tab),
                 visual_index,
+                was_active: Some(tab.id) == old_active_tab_id,
             })
         });
         let tab = self.tabs.remove(index);

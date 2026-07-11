@@ -79,9 +79,6 @@ impl WorkspaceApp {
                 self.render_settings_select_overlay(cx),
                 |surface, overlay| surface.child(overlay),
             )
-            .when_some(self.render_theme_editor_modal(cx), |surface, modal| {
-                surface.child(modal)
-            })
             .when_some(
                 self.render_settings_managed_key_dialog(cx),
                 |surface, modal| surface.child(modal),

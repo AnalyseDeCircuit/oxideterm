@@ -126,16 +126,6 @@ impl Render for WorkspaceApp {
             window,
             cx,
         );
-        let content = if let Some(tab_id) = self.main_window_tabs.active_tab_id {
-            oxideterm_gpui_ui::motion::fade_in(
-                &self.tokens,
-                ("workspace-tab-content", tab_id.0),
-                div().size_full().child(content),
-                oxideterm_gpui_ui::motion::MotionDuration::Micro,
-            )
-        } else {
-            content
-        };
         let toast_layer = self.render_workspace_toasts(cx);
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
         let titlebar_visible = !window.is_fullscreen();
@@ -935,6 +925,11 @@ impl Render for WorkspaceApp {
             })
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
+            })
+            .when_some(self.render_theme_editor_modal(cx), |root, modal| {
+                // Theme editing is a workspace modal, not a settings-pane overlay.
+                // Mount it here so the backdrop covers every persistent chrome region.
+                root.child(modal)
             })
             .when(self.command_palette.open, |root| {
                 root.child(self.render_command_palette(cx))
