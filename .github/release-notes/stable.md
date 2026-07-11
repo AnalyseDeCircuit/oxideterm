@@ -1,12 +1,12 @@
-# OxideTerm Native Release
+# OxideTerm 2.0
 
-This is the stable OxideTerm native desktop release.
+OxideTerm 2.0 is the stable, GPU-rendered desktop workspace for SSH, terminals, files, forwarding, host operations, remote desktop, and OxideSens AI.
 
-Use this channel for daily work when you want the default supported build. It includes the native desktop app, signed update metadata, and the recommended update path for most users.
+Use this channel for daily work. It includes the desktop app, signed update metadata, and the recommended update path for most users.
 
 ## What This Release Is
 
-- A stable OxideTerm desktop build.
+- The stable OxideTerm 2.0 desktop build.
 - Intended for daily SSH, SFTP, terminal, port forwarding, remote desktop, serial, file, and OxideSens workflows.
 - Published with updater metadata for the stable channel.
 - Suitable for users who do not want preview-channel churn.
@@ -48,4 +48,4 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 - Documentation: https://oxideterm.app
 - GitHub Issues: https://github.com/AnalyseDeCircuit/oxideterm/issues
-- Changelog: https://github.com/AnalyseDeCircuit/oxideterm/tree/main/docs/changelog
+- Changelog: https://github.com/AnalyseDeCircuit/oxideterm/blob/main/.github/release-notes/stable-changelog.md
