@@ -79,7 +79,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.close_portable_password_change_dialog(cx);
+        self.portable_settings_dialog_presence.reopen();
         self.portable_settings_dialog = Some(PortableSettingsDialog::ChangePassword);
         self.portable_settings_action_error = None;
         cx.notify();
@@ -89,11 +89,40 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.portable_settings_dialog = None;
-        self.portable_settings_action_pending = None;
-        self.portable_settings_action_error = None;
         self.focused_settings_input = None;
-        self.clear_portable_password_drafts();
+        let Some(generation) = self.portable_settings_dialog_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.portable_settings_dialog = None;
+            self.portable_settings_action_pending = None;
+            self.portable_settings_action_error = None;
+            self.clear_portable_password_drafts();
+            self.portable_settings_dialog_presence.reopen();
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this
+                    .portable_settings_dialog_presence
+                    .finish_exit(generation)
+                {
+                    this.portable_settings_dialog = None;
+                    this.portable_settings_action_pending = None;
+                    this.portable_settings_action_error = None;
+                    this.clear_portable_password_drafts();
+                    this.portable_settings_dialog_presence.reopen();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -159,7 +188,7 @@ impl WorkspaceApp {
                 this.portable_settings_action_pending = None;
                 match result {
                     Ok(()) => {
-                        this.portable_settings_dialog = None;
+                        this.close_portable_password_change_dialog(cx);
                         this.portable_settings_action_error = None;
                         this.portable_status_snapshot = None;
                         this.portable_status_error = None;

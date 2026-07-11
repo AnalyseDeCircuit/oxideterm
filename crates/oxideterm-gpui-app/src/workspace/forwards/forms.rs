@@ -21,7 +21,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
+        let form_visible = self.forwarding_view.new_form_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let form = div()
+            .relative()
             .rounded(px(self.tokens.radii.xs))
             .border_1()
             .border_color(forwards_theme_border(theme.border, has_background))
@@ -55,10 +58,8 @@ impl WorkspaceApp {
                             true,
                             has_background,
                             cx.listener(|this, _event, _window, cx| {
-                                this.forwarding_view.show_new_form = false;
+                                this.begin_forward_create_form_exit(cx);
                                 this.forwarding_view.error = None;
-                                this.forwarding_view.focused_input = None;
-                                cx.notify();
                                 cx.stop_propagation();
                             }),
                         )
@@ -95,7 +96,27 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )))
-            .into_any_element()
+            .when(!form_visible, |form| {
+                form.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        }),
+                )
+            });
+
+        oxideterm_gpui_ui::motion::form_transition(
+            &self.tokens,
+            "forward-create-form-enter",
+            form,
+            form_visible,
+        )
     }
 
     pub(super) fn render_forward_edit_modal(
@@ -109,6 +130,8 @@ impl WorkspaceApp {
         let Some(editing) = self.forwarding_view.editing_forward.as_ref() else {
             return div().into_any_element();
         };
+        let form_visible = self.forwarding_view.edit_form_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
 
         div()
             .absolute()
@@ -120,7 +143,9 @@ impl WorkspaceApp {
             .items_center()
             .justify_center()
             .bg(forwards_palette_alpha(TW_BLACK, FORWARDS_TW_ALPHA_50))
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "forward-edit-form-enter",
                 div()
                     .w(px(500.0))
                     .rounded(px(self.tokens.radii.lg))
@@ -150,9 +175,7 @@ impl WorkspaceApp {
                                 theme.text_muted,
                                 has_background,
                                 |this, _event, _window, cx| {
-                                    this.forwarding_view.editing_forward = None;
-                                    this.forwarding_view.focused_input = None;
-                                    cx.notify();
+                                    this.begin_forward_edit_form_exit(cx);
                                     cx.stop_propagation();
                                 },
                                 cx,
@@ -196,9 +219,7 @@ impl WorkspaceApp {
                                 true,
                                 has_background,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.forwarding_view.editing_forward = None;
-                                    this.forwarding_view.focused_input = None;
-                                    cx.notify();
+                                    this.begin_forward_edit_form_exit(cx);
                                     cx.stop_propagation();
                                 }),
                             ))
@@ -214,8 +235,86 @@ impl WorkspaceApp {
                                 }),
                             )),
                     ),
-            )
+                form_visible,
+            ))
+            .when(!form_visible, |backdrop| {
+                backdrop.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        }),
+                )
+            })
             .into_any_element()
+    }
+
+    pub(super) fn begin_forward_create_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(generation) = self.forwarding_view.new_form_presence.begin_exit() else {
+            return false;
+        };
+        self.forwarding_view.focused_input = None;
+        self.schedule_forward_form_exit(generation, true, cx);
+        true
+    }
+
+    pub(super) fn begin_forward_edit_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(generation) = self.forwarding_view.edit_form_presence.begin_exit() else {
+            return false;
+        };
+        self.forwarding_view.focused_input = None;
+        self.schedule_forward_form_exit(generation, false, cx);
+        true
+    }
+
+    fn schedule_forward_form_exit(
+        &mut self,
+        generation: u64,
+        create_form: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_forward_form_exit(generation, create_form);
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_forward_form_exit(generation, create_form) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn finish_forward_form_exit(&mut self, generation: u64, create_form: bool) -> bool {
+        let presence = if create_form {
+            &mut self.forwarding_view.new_form_presence
+        } else {
+            &mut self.forwarding_view.edit_form_presence
+        };
+        if !presence.finish_exit(generation) {
+            return false;
+        }
+        presence.reopen();
+        if create_form {
+            self.forwarding_view.show_new_form = false;
+        } else {
+            self.forwarding_view.editing_forward = None;
+        }
+        true
     }
 
     pub(super) fn render_forward_delete_confirm(

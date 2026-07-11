@@ -2,6 +2,10 @@ use super::dialog_lifecycle::sftp_i18n_count;
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn dismiss_sftp_context_menu(&mut self) -> bool {
+        self.sftp_view.clear_context_menu_immediately()
+    }
+
     pub(in crate::workspace::sftp) fn open_sftp_context_menu(
         &mut self,
         pane: SftpPane,
@@ -27,6 +31,8 @@ impl WorkspaceApp {
                 }
             }
         }
+        self.sftp_view.context_menu_presence.reopen();
+        self.sftp_view.context_menu_exit_generation = None;
         self.sftp_view.context_menu = Some(SftpContextMenu { pane, file, x, y });
     }
 
@@ -36,13 +42,14 @@ impl WorkspaceApp {
         old_name: String,
     ) {
         self.sftp_view.dialog_value = old_name.clone();
-        self.sftp_view.dialog = Some(SftpDialog::Rename { pane, old_name });
+        self.sftp_view
+            .set_dialog(SftpDialog::Rename { pane, old_name });
         self.sftp_view.focused_input = Some(SftpInput::DialogValue);
     }
 
     pub(in crate::workspace::sftp) fn open_sftp_new_folder_dialog(&mut self, pane: SftpPane) {
         self.sftp_view.dialog_value.clear();
-        self.sftp_view.dialog = Some(SftpDialog::NewFolder { pane });
+        self.sftp_view.set_dialog(SftpDialog::NewFolder { pane });
         self.sftp_view.focused_input = Some(SftpInput::DialogValue);
     }
 
@@ -118,7 +125,7 @@ impl WorkspaceApp {
                 toast: Some(toast),
             });
         });
-        self.sftp_view.dismiss_context_menu();
+        self.dismiss_sftp_context_menu();
     }
 
     pub(in crate::workspace::sftp) fn queue_sftp_transfers(
@@ -181,8 +188,8 @@ impl WorkspaceApp {
                 resolved_actions: HashMap::new(),
                 apply_to_all: false,
             });
-            self.sftp_view.dialog = Some(SftpDialog::Conflict);
-            self.sftp_view.dismiss_context_menu();
+            self.sftp_view.set_dialog(SftpDialog::Conflict);
+            self.dismiss_sftp_context_menu();
             self.clear_sftp_selection(pane);
             return;
         }
@@ -264,8 +271,8 @@ impl WorkspaceApp {
                 resolved_actions: HashMap::new(),
                 apply_to_all: false,
             });
-            self.sftp_view.dialog = Some(SftpDialog::Conflict);
-            self.sftp_view.dismiss_context_menu();
+            self.sftp_view.set_dialog(SftpDialog::Conflict);
+            self.dismiss_sftp_context_menu();
             return;
         }
 
@@ -435,7 +442,7 @@ impl WorkspaceApp {
                     .insert(conflict.file_name.clone(), resolution);
             }
             self.sftp_view.conflict_state = None;
-            self.sftp_view.dialog = None;
+            self.close_sftp_dialog();
             self.execute_sftp_pending_transfers(
                 node_id,
                 conflict_state.pending_transfers,
@@ -454,10 +461,10 @@ impl WorkspaceApp {
             conflict_state.current_index += 1;
             conflict_state.apply_to_all = false;
             self.sftp_view.conflict_state = Some(conflict_state);
-            self.sftp_view.dialog = Some(SftpDialog::Conflict);
+            self.sftp_view.set_dialog(SftpDialog::Conflict);
         } else {
             self.sftp_view.conflict_state = None;
-            self.sftp_view.dialog = None;
+            self.close_sftp_dialog();
             self.execute_sftp_pending_transfers(
                 node_id,
                 conflict_state.pending_transfers,

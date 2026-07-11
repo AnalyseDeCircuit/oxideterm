@@ -768,6 +768,8 @@ impl WorkspaceApp {
             "settings_view.custom_theme.create_title"
         };
         let save_disabled = editor.name.trim().is_empty();
+        let form_visible =
+            self.theme_editor_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
 
         let dialog = div()
             .w(px(THEME_EDITOR_MODAL_WIDTH))
@@ -922,7 +924,27 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 )
-                .child(dialog)
+                .child(oxideterm_gpui_ui::motion::form_transition(
+                    &self.tokens,
+                    "theme-editor-form-enter",
+                    dialog,
+                    form_visible,
+                ))
+                .when(!form_visible, |backdrop| {
+                    backdrop.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .occlude()
+                            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+                    )
+                })
                 .into_any_element(),
         )
     }
@@ -1386,16 +1408,46 @@ impl WorkspaceApp {
                 edit_theme_id,
                 self.i18n.t("settings_view.custom_theme.new_theme_name"),
             ));
+        self.theme_editor_presence.reopen();
         self.close_settings_select();
         self.focused_settings_input = None;
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
-        self.settings_page.close_theme_editor();
         self.close_settings_select();
         self.focused_settings_input = None;
+        let Some(generation) = self.theme_editor_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_theme_editor_exit(generation);
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_theme_editor_exit(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         cx.notify();
+    }
+
+    fn finish_theme_editor_exit(&mut self, generation: u64) -> bool {
+        if !self.theme_editor_presence.finish_exit(generation) {
+            return false;
+        }
+        self.settings_page.close_theme_editor();
+        self.theme_editor_presence.reopen();
+        true
     }
 
     pub(in crate::workspace) fn save_theme_editor(&mut self, cx: &mut Context<Self>) {
@@ -1412,7 +1464,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.settings_page.close_theme_editor();
+        self.close_theme_editor(cx);
         self.focused_settings_input = None;
         self.send_settings_notice(
             self.i18n
@@ -1438,7 +1490,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.settings_page.close_theme_editor();
+        self.close_theme_editor(cx);
         self.focused_settings_input = None;
         cx.notify();
     }

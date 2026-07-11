@@ -113,8 +113,7 @@ impl WorkspaceApp {
             match key {
                 "escape" => {
                     if form.jump_server_form.is_some() {
-                        form.jump_server_form = None;
-                        cx.notify();
+                        self.begin_jump_server_form_exit(cx);
                         return true;
                     }
                     self.close_new_connection_form(window, cx);
@@ -200,10 +199,7 @@ impl WorkspaceApp {
         match key {
             "escape" => {
                 if form.jump_server_form.is_some() {
-                    form.jump_server_form = None;
-                    form.field_focused = false;
-                    self.ime_marked_text = None;
-                    cx.notify();
+                    self.begin_jump_server_form_exit(cx);
                     return true;
                 }
                 self.close_new_connection_form(window, cx);

@@ -47,8 +47,8 @@ impl TerminalPane {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
-        if self.context_menu.take().is_some() {
-            cx.notify();
+        if self.context_menu.is_some() {
+            self.dismiss_terminal_context_menu(cx);
             if key == "escape" {
                 return true;
             }
@@ -188,6 +188,12 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        // Terminal menu payloads include row-local command marks and target
+        // points; any scroll makes that semantic snapshot stale.
+        if self.context_menu.take().is_some() {
+            self.context_menu_presence.reopen();
+            cx.notify();
+        }
         let mode = self.terminal.lock().mode();
         let scroll_multiplier = if mouse_mode(mode, event.modifiers.shift) {
             1.0
@@ -749,8 +755,8 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
-        if self.context_menu.take().is_some() {
-            cx.notify();
+        if self.context_menu.is_some() {
+            self.dismiss_terminal_context_menu(cx);
         }
 
         if event.button == MouseButton::Left
@@ -845,6 +851,7 @@ impl TerminalPane {
         // The Tauri/Web terminal now owns a copy/paste context menu instead of
         // exposing the WebView menu. Store pane-local coordinates so the GPUI
         // overlay tracks the same terminal surface without affecting TUI mouse mode.
+        self.context_menu_presence.reopen();
         self.context_menu = Some(TerminalContextMenu {
             x: f32::from(event.position.x - bounds.origin.x),
             y: f32::from(event.position.y - bounds.origin.y),

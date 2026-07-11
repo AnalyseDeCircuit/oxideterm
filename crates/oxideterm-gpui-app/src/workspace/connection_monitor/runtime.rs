@@ -12,6 +12,18 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.terminal_background_preferences("runtime").is_some();
+        let active_section = self.active_connection_runtime_section;
+        let content = match active_section {
+            ConnectionRuntimeSection::Overview => self.render_connection_runtime_overview(cx),
+            ConnectionRuntimeSection::Health => self.render_connection_runtime_health(cx),
+            ConnectionRuntimeSection::Topology => self.render_connection_runtime_topology(cx),
+        };
+        let content = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            SharedString::from(format!("runtime-page-{active_section:?}")),
+            div().size_full().child(content),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
         div()
             .size_full()
             .flex()
@@ -20,11 +32,7 @@ impl WorkspaceApp {
             .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
             .child(self.render_connection_runtime_header(has_background, cx))
-            .child(match self.active_connection_runtime_section {
-                ConnectionRuntimeSection::Overview => self.render_connection_runtime_overview(cx),
-                ConnectionRuntimeSection::Health => self.render_connection_runtime_health(cx),
-                ConnectionRuntimeSection::Topology => self.render_connection_runtime_topology(cx),
-            })
+            .child(content)
             .into_any_element()
     }
 

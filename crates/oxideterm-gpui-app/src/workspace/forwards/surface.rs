@@ -539,8 +539,12 @@ impl WorkspaceApp {
                                     true,
                                     has_background,
                                     cx.listener(|this, _event, _window, cx| {
-                                        this.forwarding_view.show_new_form =
-                                            !this.forwarding_view.show_new_form;
+                                        if this.forwarding_view.show_new_form {
+                                            this.begin_forward_create_form_exit(cx);
+                                        } else {
+                                            this.forwarding_view.show_new_form = true;
+                                            this.forwarding_view.new_form_presence.reopen();
+                                        }
                                         this.forwarding_view.error = None;
                                         cx.notify();
                                         cx.stop_propagation();

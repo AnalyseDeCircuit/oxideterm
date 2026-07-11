@@ -6,6 +6,46 @@ fn tree_svg_icon(path: &'static str, size: f32, color: u32) -> AnyElement {
         .into_any_element()
 }
 
+fn tree_spinner_icon(
+    tokens: &ThemeTokens,
+    id: impl Into<gpui::ElementId>,
+    size: f32,
+    color: u32,
+) -> AnyElement {
+    // Tree loading indicators share the application motion policy without owning timer state.
+    oxideterm_gpui_ui::motion::animated_spinner(
+        tokens,
+        id,
+        svg()
+            .path("lucide/loader-circle.svg")
+            .size(px(size))
+            .text_color(rgb(color)),
+    )
+}
+
+fn tree_chevron_icon(
+    tokens: &ThemeTokens,
+    id: impl Into<gpui::ElementId>,
+    size: f32,
+    color: u32,
+    expanded: bool,
+) -> AnyElement {
+    // Keeping one right-facing asset mounted allows expansion to rotate continuously.
+    oxideterm_gpui_ui::motion::animated_chevron(
+        tokens,
+        id,
+        svg()
+            .path("lucide/chevron-right.svg")
+            .size(px(size))
+            .text_color(rgb(color)),
+        expanded,
+    )
+}
+
+fn tree_motion_id(kind: &str, stable_path: &str) -> SharedString {
+    SharedString::from(format!("ide-tree-{kind}-{stable_path}"))
+}
+
 fn apply_editor_runtime_settings(
     editor: &Entity<TextEditorView>,
     tokens: ThemeTokens,
@@ -291,6 +331,18 @@ mod helper_tests {
         assert_eq!(
             resolve_search_match_path("/srv/app", "src/main.rs"),
             "/srv/app/src/main.rs"
+        );
+    }
+
+    #[test]
+    fn tree_motion_ids_are_stable_and_state_independent() {
+        let path = "remote:node:/srv/app/src";
+
+        assert_eq!(tree_motion_id("chevron", path), tree_motion_id("chevron", path));
+        assert_ne!(tree_motion_id("chevron", path), tree_motion_id("spinner", path));
+        assert_ne!(
+            tree_motion_id("chevron", path),
+            tree_motion_id("chevron", "remote:node:/srv/app/tests")
         );
     }
 }

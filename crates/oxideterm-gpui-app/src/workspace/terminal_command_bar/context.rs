@@ -249,12 +249,7 @@ impl WorkspaceApp {
             }
         };
 
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "terminal-cwd-picker-enter",
-            panel.child(body),
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        panel.child(body).into_any_element()
     }
 
     pub(super) fn render_terminal_cwd_entry_list(
@@ -954,12 +949,7 @@ impl WorkspaceApp {
             )
         };
         panel = panel.child(body);
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "terminal-project-picker-enter",
-            panel,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        panel.into_any_element()
     }
 
     pub(super) fn render_terminal_project_header(

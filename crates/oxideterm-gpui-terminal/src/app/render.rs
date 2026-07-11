@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use gpui::Timer;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, FocusHandle, Focusable,
     FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Render,
@@ -761,6 +762,8 @@ impl TerminalPane {
         let replace_target = menu.target;
 
         let tokens = &self.theme.tokens;
+        let menu_visible =
+            self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let popup = context_menu_event_boundary(
             context_menu_content(tokens)
                 .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
@@ -1018,7 +1021,13 @@ impl TerminalPane {
                         .anchor(Corner::TopLeft)
                         .position(point(px(left), px(top)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(overlay_content_boundary(popup)),
+                        .child(oxideterm_gpui_ui::motion::fade(
+                            tokens,
+                            "terminal-context-menu-presence",
+                            overlay_content_boundary(popup),
+                            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                            menu_visible,
+                        )),
                 ),
         )
         .with_priority(TAURI_POPOVER_LAYER_PRIORITY)
@@ -1122,6 +1131,8 @@ impl TerminalPane {
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let disabled = disabled
+            || self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let item = context_menu_item(
             &self.theme.tokens,
             label,
@@ -1197,10 +1208,28 @@ impl TerminalPane {
         cx.notify();
     }
 
-    fn dismiss_terminal_context_menu(&mut self, cx: &mut Context<Self>) {
-        if self.context_menu.take().is_some() {
-            cx.notify();
+    pub(super) fn dismiss_terminal_context_menu(&mut self, cx: &mut Context<Self>) {
+        if self.context_menu.is_none() {
+            return;
         }
+        let Some(generation) = self.context_menu_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.theme.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.context_menu_presence.finish_exit(generation) {
+                    this.context_menu = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn selected_command_mark(&self) -> Option<TerminalCommandMark> {

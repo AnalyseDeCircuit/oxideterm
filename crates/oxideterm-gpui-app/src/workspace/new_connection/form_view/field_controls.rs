@@ -1,5 +1,4 @@
 use super::*;
-use gpui::Timer;
 use oxideterm_settings_model::parse_rgb24_hex;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -96,8 +95,6 @@ impl WorkspaceApp {
         }
         self.open_new_connection_select = Some(select_id);
         self.rendered_new_connection_select = Some(select_id);
-        self.new_connection_select_frozen_anchor = None;
-        self.new_connection_select_presence.reopen();
         self.new_connection_select_focus_origin =
             Some(browser_behavior::BrowserFocusOrigin::Pointer);
     }
@@ -108,53 +105,19 @@ impl WorkspaceApp {
             &mut self.new_connection_select_focus_origin,
         );
         self.rendered_new_connection_select = None;
-        self.new_connection_select_frozen_anchor = None;
-        self.new_connection_select_presence.reopen();
     }
 
     pub(in crate::workspace) fn begin_new_connection_select_exit(
         &mut self,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> bool {
-        let Some(select) = self.open_new_connection_select.take() else {
-            return false;
-        };
-        self.new_connection_select_focus_origin = None;
-        self.rendered_new_connection_select = Some(select);
-        self.new_connection_select_frozen_anchor = self
-            .select_anchors
-            .get(&Self::new_connection_select_anchor_id(select))
-            .copied();
-        let Some(generation) = self.new_connection_select_presence.begin_exit() else {
-            return false;
-        };
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        );
-        if delay.is_zero() || self.new_connection_select_frozen_anchor.is_none() {
-            self.finish_new_connection_select_exit(generation);
-            return true;
-        }
-        // Manual close freezes the final window-space anchor for the short exit.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_new_connection_select_exit(generation) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        true
-    }
-
-    fn finish_new_connection_select_exit(&mut self, generation: u64) -> bool {
-        if !self.new_connection_select_presence.finish_exit(generation) {
+        if self.open_new_connection_select.is_none()
+            && self.rendered_new_connection_select.is_none()
+        {
             return false;
         }
-        self.rendered_new_connection_select = None;
-        self.new_connection_select_frozen_anchor = None;
+        // Select dismissal must never retain an input-blocking backdrop.
+        self.close_new_connection_select();
         true
     }
 

@@ -102,6 +102,7 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
                             if !enabled && !this.settings_store.settings().ai.enabled_confirmed {
+                                this.ai_settings_dialog_presence.reopen();
                                 this.settings_page.set_ai_enable_confirm_open(true);
                                 this.reset_standard_confirm_focus();
                                 cx.notify();

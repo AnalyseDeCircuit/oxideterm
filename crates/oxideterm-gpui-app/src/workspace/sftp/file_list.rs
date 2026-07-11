@@ -58,7 +58,7 @@ impl WorkspaceApp {
             .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
                 // The menu is positioned in window coordinates, so any pane
                 // scroll invalidates the row that produced the coordinates.
-                if this.sftp_view.dismiss_context_menu() {
+                if this.sftp_view.clear_context_menu_immediately() {
                     cx.notify();
                 }
             }))
@@ -66,7 +66,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    let menu_changed = this.sftp_view.dismiss_context_menu();
+                    let menu_changed = this.dismiss_sftp_context_menu();
                     let drag_changed = this.cancel_sftp_drag_capture();
                     let selection_changed = this.clear_sftp_selection(pane);
                     if menu_changed || drag_changed || selection_changed {
@@ -300,7 +300,7 @@ impl WorkspaceApp {
                                 move |event: &MouseDownEvent, window, cx| {
                                     let _ = workspace.update(cx, |this, cx| {
                                         window.focus(&this.focus_handle);
-                                        this.sftp_view.dismiss_context_menu();
+                                        this.dismiss_sftp_context_menu();
                                         if event.click_count >= 2 {
                                             this.open_or_preview_sftp_file(pane, &row_file);
                                         } else {

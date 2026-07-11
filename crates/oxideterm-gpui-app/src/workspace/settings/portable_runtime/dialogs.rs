@@ -13,7 +13,7 @@ use oxideterm_gpui_ui::{
     text_input::{TextInputView, text_input, text_input_anchor_probe},
 };
 
-use crate::workspace::ime::WorkspaceImeTarget;
+use crate::workspace::{ime::WorkspaceImeTarget, settings::settings_dialog_transition};
 
 use super::{
     PORTABLE_SETTINGS_DIALOG_WIDTH, PortableSettingsAction, PortableSettingsDialog, WorkspaceApp,
@@ -31,116 +31,112 @@ impl WorkspaceApp {
             self.portable_settings_action_pending == Some(PortableSettingsAction::ChangePassword);
         let can_submit = !pending && !self.portable_current_password.is_empty();
 
-        Some(
-            dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_portable_password_change_dialog(cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(
-                    dialog_content(&self.tokens)
-                        .w(px(PORTABLE_SETTINGS_DIALOG_WIDTH))
-                        .max_w(relative(0.92))
-                        .shadow_lg()
-                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .child(
-                            dialog_header(&self.tokens)
-                                .child(dialog_title(
-                                    &self.tokens,
-                                    self.i18n
-                                        .t("settings_view.general.portable_change_password_title"),
-                                ))
-                                .child(dialog_description(
-                                    &self.tokens,
-                                    self.i18n.t(
-                                        "settings_view.general.portable_change_password_description",
-                                    ),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .px(px(24.0))
-                                .py(px(18.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(12.0))
-                                .child(self.portable_password_field(
-                                    "settings_view.general.portable_current_password",
-                                    SettingsInput::PortableCurrentPassword,
-                                    self.portable_current_password.clone(),
-                                    cx,
-                                ))
-                                .child(self.portable_password_field(
-                                    "settings_view.general.portable_new_password",
-                                    SettingsInput::PortableNewPassword,
-                                    self.portable_new_password.clone(),
-                                    cx,
-                                ))
-                                .child(self.portable_password_field(
-                                    "settings_view.general.portable_confirm_password",
-                                    SettingsInput::PortableConfirmPassword,
-                                    self.portable_confirm_password.clone(),
-                                    cx,
-                                ))
-                                .when_some(
-                                    self.portable_settings_action_error.clone(),
-                                    |body, error| {
-                                        body.child(
-                                            div()
-                                                .rounded(px(self.tokens.radii.md))
-                                                .border_1()
-                                                .border_color(rgba(
-                                                    (self.tokens.ui.error << 8) | 0x4d,
-                                                ))
-                                                .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                                                .px(px(10.0))
-                                                .py(px(8.0))
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .text_color(rgb(self.tokens.ui.error))
-                                                .child(error),
-                                        )
-                                    },
-                                ),
-                        )
-                        .child(
-                            dialog_footer(&self.tokens)
-                                .child(self.standard_footer_action_button(
-                                    self.i18n.t("common.actions.cancel"),
-                                    ButtonVariant::Outline,
-                                    ConfirmDialogAction::Cancel,
-                                    pending,
-                                    |this, _event, _window, cx| {
-                                        this.close_portable_password_change_dialog(cx);
-                                    },
-                                    cx,
-                                ))
-                                .child(self.standard_footer_action_button(
-                                    if pending {
-                                        self.i18n.t(
-                                            "settings_view.general.portable_change_password_pending",
-                                        )
-                                    } else {
-                                        self.i18n.t(
-                                            "settings_view.general.portable_submit_change_password",
-                                        )
-                                    },
-                                    ButtonVariant::Default,
-                                    ConfirmDialogAction::Confirm,
-                                    !can_submit,
-                                    |this, _event, _window, cx| {
-                                        this.submit_portable_password_change(cx);
-                                    },
-                                    cx,
-                                )),
-                        ),
-                )
-                .into_any_element(),
-        )
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                this.close_portable_password_change_dialog(cx);
+                cx.stop_propagation();
+            }),
+        );
+        let form = dialog_content(&self.tokens)
+            .w(px(PORTABLE_SETTINGS_DIALOG_WIDTH))
+            .max_w(relative(0.92))
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.general.portable_change_password_title"),
+                    ))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.general.portable_change_password_description"),
+                    )),
+            )
+            .child(
+                div()
+                    .px(px(24.0))
+                    .py(px(18.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(self.portable_password_field(
+                        "settings_view.general.portable_current_password",
+                        SettingsInput::PortableCurrentPassword,
+                        self.portable_current_password.clone(),
+                        cx,
+                    ))
+                    .child(self.portable_password_field(
+                        "settings_view.general.portable_new_password",
+                        SettingsInput::PortableNewPassword,
+                        self.portable_new_password.clone(),
+                        cx,
+                    ))
+                    .child(self.portable_password_field(
+                        "settings_view.general.portable_confirm_password",
+                        SettingsInput::PortableConfirmPassword,
+                        self.portable_confirm_password.clone(),
+                        cx,
+                    ))
+                    .when_some(
+                        self.portable_settings_action_error.clone(),
+                        |body, error| {
+                            body.child(
+                                div()
+                                    .rounded(px(self.tokens.radii.md))
+                                    .border_1()
+                                    .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
+                                    .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
+                                    .px(px(10.0))
+                                    .py(px(8.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(self.tokens.ui.error))
+                                    .child(error),
+                            )
+                        },
+                    ),
+            )
+            .child(
+                dialog_footer(&self.tokens)
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("common.actions.cancel"),
+                        ButtonVariant::Outline,
+                        ConfirmDialogAction::Cancel,
+                        pending,
+                        |this, _event, _window, cx| {
+                            this.close_portable_password_change_dialog(cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.standard_footer_action_button(
+                        if pending {
+                            self.i18n
+                                .t("settings_view.general.portable_change_password_pending")
+                        } else {
+                            self.i18n
+                                .t("settings_view.general.portable_submit_change_password")
+                        },
+                        ButtonVariant::Default,
+                        ConfirmDialogAction::Confirm,
+                        !can_submit,
+                        |this, _event, _window, cx| {
+                            this.submit_portable_password_change(cx);
+                        },
+                        cx,
+                    )),
+            );
+        Some(settings_dialog_transition(
+            &self.tokens,
+            "portable-password-dialog-form",
+            backdrop,
+            form,
+            self.portable_settings_dialog_presence,
+        ))
     }
 
     pub(in crate::workspace) fn portable_password_field(

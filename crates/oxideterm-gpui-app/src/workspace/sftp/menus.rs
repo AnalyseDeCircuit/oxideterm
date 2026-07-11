@@ -32,7 +32,6 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("sftp.context.download")
         };
-
         let popup = context_menu_event_boundary(
             div()
                 .w(px(SFTP_CONTEXT_MENU_WIDTH))
@@ -152,7 +151,7 @@ impl WorkspaceApp {
                 has_background,
                 move |this, _event, _window, _cx| {
                     let files = this.sftp_selected_names(menu.pane);
-                    this.sftp_view.dialog = Some(SftpDialog::Delete {
+                    this.sftp_view.set_dialog(SftpDialog::Delete {
                         pane: menu.pane,
                         files,
                     });
@@ -185,12 +184,7 @@ impl WorkspaceApp {
                     .anchor(Corner::TopLeft)
                     .position(gpui::point(px(placement.x), px(placement.y)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(oxideterm_gpui_ui::motion::fade_in(
-                        &self.tokens,
-                        "sftp-context-menu-enter",
-                        overlay_content_boundary(popup),
-                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
-                    )),
+                    .child(overlay_content_boundary(popup)),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             cx,
@@ -210,6 +204,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let disabled = disabled
+            || self.sftp_view.context_menu_presence.phase()
+                == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let color = if danger { SFTP_RED } else { theme.text };
         let item = div()
             .h(px(SFTP_CONTEXT_MENU_ITEM_HEIGHT))
@@ -244,7 +241,7 @@ impl WorkspaceApp {
                 hover_text_color: None,
             },
             |this| {
-                this.sftp_view.dismiss_context_menu();
+                this.dismiss_sftp_context_menu();
             },
             // The shared workspace menu helper already wraps this closure in
             // `cx.listener`. Passing another listener here re-enters WorkspaceApp

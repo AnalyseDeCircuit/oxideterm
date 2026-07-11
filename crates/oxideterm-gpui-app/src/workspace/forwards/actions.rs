@@ -488,9 +488,13 @@ impl WorkspaceApp {
                             Ok(()) => {
                                 let _ = message_key;
                                 self.forwarding_view.error = None;
-                                self.forwarding_view.show_new_form = false;
+                                if self.forwarding_view.show_new_form {
+                                    self.begin_forward_create_form_exit(cx);
+                                }
                                 self.forwarding_view.skip_health_check = false;
-                                self.forwarding_view.editing_forward = None;
+                                if self.forwarding_view.editing_forward.is_some() {
+                                    self.begin_forward_edit_form_exit(cx);
+                                }
                                 self.forwarding_view.focused_input = None;
                                 if sync_saved_forwards_on_success {
                                     // Tauri emits saved-forwards:update only
@@ -950,6 +954,7 @@ impl WorkspaceApp {
         self.forwarding_view.edit_target_host = rule.target_host.clone();
         self.forwarding_view.edit_target_port = rule.target_port.to_string();
         self.forwarding_view.editing_forward = Some(rule);
+        self.forwarding_view.edit_form_presence.reopen();
         self.forwarding_view.error = None;
         self.forwarding_view.focused_input = None;
         cx.notify();

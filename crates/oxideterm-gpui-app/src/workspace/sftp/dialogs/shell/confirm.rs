@@ -7,6 +7,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let dialog_visible =
+            self.sftp_view.dialog_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let backdrop_name = name.clone();
         dismissible_dialog_backdrop()
             .on_mouse_down(
@@ -19,7 +21,9 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "sftp-editor-close-confirm-presence",
                 div()
                     .w(px(SFTP_DIALOG_WIDTH_SM))
                     .max_w(relative(0.9))
@@ -131,7 +135,25 @@ impl WorkspaceApp {
                                     ),
                             ),
                     ),
-            )
+                dialog_visible,
+            ))
+            .when(!dialog_visible, |backdrop| {
+                backdrop.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .left_0()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+                )
+            })
             .into_any_element()
     }
 }

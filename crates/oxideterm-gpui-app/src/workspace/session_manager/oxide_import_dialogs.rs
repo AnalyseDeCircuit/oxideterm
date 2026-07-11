@@ -17,6 +17,8 @@ impl WorkspaceApp {
         let Some(dialog) = self.session_manager.oxide_import_dialog.as_ref() else {
             return div().into_any_element();
         };
+        let dialog_visible =
+            dialog.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let preview = dialog.preview.clone();
         let has_result = dialog.result.is_some();
         dismissible_dialog_backdrop()
@@ -25,13 +27,14 @@ impl WorkspaceApp {
                 cx.listener(|this, _event, _window, cx| {
                     // Tauri OxideImportModal wires Dialog onOpenChange through
                     // handleClose, which clears the dialog state on backdrop click.
-                    this.session_manager.oxide_import_dialog = None;
-                    this.session_manager.focused_input = None;
+                    this.begin_oxide_import_dialog_exit(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "oxide-import-dialog-transition",
                 div()
                     .w(px(OXIDE_MODAL_WIDTH))
                     .max_h(relative(OXIDE_MODAL_MAX_HEIGHT_RATIO))
@@ -167,8 +170,9 @@ impl WorkspaceApp {
                             .when(dialog.file_data.is_some() && has_result, |body| {
                                 body.child(self.render_oxide_import_result_footer(cx))
                             }),
-                    )
-            )
+                    ),
+                dialog_visible,
+            ))
             .into_any_element()
     }
 

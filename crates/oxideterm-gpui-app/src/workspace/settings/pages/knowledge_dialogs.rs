@@ -13,118 +13,116 @@ impl WorkspaceApp {
             .knowledge_new_collection_name
             .trim()
             .is_empty();
-        Some(
-            dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        // Tauri DocumentManager uses Dialog onOpenChange for
-                        // create collection; outside close matches Cancel.
-                        this.settings_page.close_knowledge_create_dialog();
-                        this.clear_standard_confirm_focus();
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .child(
-                    dialog_content(&self.tokens)
-                        .w(px(KNOWLEDGE_DIALOG_WIDTH))
-                        .max_w(relative(0.92))
-                        .shadow_lg()
-                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .child(
-                            dialog_header(&self.tokens)
-                                .child(dialog_title(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.knowledge.create_collection"),
-                                ))
-                                .child(dialog_description(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.knowledge.create_description"),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .px(px(24.0))
-                                .py(px(18.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(12.0))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text))
-                                                .child(self.i18n.t("settings_view.knowledge.collection_name")),
-                                        )
-                                        .child(self.settings_text_input_control(
-                                            SettingsInput::KnowledgeCollectionName,
-                                            self.settings_page.knowledge_new_collection_name.clone(),
-                                            self.i18n
-                                                .t("settings_view.knowledge.collection_name_placeholder"),
-                                            420.0,
-                                            cx,
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text))
-                                                .child(self.i18n.t("settings_view.knowledge.scope")),
-                                        )
-                                        .child(self.ai_settings_select_control(
-                                            SettingsSelect::KnowledgeCollectionScope,
-                                            self.i18n.t("settings_view.knowledge.scope_global"),
-                                            420.0,
-                                            cx,
-                                        )),
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                // Tauri DocumentManager uses Dialog onOpenChange for
+                // create collection; outside close matches Cancel.
+                this.close_knowledge_create_dialog(cx);
+                this.clear_standard_confirm_focus();
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        );
+        let form = dialog_content(&self.tokens)
+            .w(px(KNOWLEDGE_DIALOG_WIDTH))
+            .max_w(relative(0.92))
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(
+                        &self.tokens,
+                        self.i18n.t("settings_view.knowledge.create_collection"),
+                    ))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n.t("settings_view.knowledge.create_description"),
+                    )),
+            )
+            .child(
+                div()
+                    .px(px(24.0))
+                    .py(px(18.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(self.i18n.t("settings_view.knowledge.collection_name")),
+                            )
+                            .child(
+                                self.settings_text_input_control(
+                                    SettingsInput::KnowledgeCollectionName,
+                                    self.settings_page.knowledge_new_collection_name.clone(),
+                                    self.i18n
+                                        .t("settings_view.knowledge.collection_name_placeholder"),
+                                    420.0,
+                                    cx,
                                 ),
-                        )
-                        .child(
-                            dialog_footer(&self.tokens)
-                                .child(
-                                    self.standard_footer_action_button(
-                                        self.i18n.t("common.actions.cancel"),
-                                        ButtonVariant::Outline,
-                                        ConfirmDialogAction::Cancel,
-                                        false,
-                                        |this, _event, _window, cx| {
-                                            this.settings_page.close_knowledge_create_dialog();
-                                            cx.notify();
-                                        },
-                                        cx,
-                                    ),
-                                )
-                                .child(
-                                    self.standard_footer_action_button(
-                                        self.i18n.t("settings_view.knowledge.create_collection"),
-                                        ButtonVariant::Default,
-                                        ConfirmDialogAction::Confirm,
-                                        !can_create,
-                                        |this, _event, _window, cx| {
-                                            this.knowledge_create_collection(cx);
-                                            this.settings_page.hide_knowledge_create_dialog();
-                                        },
-                                        cx,
-                                    ),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-        )
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(self.i18n.t("settings_view.knowledge.scope")),
+                            )
+                            .child(self.ai_settings_select_control(
+                                SettingsSelect::KnowledgeCollectionScope,
+                                self.i18n.t("settings_view.knowledge.scope_global"),
+                                420.0,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                dialog_footer(&self.tokens)
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("common.actions.cancel"),
+                        ButtonVariant::Outline,
+                        ConfirmDialogAction::Cancel,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.close_knowledge_create_dialog(cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("settings_view.knowledge.create_collection"),
+                        ButtonVariant::Default,
+                        ConfirmDialogAction::Confirm,
+                        !can_create,
+                        |this, _event, _window, cx| {
+                            this.knowledge_create_collection(cx);
+                            this.close_knowledge_create_dialog(cx);
+                        },
+                        cx,
+                    )),
+            );
+        Some(settings_dialog_transition(
+            &self.tokens,
+            "knowledge-create-dialog-form",
+            backdrop,
+            form,
+            self.knowledge_create_presence,
+        ))
     }
 
     pub(in crate::workspace) fn render_knowledge_new_document_dialog(
@@ -139,118 +137,188 @@ impl WorkspaceApp {
             .knowledge_new_document_title
             .trim()
             .is_empty();
-        Some(
-            dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        // Tauri new-document Dialog closes through
-                        // setNewDocDialogOpen(false) on backdrop click.
-                        this.settings_page.close_knowledge_new_document_dialog();
-                        this.clear_standard_confirm_focus();
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .child(
-                    dialog_content(&self.tokens)
-                        .w(px(KNOWLEDGE_DIALOG_WIDTH))
-                        .max_w(relative(0.92))
-                        .shadow_lg()
-                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .child(
-                            dialog_header(&self.tokens)
-                                .child(dialog_title(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.knowledge.new_document"),
-                                ))
-                                .child(dialog_description(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.knowledge.new_document_description"),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .px(px(24.0))
-                                .py(px(18.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(12.0))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text))
-                                                .child(self.i18n.t("settings_view.knowledge.new_document_title")),
-                                        )
-                                        .child(self.settings_text_input_control(
-                                            SettingsInput::KnowledgeDocumentTitle,
-                                            self.settings_page.knowledge_new_document_title.clone(),
-                                            self.i18n
-                                                .t("settings_view.knowledge.new_document_title_placeholder"),
-                                            420.0,
-                                            cx,
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text))
-                                                .child(self.i18n.t("settings_view.knowledge.format")),
-                                        )
-                                        .child(self.ai_settings_select_control(
-                                            SettingsSelect::KnowledgeDocumentFormat,
-                                            self.knowledge_document_format_label(),
-                                            420.0,
-                                            cx,
-                                        )),
-                                ),
-                        )
-                        .child(
-                            dialog_footer(&self.tokens)
-                                .child(
-                                    self.standard_footer_action_button(
-                                        self.i18n.t("common.actions.cancel"),
-                                        ButtonVariant::Outline,
-                                        ConfirmDialogAction::Cancel,
-                                        false,
-                                        |this, _event, _window, cx| {
-                                            this.settings_page.close_knowledge_new_document_dialog();
-                                            cx.notify();
-                                        },
-                                        cx,
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                // Tauri new-document Dialog closes through
+                // setNewDocDialogOpen(false) on backdrop click.
+                this.close_knowledge_document_dialog(cx);
+                this.clear_standard_confirm_focus();
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        );
+        let form = dialog_content(&self.tokens)
+            .w(px(KNOWLEDGE_DIALOG_WIDTH))
+            .max_w(relative(0.92))
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(
+                        &self.tokens,
+                        self.i18n.t("settings_view.knowledge.new_document"),
+                    ))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.knowledge.new_document_description"),
+                    )),
+            )
+            .child(
+                div()
+                    .px(px(24.0))
+                    .py(px(18.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(
+                                        self.i18n.t("settings_view.knowledge.new_document_title"),
                                     ),
-                                )
-                                .child(
-                                    self.standard_footer_action_button(
-                                        self.i18n.t("settings_view.knowledge.new_document"),
-                                        ButtonVariant::Default,
-                                        ConfirmDialogAction::Confirm,
-                                        !can_create,
-                                        |this, _event, _window, cx| {
-                                            this.knowledge_create_blank_document(cx);
-                                            this.settings_page.hide_knowledge_new_document_dialog();
-                                        },
-                                        cx,
+                            )
+                            .child(
+                                self.settings_text_input_control(
+                                    SettingsInput::KnowledgeDocumentTitle,
+                                    self.settings_page.knowledge_new_document_title.clone(),
+                                    self.i18n.t(
+                                        "settings_view.knowledge.new_document_title_placeholder",
                                     ),
+                                    420.0,
+                                    cx,
                                 ),
-                        ),
-                )
-                .into_any_element(),
-        )
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(self.i18n.t("settings_view.knowledge.format")),
+                            )
+                            .child(self.ai_settings_select_control(
+                                SettingsSelect::KnowledgeDocumentFormat,
+                                self.knowledge_document_format_label(),
+                                420.0,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(
+                dialog_footer(&self.tokens)
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("common.actions.cancel"),
+                        ButtonVariant::Outline,
+                        ConfirmDialogAction::Cancel,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.close_knowledge_document_dialog(cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("settings_view.knowledge.new_document"),
+                        ButtonVariant::Default,
+                        ConfirmDialogAction::Confirm,
+                        !can_create,
+                        |this, _event, _window, cx| {
+                            this.knowledge_create_blank_document(cx);
+                            this.close_knowledge_document_dialog(cx);
+                        },
+                        cx,
+                    )),
+            );
+        Some(settings_dialog_transition(
+            &self.tokens,
+            "knowledge-document-dialog-form",
+            backdrop,
+            form,
+            self.knowledge_document_presence,
+        ))
+    }
+
+    pub(in crate::workspace) fn open_knowledge_create_dialog(&mut self, cx: &mut Context<Self>) {
+        self.knowledge_create_presence.reopen();
+        self.settings_page.open_knowledge_create_dialog();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_knowledge_create_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(generation) = self.knowledge_create_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.settings_page.close_knowledge_create_dialog();
+            self.knowledge_create_presence.reopen();
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.knowledge_create_presence.finish_exit(generation) {
+                    this.settings_page.close_knowledge_create_dialog();
+                    this.knowledge_create_presence.reopen();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_knowledge_document_dialog(&mut self, cx: &mut Context<Self>) {
+        self.knowledge_document_presence.reopen();
+        self.settings_page.open_knowledge_new_document_dialog();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_knowledge_document_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(generation) = self.knowledge_document_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.settings_page.close_knowledge_new_document_dialog();
+            self.knowledge_document_presence.reopen();
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.knowledge_document_presence.finish_exit(generation) {
+                    this.settings_page.close_knowledge_new_document_dialog();
+                    this.knowledge_document_presence.reopen();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     pub(in crate::workspace) fn render_knowledge_delete_confirm_dialog(

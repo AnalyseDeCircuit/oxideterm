@@ -166,13 +166,11 @@ impl WorkspaceApp {
                 matches!(self.file_manager.preview, Some(LocalPreview::Video { .. }));
             match key {
                 "escape" => {
-                    self.close_file_manager_dialog();
-                    cx.notify();
+                    self.begin_file_manager_rich_dialog_exit(cx);
                     return true;
                 }
                 "space" | " " if !is_video_preview => {
-                    self.close_file_manager_dialog();
-                    cx.notify();
+                    self.begin_file_manager_rich_dialog_exit(cx);
                     return true;
                 }
                 "arrowleft" | "left" if !is_video_preview => {
@@ -556,6 +554,8 @@ impl WorkspaceApp {
         {
             self.file_manager.last_selected = Some(file.name.clone());
         }
+        self.file_manager.context_menu_presence.reopen();
+        self.file_manager.context_menu_exit_generation = None;
         self.file_manager.context_menu = Some(FileManagerContextMenu { file, x, y });
     }
 
@@ -564,7 +564,17 @@ impl WorkspaceApp {
         // close came from outside click, Esc, or an item activation. Keep the
         // FileManager menu payload behind this helper so global browser
         // dismissal does not mutate feature state ad hoc.
-        self.file_manager.context_menu.take().is_some()
+        if self.file_manager.context_menu.is_none() {
+            return false;
+        }
+        self.clear_file_manager_context_menu_immediately()
+    }
+
+    pub(in crate::workspace) fn clear_file_manager_context_menu_immediately(&mut self) -> bool {
+        let changed = self.file_manager.context_menu.take().is_some();
+        self.file_manager.context_menu_exit_generation = None;
+        self.file_manager.context_menu_presence.reopen();
+        changed
     }
 
     pub(super) fn clear_file_manager_selection(&mut self) {
@@ -683,6 +693,7 @@ impl WorkspaceApp {
         self.file_manager.properties_checksum_rx = None;
         self.file_manager.properties_checksum_poll_active = false;
         self.file_manager.dialog = Some(FileManagerDialog::Properties { entry, details });
+        self.file_manager.dialog_presence.reopen();
         self.file_manager.focused_dialog_footer_action = None;
         self.dismiss_file_manager_context_menu();
     }
@@ -828,6 +839,7 @@ impl WorkspaceApp {
         self.file_manager.preview_image_zoom = 1.0;
         self.file_manager.preview_image_rotation = 0;
         self.file_manager.dialog = Some(FileManagerDialog::Preview { entry });
+        self.file_manager.dialog_presence.reopen();
         self.file_manager.focused_dialog_footer_action = None;
         self.dismiss_file_manager_context_menu();
     }
@@ -1620,6 +1632,56 @@ impl WorkspaceApp {
         self.file_manager.properties_checksum_rx = None;
         self.file_manager.properties_checksum_poll_active = false;
         self.ime_marked_text = None;
+    }
+
+    pub(super) fn begin_file_manager_rich_dialog_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        if !matches!(
+            self.file_manager.dialog,
+            Some(FileManagerDialog::Preview { .. } | FileManagerDialog::Properties { .. })
+        ) {
+            self.close_file_manager_dialog();
+            cx.notify();
+            return true;
+        }
+        let Some(generation) = self.file_manager.dialog_presence.begin_exit() else {
+            return false;
+        };
+        // Media must stop when dismissal begins even though the visual payload
+        // remains mounted until the exit frame completes.
+        let _ = self
+            .file_manager
+            .preview_audio
+            .command(AudioPreviewCommand::Stop);
+        self.file_manager.preview_video_surface.detach();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_file_manager_rich_dialog_exit(generation);
+            cx.notify();
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_file_manager_rich_dialog_exit(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    fn finish_file_manager_rich_dialog_exit(&mut self, generation: u64) -> bool {
+        if !self.file_manager.dialog_presence.finish_exit(generation) {
+            return false;
+        }
+        self.close_file_manager_dialog();
+        self.file_manager.dialog_presence.reopen();
+        true
     }
 
     pub(super) fn push_file_manager_toast(

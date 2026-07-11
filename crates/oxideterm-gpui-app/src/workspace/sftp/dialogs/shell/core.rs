@@ -7,6 +7,25 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let dialog_visible =
+            self.sftp_view.dialog_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        if let Some(generation) = self.sftp_view.dialog_exit_generation {
+            let delay = oxideterm_gpui_ui::motion::duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            );
+            // The generation check prevents a stale close timer from clearing
+            // a replacement dialog that reopened during the exit interval.
+            cx.spawn(async move |weak, cx| {
+                Timer::after(delay).await;
+                let _ = weak.update(cx, |this, cx| {
+                    if this.finish_sftp_dialog_exit(generation) {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
         if let SftpDialog::EditorCloseConfirm { name } = dialog.clone() {
             return self.render_sftp_editor_close_confirm_dialog(name, cx);
         }
@@ -123,7 +142,9 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "sftp-dialog-presence",
                 div()
                     .w(px(width))
                     .max_w(relative(0.9))
@@ -261,7 +282,27 @@ impl WorkspaceApp {
                         has_background,
                         cx,
                     )),
-            )
+                dialog_visible,
+            ))
+            .when(!dialog_visible, |backdrop| {
+                // Retained exit payloads are visual-only and cannot receive
+                // clicks, wheel input, or button activation while fading out.
+                backdrop.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .left_0()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+                )
+            })
             .into_any_element()
     }
 

@@ -31,4 +31,21 @@ impl IdeSurface {
             .text_color(rgb(color))
             .into_any_element()
     }
+
+    fn spinner_icon(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        size: f32,
+        color: u32,
+    ) -> AnyElement {
+        // The shared motion helper applies the active Off, Reduced, or full-motion profile.
+        oxideterm_gpui_ui::motion::animated_spinner(
+            &self.tokens,
+            id,
+            svg()
+                .path("lucide/loader-circle.svg")
+                .size(px(size))
+                .text_color(rgb(color)),
+        )
+    }
 }

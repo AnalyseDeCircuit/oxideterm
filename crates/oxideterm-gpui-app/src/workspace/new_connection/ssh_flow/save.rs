@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use gpui::Timer;
 
 impl WorkspaceApp {
     pub(super) fn report_saved_next_hop_error(&mut self, i18n_key: &str, cx: &mut Context<Self>) {
@@ -120,6 +121,37 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(generation) = self.new_connection_form_presence.begin_exit() else {
+            return;
+        };
+        self.close_new_connection_select();
+        self.focus_active_pane(window, cx);
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_new_connection_form_exit(generation, cx);
+            return;
+        }
+        // Secret-bearing form state stays in its single owner until the inert
+        // visual exit completes; no password or passphrase payload is cloned.
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_new_connection_form_exit(generation, cx) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn finish_new_connection_form_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.new_connection_form_presence.finish_exit(generation) {
+            return false;
+        }
         self.new_connection_form = None;
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
@@ -128,12 +160,11 @@ impl WorkspaceApp {
         self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
         self.host_key_challenge = None;
         self.cancel_active_proxy_connect_run();
         self.cancel_keyboard_interactive_challenge(cx);
-        self.focus_active_pane(window, cx);
-        cx.notify();
+        self.new_connection_form_presence.reopen();
+        true
     }
 
     pub(in crate::workspace) fn submit_new_connection_form(

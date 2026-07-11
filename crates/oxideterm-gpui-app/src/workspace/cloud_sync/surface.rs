@@ -115,16 +115,12 @@ impl WorkspaceApp {
         let Some(rendered_select) = self.cloud_sync.view.rendered_select else {
             return;
         };
-        let visible = self.cloud_sync.view.select_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let anchor_valid = self
             .select_anchors
             .contains_key(&Self::cloud_sync_select_anchor_id(rendered_select));
-        if visible && (self.cloud_sync.view.open_select.is_none() || !anchor_valid) {
+        if self.cloud_sync.view.open_select.is_none() || !anchor_valid {
             // Programmatic dismissal and invalid live geometry must unmount immediately.
             self.cloud_sync.view.rendered_select = None;
-            self.cloud_sync.view.select_frozen_anchor = None;
-            self.cloud_sync.view.select_presence.reopen();
         }
     }
 

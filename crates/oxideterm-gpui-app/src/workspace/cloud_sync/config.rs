@@ -426,8 +426,6 @@ impl WorkspaceApp {
             selected_index,
         );
         self.cloud_sync.view.rendered_select = Some(select);
-        self.cloud_sync.view.select_frozen_anchor = None;
-        self.cloud_sync.view.select_presence.reopen();
     }
 
     pub(super) fn clear_cloud_sync_select_focus(&mut self) {
@@ -438,8 +436,6 @@ impl WorkspaceApp {
             &mut self.cloud_sync.view.select_highlighted,
         );
         self.cloud_sync.view.rendered_select = None;
-        self.cloud_sync.view.select_frozen_anchor = None;
-        self.cloud_sync.view.select_presence.reopen();
     }
 
     pub(super) fn close_cloud_sync_select_for_scroll(&mut self) -> bool {
@@ -451,53 +447,20 @@ impl WorkspaceApp {
         if changed || self.cloud_sync.view.rendered_select.is_some() {
             // Scroll invalidates window-space trigger geometry, so it cannot animate safely.
             self.cloud_sync.view.rendered_select = None;
-            self.cloud_sync.view.select_frozen_anchor = None;
-            self.cloud_sync.view.select_presence.reopen();
             return true;
         }
         false
     }
 
-    pub(super) fn begin_cloud_sync_select_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(select) = self.cloud_sync.view.open_select.take() else {
-            return false;
-        };
-        self.cloud_sync.view.rendered_select = Some(select);
-        self.cloud_sync.view.select_highlighted = None;
-        self.cloud_sync.view.select_frozen_anchor = self
-            .select_anchors
-            .get(&Self::cloud_sync_select_anchor_id(select))
-            .copied();
-        let Some(generation) = self.cloud_sync.view.select_presence.begin_exit() else {
-            return false;
-        };
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        );
-        if delay.is_zero() || self.cloud_sync.view.select_frozen_anchor.is_none() {
-            self.finish_cloud_sync_select_exit(generation);
-            return true;
-        }
-        // Keep the rendered select and its frozen anchor stable for this short manual exit.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_cloud_sync_select_exit(generation) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        true
-    }
-
-    fn finish_cloud_sync_select_exit(&mut self, generation: u64) -> bool {
-        if !self.cloud_sync.view.select_presence.finish_exit(generation) {
+    pub(super) fn begin_cloud_sync_select_exit(&mut self, _cx: &mut Context<Self>) -> bool {
+        if self.cloud_sync.view.open_select.is_none()
+            && self.cloud_sync.view.rendered_select.is_none()
+        {
             return false;
         }
+        self.cloud_sync.view.open_select = None;
         self.cloud_sync.view.rendered_select = None;
-        self.cloud_sync.view.select_frozen_anchor = None;
+        self.cloud_sync.view.select_highlighted = None;
         true
     }
 
@@ -583,12 +546,8 @@ impl WorkspaceApp {
         } else if previous_open_select.is_some() && state.open_select.is_none() {
             // Focus traversal is a programmatic close and must not retain stale geometry.
             self.cloud_sync.view.rendered_select = None;
-            self.cloud_sync.view.select_frozen_anchor = None;
-            self.cloud_sync.view.select_presence.reopen();
         } else if let Some(select) = state.open_select {
             self.cloud_sync.view.rendered_select = Some(select);
-            self.cloud_sync.view.select_frozen_anchor = None;
-            self.cloud_sync.view.select_presence.reopen();
         }
         if let (Some(select), Some(index)) =
             (self.cloud_sync.view.focused_select, selected_action_index)
@@ -687,13 +646,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let select = self.cloud_sync.view.rendered_select?;
-        let phase = self.cloud_sync.view.select_presence.phase();
         let anchor_id = Self::cloud_sync_select_anchor_id(select);
-        let anchor = browser_behavior::anchored_overlay_render_value(
-            phase,
-            self.cloud_sync.view.select_frozen_anchor,
-            self.select_anchors.get(&anchor_id).copied(),
-        )?;
+        let anchor = self.select_anchors.get(&anchor_id).copied()?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let mut popup = select_panel_overlay_popup_with_max_height(
@@ -739,17 +693,7 @@ impl WorkspaceApp {
                 }),
             ));
         }
-        // Highlight changes redraw the select without restarting its entrance.
-        let popup = oxideterm_gpui_ui::motion::fade(
-            &self.tokens,
-            (
-                gpui::SharedString::from(format!("cloud-sync-select-enter-{select:?}")),
-                0usize,
-            ),
-            overlay_content_boundary(popup),
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-            phase == oxideterm_gpui_ui::motion::ExitPhase::Visible,
-        );
+        let popup = overlay_content_boundary(popup).into_any_element();
 
         Some(
             popover_backdrop()

@@ -138,11 +138,11 @@ impl From<oxideterm_ssh::SshConfig> for SshSessionConfig {
 
 fn build_remote_metadata_startup_input(token: &str) -> String {
     let token = shell_single_quote(token);
-    let bash_rc = shell_single_quote(&remote_bash_metadata_rc());
-    let zsh_rc = shell_single_quote(&remote_zsh_metadata_rc());
-    let fish_rc = shell_single_quote(&remote_fish_metadata_rc());
-    let nushell_config = shell_single_quote(&remote_nushell_metadata_config());
-    let powershell_profile = shell_single_quote(&remote_powershell_metadata_profile());
+    let bash_rc = shell_printf_argument(&remote_bash_metadata_rc());
+    let zsh_rc = shell_printf_argument(&remote_zsh_metadata_rc());
+    let fish_rc = shell_printf_argument(&remote_fish_metadata_rc());
+    let nushell_config = shell_printf_argument(&remote_nushell_metadata_config());
+    let powershell_profile = shell_printf_argument(&remote_powershell_metadata_profile());
 
     let script = format!(
         "__oxide_shell=${{SHELL:-/bin/sh}}; \
@@ -281,6 +281,26 @@ fn shell_single_quote(value: &str) -> String {
     quoted
 }
 
+fn shell_printf_argument(value: &str) -> String {
+    debug_assert!(
+        !value.ends_with(['\n', '\r']),
+        "shell profile payloads must not rely on trailing newlines"
+    );
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            // Decode line breaks only after the interactive shell has parsed
+            // the complete one-line bootstrap command with echo still off.
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    format!("\"$(printf '%b' {})\"", shell_single_quote(&escaped))
+}
+
 fn normalize_post_connect_command(command: Option<&str>) -> Result<Option<Vec<u8>>, String> {
     let Some(command) = command.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(None);
@@ -307,7 +327,10 @@ fn normalize_post_connect_command(command: Option<&str>) -> Result<Option<Vec<u8
 
 #[cfg(test)]
 mod ssh_config_tests {
-    use super::{SshSessionConfig, normalize_post_connect_command};
+    use super::{
+        SshSessionConfig, normalize_post_connect_command, remote_fish_metadata_rc,
+        remote_nushell_metadata_config, remote_powershell_metadata_profile, shell_printf_argument,
+    };
     use oxideterm_ssh::SshConfig;
 
     #[test]
@@ -367,13 +390,40 @@ mod ssh_config_tests {
         assert!(input.starts_with(" stty echo; /bin/sh -lc "));
         assert!(input.contains("fish)"));
         assert!(input.contains("fish --init-command"));
-        assert!(input.contains("function __oxideterm_emit_remote_metadata --on-event fish_prompt"));
+        assert!(!input.contains('\n'));
+        assert!(remote_fish_metadata_rc()
+            .contains("function __oxideterm_emit_remote_metadata --on-event fish_prompt"));
         assert!(input.contains("nu|nushell)"));
-        assert!(input.contains("hooks.pre_prompt"));
+        assert!(remote_nushell_metadata_config().contains("hooks.pre_prompt"));
         assert!(input.contains("pwsh|powershell)"));
-        assert!(input.contains("function global:prompt"));
+        assert!(remote_powershell_metadata_profile().contains("function global:prompt"));
         assert!(input.contains("OXIDETERM_BOOTSTRAP_PWSH"));
         assert!(!input.contains("2>/dev/null; exec /bin/sh"));
+
+        // Validate the exact nested quoting sent to the remote login shell.
+        let syntax = std::process::Command::new("/bin/sh")
+            .args(["-n", "-c", input.trim_end_matches('\r')])
+            .output()
+            .expect("local POSIX shell should validate startup input");
+        assert!(
+            syntax.status.success(),
+            "startup input must be valid POSIX shell: {}",
+            String::from_utf8_lossy(&syntax.stderr)
+        );
+    }
+
+    #[test]
+    fn shell_printf_argument_round_trips_multiline_profile_without_physical_newlines() {
+        let profile = "first 'quoted' line\nsecond \\ path";
+        let argument = shell_printf_argument(profile);
+        assert!(!argument.contains('\n'));
+
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &format!("printf '%s' {argument}")])
+            .output()
+            .expect("local POSIX shell should decode profile argument");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, profile.as_bytes());
     }
 }
 

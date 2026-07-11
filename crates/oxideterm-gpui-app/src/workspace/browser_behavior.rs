@@ -97,18 +97,6 @@ pub(crate) fn close_browser_trigger_select<T>(
     had_open_select
 }
 
-pub(crate) fn anchored_overlay_render_value<T: Copy>(
-    phase: oxideterm_gpui_ui::motion::ExitPhase,
-    frozen: Option<T>,
-    live: Option<T>,
-) -> Option<T> {
-    // Manual exits use frozen window geometry; visible overlays follow live probes.
-    match phase {
-        oxideterm_gpui_ui::motion::ExitPhase::Visible => live,
-        oxideterm_gpui_ui::motion::ExitPhase::Exiting => frozen,
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FocusCycle<'a, T> {
     actions: &'a [T],
@@ -567,11 +555,11 @@ fn resolve_browser_pointer_capture_owner(
 mod tests {
     use super::{
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
-        anchored_overlay_render_value, browser_focus_visible, clamp_context_menu_position,
-        clear_browser_highlighted_select_focus, modal_footer_input_key_action,
-        modal_footer_key_action, modal_footer_key_moves_forward, next_required_modal_footer_focus,
-        pointer_capture_needs_workspace_overlay, preserve_or_move_context_selection,
-        resolve_browser_pointer_capture_owner, toggle_browser_highlighted_select_from_pointer,
+        browser_focus_visible, clamp_context_menu_position, clear_browser_highlighted_select_focus,
+        modal_footer_input_key_action, modal_footer_key_action, modal_footer_key_moves_forward,
+        next_required_modal_footer_focus, pointer_capture_needs_workspace_overlay,
+        preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
+        toggle_browser_highlighted_select_from_pointer,
     };
     use std::collections::HashSet;
 
@@ -596,30 +584,6 @@ mod tests {
 
         assert!(changed);
         assert_eq!(selected, HashSet::from(["three".to_string()]));
-    }
-
-    #[test]
-    fn anchored_overlay_uses_live_value_while_visible() {
-        assert_eq!(
-            anchored_overlay_render_value(
-                oxideterm_gpui_ui::motion::ExitPhase::Visible,
-                Some(1_u8),
-                Some(2_u8),
-            ),
-            Some(2),
-        );
-    }
-
-    #[test]
-    fn anchored_overlay_uses_frozen_value_while_exiting() {
-        assert_eq!(
-            anchored_overlay_render_value(
-                oxideterm_gpui_ui::motion::ExitPhase::Exiting,
-                Some(1_u8),
-                Some(2_u8),
-            ),
-            Some(1),
-        );
     }
 
     #[test]

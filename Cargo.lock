@@ -7100,6 +7100,8 @@ dependencies = [
  "rand 0.8.6",
  "rmp-serde",
  "russh",
+ "security-framework 3.7.0",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "sha2 0.10.9",

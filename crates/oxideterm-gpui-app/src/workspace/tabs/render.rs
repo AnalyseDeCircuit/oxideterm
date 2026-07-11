@@ -3,6 +3,26 @@ use super::*;
 
 use gpui::StatefulInteractiveElement;
 
+fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
+    match kind {
+        TabKind::LocalTerminal => LucideIcon::Square,
+        TabKind::SshTerminal => LucideIcon::Terminal,
+        TabKind::FileManager => LucideIcon::FolderOpen,
+        TabKind::Launcher | TabKind::Graphics | TabKind::RemoteDesktop => LucideIcon::Monitor,
+        TabKind::Runtime | TabKind::ConnectionPool => LucideIcon::Gauge,
+        TabKind::ConnectionMonitor => LucideIcon::Activity,
+        TabKind::Topology => LucideIcon::Network,
+        TabKind::NotificationCenter => LucideIcon::Bell,
+        TabKind::Sftp => LucideIcon::FolderInput,
+        TabKind::Ide => LucideIcon::Code2,
+        TabKind::Forwards => LucideIcon::ArrowLeftRight,
+        TabKind::SessionManager => LucideIcon::LayoutList,
+        TabKind::PluginManager | TabKind::Plugin { .. } => LucideIcon::Puzzle,
+        TabKind::CloudSync => LucideIcon::Cloud,
+        TabKind::Settings => LucideIcon::Settings,
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_tab_bar(
         &self,
@@ -42,11 +62,26 @@ impl WorkspaceApp {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
 
-        for (tab_index, tab) in self.tabs.iter().enumerate() {
-            let tab_id = tab.id;
-            if self.detached_tabs.contains(&tab_id) {
+        let mut live_tabs = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| !self.detached_tabs.contains(&tab.id));
+        let visual_tab_count = live_tabs.clone().count() + self.main_window_tabs.closing_tabs.len();
+        for visual_index in 0..visual_tab_count {
+            if let Some(closing) = self
+                .main_window_tabs
+                .closing_tabs
+                .iter()
+                .find(|closing| closing.visual_index == visual_index)
+            {
+                scroll_viewport = scroll_viewport.child(self.render_closing_tab_visual(closing));
                 continue;
             }
+            let Some((tab_index, tab)) = live_tabs.next() else {
+                continue;
+            };
+            let tab_id = tab.id;
             let active = Some(tab_id) == self.main_window_tabs.active_tab_id;
             let drag_state = self.main_window_tabs.drag.as_ref();
             let drag_active = drag_state.is_some_and(|drag| drag.active);
@@ -64,152 +99,137 @@ impl WorkspaceApp {
                 .and_then(|node_id| self.reconnect_orchestrator.job(&node_id.0))
                 .filter(|job| job.ended_at.is_none());
             let show_reconnect_progress = reconnect_job.is_some();
-            let icon = match tab.kind {
-                TabKind::LocalTerminal => LucideIcon::Square,
-                TabKind::SshTerminal => LucideIcon::Terminal,
-                TabKind::FileManager => LucideIcon::FolderOpen,
-                TabKind::Launcher => LucideIcon::Monitor,
-                TabKind::Graphics => LucideIcon::Monitor,
-                TabKind::Runtime => LucideIcon::Gauge,
-                TabKind::ConnectionPool => LucideIcon::Gauge,
-                TabKind::ConnectionMonitor => LucideIcon::Activity,
-                TabKind::Topology => LucideIcon::Network,
-                TabKind::NotificationCenter => LucideIcon::Bell,
-                TabKind::Sftp => LucideIcon::FolderInput,
-                TabKind::Ide => LucideIcon::Code2,
-                TabKind::Forwards => LucideIcon::ArrowLeftRight,
-                TabKind::SessionManager => LucideIcon::LayoutList,
-                TabKind::PluginManager => LucideIcon::Puzzle,
-                TabKind::Plugin { .. } => LucideIcon::Puzzle,
-                TabKind::CloudSync => LucideIcon::Cloud,
-                TabKind::RemoteDesktop => LucideIcon::Monitor,
-                TabKind::Settings => LucideIcon::Settings,
-            };
+            let icon = tab_kind_icon(&tab.kind);
             let tab_text = self.tab_display_title(tab);
             let tab_text_color = if active {
                 rgb(theme.text)
             } else {
                 rgb(theme.text_muted)
             };
-            scroll_viewport = scroll_viewport.child(
-                div()
-                    .id(("workspace-tab", tab_id.0))
-                    .h_full()
-                    .flex_none()
-                    .w(px(tab_width))
-                    .min_w(px(self.tokens.metrics.tab_min_width))
-                    .max_w(px(self.tokens.metrics.tab_max_width))
-                    .px(px(self.tokens.metrics.tab_padding_x))
-                    .relative()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(self.tokens.metrics.tab_gap))
-                    .border_r_1()
-                    .border_color(if show_reconnect_progress {
-                        rgb(theme.warning)
-                    } else {
-                        rgb(theme.border)
-                    })
-                    .bg(if active {
-                        rgb(theme.bg_panel)
-                    } else {
-                        rgb(theme.bg)
-                    })
-                    .text_color(if active {
-                        rgb(theme.text)
-                    } else {
-                        rgb(theme.text_muted)
-                    })
-                    .opacity(if is_being_dragged && drag_active {
-                        0.5
-                    } else {
-                        1.0
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.start_tab_drag_candidate(tab_id, tab_index, event, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                            this.open_tab_context_menu(tab_id, event, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .when(show_drop_indicator, |tab| {
-                        tab.child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .top_0()
-                                .bottom_0()
-                                .w(px(2.0))
-                                .bg(rgb(theme.accent)),
-                        )
-                    })
-                    .when(active || show_reconnect_progress, |tab| {
-                        tab.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .right_0()
-                                .h(px(self.tokens.metrics.tab_active_accent_height))
-                                .bg(rgb(if show_reconnect_progress {
-                                    theme.warning
-                                } else {
-                                    theme.accent
-                                })),
-                        )
-                    })
-                    .child(Self::render_lucide_icon(
-                        icon,
-                        self.tokens.metrics.tab_icon_size,
-                        tab_text_color,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .truncate()
-                            .text_size(px(self.tokens.metrics.tab_font_size))
-                            .child(tab_text),
-                    )
-                    .when_some(
-                        reconnect_job.zip(reconnect_node_id),
-                        |tab, (job, node_id)| {
-                            tab.child(self.render_tab_reconnect_indicator(&job, node_id, cx))
-                        },
-                    )
-                    .when(!show_reconnect_progress, |tab| {
-                        tab.child(
-                            div()
-                                .size(px(self.tokens.metrics.tab_close_button_size))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded(px(self.tokens.radii.sm))
-                                .cursor_pointer()
-                                .text_color(rgb(theme.text_muted))
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::X,
-                                    self.tokens.metrics.tab_close_icon_size,
-                                    rgb(theme.text_muted),
-                                ))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, window, cx| {
-                                        this.set_active_tab(tab_id, window, cx);
-                                        this.request_close_active_tab(window, cx);
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                        )
+            let tab_element = div()
+                .id(("workspace-tab", tab_id.0))
+                .h_full()
+                .flex_none()
+                .w(px(tab_width))
+                .min_w(px(self.tokens.metrics.tab_min_width))
+                .max_w(px(self.tokens.metrics.tab_max_width))
+                .px(px(self.tokens.metrics.tab_padding_x))
+                .relative()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(self.tokens.metrics.tab_gap))
+                .border_r_1()
+                .border_color(if show_reconnect_progress {
+                    rgb(theme.warning)
+                } else {
+                    rgb(theme.border)
+                })
+                .bg(if active {
+                    rgb(theme.bg_panel)
+                } else {
+                    rgb(theme.bg)
+                })
+                .text_color(if active {
+                    rgb(theme.text)
+                } else {
+                    rgb(theme.text_muted)
+                })
+                .opacity(if is_being_dragged && drag_active {
+                    0.5
+                } else {
+                    1.0
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.start_tab_drag_candidate(tab_id, tab_index, event, window, cx);
+                        cx.stop_propagation();
                     }),
-            );
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                        this.open_tab_context_menu(tab_id, event, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .when(show_drop_indicator, |tab| {
+                    tab.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top_0()
+                            .bottom_0()
+                            .w(px(2.0))
+                            .bg(rgb(theme.accent)),
+                    )
+                })
+                .when(active || show_reconnect_progress, |tab| {
+                    tab.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(self.tokens.metrics.tab_active_accent_height))
+                            .bg(rgb(if show_reconnect_progress {
+                                theme.warning
+                            } else {
+                                theme.accent
+                            })),
+                    )
+                })
+                .child(Self::render_lucide_icon(
+                    icon,
+                    self.tokens.metrics.tab_icon_size,
+                    tab_text_color,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .truncate()
+                        .text_size(px(self.tokens.metrics.tab_font_size))
+                        .child(tab_text),
+                )
+                .when_some(
+                    reconnect_job.zip(reconnect_node_id),
+                    |tab, (job, node_id)| {
+                        tab.child(self.render_tab_reconnect_indicator(&job, node_id, cx))
+                    },
+                )
+                .when(!show_reconnect_progress, |tab| {
+                    tab.child(
+                        div()
+                            .size(px(self.tokens.metrics.tab_close_button_size))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .text_color(rgb(theme.text_muted))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                self.tokens.metrics.tab_close_icon_size,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.set_active_tab(tab_id, window, cx);
+                                    this.request_close_active_tab(window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                });
+            scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::horizontal_reveal(
+                &self.tokens,
+                ("workspace-tab-open", tab_id.0),
+                div().w(px(tab_width)).h_full().child(tab_element),
+                tab_width,
+                true,
+            ));
         }
 
         // Only the trailing filler is draggable. Do not mark the tabbar parent
@@ -220,6 +240,46 @@ impl WorkspaceApp {
             .child(self.render_window_drag_region("workspace-tabbar-drag-region", cx));
 
         bar.child(scroll_viewport).into_any_element()
+    }
+
+    fn render_closing_tab_visual(&self, closing: &ClosingTabVisual) -> AnyElement {
+        let theme = self.tokens.ui;
+        let tab = div()
+            .h_full()
+            .flex_none()
+            .w(px(closing.width))
+            .px(px(self.tokens.metrics.tab_padding_x))
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.metrics.tab_gap))
+            .border_r_1()
+            .border_color(rgb(theme.border))
+            .bg(rgb(theme.bg))
+            .text_color(rgb(theme.text_muted))
+            .child(Self::render_lucide_icon(
+                tab_kind_icon(&closing.kind),
+                self.tokens.metrics.tab_icon_size,
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.tab_font_size))
+                    .child(closing.title.clone()),
+            )
+            .child(Self::render_lucide_icon(
+                LucideIcon::X,
+                self.tokens.metrics.tab_close_icon_size,
+                rgb(theme.text_muted),
+            ));
+        oxideterm_gpui_ui::motion::horizontal_reveal(
+            &self.tokens,
+            ("workspace-tab-close", closing.tab_id.0),
+            tab,
+            closing.width,
+            false,
+        )
     }
 
     pub(in crate::workspace) fn render_node_disconnect_confirm_dialog(

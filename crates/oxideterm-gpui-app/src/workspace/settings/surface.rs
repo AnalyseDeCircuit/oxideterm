@@ -109,10 +109,11 @@ impl WorkspaceApp {
         let state = self.settings_section_list_state.clone();
         let workspace = cx.entity();
         let spec = self.settings_section_list_spec();
+        let transition_id = format!("settings-page-{:?}", self.settings_page.active_tab);
         // All settings pages now share the same variable-height section list.
         // This matches the browser/TanStack virtualizer direction and avoids
         // keeping a full flex tree mounted just because a tab is inside Settings.
-        div()
+        let list = div()
             .id("settings-content-scroll")
             .size_full()
             .min_w(px(0.0))
@@ -136,8 +137,13 @@ impl WorkspaceApp {
                         this.render_settings_section_list_item(index, cx)
                     })
                 },
-            ))
-            .into_any_element()
+            ));
+        oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            SharedString::from(transition_id),
+            list,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        )
     }
 
     pub(in crate::workspace) fn render_settings_section_list_item(

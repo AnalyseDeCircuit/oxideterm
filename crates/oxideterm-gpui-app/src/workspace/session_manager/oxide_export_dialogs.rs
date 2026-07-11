@@ -10,6 +10,8 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let connection_count = dialog.selected_ids.len();
+        let dialog_visible =
+            dialog.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let connections = self.connection_store.connections();
         dismissible_dialog_backdrop()
             .on_mouse_down(
@@ -17,13 +19,14 @@ impl WorkspaceApp {
                 cx.listener(|this, _event, _window, cx| {
                     // Tauri OxideExportModal uses Dialog onOpenChange(onClose);
                     // native backdrop clicks follow the same close path.
-                    this.session_manager.oxide_export_dialog = None;
-                    this.session_manager.focused_input = None;
+                    this.begin_oxide_export_dialog_exit(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "oxide-export-dialog-transition",
                 div()
                     .w(px(OXIDE_MODAL_WIDTH))
                     .max_h(relative(OXIDE_MODAL_MAX_HEIGHT_RATIO))
@@ -127,7 +130,8 @@ impl WorkspaceApp {
                             })
                             .child(self.render_oxide_export_footer(dialog, cx)),
                     ),
-            )
+                dialog_visible,
+            ))
             .into_any_element()
     }
 

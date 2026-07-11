@@ -570,12 +570,7 @@ impl WorkspaceApp {
                     ),
                 ),
         );
-        let menu_body = oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            ("tab-context-menu-enter", menu.tab_id.0),
-            overlay_content_boundary(menu_body),
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        );
+        let menu_body = overlay_content_boundary(menu_body);
 
         Some(
             self.workspace_context_menu_backdrop(

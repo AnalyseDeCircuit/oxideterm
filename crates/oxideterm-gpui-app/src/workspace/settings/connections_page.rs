@@ -1598,64 +1598,67 @@ impl WorkspaceApp {
         confirm: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_managed_key_dialog(cx);
-                    cx.stop_propagation();
-                }),
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                this.close_managed_key_dialog(cx);
+                cx.stop_propagation();
+            }),
+        );
+        let form = dialog_content(&self.tokens)
+            .w(px(520.0))
+            .max_w(relative(0.92))
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(&self.tokens, self.i18n.t(title_key)))
+                    .when(!description_key.is_empty(), |header| {
+                        header.child(dialog_description(
+                            &self.tokens,
+                            self.i18n.t(description_key),
+                        ))
+                    }),
             )
             .child(
-                dialog_content(&self.tokens)
-                    .w(px(520.0))
-                    .max_w(relative(0.92))
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        dialog_header(&self.tokens)
-                            .child(dialog_title(&self.tokens, self.i18n.t(title_key)))
-                            .when(!description_key.is_empty(), |header| {
-                                header.child(dialog_description(
-                                    &self.tokens,
-                                    self.i18n.t(description_key),
-                                ))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .px(px(24.0))
-                            .py(px(18.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(12.0))
-                            .children(rows),
-                    )
-                    .child(
-                        dialog_footer(&self.tokens)
-                            .child(self.standard_footer_action_button(
-                                self.i18n.t("common.actions.cancel"),
-                                ButtonVariant::Outline,
-                                ConfirmDialogAction::Cancel,
-                                false,
-                                |this, _event, _window, cx| {
-                                    this.close_managed_key_dialog(cx);
-                                },
-                                cx,
-                            ))
-                            .child(self.standard_footer_action_button(
-                                confirm_label,
-                                ButtonVariant::Default,
-                                ConfirmDialogAction::Confirm,
-                                !can_confirm,
-                                confirm,
-                                cx,
-                            )),
-                    ),
+                div()
+                    .px(px(24.0))
+                    .py(px(18.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .children(rows),
             )
-            .into_any_element()
+            .child(
+                dialog_footer(&self.tokens)
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("common.actions.cancel"),
+                        ButtonVariant::Outline,
+                        ConfirmDialogAction::Cancel,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.close_managed_key_dialog(cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.standard_footer_action_button(
+                        confirm_label,
+                        ButtonVariant::Default,
+                        ConfirmDialogAction::Confirm,
+                        !can_confirm,
+                        confirm,
+                        cx,
+                    )),
+            );
+        settings_dialog_transition(
+            &self.tokens,
+            "managed-key-dialog-form",
+            backdrop,
+            form,
+            self.managed_key_dialog_presence,
+        )
     }
 
     pub(in crate::workspace) fn settings_managed_key_input_field(
@@ -1837,6 +1840,7 @@ impl WorkspaceApp {
     ) {
         self.clear_managed_key_dialog_drafts();
         self.settings_managed_key_status = None;
+        self.managed_key_dialog_presence.reopen();
         self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::ImportFile);
         cx.notify();
     }
@@ -1844,6 +1848,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn open_managed_key_paste_dialog(&mut self, cx: &mut Context<Self>) {
         self.clear_managed_key_dialog_drafts();
         self.settings_managed_key_status = None;
+        self.managed_key_dialog_presence.reopen();
         self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::Paste);
         cx.notify();
     }
@@ -1856,6 +1861,7 @@ impl WorkspaceApp {
     ) {
         self.clear_managed_key_dialog_drafts();
         self.settings_managed_key_rename_name = key_name;
+        self.managed_key_dialog_presence.reopen();
         self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::Rename { key_id });
         cx.notify();
     }
@@ -1867,6 +1873,7 @@ impl WorkspaceApp {
     ) {
         match self.connection_store.managed_ssh_key_usage(&key.id) {
             Ok(usage) => {
+                self.managed_key_dialog_presence.reopen();
                 self.settings_managed_key_dialog =
                     Some(SettingsManagedKeyDialog::Delete { key, usage });
             }
@@ -1876,9 +1883,33 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_managed_key_dialog(&mut self, cx: &mut Context<Self>) {
-        self.settings_managed_key_dialog = None;
-        self.clear_managed_key_dialog_drafts();
         self.clear_standard_confirm_focus();
+        let Some(generation) = self.managed_key_dialog_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.settings_managed_key_dialog = None;
+            self.clear_managed_key_dialog_drafts();
+            self.managed_key_dialog_presence.reopen();
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.managed_key_dialog_presence.finish_exit(generation) {
+                    this.settings_managed_key_dialog = None;
+                    this.clear_managed_key_dialog_drafts();
+                    this.managed_key_dialog_presence.reopen();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         cx.notify();
     }
 

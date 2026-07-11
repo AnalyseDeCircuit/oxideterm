@@ -557,6 +557,15 @@ struct TabContextMenu {
     y: f32,
 }
 
+#[derive(Clone, Debug)]
+struct ClosingTabVisual {
+    tab_id: TabId,
+    kind: TabKind,
+    title: String,
+    width: f32,
+    visual_index: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TabCloseConfirm {
     Single { tab_id: TabId },
@@ -574,6 +583,7 @@ struct WorkspaceWindowTabState {
     drag: Option<TabDragState>,
     context_menu: Option<TabContextMenu>,
     close_confirm: Option<TabCloseConfirm>,
+    closing_tabs: Vec<ClosingTabVisual>,
     scroll_handle: ScrollHandle,
 }
 
@@ -598,6 +608,7 @@ impl WorkspaceWindowTabState {
             drag: None,
             context_menu: None,
             close_confirm: None,
+            closing_tabs: Vec::new(),
             scroll_handle: ScrollHandle::new(),
         }
     }
@@ -689,6 +700,14 @@ pub(crate) struct WorkspaceApp {
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
     settings_page: SettingsPageModel,
+    theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    ai_mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    portable_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    ai_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     settings_managed_key_dialog: Option<SettingsManagedKeyDialog>,
     settings_managed_key_status: Option<String>,
     settings_managed_key_file_path: String,
@@ -737,8 +756,6 @@ pub(crate) struct WorkspaceApp {
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     open_settings_select: Option<SettingsSelect>,
     rendered_settings_select: Option<SettingsSelect>,
-    settings_select_frozen_anchor: Option<OverlayAnchor>,
-    settings_select_presence: oxideterm_gpui_ui::motion::ExitPresence,
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
@@ -793,6 +810,9 @@ pub(crate) struct WorkspaceApp {
     portable_new_password: String,
     portable_confirm_password: String,
     new_connection_form: Option<NewConnectionForm>,
+    new_connection_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    jump_server_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    jump_server_exit_commits: bool,
     drill_down_parent_node_id: Option<NodeId>,
     editing_saved_connection_id: Option<String>,
     editing_saved_connection_connect_after_save_node_id: Option<NodeId>,
@@ -802,8 +822,6 @@ pub(crate) struct WorkspaceApp {
     saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
     open_new_connection_select: Option<NewConnectionSelect>,
     rendered_new_connection_select: Option<NewConnectionSelect>,
-    new_connection_select_frozen_anchor: Option<OverlayAnchor>,
-    new_connection_select_presence: oxideterm_gpui_ui::motion::ExitPresence,
     new_connection_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     new_connection_caret_visible: bool,
     host_key_challenge: Option<HostKeyChallenge>,

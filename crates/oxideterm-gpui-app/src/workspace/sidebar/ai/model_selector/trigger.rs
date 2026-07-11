@@ -120,13 +120,7 @@ impl WorkspaceApp {
                     }),
                 ),
             );
-        // Provider status updates must not restart the open dropdown timeline.
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "ai-model-selector-enter",
-            dropdown,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        dropdown.into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_model_selector_search(

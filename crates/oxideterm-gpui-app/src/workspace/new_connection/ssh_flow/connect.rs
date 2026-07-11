@@ -222,6 +222,7 @@ impl WorkspaceApp {
                 let host = config.host.clone();
                 let port = config.port;
                 self.host_key_challenge = Some(HostKeyChallenge {
+                    presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
                     config,
                     title,
                     status,
@@ -423,6 +424,7 @@ impl WorkspaceApp {
                 let intent = active_run.intent.clone();
                 self.prepare_modal_interaction_boundary();
                 self.host_key_challenge = Some(HostKeyChallenge {
+                    presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
                     config: SshConfig::default(),
                     title,
                     status: challenge.status.clone(),

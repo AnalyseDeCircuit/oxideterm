@@ -122,7 +122,9 @@ impl ForwardInput {
 #[derive(Clone, Debug)]
 pub(super) struct ForwardsViewState {
     show_new_form: bool,
+    new_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
     editing_forward: Option<ForwardRule>,
+    edit_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pending_delete_forward: Option<ForwardRule>,
     copied_forward_id: Option<String>,
     forward_type: ForwardType,
@@ -162,7 +164,9 @@ impl Default for ForwardsViewState {
     fn default() -> Self {
         Self {
             show_new_form: false,
+            new_form_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             editing_forward: None,
+            edit_form_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             pending_delete_forward: None,
             copied_forward_id: None,
             forward_type: ForwardType::Local,

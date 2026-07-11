@@ -8,12 +8,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let open_select = self.rendered_settings_select?;
-        let phase = self.settings_select_presence.phase();
-        let anchor = browser_behavior::anchored_overlay_render_value(
-            phase,
-            self.settings_select_frozen_anchor,
-            self.select_anchors.get(&open_select.anchor_id()).copied(),
-        )?;
+        let anchor = self.select_anchors.get(&open_select.anchor_id()).copied()?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let settings = self.settings_store.settings();
@@ -288,11 +283,13 @@ impl WorkspaceApp {
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.begin_settings_select_exit(cx);
+                            // Apply the selected profile before starting the
+                            // exit so choosing Off closes in this same event.
                             this.edit_settings(
                                 |settings| settings.appearance.animation_speed = speed,
                                 cx,
                             );
+                            this.begin_settings_select_exit(cx);
                             cx.stop_propagation();
                         }),
                     ));
@@ -1328,16 +1325,7 @@ impl WorkspaceApp {
             }
             _ => None,
         }?;
-        let popup = oxideterm_gpui_ui::motion::fade(
-            &self.tokens,
-            (
-                gpui::SharedString::from(format!("settings-select-enter-{open_select:?}")),
-                0usize,
-            ),
-            overlay_content_boundary(popup),
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-            phase == oxideterm_gpui_ui::motion::ExitPhase::Visible,
-        );
+        let popup = overlay_content_boundary(popup).into_any_element();
 
         Some(
             popover_backdrop()
@@ -1390,8 +1378,6 @@ impl WorkspaceApp {
         }
         self.open_settings_select = Some(select_id);
         self.rendered_settings_select = Some(select_id);
-        self.settings_select_frozen_anchor = None;
-        self.settings_select_presence.reopen();
         self.settings_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
     }
 

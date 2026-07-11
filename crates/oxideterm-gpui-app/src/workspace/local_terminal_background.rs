@@ -308,13 +308,7 @@ impl WorkspaceApp {
             )
             .child(list);
 
-        Some(oxideterm_gpui_ui::motion::slide_fade_in_y(
-            &self.tokens,
-            "detached-local-terminals-popover-enter",
-            popover,
-            4.0,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        ))
+        Some(popover.into_any_element())
     }
 
     fn sorted_detached_local_terminal_sessions(&self) -> Vec<DetachedLocalTerminalSession> {

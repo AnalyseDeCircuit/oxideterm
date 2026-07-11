@@ -105,10 +105,9 @@ impl WorkspaceApp {
                             ..ToolbarButtonOptions::default()
                         },
                         cx.listener(|this, _event, _window, cx| {
-                            this.settings_page.open_knowledge_create_dialog();
+                            this.open_knowledge_create_dialog(cx);
                             this.reset_standard_confirm_focus();
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     )
                     .into_any_element(),
@@ -229,10 +228,9 @@ impl WorkspaceApp {
                             self.i18n.t("settings_view.knowledge.new_document"),
                             false,
                             cx.listener(|this, _event, _window, cx| {
-                                this.settings_page.open_knowledge_new_document_dialog();
+                                this.open_knowledge_document_dialog(cx);
                                 this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         ))
                         .child({

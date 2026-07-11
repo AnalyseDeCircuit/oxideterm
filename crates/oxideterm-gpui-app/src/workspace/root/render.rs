@@ -126,6 +126,16 @@ impl Render for WorkspaceApp {
             window,
             cx,
         );
+        let content = if let Some(tab_id) = self.main_window_tabs.active_tab_id {
+            oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                ("workspace-tab-content", tab_id.0),
+                div().size_full().child(content),
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            )
+        } else {
+            content
+        };
         let toast_layer = self.render_workspace_toasts(cx);
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
         let titlebar_visible = !window.is_fullscreen();

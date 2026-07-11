@@ -379,12 +379,7 @@ impl WorkspaceApp {
                     cx,
                 ),
             );
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "ai-safety-menu-enter",
-            menu,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        menu.into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_safety_menu_item(
@@ -815,12 +810,7 @@ impl WorkspaceApp {
                         )
                 },
             );
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "ai-context-popover-enter",
-            popover,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        popover.into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_context_breakdown_row(
@@ -1080,13 +1070,7 @@ impl WorkspaceApp {
                 ),
             );
         }
-        // Candidate updates preserve one open autocomplete timeline.
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "ai-chat-autocomplete-enter",
-            popup,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        popup.into_any_element()
     }
 
     pub(in crate::workspace) fn apply_ai_chat_autocomplete_candidate(

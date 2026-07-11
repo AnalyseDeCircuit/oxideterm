@@ -53,6 +53,102 @@ pub(super) struct OxideClientStateSnapshot {
 }
 
 impl WorkspaceApp {
+    pub(super) fn begin_oxide_import_dialog_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() else {
+            return false;
+        };
+        if dialog.busy {
+            return false;
+        }
+        let Some(generation) = dialog.presence.begin_exit() else {
+            return false;
+        };
+        self.session_manager.focused_input = None;
+        self.schedule_oxide_import_dialog_exit(generation, cx);
+        true
+    }
+
+    fn schedule_oxide_import_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_oxide_import_dialog_exit(generation);
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_oxide_import_dialog_exit(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn finish_oxide_import_dialog_exit(&mut self, generation: u64) -> bool {
+        if !self
+            .session_manager
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.presence.finish_exit(generation))
+        {
+            return false;
+        }
+        self.session_manager.oxide_import_dialog = None;
+        true
+    }
+
+    pub(super) fn begin_oxide_export_dialog_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() else {
+            return false;
+        };
+        if dialog.busy {
+            return false;
+        }
+        let Some(generation) = dialog.presence.begin_exit() else {
+            return false;
+        };
+        self.session_manager.focused_input = None;
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_oxide_export_dialog_exit(generation);
+            cx.notify();
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_oxide_export_dialog_exit(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    fn finish_oxide_export_dialog_exit(&mut self, generation: u64) -> bool {
+        if !self
+            .session_manager
+            .oxide_export_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.presence.finish_exit(generation))
+        {
+            return false;
+        }
+        self.session_manager.oxide_export_dialog = None;
+        true
+    }
+
     pub(in crate::workspace) fn open_oxide_import_dialog(&mut self, cx: &mut Context<Self>) {
         self.session_manager.oxide_import_dialog = Some(OxideImportDialogState::default());
         self.session_manager.focused_input = None;
@@ -129,9 +225,29 @@ impl WorkspaceApp {
         }
 
         if self.session_manager.oxide_import_dialog.is_some() {
+            if self
+                .session_manager
+                .oxide_import_dialog
+                .as_ref()
+                .is_some_and(|dialog| {
+                    dialog.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+                })
+            {
+                return true;
+            }
             return self.handle_oxide_import_footer_key(event, cx);
         }
         if self.session_manager.oxide_export_dialog.is_some() {
+            if self
+                .session_manager
+                .oxide_export_dialog
+                .as_ref()
+                .is_some_and(|dialog| {
+                    dialog.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+                })
+            {
+                return true;
+            }
             return self.handle_oxide_export_footer_key(event, cx);
         }
         false
@@ -989,24 +1105,38 @@ impl WorkspaceApp {
             .oxide_export_connection_ids(dialog)
             .into_iter()
             .collect::<Vec<_>>();
-        // Dialog input is a UI String draft; worker-owned copies are zeroized
-        // when the export thread exits.
-        let password = zeroize::Zeroizing::new(dialog.password.clone());
         let preflight = self.oxide_export_preflight(dialog);
-        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-            dialog.busy = true;
-            dialog.operation_generation = dialog.operation_generation.wrapping_add(1);
-            dialog.progress_stage =
-                Some(OxideTransferProgress::new("collecting_connections", 0, 1));
-            dialog.error = None;
-            dialog.preflight = Some(preflight);
-        }
-        let generation = self
-            .session_manager
-            .oxide_export_dialog
-            .as_ref()
-            .map(|dialog| dialog.operation_generation)
-            .unwrap_or(0);
+        let Some((password, generation)) =
+            self.session_manager
+                .oxide_export_dialog
+                .as_mut()
+                .map(|dialog| {
+                    // Move the UI drafts into zeroizing owners; no secret copy survives submission.
+                    let password = zeroize::Zeroizing::new(std::mem::take(&mut dialog.password));
+                    let confirm_password =
+                        zeroize::Zeroizing::new(std::mem::take(&mut dialog.confirm_password));
+                    dialog.busy = true;
+                    dialog.operation_generation = dialog.operation_generation.wrapping_add(1);
+                    dialog.progress_stage =
+                        Some(OxideTransferProgress::new("collecting_connections", 0, 1));
+                    dialog.error = None;
+                    dialog.preflight = Some(preflight);
+                    drop(confirm_password);
+                    (password, dialog.operation_generation)
+                })
+        else {
+            return;
+        };
+        self.start_oxide_export_worker(password, selected_ids, generation, cx);
+    }
+
+    fn start_oxide_export_worker(
+        &mut self,
+        password: zeroize::Zeroizing<String>,
+        selected_ids: Vec<String>,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
         let result = self
             .session_manager
             .oxide_export_dialog

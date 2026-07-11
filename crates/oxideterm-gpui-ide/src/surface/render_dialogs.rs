@@ -1274,7 +1274,11 @@ impl IdeSurface {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(self.icon("lucide/loader-circle.svg", 24.0, tokens.ui.text_muted))
+                .child(self.spinner_icon(
+                    "ide-folder-picker-loading",
+                    24.0,
+                    tokens.ui.text_muted,
+                ))
                 .into_any_element();
         }
 

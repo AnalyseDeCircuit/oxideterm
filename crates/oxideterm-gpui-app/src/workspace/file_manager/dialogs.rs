@@ -2,6 +2,22 @@ use super::*;
 
 mod preview;
 
+fn file_manager_dialog_exit_shield() -> AnyElement {
+    // Rich preview payloads remain mounted only for painting during exit.
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .occlude()
+        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation())
+        .into_any_element()
+}
+
 impl WorkspaceApp {
     pub(super) fn render_file_manager_context_menu(
         &self,
@@ -31,7 +47,6 @@ impl WorkspaceApp {
                 .operation_progress
                 .as_ref()
                 .is_some_and(|progress| progress.active);
-
         let popup = context_menu_event_boundary(
             div()
                 .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
@@ -334,12 +349,7 @@ impl WorkspaceApp {
                     .anchor(Corner::TopLeft)
                     .position(gpui::point(px(placement.x), px(placement.y)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(oxideterm_gpui_ui::motion::fade_in(
-                        &self.tokens,
-                        "file-manager-context-menu-enter",
-                        overlay_content_boundary(popup),
-                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
-                    )),
+                    .child(overlay_content_boundary(popup)),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             cx,
@@ -380,6 +390,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let disabled = disabled
+            || self.file_manager.context_menu_presence.phase()
+                == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let color = if danger { FILE_MANAGER_RED } else { theme.text };
         let item = div()
             .h(px(FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT))
@@ -613,16 +626,19 @@ impl WorkspaceApp {
             .min(FILE_MANAGER_QUICKLOOK_HEIGHT)
             .max(min_height)
             .min(max_height);
+        let form_visible = self.file_manager.dialog_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         quicklook_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.close_file_manager_dialog();
+                    this.begin_file_manager_rich_dialog_exit(cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "file-manager-preview-transition",
                 div()
                     .w(px(width))
                     .h(px(height))
@@ -649,7 +665,11 @@ impl WorkspaceApp {
                         window,
                         cx,
                     )),
-            )
+                form_visible,
+            ))
+            .when(!form_visible, |backdrop| {
+                backdrop.child(file_manager_dialog_exit_shield())
+            })
             .into_any_element()
     }
 
@@ -670,16 +690,19 @@ impl WorkspaceApp {
         } else {
             icon_color
         };
+        let form_visible = self.file_manager.dialog_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.close_file_manager_dialog();
+                    this.begin_file_manager_rich_dialog_exit(cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "file-manager-properties-transition",
                 div()
                     .w(px(width.max(280.0)))
                     .max_h(px(
@@ -747,9 +770,8 @@ impl WorkspaceApp {
                                     ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
                                 },
                                 |this, _event, _window, cx| {
-                                    this.close_file_manager_dialog();
+                                    this.begin_file_manager_rich_dialog_exit(cx);
                                     cx.stop_propagation();
-                                    cx.notify();
                                 },
                                 cx,
                             )),
@@ -790,13 +812,16 @@ impl WorkspaceApp {
                                     )
                                 },
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.close_file_manager_dialog();
+                                    this.begin_file_manager_rich_dialog_exit(cx);
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             )),
                     ),
-            )
+                form_visible,
+            ))
+            .when(!form_visible, |backdrop| {
+                backdrop.child(file_manager_dialog_exit_shield())
+            })
             .into_any_element()
     }
 

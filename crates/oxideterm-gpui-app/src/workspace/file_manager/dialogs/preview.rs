@@ -230,9 +230,8 @@ impl WorkspaceApp {
                         LucideIcon::X,
                         false,
                         |this, _event, _window, cx| {
-                            this.close_file_manager_dialog();
+                            this.begin_file_manager_rich_dialog_exit(cx);
                             cx.stop_propagation();
-                            cx.notify();
                         },
                         cx,
                     )),

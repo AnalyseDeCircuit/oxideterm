@@ -549,8 +549,10 @@ impl WorkspaceApp {
                             )),
                     ),
             )
-            .when(!input_collapsed, |bar| {
-                bar.child(
+            .child(oxideterm_gpui_ui::motion::vertical_reveal(
+                &self.tokens,
+                "terminal-command-input-reveal",
+                div().child(
                     div()
                         .mt(px(2.0))
                         .pt(px(4.0))
@@ -664,8 +666,10 @@ impl WorkspaceApp {
                                     )),
                             )
                         }),
-                )
-            });
+                ),
+                command_input_height + 7.0,
+                !input_collapsed,
+            ));
         select_anchor_probe(
             SelectAnchorId::TerminalCommandBar,
             bar,
@@ -887,13 +891,7 @@ impl WorkspaceApp {
             );
         }
 
-        // Target toggles redraw the persistent menu without replaying its entrance.
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "terminal-broadcast-menu-enter",
-            menu,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        menu.into_any_element()
     }
 
     pub(super) fn render_terminal_broadcast_menu_action(

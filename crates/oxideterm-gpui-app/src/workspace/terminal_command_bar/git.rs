@@ -66,13 +66,7 @@ impl WorkspaceApp {
                 .child(section),
         );
 
-        // Repository sampling redraws the panel without restarting its entrance.
-        oxideterm_gpui_ui::motion::fade_in(
-            &self.tokens,
-            "terminal-git-branch-picker-enter",
-            panel,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-        )
+        panel.into_any_element()
     }
 
     pub(super) fn render_terminal_git_context_header(

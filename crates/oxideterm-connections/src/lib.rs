@@ -8,9 +8,6 @@ mod ssh_config;
 mod ssh_keys;
 mod ssh_paths;
 mod store;
-#[cfg(target_os = "macos")]
-mod touch_id;
-
 pub use connection_import::{
     ConnectionImportApplyRequest, ConnectionImportApplyResult, ConnectionImportDuplicateStrategy,
     ConnectionImportErrorInfo, ConnectionImportPreview, ConnectionImportSource,

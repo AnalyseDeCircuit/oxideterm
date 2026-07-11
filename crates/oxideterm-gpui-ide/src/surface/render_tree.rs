@@ -19,7 +19,7 @@ impl IdeSurface {
             .items_center()
             .justify_center()
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.icon("lucide/loader-circle.svg", 24.0, self.tokens.ui.accent))
+            .child(self.spinner_icon("ide-project-loading", 24.0, self.tokens.ui.accent))
             .child(self.labels.loading_project.clone())
             .into_any_element()
     }

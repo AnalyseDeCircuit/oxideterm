@@ -53,9 +53,34 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace::sftp) fn close_sftp_dialog(&mut self) {
+        if self.sftp_view.dialog.is_none() {
+            return;
+        }
         self.stop_sftp_preview_media();
         self.sftp_view.preview_generation = self.sftp_view.preview_generation.wrapping_add(1);
+        let Some(generation) = self.sftp_view.dialog_presence.begin_exit() else {
+            return;
+        };
+        if oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        )
+        .is_zero()
+        {
+            self.finish_sftp_dialog_exit(generation);
+            return;
+        }
+        self.sftp_view.dialog_exit_generation = Some(generation);
+        self.sftp_view.focused_input = None;
+        self.ime_marked_text = None;
+    }
+
+    pub(in crate::workspace::sftp) fn finish_sftp_dialog_exit(&mut self, generation: u64) -> bool {
+        if !self.sftp_view.dialog_presence.finish_exit(generation) {
+            return false;
+        }
         self.sftp_view.dialog = None;
+        self.sftp_view.dialog_exit_generation = None;
         self.sftp_view.conflict_state = None;
         self.sftp_view.dialog_value.clear();
         self.sftp_view.preview_asset_owner = None;
@@ -69,6 +94,7 @@ impl WorkspaceApp {
         self.reset_sftp_preview_editor();
         self.sftp_view.focused_input = None;
         self.ime_marked_text = None;
+        true
     }
 
     pub(in crate::workspace::sftp) fn reset_sftp_preview_editor(&mut self) {

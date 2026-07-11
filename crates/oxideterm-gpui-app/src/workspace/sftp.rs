@@ -478,6 +478,8 @@ pub(super) struct SftpViewState {
     editing_local_path: bool,
     editing_remote_path: bool,
     pub(super) dialog: Option<SftpDialog>,
+    dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    dialog_exit_generation: Option<u64>,
     conflict_state: Option<SftpConflictState>,
     dialog_value: String,
     preview_pane: Option<SftpPane>,
@@ -519,6 +521,8 @@ pub(super) struct SftpViewState {
     incomplete_load_inflight: bool,
     show_incomplete: bool,
     context_menu: Option<SftpContextMenu>,
+    context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    context_menu_exit_generation: Option<u64>,
     drag_state: Option<SftpDragState>,
     drag_over_pane: Option<SftpPane>,
     drag_autoscroll_position: Option<Point<Pixels>>,
@@ -565,6 +569,8 @@ impl Default for SftpViewState {
             editing_local_path: false,
             editing_remote_path: false,
             dialog: None,
+            dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            dialog_exit_generation: None,
             conflict_state: None,
             dialog_value: String::new(),
             preview_pane: None,
@@ -630,6 +636,8 @@ impl Default for SftpViewState {
             incomplete_load_inflight: false,
             show_incomplete: false,
             context_menu: None,
+            context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            context_menu_exit_generation: None,
             drag_state: None,
             drag_over_pane: None,
             drag_autoscroll_position: None,
@@ -641,6 +649,13 @@ impl Default for SftpViewState {
 }
 
 impl SftpViewState {
+    pub(super) fn set_dialog(&mut self, dialog: SftpDialog) {
+        // SftpDialog remains the only payload owner across replacements.
+        self.dialog_presence.reopen();
+        self.dialog_exit_generation = None;
+        self.dialog = Some(dialog);
+    }
+
     pub(super) fn current_remote_path(&self) -> &str {
         &self.remote_path
     }
@@ -651,11 +666,11 @@ impl SftpViewState {
         files
     }
 
-    pub(super) fn dismiss_context_menu(&mut self) -> bool {
-        // Root-level browser dismiss only needs to know whether a transient
-        // menu existed; SFTP keeps the menu payload private to preserve row
-        // action ownership inside the SFTP module.
-        self.context_menu.take().is_some()
+    pub(super) fn clear_context_menu_immediately(&mut self) -> bool {
+        let changed = self.context_menu.take().is_some();
+        self.context_menu_exit_generation = None;
+        self.context_menu_presence.reopen();
+        changed
     }
 
     pub(super) fn has_drag_capture(&self) -> bool {

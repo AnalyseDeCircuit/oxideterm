@@ -29,11 +29,10 @@ impl WorkspaceApp {
             },
             move |this, _event, _window, cx| {
                 if import_dialog {
-                    this.session_manager.oxide_import_dialog = None;
+                    this.begin_oxide_import_dialog_exit(cx);
                 } else {
-                    this.session_manager.oxide_export_dialog = None;
+                    this.begin_oxide_export_dialog_exit(cx);
                 }
-                this.session_manager.focused_input = None;
                 cx.notify();
                 cx.stop_propagation();
             },

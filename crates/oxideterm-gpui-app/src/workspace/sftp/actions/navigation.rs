@@ -123,13 +123,13 @@ impl WorkspaceApp {
             match key {
                 "a" => {
                     self.select_all_sftp_files(self.sftp_view.active_pane);
-                    self.sftp_view.dismiss_context_menu();
+                    self.dismiss_sftp_context_menu();
                     cx.notify();
                     return true;
                 }
                 "l" => {
                     self.start_sftp_path_edit(self.sftp_view.active_pane);
-                    self.sftp_view.dismiss_context_menu();
+                    self.dismiss_sftp_context_menu();
                     cx.notify();
                     return true;
                 }
@@ -138,7 +138,7 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                self.sftp_view.dismiss_context_menu();
+                self.dismiss_sftp_context_menu();
                 self.sftp_view.focused_input = None;
                 cx.notify();
                 true
@@ -191,7 +191,7 @@ impl WorkspaceApp {
             "delete" | "backspace" => {
                 let files = self.sftp_selected_names(self.sftp_view.active_pane);
                 if !files.is_empty() {
-                    self.sftp_view.dialog = Some(SftpDialog::Delete {
+                    self.sftp_view.set_dialog(SftpDialog::Delete {
                         pane: self.sftp_view.active_pane,
                         files,
                     });
@@ -277,7 +277,7 @@ impl WorkspaceApp {
             }
         }
         self.sftp_view.focused_input = None;
-        self.sftp_view.dismiss_context_menu();
+        self.dismiss_sftp_context_menu();
     }
 
     fn cancel_sftp_path_edit(&mut self, pane: SftpPane) {
@@ -440,7 +440,7 @@ impl WorkspaceApp {
         modifiers: gpui::Modifiers,
     ) {
         self.sftp_view.active_pane = pane;
-        self.sftp_view.dismiss_context_menu();
+        self.dismiss_sftp_context_menu();
         let range_names = self.sftp_ordered_file_names(pane);
         let (selected, last_selected) = match pane {
             SftpPane::Local => (

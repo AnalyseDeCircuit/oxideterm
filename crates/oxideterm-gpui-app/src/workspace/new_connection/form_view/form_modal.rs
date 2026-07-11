@@ -170,6 +170,8 @@ impl WorkspaceApp {
                 && form.port.trim().parse::<u16>().is_ok()
         };
         let primary_disabled = form.pending || !has_required_fields;
+        let form_visible = self.new_connection_form_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -182,7 +184,10 @@ impl WorkspaceApp {
                 }),
             )
             .child(
-                modal_container(&self.tokens)
+                oxideterm_gpui_ui::motion::form_transition(
+                    &self.tokens,
+                    "new-connection-form-enter",
+                    modal_container(&self.tokens)
                 .w(px(if drill_down_mode {
                     TAURI_DRILL_DOWN_MODAL_WIDTH
                 } else if prompt_mode || edit_properties_mode {
@@ -1012,8 +1017,27 @@ impl WorkspaceApp {
                                 ))
                             },
                         ),
+                    ),
+                    form_visible,
                 ),
         )
+        .when(!form_visible, |backdrop| {
+            // The exiting payload remains mounted only for painting; this top
+            // event shield prevents stale form actions during delayed cleanup.
+            backdrop.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+            )
+        })
         .into_any_element()
     }
 

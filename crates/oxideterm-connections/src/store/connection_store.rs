@@ -34,10 +34,8 @@ impl ConnectionStore {
             }
         };
         #[cfg(target_os = "macos")]
-        let privilege_keychain = ConnectionKeychain::with_macos_biometrics_reason(
-            PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE,
-            "OxideTerm needs to access your privilege helper credential",
-        );
+        let privilege_keychain =
+            ConnectionKeychain::with_macos_user_presence(PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE);
         #[cfg(not(target_os = "macos"))]
         let privilege_keychain =
             ConnectionKeychain::with_service(PRIVILEGE_CREDENTIAL_KEYCHAIN_SERVICE);

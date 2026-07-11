@@ -1,5 +1,15 @@
 use super::*;
 
+fn closing_tab_visual_index(live_visual_index: usize, occupied_indices: &[usize]) -> usize {
+    let mut visual_index = live_visual_index;
+    for occupied in occupied_indices {
+        if *occupied <= visual_index {
+            visual_index += 1;
+        }
+    }
+    visual_index
+}
+
 pub(super) const TAB_DRAG_THRESHOLD_PX: f32 = 10.0;
 
 fn tab_drag_is_horizontal_reorder(delta_x: f32, delta_y: f32) -> bool {
@@ -825,6 +835,30 @@ impl WorkspaceApp {
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let old_active_tab_id = self.main_window_tabs.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
+        let closing_visual = self.tabs.get(index).and_then(|tab| {
+            if self.detached_tabs.contains(&tab.id) {
+                return None;
+            }
+            let live_visual_index = self.tabs[..index]
+                .iter()
+                .filter(|candidate| !self.detached_tabs.contains(&candidate.id))
+                .count();
+            let mut occupied_indices = self
+                .main_window_tabs
+                .closing_tabs
+                .iter()
+                .map(|closing| closing.visual_index)
+                .collect::<Vec<_>>();
+            occupied_indices.sort_unstable();
+            let visual_index = closing_tab_visual_index(live_visual_index, &occupied_indices);
+            Some(ClosingTabVisual {
+                tab_id: tab.id,
+                kind: tab.kind.clone(),
+                title: self.tab_display_title(tab),
+                width: self.tab_visual_width(tab),
+                visual_index,
+            })
+        });
         let tab = self.tabs.remove(index);
         self.detached_tabs.remove(&tab.id);
         if self
@@ -908,7 +942,44 @@ impl WorkspaceApp {
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
+        if let Some(closing_visual) = closing_visual {
+            self.begin_tab_visual_exit(closing_visual, cx);
+        }
         cx.notify();
+    }
+
+    fn begin_tab_visual_exit(&mut self, closing_visual: ClosingTabVisual, cx: &mut Context<Self>) {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        if delay.is_zero() {
+            return;
+        }
+        let tab_id = closing_visual.tab_id;
+        self.main_window_tabs.closing_tabs.push(closing_visual);
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                let Some(position) = this
+                    .main_window_tabs
+                    .closing_tabs
+                    .iter()
+                    .position(|closing| closing.tab_id == tab_id)
+                else {
+                    return;
+                };
+                let removed_index = this.main_window_tabs.closing_tabs[position].visual_index;
+                this.main_window_tabs.closing_tabs.remove(position);
+                for closing in &mut this.main_window_tabs.closing_tabs {
+                    if closing.visual_index > removed_index {
+                        closing.visual_index -= 1;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(super) fn close_tabs_for_node(
@@ -1466,5 +1537,13 @@ mod tests {
         assert_eq!(tabbar_scroll_x_after_wheel(24.0, 24.0, 120.0), 0.0);
         assert_eq!(tabbar_scroll_x_after_wheel(110.0, -24.0, 120.0), 120.0);
         assert_eq!(tabbar_scroll_x_after_wheel(120.0, -24.0, 120.0), 120.0);
+    }
+
+    #[test]
+    fn closing_tab_visual_indices_preserve_parallel_batch_order() {
+        assert_eq!(closing_tab_visual_index(1, &[]), 1);
+        assert_eq!(closing_tab_visual_index(1, &[1]), 2);
+        assert_eq!(closing_tab_visual_index(1, &[1, 2]), 3);
+        assert_eq!(closing_tab_visual_index(0, &[2]), 0);
     }
 }

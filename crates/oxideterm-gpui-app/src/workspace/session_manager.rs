@@ -355,6 +355,7 @@ impl Default for SessionManagerState {
 
 #[derive(Clone)]
 pub(super) struct OxideImportDialogState {
+    pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) file_path: Option<PathBuf>,
     pub(super) file_data: Option<Vec<u8>>,
     pub(super) metadata_summary: Option<String>,
@@ -395,6 +396,7 @@ pub(super) enum OxideDialogFooterAction {
 impl Default for OxideImportDialogState {
     fn default() -> Self {
         Self {
+            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             file_path: None,
             file_data: None,
             metadata_summary: None,
@@ -477,6 +479,7 @@ impl std::fmt::Debug for OxideImportDialogState {
 
 #[derive(Clone)]
 pub(super) struct OxideExportDialogState {
+    pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) selected_ids: HashSet<String>,
     pub(super) available_forwards: Vec<PersistedForward>,
     pub(super) selected_forward_ids: HashSet<String>,
@@ -513,6 +516,7 @@ pub(super) struct OxideExportDialogState {
 impl Default for OxideExportDialogState {
     fn default() -> Self {
         Self {
+            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             selected_ids: HashSet::new(),
             available_forwards: Vec::new(),
             selected_forward_ids: HashSet::new(),

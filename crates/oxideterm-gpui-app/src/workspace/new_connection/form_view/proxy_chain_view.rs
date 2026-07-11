@@ -7,13 +7,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let select_id = self.rendered_new_connection_select?;
-        let phase = self.new_connection_select_presence.phase();
         let anchor_id = Self::new_connection_select_anchor_id(select_id);
-        let anchor = browser_behavior::anchored_overlay_render_value(
-            phase,
-            self.new_connection_select_frozen_anchor,
-            self.select_anchors.get(&anchor_id).copied(),
-        )?;
+        let anchor = self.select_anchors.get(&anchor_id).copied()?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let viewport_height = f32::from(window.viewport_size().height);
@@ -592,17 +587,7 @@ impl WorkspaceApp {
         } else {
             (Corner::TopLeft, anchor.bounds.bottom_left(), popup_gap)
         };
-        // Keep the timeline stable across option highlighting and form redraws.
-        let popup = oxideterm_gpui_ui::motion::fade(
-            &self.tokens,
-            (
-                gpui::SharedString::from(format!("new-connection-select-enter-{select_id:?}")),
-                0usize,
-            ),
-            popup,
-            oxideterm_gpui_ui::motion::MotionDuration::Micro,
-            phase == oxideterm_gpui_ui::motion::ExitPhase::Visible,
-        );
+        let popup = popup.into_any_element();
 
         Some(
             popover_backdrop()
@@ -654,23 +639,22 @@ impl WorkspaceApp {
                 && jump_form.managed_key_id.trim().is_empty());
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
+        let form_visible =
+            self.jump_server_form_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
                     // Tauri jump-server form is a Dialog child of the new
                     // connection flow; overlay clicks cancel just this subform.
-                    if let Some(form) = this.new_connection_form.as_mut() {
-                        form.jump_server_form = None;
-                        form.field_focused = false;
-                        form.selected_field = None;
-                    }
-                    this.ime_marked_text = None;
+                    this.begin_jump_server_form_exit(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "jump-server-form-enter",
                 modal_container(&self.tokens)
                     .w(px(TAURI_JUMP_MODAL_WIDTH))
                     .max_h(px(modal_max_height))
@@ -867,8 +851,77 @@ impl WorkspaceApp {
                             .child(self.render_jump_cancel_button(cx))
                             .child(self.render_jump_add_button(add_disabled, cx)),
                     ),
-            )
+                form_visible,
+            ))
+            .when(!form_visible, |backdrop| {
+                backdrop.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+                )
+            })
             .into_any_element()
+    }
+
+    pub(super) fn begin_jump_server_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.begin_jump_server_form_exit_with_commit(false, cx)
+    }
+
+    fn begin_jump_server_form_exit_with_commit(
+        &mut self,
+        commit: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self.jump_server_form_presence.begin_exit() else {
+            return false;
+        };
+        self.jump_server_exit_commits = commit;
+        if let Some(form) = self.new_connection_form.as_mut() {
+            form.field_focused = false;
+            form.selected_field = None;
+        }
+        self.ime_marked_text = None;
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_jump_server_form_exit(generation, cx);
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_jump_server_form_exit(generation, cx) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    fn finish_jump_server_form_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.jump_server_form_presence.finish_exit(generation) {
+            return false;
+        }
+        let commit = std::mem::take(&mut self.jump_server_exit_commits);
+        if commit {
+            self.commit_pending_jump_server(cx);
+        } else if let Some(form) = self.new_connection_form.as_mut() {
+            form.jump_server_form = None;
+        }
+        self.jump_server_form_presence.reopen();
+        true
     }
 
     pub(super) fn render_proxy_chain_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1015,6 +1068,7 @@ impl WorkspaceApp {
                     form.focused_field = NewConnectionField::JumpHost;
                     form.selected_field = None;
                 }
+                this.jump_server_form_presence.reopen();
                 this.close_new_connection_select();
                 this.new_connection_caret_visible = true;
                 window.focus(&this.focus_handle);
@@ -1062,14 +1116,8 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(|this, _event, _window, cx| {
-                if let Some(form) = this.new_connection_form.as_mut() {
-                    form.jump_server_form = None;
-                    form.field_focused = false;
-                    form.selected_field = None;
-                }
-                this.ime_marked_text = None;
+                this.begin_jump_server_form_exit(cx);
                 cx.stop_propagation();
-                cx.notify();
             }),
         )
         .into_any_element()
@@ -1246,6 +1294,24 @@ impl WorkspaceApp {
     }
 
     pub(super) fn add_pending_jump_server(&mut self, cx: &mut Context<Self>) {
+        let Some(jump_form) = self
+            .new_connection_form
+            .as_ref()
+            .and_then(|form| form.jump_server_form.as_ref())
+        else {
+            return;
+        };
+        if !jump_form.complete() {
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.error = Some(self.i18n.t("ssh.form.proxy_jump_required"));
+            }
+            cx.notify();
+            return;
+        }
+        self.begin_jump_server_form_exit_with_commit(true, cx);
+    }
+
+    fn commit_pending_jump_server(&mut self, cx: &mut Context<Self>) {
         let Some(form) = self.new_connection_form.as_mut() else {
             return;
         };

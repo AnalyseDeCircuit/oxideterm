@@ -82,6 +82,25 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let active_tool = self.active_context_sidebar_tool;
+        let content = match active_tool {
+            ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
+            ContextSidebarTool::Processes => self.render_host_processes_panel(cx),
+            ContextSidebarTool::Services => self.render_host_services_panel(cx),
+            ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
+            ContextSidebarTool::Tmux => self.render_host_tmux_panel(cx),
+            ContextSidebarTool::Docker => self.render_host_docker_panel(cx),
+            ContextSidebarTool::Ports => self.render_host_ports_panel(cx),
+            ContextSidebarTool::Schedules => self.render_host_schedules_panel(cx),
+            ContextSidebarTool::Filesystems => self.render_host_filesystems_panel(cx),
+            ContextSidebarTool::Packages => self.render_host_packages_panel(cx),
+        };
+        let content = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            SharedString::from(format!("host-tools-page-{active_tool:?}")),
+            div().size_full().child(content),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
         div()
             .id("host-tools-context-panel")
             .size_full()
@@ -103,18 +122,7 @@ impl WorkspaceApp {
                     // Only the secondary tab strip may own horizontal scroll.
                     // Keep tool bodies clipped to the companion-sidebar width.
                     .overflow_hidden()
-                    .child(match self.active_context_sidebar_tool {
-                        ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
-                        ContextSidebarTool::Processes => self.render_host_processes_panel(cx),
-                        ContextSidebarTool::Services => self.render_host_services_panel(cx),
-                        ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
-                        ContextSidebarTool::Tmux => self.render_host_tmux_panel(cx),
-                        ContextSidebarTool::Docker => self.render_host_docker_panel(cx),
-                        ContextSidebarTool::Ports => self.render_host_ports_panel(cx),
-                        ContextSidebarTool::Schedules => self.render_host_schedules_panel(cx),
-                        ContextSidebarTool::Filesystems => self.render_host_filesystems_panel(cx),
-                        ContextSidebarTool::Packages => self.render_host_packages_panel(cx),
-                    }),
+                    .child(content),
             )
             .into_any_element()
     }

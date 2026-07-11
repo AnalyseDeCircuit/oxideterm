@@ -21,6 +21,7 @@ use oxideterm_gpui_ui::{
 const KBI_PROMPT_TIMEOUT_SECS: u64 = 60;
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
+    presence: oxideterm_gpui_ui::motion::ExitPresence,
     request: KeyboardInteractivePromptRequest,
     pub(in crate::workspace) responses: KeyboardInteractiveResponses,
     pub(in crate::workspace) focused_prompt: usize,
@@ -36,6 +37,7 @@ impl KeyboardInteractiveChallenge {
         let responses =
             KeyboardInteractiveResponses::new(vec![String::new(); request.prompts.len()]);
         Self {
+            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             request,
             responses,
             focused_prompt: 0,
@@ -129,6 +131,9 @@ impl WorkspaceApp {
         let Some(challenge) = self.keyboard_interactive_challenge.as_mut() else {
             return false;
         };
+        if challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+            return true;
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
@@ -227,7 +232,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(mut challenge) = self.keyboard_interactive_challenge.take() else {
+        let Some(challenge) = self.keyboard_interactive_challenge.as_mut() else {
+            return;
+        };
+        let Some(generation) = challenge.presence.begin_exit() else {
             return;
         };
         self.keyboard_interactive_timer_generation =
@@ -239,7 +247,37 @@ impl WorkspaceApp {
             form.pending = false;
             form.error = Some(self.i18n.t("ssh.kbi.cancelled"));
         }
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_keyboard_interactive_exit(generation);
+        } else {
+            cx.spawn(async move |weak, cx| {
+                Timer::after(delay).await;
+                let _ = weak.update(cx, |this, cx| {
+                    if this.finish_keyboard_interactive_exit(generation) {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
         cx.notify();
+    }
+
+    fn finish_keyboard_interactive_exit(&mut self, generation: u64) -> bool {
+        if !self
+            .keyboard_interactive_challenge
+            .as_ref()
+            .is_some_and(|challenge| challenge.presence.finish_exit(generation))
+        {
+            return false;
+        }
+        // Dropping the retained payload after the exit zeroizes all secret answers.
+        self.keyboard_interactive_challenge = None;
+        true
     }
 
     pub(in crate::workspace) fn render_keyboard_interactive_dialog(
@@ -249,6 +287,8 @@ impl WorkspaceApp {
         let Some(challenge) = self.keyboard_interactive_challenge.as_ref() else {
             return div().into_any_element();
         };
+        let dialog_visible =
+            challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let theme = self.tokens.ui;
         let title = if challenge.request.name.trim().is_empty() {
             self.i18n.t("ssh.kbi.title")
@@ -328,7 +368,9 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
-            .child(
+            .child(oxideterm_gpui_ui::motion::form_transition(
+                &self.tokens,
+                "keyboard-interactive-dialog-transition",
                 div()
                     .w(px(self.tokens.metrics.modal_width))
                     .rounded(px(self.tokens.radii.md))
@@ -442,7 +484,8 @@ impl WorkspaceApp {
                                 cx,
                             )),
                     ),
-            )
+                dialog_visible,
+            ))
             .into_any_element()
     }
 

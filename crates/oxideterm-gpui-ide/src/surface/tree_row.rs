@@ -63,16 +63,23 @@ fn render_tree_row_virtual(
         })
         .child(div().w(px((row.depth as f32) * IDE_TREE_INDENT_STEP)))
         .child(if is_dir {
-            if row.expanded {
-                tree_svg_icon("lucide/chevron-down.svg", 14.0, tokens.ui.text_secondary)
-            } else {
-                tree_svg_icon("lucide/chevron-right.svg", 14.0, tokens.ui.text_secondary)
-            }
+            tree_chevron_icon(
+                tokens,
+                tree_motion_id("chevron", &path_key),
+                14.0,
+                tokens.ui.text_secondary,
+                row.expanded,
+            )
         } else {
             div().w(px(14.0)).into_any_element()
         })
         .child(if loading {
-            tree_svg_icon("lucide/loader-circle.svg", IDE_ICON_SIZE, tokens.ui.accent)
+            tree_spinner_icon(
+                tokens,
+                tree_motion_id("spinner", &path_key),
+                IDE_ICON_SIZE,
+                tokens.ui.accent,
+            )
         } else if is_dir {
             tree_svg_icon(icon.path, IDE_ICON_SIZE, icon.color)
         } else {

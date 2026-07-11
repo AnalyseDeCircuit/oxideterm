@@ -56,6 +56,28 @@ impl WorkspaceApp {
                     )),
             );
 
+        if let Some(generation) = self.file_manager.context_menu_exit_generation {
+            let delay = oxideterm_gpui_ui::motion::duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            );
+            // Dialog-opening actions still retire their retained menu payload.
+            cx.spawn(async move |weak, cx| {
+                Timer::after(delay).await;
+                let _ = weak.update(cx, |this, cx| {
+                    if this
+                        .file_manager
+                        .context_menu_presence
+                        .finish_exit(generation)
+                    {
+                        this.file_manager.context_menu = None;
+                        this.file_manager.context_menu_exit_generation = None;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
         if self.file_manager.dialog.is_none()
             && let Some(menu) = self.file_manager.context_menu.clone()
         {
@@ -994,6 +1016,13 @@ impl WorkspaceApp {
             .id("file-manager-list-scroll")
             .flex_1()
             .min_h(px(0.0))
+            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                // Context-menu coordinates and row payloads describe the
+                // pre-scroll list, so scrolling invalidates both immediately.
+                if this.clear_file_manager_context_menu_immediately() {
+                    cx.notify();
+                }
+            }))
             .bg(file_manager_bg(theme.bg, has_background));
         if self.file_manager.loading {
             return list

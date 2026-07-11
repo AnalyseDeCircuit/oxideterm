@@ -19,6 +19,9 @@ pub enum ExitPhase {
     Exiting,
 }
 
+const FORM_ENTER_OFFSET_Y: f32 = 18.0;
+const FORM_ENTER_SPRING_OVERSHOOT: f32 = 0.55;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExitPresence {
     phase: ExitPhase,
@@ -81,6 +84,16 @@ pub fn ease_in_out_cubic(progress: f32) -> f32 {
     } else {
         1.0 - (-2.0 * progress + 2.0).powi(3) / 2.0
     }
+}
+
+pub fn spring_out(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    if progress == 0.0 || progress == 1.0 {
+        return progress;
+    }
+    let shifted = progress - 1.0;
+    let cubic = FORM_ENTER_SPRING_OVERSHOOT + 1.0;
+    1.0 + cubic * shifted.powi(3) + FORM_ENTER_SPRING_OVERSHOOT * shifted.powi(2)
 }
 
 pub fn lerp(from: f32, to: f32, progress: f32) -> f32 {
@@ -153,6 +166,49 @@ pub fn slide_fade_in_y(
             },
         )
         .into_any_element()
+}
+
+pub fn form_enter(tokens: &ThemeTokens, id: impl Into<ElementId>, form: Div) -> AnyElement {
+    form_transition(tokens, id, form, true)
+}
+
+pub fn form_transition(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    form: Div,
+    visible: bool,
+) -> AnyElement {
+    let id = (id.into(), if visible { "visible" } else { "exiting" });
+    if !tokens.motion.enabled {
+        return form
+            .opacity(if visible { 1.0 } else { 0.0 })
+            .into_any_element();
+    }
+    let spatial = tokens.motion.spatial_enabled;
+    form.with_animation(
+        id,
+        Animation::new(duration(tokens, MotionDuration::Overlay)),
+        move |form, progress| {
+            let visibility = if visible {
+                ease_out_cubic(progress)
+            } else {
+                1.0 - ease_in_out_cubic(progress)
+            };
+            let form = form.opacity(visibility);
+            if spatial {
+                let spatial_progress = if visible {
+                    spring_out(progress)
+                } else {
+                    1.0 - ease_in_out_cubic(progress)
+                };
+                form.relative()
+                    .top(gpui::px(FORM_ENTER_OFFSET_Y * (1.0 - spatial_progress)))
+            } else {
+                form
+            }
+        },
+    )
+    .into_any_element()
 }
 
 pub fn slide_fade_in_x(
@@ -232,6 +288,43 @@ pub fn horizontal_reveal(
                 } else {
                     // Reduced motion preserves layout and limits the transition to opacity.
                     element.w(gpui::px(expanded_width))
+                }
+            },
+        )
+        .into_any_element()
+}
+
+pub fn vertical_reveal(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    element: Div,
+    expanded_height: f32,
+    expanded: bool,
+) -> AnyElement {
+    // Keep the content mounted so the same stable element can animate in both directions.
+    let id = (id.into(), if expanded { "expanded" } else { "collapsed" });
+    let final_height = if expanded { expanded_height } else { 0.0 };
+    let final_opacity = if expanded { 1.0 } else { 0.0 };
+    if !tokens.motion.enabled {
+        return element
+            .h(gpui::px(final_height))
+            .opacity(final_opacity)
+            .into_any_element();
+    }
+    let spatial = tokens.motion.spatial_enabled;
+    element
+        .overflow_hidden()
+        .with_animation(
+            id,
+            Animation::new(duration(tokens, MotionDuration::Micro)).with_easing(ease_in_out_cubic),
+            move |element, progress| {
+                let visibility = if expanded { progress } else { 1.0 - progress };
+                let element = element.opacity(visibility);
+                if spatial {
+                    element.h(gpui::px(lerp(0.0, expanded_height, visibility)))
+                } else {
+                    // Reduced motion changes layout immediately and limits the visual transition.
+                    element.h(gpui::px(final_height))
                 }
             },
         )
@@ -330,8 +423,17 @@ mod tests {
         assert_eq!(ease_out_cubic(1.0), 1.0);
         assert_eq!(ease_in_out_cubic(0.0), 0.0);
         assert_eq!(ease_in_out_cubic(1.0), 1.0);
+        assert_eq!(spring_out(0.0), 0.0);
+        assert_eq!(spring_out(1.0), 1.0);
         assert_eq!(lerp(4.0, 8.0, 0.0), 4.0);
         assert_eq!(lerp(4.0, 8.0, 1.0), 8.0);
+    }
+
+    #[test]
+    fn spring_out_enters_quickly_and_settles_after_a_small_overshoot() {
+        assert!(spring_out(0.5) > 0.9);
+        assert!(spring_out(0.75) > 1.0);
+        assert!(spring_out(0.75) < 1.03);
     }
 
     #[test]
@@ -358,6 +460,17 @@ mod tests {
     fn horizontal_reveal_targets_match_visibility() {
         assert_eq!(lerp(0.0, 280.0, 0.0), 0.0);
         assert_eq!(lerp(0.0, 280.0, 1.0), 280.0);
+    }
+
+    #[test]
+    fn vertical_reveal_targets_match_visibility() {
+        assert_eq!(lerp(0.0, 28.0, 0.0), 0.0);
+        assert_eq!(lerp(0.0, 28.0, 1.0), 28.0);
+    }
+
+    #[test]
+    fn form_enter_has_a_visible_but_bounded_spatial_range() {
+        assert!((12.0..=24.0).contains(&FORM_ENTER_OFFSET_Y));
     }
 
     #[test]

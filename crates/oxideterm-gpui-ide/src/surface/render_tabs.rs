@@ -150,8 +150,8 @@ impl IdeSurface {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(self.icon(
-                                "lucide/loader-circle.svg",
+                            .child(self.spinner_icon(
+                                SharedString::from(format!("ide-tab-loading-{tab_id:?}")),
                                 12.0,
                                 self.tokens.ui.text_muted,
                             ))
@@ -648,7 +648,11 @@ impl IdeSurface {
             .gap_2()
             .bg(self.ide_editor_content_bg(self.tokens.ui.bg))
             .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.icon("lucide/loader-circle.svg", 24.0, self.tokens.ui.text_muted))
+            .child(self.spinner_icon(
+                "ide-editor-file-loading",
+                24.0,
+                self.tokens.ui.text_muted,
+            ))
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))

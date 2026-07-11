@@ -100,6 +100,14 @@ impl WorkspaceApp {
         let has_background = self
             .terminal_background_preferences("session_manager")
             .is_some();
+        let view_mode = self.session_manager.view_mode;
+        let content = self.render_session_manager_view_content(has_background, cx);
+        let content = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            ("session-manager-view", view_mode as usize),
+            div().size_full().child(content),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
         div()
             .size_full()
             .relative()
@@ -118,13 +126,7 @@ impl WorkspaceApp {
             })
             .text_color(rgb(theme.text))
             .child(self.render_session_manager_toolbar(window, has_background, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .min_w(px(0.0))
-                    .child(self.render_session_manager_view_content(has_background, cx)),
-            )
+            .child(div().flex_1().min_h(px(0.0)).min_w(px(0.0)).child(content))
             .when_some(self.session_manager.status.clone(), |surface, status| {
                 surface.child(
                     div()

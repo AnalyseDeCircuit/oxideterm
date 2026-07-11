@@ -190,9 +190,13 @@ impl IdeSurface {
             .when(self.agent_can_deploy(&status), |this| {
                 this.child(self.render_agent_status_menu_item(
                     if self.agent_action == Some(AgentActionKind::Deploy) {
-                        "lucide/loader-circle.svg"
+                        self.spinner_icon(
+                            "ide-agent-deploy-loading",
+                            12.0,
+                            self.tokens.ui.text,
+                        )
                     } else {
-                        "lucide/rocket.svg"
+                        self.icon("lucide/rocket.svg", 12.0, self.tokens.ui.text)
                     },
                     if matches!(
                         status,
@@ -214,9 +218,13 @@ impl IdeSurface {
             .when(matches!(status, AgentStatus::Ready { .. }), |this| {
                 this.child(self.render_agent_status_menu_item(
                     if self.agent_action == Some(AgentActionKind::Remove) {
-                        "lucide/loader-circle.svg"
+                        self.spinner_icon(
+                            "ide-agent-remove-loading",
+                            12.0,
+                            TAILWIND_RED_400,
+                        )
                     } else {
-                        "lucide/trash-2.svg"
+                        self.icon("lucide/trash-2.svg", 12.0, TAILWIND_RED_400)
                     },
                     self.labels.agent_remove_btn.clone(),
                     true,
@@ -400,7 +408,7 @@ impl IdeSurface {
 
     fn render_agent_status_menu_item(
         &self,
-        icon: &'static str,
+        icon: AnyElement,
         label: String,
         danger: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -420,7 +428,7 @@ impl IdeSurface {
             .cursor_pointer()
             .text_color(rgb(text_color))
             .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(self.icon(icon, 12.0, text_color))
+            .child(icon)
             .child(div().flex_1().truncate().child(label))
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()

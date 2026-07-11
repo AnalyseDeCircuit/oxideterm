@@ -8,7 +8,7 @@ impl WorkspaceApp {
         file: &SftpFileEntry,
     ) {
         self.sftp_view.active_pane = pane;
-        self.sftp_view.dismiss_context_menu();
+        self.dismiss_sftp_context_menu();
         if file.file_type == SftpFileType::Directory {
             let base = match pane {
                 SftpPane::Local => self.sftp_view.local_path.clone(),
@@ -34,7 +34,7 @@ impl WorkspaceApp {
             self.sftp_view.preview_font_family = None;
             self.sftp_view.preview_font_error = None;
             self.sftp_view.preview_font_size = SFTP_PREVIEW_FONT_DEFAULT_SIZE;
-            self.sftp_view.dialog = Some(SftpDialog::Preview {
+            self.sftp_view.set_dialog(SftpDialog::Preview {
                 name: file.name.clone(),
             });
             self.spawn_remote_sftp_preview(file.path.clone(), generation);
@@ -152,7 +152,7 @@ impl WorkspaceApp {
         self.sftp_view.preview_editor_retry_count = 0;
         self.sftp_view.preview_editor_last_saved_mtime = None;
         self.sftp_view.preview_editor_last_atomic_write = None;
-        self.sftp_view.dialog = Some(SftpDialog::Editor {
+        self.sftp_view.set_dialog(SftpDialog::Editor {
             name: name.to_string(),
         });
     }
@@ -249,14 +249,15 @@ impl WorkspaceApp {
             _ => return,
         };
         if self.sftp_view.preview_editor_dirty {
-            self.sftp_view.dialog = Some(SftpDialog::EditorCloseConfirm { name });
+            self.sftp_view
+                .set_dialog(SftpDialog::EditorCloseConfirm { name });
         } else {
             self.close_sftp_dialog();
         }
     }
 
     pub(in crate::workspace::sftp) fn cancel_sftp_editor_close_confirm(&mut self, name: String) {
-        self.sftp_view.dialog = Some(SftpDialog::Editor { name });
+        self.sftp_view.set_dialog(SftpDialog::Editor { name });
     }
 
     pub(in crate::workspace::sftp) fn discard_sftp_editor_changes(&mut self) {
@@ -338,7 +339,7 @@ impl WorkspaceApp {
             Ok(local_content) => {
                 let remote_path = self.sftp_view.preview_path.clone().unwrap_or_default();
                 self.sftp_view.diff_scroll = UniformListScrollHandle::new();
-                self.sftp_view.dialog = Some(SftpDialog::Diff {
+                self.sftp_view.set_dialog(SftpDialog::Diff {
                     local_path: local_file.path,
                     local_content,
                     remote_path,

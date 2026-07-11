@@ -983,13 +983,37 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_help_legal_notice(&mut self, cx: &mut Context<Self>) {
+        self.help_legal_notice_presence.reopen();
         self.settings_page.legal_notice_open = true;
         self.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_help_legal_notice(&mut self, cx: &mut Context<Self>) {
-        self.settings_page.legal_notice_open = false;
+        let Some(generation) = self.help_legal_notice_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.settings_page.legal_notice_open = false;
+            self.help_legal_notice_presence.reopen();
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.help_legal_notice_presence.finish_exit(generation) {
+                    this.settings_page.legal_notice_open = false;
+                    this.help_legal_notice_presence.reopen();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -1017,64 +1041,69 @@ impl WorkspaceApp {
         options.block_gap = 8.0;
         let code_actions = self.markdown_mermaid_actions(cx);
 
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_help_legal_notice(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(overlay_content_boundary(
-                dialog_content(&self.tokens)
-                    .flex()
-                    .flex_col()
-                    .w(px(HELP_LEGAL_NOTICE_WIDTH))
-                    .max_w(relative(0.92))
-                    .h(px(HELP_LEGAL_NOTICE_HEIGHT))
-                    .max_h(relative(0.90))
-                    .child(
-                        dialog_header(&self.tokens)
-                            .child(dialog_title(
-                                &self.tokens,
-                                self.i18n.t("settings_view.help.disclaimer"),
-                            ))
-                            .child(dialog_description(
-                                &self.tokens,
-                                self.i18n.t("settings_view.help.legal_notice_description"),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .p(px(16.0))
-                            .bg(rgb(self.tokens.ui.bg))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(markdown_virtual_with_code_actions(
-                                cx.entity(),
-                                "settings-help-legal-notice-markdown",
-                                &self.tokens,
-                                HELP_LEGAL_MARKDOWN,
-                                &options,
-                                &self.settings_legal_notice_scroll,
-                                &code_actions,
-                            )),
-                    )
-                    .child(
-                        dialog_footer(&self.tokens).child(self.standard_footer_action_button(
-                            self.i18n.t("settings_view.help.legal_notice_close"),
-                            ButtonVariant::Secondary,
-                            ConfirmDialogAction::Cancel,
-                            false,
-                            |this, _event, _window, cx| {
-                                this.close_help_legal_notice(cx);
-                            },
-                            cx,
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                this.close_help_legal_notice(cx);
+                cx.stop_propagation();
+            }),
+        );
+        let form = overlay_content_boundary(
+            dialog_content(&self.tokens)
+                .flex()
+                .flex_col()
+                .w(px(HELP_LEGAL_NOTICE_WIDTH))
+                .max_w(relative(0.92))
+                .h(px(HELP_LEGAL_NOTICE_HEIGHT))
+                .max_h(relative(0.90))
+                .child(
+                    dialog_header(&self.tokens)
+                        .child(dialog_title(
+                            &self.tokens,
+                            self.i18n.t("settings_view.help.disclaimer"),
+                        ))
+                        .child(dialog_description(
+                            &self.tokens,
+                            self.i18n.t("settings_view.help.legal_notice_description"),
                         )),
-                    ),
-            ))
-            .into_any_element()
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .p(px(16.0))
+                        .bg(rgb(self.tokens.ui.bg))
+                        .text_color(rgb(self.tokens.ui.text))
+                        .child(markdown_virtual_with_code_actions(
+                            cx.entity(),
+                            "settings-help-legal-notice-markdown",
+                            &self.tokens,
+                            HELP_LEGAL_MARKDOWN,
+                            &options,
+                            &self.settings_legal_notice_scroll,
+                            &code_actions,
+                        )),
+                )
+                .child(
+                    dialog_footer(&self.tokens).child(self.standard_footer_action_button(
+                        self.i18n.t("settings_view.help.legal_notice_close"),
+                        ButtonVariant::Secondary,
+                        ConfirmDialogAction::Cancel,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.close_help_legal_notice(cx);
+                        },
+                        cx,
+                    )),
+                ),
+        );
+        settings_dialog_transition(
+            &self.tokens,
+            "help-legal-notice-form",
+            backdrop,
+            form,
+            self.help_legal_notice_presence,
+        )
     }
 
     pub(in crate::workspace) fn open_help_url(

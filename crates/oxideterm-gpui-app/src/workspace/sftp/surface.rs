@@ -42,7 +42,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     window.focus(&this.focus_handle);
-                    if this.sftp_view.dismiss_context_menu() {
+                    if this.dismiss_sftp_context_menu() {
                         // Ordinary pane clicks already repaint through their
                         // own state changes; the root only owns context-menu
                         // dismissal, so skip a no-op background repaint.
@@ -101,6 +101,24 @@ impl WorkspaceApp {
             )
             .child(self.render_sftp_transfer_queue(has_background, cx));
 
+        if let Some(generation) = self.sftp_view.context_menu_exit_generation {
+            let delay = oxideterm_gpui_ui::motion::duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            );
+            // Dialog-opening actions still retire their retained menu payload.
+            cx.spawn(async move |weak, cx| {
+                Timer::after(delay).await;
+                let _ = weak.update(cx, |this, cx| {
+                    if this.sftp_view.context_menu_presence.finish_exit(generation) {
+                        this.sftp_view.context_menu = None;
+                        this.sftp_view.context_menu_exit_generation = None;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
         if self.sftp_view.dialog.is_none()
             && let Some(menu) = self.sftp_view.context_menu.clone()
         {
@@ -279,7 +297,7 @@ impl WorkspaceApp {
                     LucideIcon::HardDrive,
                     self.i18n.t("sftp.toolbar.show_drives"),
                     cx.listener(|this, _event, _window, cx| {
-                        this.sftp_view.dialog = Some(SftpDialog::Drives);
+                        this.sftp_view.set_dialog(SftpDialog::Drives);
                         cx.stop_propagation();
                         cx.notify();
                     }),

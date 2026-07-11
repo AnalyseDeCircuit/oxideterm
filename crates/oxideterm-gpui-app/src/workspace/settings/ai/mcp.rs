@@ -121,6 +121,7 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(|this, _event, _window, cx| {
+                                this.ai_mcp_dialog_presence.reopen();
                                 this.ai.models.mcp_add_dialog = Some(AiMcpServerDraft::default());
                                 this.focused_settings_input = None;
                                 this.close_settings_select();
@@ -577,94 +578,94 @@ impl WorkspaceApp {
             }
         };
 
-        Some(
-            dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        // Tauri McpServersPanel binds Add Server Dialog
-                        // onOpenChange to setShowAddDialog(false).
-                        this.close_ai_mcp_add_dialog();
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .child(
-                    dialog_content(&self.tokens)
-                        .w(px(AI_MCP_DIALOG_WIDTH))
-                        .max_w(relative(0.92))
-                        .max_h(relative(0.86))
-                        .shadow_lg()
-                        .flex()
-                        .flex_col()
-                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .child(
-                            dialog_header(&self.tokens)
-                                .child(dialog_title(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.mcp.add_server_title"),
-                                ))
-                                .child(dialog_description(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.mcp.add_server_description"),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .id("ai-mcp-add-server-scroll")
-                                .flex_1()
-                                .min_h(px(0.0))
-                                .selectable_overflow_y_scrollbar(
-                                    &self.selectable_text_scroll_handle("ai-mcp-add-server-scroll"),
-                                )
-                                .px(px(AI_MCP_DIALOG_CONTENT_PX))
-                                .py(px(AI_MCP_DIALOG_CONTENT_PY))
-                                .flex()
-                                .flex_col()
-                                .gap(px(AI_MCP_FORM_GAP))
-                                .child(self.ai_mcp_labeled_input(
-                                    "settings_view.mcp.server_name",
-                                    SettingsInput::AiMcpName,
-                                    "my-mcp-server".to_string(),
-                                    cx,
-                                ))
-                                .child(self.ai_mcp_labeled_select(
-                                    "settings_view.mcp.transport",
-                                    SettingsSelect::AiMcpTransport,
-                                    transport_label,
-                                    cx,
-                                ))
-                                .children(self.ai_mcp_transport_fields(draft, auth_mode_label, cx)),
-                        )
-                        .child(
-                            dialog_footer(&self.tokens)
-                                .child(self.standard_footer_action_button(
-                                    self.i18n.t("settings_view.mcp.cancel"),
-                                    ButtonVariant::Outline,
-                                    ConfirmDialogAction::Cancel,
-                                    false,
-                                    |this, _event, _window, cx| {
-                                        this.close_ai_mcp_add_dialog();
-                                        cx.notify();
-                                    },
-                                    cx,
-                                ))
-                                .child(self.standard_footer_action_button(
-                                    self.i18n.t("settings_view.mcp.add"),
-                                    ButtonVariant::Default,
-                                    ConfirmDialogAction::Confirm,
-                                    !can_add,
-                                    |this, _event, _window, cx| {
-                                        this.add_ai_mcp_server_from_draft(cx);
-                                    },
-                                    cx,
-                                )),
-                        ),
-                )
-                .into_any_element(),
-        )
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                // Tauri McpServersPanel binds Add Server Dialog
+                // onOpenChange to setShowAddDialog(false).
+                this.close_ai_mcp_add_dialog(cx);
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        );
+        let form = dialog_content(&self.tokens)
+            .w(px(AI_MCP_DIALOG_WIDTH))
+            .max_w(relative(0.92))
+            .max_h(relative(0.86))
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(
+                        &self.tokens,
+                        self.i18n.t("settings_view.mcp.add_server_title"),
+                    ))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n.t("settings_view.mcp.add_server_description"),
+                    )),
+            )
+            .child(
+                div()
+                    .id("ai-mcp-add-server-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("ai-mcp-add-server-scroll"),
+                    )
+                    .px(px(AI_MCP_DIALOG_CONTENT_PX))
+                    .py(px(AI_MCP_DIALOG_CONTENT_PY))
+                    .flex()
+                    .flex_col()
+                    .gap(px(AI_MCP_FORM_GAP))
+                    .child(self.ai_mcp_labeled_input(
+                        "settings_view.mcp.server_name",
+                        SettingsInput::AiMcpName,
+                        "my-mcp-server".to_string(),
+                        cx,
+                    ))
+                    .child(self.ai_mcp_labeled_select(
+                        "settings_view.mcp.transport",
+                        SettingsSelect::AiMcpTransport,
+                        transport_label,
+                        cx,
+                    ))
+                    .children(self.ai_mcp_transport_fields(draft, auth_mode_label, cx)),
+            )
+            .child(
+                dialog_footer(&self.tokens)
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("settings_view.mcp.cancel"),
+                        ButtonVariant::Outline,
+                        ConfirmDialogAction::Cancel,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.close_ai_mcp_add_dialog(cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.standard_footer_action_button(
+                        self.i18n.t("settings_view.mcp.add"),
+                        ButtonVariant::Default,
+                        ConfirmDialogAction::Confirm,
+                        !can_add,
+                        |this, _event, _window, cx| {
+                            this.submit_ai_mcp_add_dialog(cx);
+                        },
+                        cx,
+                    )),
+            );
+        Some(settings_dialog_transition(
+            &self.tokens,
+            "ai-mcp-dialog-form",
+            backdrop,
+            form,
+            self.ai_mcp_dialog_presence,
+        ))
     }
 
     pub(in crate::workspace) fn handle_ai_mcp_add_dialog_key(
@@ -688,13 +689,12 @@ impl WorkspaceApp {
 
         match self.handle_standard_confirm_key(event, cx) {
             Some(ConfirmKeyboardAction::Cancel) => {
-                self.close_ai_mcp_add_dialog();
-                cx.notify();
+                self.close_ai_mcp_add_dialog(cx);
                 true
             }
             Some(ConfirmKeyboardAction::Confirm) => {
                 if can_add {
-                    self.add_ai_mcp_server_from_draft(cx);
+                    self.submit_ai_mcp_add_dialog(cx);
                 } else {
                     // Disabled primary buttons remain in the dialog; restore
                     // focus to the first footer action like a browser footer loop.
@@ -1211,6 +1211,7 @@ impl WorkspaceApp {
                     }
                     Err(error) => {
                         this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                        this.ai_mcp_dialog_presence.reopen();
                         this.ai.models.mcp_add_dialog = Some(restore_draft);
                         cx.notify();
                     }
@@ -1234,13 +1235,76 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn close_ai_mcp_add_dialog(&mut self) {
-        if let Some(mut draft) = self.ai.models.mcp_add_dialog.take() {
-            zeroize::Zeroize::zeroize(&mut draft.auth_token);
-        }
+    pub(in crate::workspace) fn close_ai_mcp_add_dialog(&mut self, cx: &mut Context<Self>) {
         self.focused_settings_input = None;
         self.settings_input_draft.clear();
         self.close_settings_select();
         self.clear_standard_confirm_focus();
+        let Some(generation) = self.ai_mcp_dialog_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_ai_mcp_dialog_exit(generation, false, cx);
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_ai_mcp_dialog_exit(generation, false, cx) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn submit_ai_mcp_add_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(generation) = self.ai_mcp_dialog_presence.begin_exit() else {
+            return;
+        };
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.finish_ai_mcp_dialog_exit(generation, true, cx);
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.finish_ai_mcp_dialog_exit(generation, true, cx) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn finish_ai_mcp_dialog_exit(
+        &mut self,
+        generation: u64,
+        submit: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.ai_mcp_dialog_presence.finish_exit(generation) {
+            return false;
+        }
+        self.ai_mcp_dialog_presence.reopen();
+        if submit {
+            self.add_ai_mcp_server_from_draft(cx);
+        } else if let Some(mut draft) = self.ai.models.mcp_add_dialog.take() {
+            // Closing owns the last secret-bearing draft and zeroizes it immediately.
+            zeroize::Zeroize::zeroize(&mut draft.auth_token);
+        }
+        true
     }
 }
