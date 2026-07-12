@@ -105,4 +105,4 @@ jobs:
         run: python scripts/audit_i18n.py
 
       - name: Test native packaging helpers
-        run: python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
+        run: python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package scripts.tests.test_compose_release_notes

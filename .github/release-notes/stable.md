@@ -4,6 +4,8 @@ OxideTerm 2.0 is the stable, GPU-rendered desktop workspace for SSH, terminals, 
 
 Use this channel for daily work. It includes the desktop app, signed update metadata, and the recommended update path for most users.
 
+<!-- RELEASE_DOWNLOADS -->
+
 ## What This Release Is
 
 - The stable OxideTerm 2.0 desktop build.

@@ -331,6 +331,7 @@ jobs:
           # versioned changelog section so release history can stay in Git.
           python3 .github/scripts/compose_release_notes.py \
             --version "${RELEASE_VERSION}" \
+            --tag "${RELEASE_TAG}" \
             --base "${notes_base}" \
             --changelog "${notes_changelog}" \
             --output release-notes.md
