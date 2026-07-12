@@ -681,12 +681,14 @@ pub(in crate::workspace) fn next_connection_field(
                 NewConnectionField::Host,
                 NewConnectionField::Port,
                 NewConnectionField::Username,
+                NewConnectionField::Password,
             ]
         } else {
             vec![
                 NewConnectionField::Name,
                 NewConnectionField::Host,
                 NewConnectionField::Port,
+                NewConnectionField::Password,
             ]
         };
         let index = fields
@@ -1292,6 +1294,17 @@ mod tests {
         assert_eq!(
             next_connection_field(
                 NewConnectionField::Port,
+                super::SshAuthTab::Password,
+                NewConnectionTransport::Vnc,
+                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
+                super::NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::Password
+        );
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Password,
                 super::SshAuthTab::Password,
                 NewConnectionTransport::Vnc,
                 super::NewConnectionUpstreamProxyPolicy::UseGlobal,

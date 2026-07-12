@@ -5,6 +5,12 @@ const CONFIG_ENCRYPTION_KEY_LEN: usize = 32;
 const CONFIG_ENCRYPTION_NONCE_LEN: usize = 12;
 const CONFIG_KEYCHAIN_SERVICE: &str = "com.oxideterm.config";
 const CONFIG_KEYCHAIN_ID: &str = "local-config-master-key";
+#[cfg(target_os = "macos")]
+const CONFIG_KEYCHAIN_MIGRATION_BACKUP_SUFFIX: &str = ".migration-backup";
+#[cfg(target_os = "macos")]
+const MACOS_KEYCHAIN_COMMAND_TIMEOUT_SECS: u64 = 30;
+#[cfg(target_os = "macos")]
+const MACOS_SECURITY_ITEM_NOT_FOUND_EXIT_CODE: i32 = 44;
 const MANAGED_SSH_KEY_SECRET_DIR: &str = "managed-ssh-key-secrets";
 const MANAGED_SSH_KEY_SECRET_FILE_FORMAT: &str = "oxideterm.managed-ssh-key-secret.encrypted";
 const MANAGED_SSH_KEY_SECRET_FILE_VERSION: u32 = 1;
@@ -513,9 +519,8 @@ fn delete_config_key_secret() -> Result<()> {
     result
 }
 
+#[cfg(not(target_os = "macos"))]
 fn load_system_config_key_secret() -> Result<Option<zeroize::Zeroizing<String>>> {
-    #[cfg(target_os = "macos")]
-    authenticate_macos_keychain_access("OxideTerm needs to unlock your encrypted connections")?;
     let entry = config_keychain_entry()?;
     match entry.get_password() {
         // Move the backend String directly into a zeroizing owner.
@@ -525,6 +530,26 @@ fn load_system_config_key_secret() -> Result<Option<zeroize::Zeroizing<String>>>
     }
 }
 
+#[cfg(target_os = "macos")]
+fn load_system_config_key_secret() -> Result<Option<zeroize::Zeroizing<String>>> {
+    authenticate_macos_keychain_access("OxideTerm needs to unlock your encrypted connections")?;
+    let account = config_keychain_account();
+    if let Some(secret) = read_macos_permissive_config_key(&account)? {
+        // Rewriting a legacy entry changes its executable ACL to allow-all;
+        // subsequent cargo rebuilds then need only the app-level Touch ID gate.
+        let _ = store_macos_permissive_config_key(&account, secret.as_str());
+        return Ok(Some(secret));
+    }
+
+    let backup_account = config_keychain_backup_account(&account);
+    let Some(secret) = read_macos_permissive_config_key(&backup_account)? else {
+        return Ok(None);
+    };
+    store_macos_permissive_config_key(&account, secret.as_str())?;
+    Ok(Some(secret))
+}
+
+#[cfg(not(target_os = "macos"))]
 fn store_system_config_key_secret(secret: &str) -> Result<()> {
     // keyring's apple-native backend never places the master key in process argv.
     config_keychain_entry()?
@@ -532,10 +557,209 @@ fn store_system_config_key_secret(secret: &str) -> Result<()> {
         .context("failed to store local config key in OS keychain")
 }
 
+#[cfg(target_os = "macos")]
+fn store_system_config_key_secret(secret: &str) -> Result<()> {
+    store_macos_permissive_config_key(&config_keychain_account(), secret)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn delete_system_config_key_secret() -> Result<()> {
     match config_keychain_entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(error) => Err(error).context("failed to delete local config key from OS keychain"),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn delete_system_config_key_secret() -> Result<()> {
+    let account = config_keychain_account();
+    delete_macos_config_key(&account)?;
+    delete_macos_config_key(&config_keychain_backup_account(&account))
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_permissive_config_key(
+    account: &str,
+) -> Result<Option<zeroize::Zeroizing<String>>> {
+    let output = run_macos_security_command(
+        macos_find_config_key_args(account),
+        None,
+        "read local config key",
+    )?;
+    if output.status.success() {
+        // Keep the command output zeroizing while validating and trimming it;
+        // the master key never appears in argv, logs, or diagnostics.
+        let output = zeroize::Zeroizing::new(output.stdout);
+        let secret = std::str::from_utf8(output.as_slice())
+            .context("local config key from macOS keychain is not UTF-8")?;
+        return Ok(Some(zeroize::Zeroizing::new(
+            secret.trim_end_matches(['\r', '\n']).to_owned(),
+        )));
+    }
+    if output.status.code() == Some(MACOS_SECURITY_ITEM_NOT_FOUND_EXIT_CODE) {
+        return Ok(None);
+    }
+    Err(anyhow::anyhow!(
+        "failed to read local config key from macOS keychain"
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn store_macos_permissive_config_key(account: &str, secret: &str) -> Result<()> {
+    // This intentionally matches the Tauri rebuild-friendly ACL tradeoff for
+    // the config master key only. Other keychain services remain restrictive.
+    let backup_account = config_keychain_backup_account(account);
+    replace_macos_permissive_config_key(&backup_account, secret)
+        .context("failed to preserve local config key migration backup")?;
+
+    if let Err(error) = replace_macos_permissive_config_key(account, secret) {
+        // Keep the permissive backup discoverable for recovery on the next run.
+        return Err(error).context("failed to replace local config key ACL");
+    }
+
+    delete_macos_config_key(&backup_account)
+        .context("failed to remove local config key migration backup")
+}
+
+#[cfg(target_os = "macos")]
+fn replace_macos_permissive_config_key(account: &str, secret: &str) -> Result<()> {
+    delete_macos_config_key(account)?;
+    let output = run_macos_security_command(
+        macos_add_config_key_args(account),
+        Some(secret),
+        "store local config key",
+    )?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "failed to store local config key in macOS keychain"
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn delete_macos_config_key(account: &str) -> Result<()> {
+    let output = run_macos_security_command(
+        macos_delete_config_key_args(account),
+        None,
+        "delete local config key",
+    )?;
+    if output.status.success()
+        || output.status.code() == Some(MACOS_SECURITY_ITEM_NOT_FOUND_EXIT_CODE)
+    {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "failed to delete local config key from macOS keychain"
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_find_config_key_args(account: &str) -> Vec<String> {
+    [
+        "find-generic-password",
+        "-s",
+        CONFIG_KEYCHAIN_SERVICE,
+        "-a",
+        account,
+        "-w",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_add_config_key_args(account: &str) -> Vec<String> {
+    [
+        "add-generic-password",
+        "-s",
+        CONFIG_KEYCHAIN_SERVICE,
+        "-a",
+        account,
+        "-A",
+        "-w",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_delete_config_key_args(account: &str) -> Vec<String> {
+    [
+        "delete-generic-password",
+        "-s",
+        CONFIG_KEYCHAIN_SERVICE,
+        "-a",
+        account,
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn run_macos_security_command(
+    args: Vec<String>,
+    stdin_secret: Option<&str>,
+    action: &str,
+) -> Result<std::process::Output> {
+    use std::io::Write as _;
+
+    let mut command = std::process::Command::new("/usr/bin/security");
+    command
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if stdin_secret.is_some() {
+        command.stdin(std::process::Stdio::piped());
+    }
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to run macOS security command to {action}"))?;
+
+    if let Some(secret) = stdin_secret {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("macOS security command stdin is unavailable"))?;
+        // `security ... -w` asks for confirmation twice. Both writes stay in the
+        // anonymous pipe and never become process arguments or log fields.
+        let write_result = (|| -> std::io::Result<()> {
+            for _ in 0..2 {
+                stdin.write_all(secret.as_bytes())?;
+                stdin.write_all(b"\n")?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error).context("failed to send local config key to macOS keychain");
+        }
+    }
+
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(MACOS_KEYCHAIN_COMMAND_TIMEOUT_SECS);
+    loop {
+        if child
+            .try_wait()
+            .with_context(|| format!("failed to poll macOS security command to {action}"))?
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .with_context(|| format!("failed to collect macOS security output to {action}"));
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("macOS keychain operation timed out while trying to {action}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
 
@@ -595,6 +819,7 @@ fn authenticate_macos_keychain_access(reason: &str) -> Result<()> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn config_keychain_entry() -> Result<keyring::Entry> {
     keyring::Entry::new(CONFIG_KEYCHAIN_SERVICE, &config_keychain_account())
         .context("failed to open local config keychain entry")
@@ -602,6 +827,11 @@ fn config_keychain_entry() -> Result<keyring::Entry> {
 
 fn config_keychain_account() -> String {
     format!("{}@{}", whoami::username(), CONFIG_KEYCHAIN_ID)
+}
+
+#[cfg(target_os = "macos")]
+fn config_keychain_backup_account(account: &str) -> String {
+    format!("{account}{CONFIG_KEYCHAIN_MIGRATION_BACKUP_SUFFIX}")
 }
 
 #[cfg(test)]
@@ -650,6 +880,26 @@ fn with_config_encryption_key_for_tests(
 #[cfg(test)]
 mod encrypted_config_tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permissive_keychain_command_keeps_secret_out_of_argv() {
+        let secret = "not-an-argument";
+        let args = macos_add_config_key_args("test-account");
+
+        assert_eq!(args.last().map(String::as_str), Some("-w"));
+        assert!(args.iter().any(|arg| arg == "-A"));
+        assert!(!args.iter().any(|arg| arg == secret));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn migration_backup_account_is_distinct_and_stable() {
+        assert_eq!(
+            config_keychain_backup_account("account"),
+            "account.migration-backup"
+        );
+    }
 
     #[test]
     fn config_encryption_key_cache_round_trips_and_clears() {

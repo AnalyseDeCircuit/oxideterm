@@ -1017,9 +1017,10 @@ impl WorkspaceApp {
         let username = (protocol == RemoteDesktopProtocol::Rdp)
             .then(|| form.username.trim().to_string())
             .filter(|username| !username.is_empty());
-        let password = if protocol == RemoteDesktopProtocol::Rdp && !form.password.is_empty() {
+        let password = if !form.password.is_empty() {
             // Remote desktop passwords are runtime-only. Move the UI draft into
-            // a zeroizing wrapper before the form is dropped.
+            // a zeroizing wrapper before the form is dropped. VNC keeps this
+            // optional because servers may advertise unauthenticated access.
             Some(RemoteDesktopSecret::from(std::mem::take(
                 &mut form.password,
             )))

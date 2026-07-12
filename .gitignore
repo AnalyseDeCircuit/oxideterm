@@ -39,3 +39,4 @@ tasks/*
 .deepseek/*
 docs/design/*
 docs/testing/visual-appearance-matrix.md
+audit-evidence-archive/

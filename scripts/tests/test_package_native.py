@@ -198,6 +198,87 @@ class PlatformSigningTests(unittest.TestCase):
 
         self.assertFalse(submitted)
 
+    def test_unsigned_stable_dmg_includes_gatekeeper_notice(self) -> None:
+        identity = package_native.release_identity("v2.0.0", "2.0.0")
+        with patch.dict(package_native.os.environ, {}, clear=True):
+            included = package_native.should_include_macos_unsigned_install_notice(
+                identity
+            )
+
+        self.assertTrue(included)
+
+    def test_signed_or_preview_dmg_omits_stable_gatekeeper_notice(self) -> None:
+        stable = package_native.release_identity("v2.0.0", "2.0.0")
+        preview = package_native.release_identity(
+            "gpui-v2.0.0-gpui-preview.16", "2.0.0-gpui-preview.16"
+        )
+
+        with patch.dict(
+            package_native.os.environ,
+            {"MACOS_CODESIGN_IDENTITY": "Developer ID Application: OxideTerm"},
+            clear=True,
+        ):
+            self.assertFalse(
+                package_native.should_include_macos_unsigned_install_notice(stable)
+            )
+        with patch.dict(package_native.os.environ, {}, clear=True):
+            self.assertFalse(
+                package_native.should_include_macos_unsigned_install_notice(preview)
+            )
+
+    def test_unsigned_notice_is_copied_into_stable_dmg_root(self) -> None:
+        identity = package_native.release_identity("v2.0.0", "2.0.0")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "notice-source.png"
+            source.write_bytes(b"png notice")
+            background = root / "background-source.png"
+            background.write_bytes(b"png background")
+            dmg_root = root / "dmg"
+            dmg_root.mkdir()
+
+            with (
+                patch.object(
+                    package_native, "MACOS_UNSIGNED_INSTALL_NOTICE", source
+                ),
+                patch.object(
+                    package_native, "MACOS_UNSIGNED_DMG_BACKGROUND", background
+                ),
+                patch.dict(package_native.os.environ, {}, clear=True),
+            ):
+                copied = package_native.copy_macos_unsigned_install_notice(
+                    dmg_root, identity
+                )
+
+            self.assertTrue(copied)
+            self.assertEqual(
+                (dmg_root / package_native.MACOS_UNSIGNED_INSTALL_NOTICE_NAME).read_bytes(),
+                b"png notice",
+            )
+            self.assertEqual(
+                (
+                    dmg_root
+                    / package_native.MACOS_DMG_BACKGROUND_DIR_NAME
+                    / package_native.MACOS_DMG_BACKGROUND_NAME
+                ).read_bytes(),
+                b"png background",
+            )
+
+    def test_unsigned_finder_layout_keeps_primary_icons_and_notice_separate(self) -> None:
+        script = package_native.macos_dmg_finder_script()
+
+        self.assertIn("set dmgFolder to POSIX file mountPath as alias", script)
+        self.assertNotIn("tell disk volumeName", script)
+        self.assertIn("set bounds of dmgWindow to {120, 120, 840, 600}", script)
+        self.assertIn("set position of item appName of dmgFolder to {180, 205}", script)
+        self.assertIn(
+            'set position of item "Applications" of dmgFolder to {540, 205}', script
+        )
+        self.assertIn(
+            "set position of item noticeName of dmgFolder to {620, 390}", script
+        )
+        self.assertIn(package_native.MACOS_DMG_BACKGROUND_NAME, script)
+
 
 class LinuxPackagingTests(unittest.TestCase):
     def test_rpm_arch_and_prerelease_version_are_normalized(self) -> None:

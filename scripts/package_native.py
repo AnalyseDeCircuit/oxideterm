@@ -21,6 +21,15 @@ APP_MANIFEST = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "Cargo.toml"
 RESOURCE_DIR = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "resources"
 MACOS_INFO_PLIST_EXTENSION_DIR = RESOURCE_DIR / "info"
 MACOS_ENTITLEMENTS = RESOURCE_DIR / "OxideTerm.entitlements"
+MACOS_UNSIGNED_INSTALL_NOTICE = (
+    RESOURCE_DIR / "macos" / "unsigned-install-notice.png"
+)
+MACOS_UNSIGNED_INSTALL_NOTICE_NAME = "READ FIRST - 未签名安装说明.png"
+MACOS_UNSIGNED_DMG_BACKGROUND = (
+    RESOURCE_DIR / "macos" / "unsigned-dmg-background.png"
+)
+MACOS_DMG_BACKGROUND_DIR_NAME = ".background"
+MACOS_DMG_BACKGROUND_NAME = "unsigned-dmg-background.png"
 DIST_DIR = ROOT_DIR / "dist"
 BASE_APP_NAME = "OxideTerm"
 STABLE_APP_IDENTIFIER = "com.oxideterm.app"
@@ -488,6 +497,164 @@ def macos_codesign_command(codesign: str, app_dir: Path) -> list[str]:
     return command
 
 
+def should_include_macos_unsigned_install_notice(identity: ReleaseIdentity) -> bool:
+    """Include Gatekeeper help only in an unsigned stable-release DMG."""
+    signing_identity = os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() or "-"
+    return identity.channel == "stable" and signing_identity == "-"
+
+
+def copy_macos_unsigned_install_notice(
+    dmg_root: Path, identity: ReleaseIdentity
+) -> bool:
+    """Copy the visible Gatekeeper guide into an eligible DMG staging root."""
+    if not should_include_macos_unsigned_install_notice(identity):
+        return False
+    shutil.copy2(
+        MACOS_UNSIGNED_INSTALL_NOTICE,
+        dmg_root / MACOS_UNSIGNED_INSTALL_NOTICE_NAME,
+    )
+    background_dir = dmg_root / MACOS_DMG_BACKGROUND_DIR_NAME
+    background_dir.mkdir(exist_ok=True)
+    shutil.copy2(
+        MACOS_UNSIGNED_DMG_BACKGROUND,
+        background_dir / MACOS_DMG_BACKGROUND_NAME,
+    )
+    return True
+
+
+def macos_dmg_finder_script() -> str:
+    """Return the Finder layout script for the unsigned stable DMG."""
+    return f'''
+on run argv
+    set mountPath to item 1 of argv
+    set appName to item 2 of argv
+    set noticeName to item 3 of argv
+    set dmgFolder to POSIX file mountPath as alias
+    tell application "Finder"
+        open dmgFolder
+        set dmgWindow to container window of dmgFolder
+        set current view of dmgWindow to icon view
+        set toolbar visible of dmgWindow to false
+        set statusbar visible of dmgWindow to false
+        set pathbar visible of dmgWindow to false
+        set bounds of dmgWindow to {{120, 120, 840, 600}}
+        set theViewOptions to icon view options of dmgWindow
+        set arrangement of theViewOptions to not arranged
+        set icon size of theViewOptions to 96
+        set text size of theViewOptions to 13
+        set background picture of theViewOptions to file "{MACOS_DMG_BACKGROUND_DIR_NAME}:{MACOS_DMG_BACKGROUND_NAME}" of dmgFolder
+        set position of item appName of dmgFolder to {{180, 205}}
+        set position of item "Applications" of dmgFolder to {{540, 205}}
+        set position of item noticeName of dmgFolder to {{620, 390}}
+        update dmgFolder without registering applications
+        delay 1
+        close dmgWindow
+    end tell
+end run
+'''.strip()
+
+
+def create_macos_dmg(
+    dmg_root: Path, dmg_path: Path, identity: ReleaseIdentity
+) -> None:
+    """Create a compressed DMG, applying Finder chrome when it is available."""
+    if not should_include_macos_unsigned_install_notice(identity):
+        run(
+            [
+                "hdiutil",
+                "create",
+                "-volname",
+                identity.app_name,
+                "-srcfolder",
+                str(dmg_root),
+                "-ov",
+                "-format",
+                "UDZO",
+                str(dmg_path),
+            ]
+        )
+        return
+
+    writable_dmg = dmg_path.with_name(f".{dmg_path.stem}.writable.dmg")
+    mount_point = dmg_path.with_name(f".{dmg_path.stem}.mount")
+    writable_dmg.unlink(missing_ok=True)
+    if mount_point.exists():
+        shutil.rmtree(mount_point)
+    mount_point.mkdir()
+
+    run(
+        [
+            "hdiutil",
+            "create",
+            "-volname",
+            identity.app_name,
+            "-srcfolder",
+            str(dmg_root),
+            "-ov",
+            "-format",
+            "UDRW",
+            str(writable_dmg),
+        ]
+    )
+    attached = False
+    try:
+        run(
+            [
+                "hdiutil",
+                "attach",
+                "-readwrite",
+                "-noverify",
+                "-noautoopen",
+                "-mountpoint",
+                str(mount_point),
+                str(writable_dmg),
+            ]
+        )
+        attached = True
+        layout = subprocess.run(
+            [
+                "osascript",
+                "-e",
+                macos_dmg_finder_script(),
+                str(mount_point),
+                f"{identity.app_name}.app",
+                MACOS_UNSIGNED_INSTALL_NOTICE_NAME,
+            ],
+            cwd=ROOT_DIR,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if layout.returncode != 0:
+            print(
+                "warning: Finder DMG layout was unavailable; using default icon positions: "
+                f"{layout.stderr.strip()}",
+                file=sys.stderr,
+            )
+        subprocess.run(["sync"], check=True)
+    finally:
+        if attached:
+            run(["hdiutil", "detach", str(mount_point)])
+        if mount_point.exists():
+            shutil.rmtree(mount_point)
+
+    run(
+        [
+            "hdiutil",
+            "convert",
+            str(writable_dmg),
+            "-ov",
+            "-format",
+            "UDZO",
+            "-imagekey",
+            "zlib-level=9",
+            "-o",
+            str(dmg_path),
+        ]
+    )
+    writable_dmg.unlink(missing_ok=True)
+
+
 def sign_macos_path(path: Path) -> None:
     codesign = require_tool("codesign")
     # Ad-hoc signing does not notarize the app, but it keeps stripped preview
@@ -879,21 +1046,9 @@ def create_macos_app(
         dmg_root.mkdir()
         shutil.copytree(app_dir, dmg_root / f"{identity.app_name}.app")
         (dmg_root / "Applications").symlink_to("/Applications")
+        copy_macos_unsigned_install_notice(dmg_root, identity)
         dmg_path = DIST_DIR / f"OxideTerm_{version}_{label}.dmg"
-        run(
-            [
-                "hdiutil",
-                "create",
-                "-volname",
-                identity.app_name,
-                "-srcfolder",
-                str(dmg_root),
-                "-ov",
-                "-format",
-                "UDZO",
-                str(dmg_path),
-            ]
-        )
+        create_macos_dmg(dmg_root, dmg_path, identity)
         notarize_macos_artifact(dmg_path, staple=True)
         shutil.rmtree(dmg_root)
 

@@ -1551,28 +1551,29 @@ impl WorkspaceApp {
             .when(
                 protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
                 |section| {
-                    section
-                        .child(self.render_connection_field(
-                            self.i18n.t("modals.new_connection.remote_desktop_username"),
-                            &form.username,
-                            "Administrator".to_string(),
-                            NewConnectionField::Username,
-                            false,
-                            cx,
-                        ))
-                        .child(
-                            self.render_connection_field(
-                                self.i18n.t("ssh.form.password"),
-                                &form.password,
-                                self.i18n
-                                    .t("modals.new_connection.remote_desktop_password_placeholder"),
-                                NewConnectionField::Password,
-                                true,
-                                cx,
-                            ),
-                        )
+                    section.child(self.render_connection_field(
+                        self.i18n.t("modals.new_connection.remote_desktop_username"),
+                        &form.username,
+                        "Administrator".to_string(),
+                        NewConnectionField::Username,
+                        false,
+                        cx,
+                    ))
                 },
             )
+            .child(self.render_connection_field(
+                self.i18n.t("ssh.form.password"),
+                &form.password,
+                if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
+                    self.i18n
+                        .t("modals.new_connection.remote_desktop_password_placeholder")
+                } else {
+                    self.i18n.t("ssh.form.password")
+                },
+                NewConnectionField::Password,
+                true,
+                cx,
+            ))
             .into_any_element()
     }
 
