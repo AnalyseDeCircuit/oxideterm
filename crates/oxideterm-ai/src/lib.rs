@@ -20,7 +20,6 @@ mod suggestions;
 mod target_projection;
 mod tool_protocol;
 mod tool_result_protocol;
-mod touch_id;
 mod types;
 
 pub use acp::{

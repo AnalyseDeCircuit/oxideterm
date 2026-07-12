@@ -10,7 +10,69 @@ use parking_lot::RwLock;
 use zeroize::Zeroizing;
 
 const AI_KEYCHAIN_SERVICE: &str = "com.oxideterm.ai";
-const AI_KEYCHAIN_TOUCH_ID_REASON: &str = "OxideTerm needs to access your AI API key";
+
+#[cfg(target_os = "macos")]
+mod macos_protected_keychain {
+    use security_framework::{
+        item::{ItemClass, ItemSearchOptions},
+        passwords::{
+            AccessControlOptions, PasswordOptions, delete_generic_password_options,
+            generic_password, set_generic_password_options,
+        },
+    };
+    use security_framework_sys::base::errSecItemNotFound;
+
+    pub(super) enum ReadError {
+        NotFound,
+        Backend(security_framework::base::Error),
+    }
+
+    fn options(service: &str, account: &str) -> PasswordOptions {
+        let mut options = PasswordOptions::new_generic_password(service, account);
+        options.use_protected_keychain();
+        options
+    }
+
+    pub(super) fn store(service: &str, account: &str, secret: &[u8]) -> anyhow::Result<()> {
+        let mut options = options(service, account);
+        // Let the keychain item perform the single authentication instead of
+        // stacking a separate LocalAuthentication prompt with an executable ACL.
+        options.set_access_control_options(AccessControlOptions::USER_PRESENCE);
+        set_generic_password_options(secret, options).map_err(anyhow::Error::new)
+    }
+
+    pub(super) fn get(service: &str, account: &str) -> Result<Vec<u8>, ReadError> {
+        generic_password(options(service, account)).map_err(|error| {
+            if error.code() == errSecItemNotFound {
+                ReadError::NotFound
+            } else {
+                ReadError::Backend(error)
+            }
+        })
+    }
+
+    pub(super) fn exists(service: &str, account: &str) -> bool {
+        let mut search = ItemSearchOptions::new();
+        search
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(account)
+            .ignore_legacy_keychains()
+            .load_attributes(true)
+            .limit(1);
+        // Metadata lookup intentionally omits secret data, so settings status
+        // checks do not trigger the item's user-presence authentication.
+        search.search().is_ok_and(|items| !items.is_empty())
+    }
+
+    pub(super) fn delete(service: &str, account: &str) -> anyhow::Result<()> {
+        match delete_generic_password_options(options(service, account)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == errSecItemNotFound => Ok(()),
+            Err(error) => Err(anyhow::Error::new(error)),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct AiProviderKeyStore {
@@ -105,34 +167,12 @@ impl AiProviderKeyStore {
             return Ok(secrets);
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            if crate::touch_id::is_biometric_available() {
-                crate::touch_id::authenticate(AI_KEYCHAIN_TOUCH_ID_REASON)
-                    .map_err(anyhow::Error::msg)
-                    .context("failed to authenticate AI provider key export")?;
+        for provider_id in missing {
+            if let Some(secret) = self.get_provider_key(&provider_id)? {
+                secrets.push((provider_id, secret));
             }
-
-            for provider_id in missing {
-                if let Some(secret) = self.load_provider_key_from_macos_after_auth(&provider_id)? {
-                    self.cache
-                        .write()
-                        .insert(provider_id.clone(), Zeroizing::new(secret.to_string()));
-                    secrets.push((provider_id, secret));
-                }
-            }
-            return Ok(secrets);
         }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            for provider_id in missing {
-                if let Some(secret) = self.get_provider_key(&provider_id)? {
-                    secrets.push((provider_id, secret));
-                }
-            }
-            Ok(secrets)
-        }
+        Ok(secrets)
     }
 
     fn begin_provider_key_read(&self, provider_id: &str) -> ProviderKeyReadTicket {
@@ -171,6 +211,12 @@ impl AiProviderKeyStore {
             Ok(false) => {}
             Err(_) => return false,
         }
+
+        #[cfg(target_os = "macos")]
+        if macos_protected_keychain::exists(&self.service, &self.account(provider_id)) {
+            return true;
+        }
+
         self.entry(provider_id)
             .map(|entry| credential_exists_without_secret_read(&entry))
             .unwrap_or(false)
@@ -186,6 +232,15 @@ impl AiProviderKeyStore {
                     )
                 });
         }
+
+        #[cfg(target_os = "macos")]
+        {
+            let account = self.account(provider_id);
+            macos_protected_keychain::delete(&self.service, &account).with_context(|| {
+                format!("failed to delete protected AI provider key for {provider_id}")
+            })?;
+        }
+
         match self.entry(provider_id)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error)
@@ -213,17 +268,7 @@ impl AiProviderKeyStore {
         }
 
         #[cfg(target_os = "macos")]
-        {
-            if crate::touch_id::is_biometric_available() {
-                crate::touch_id::authenticate(AI_KEYCHAIN_TOUCH_ID_REASON)
-                    .map_err(anyhow::Error::msg)
-                    .with_context(|| {
-                        format!("failed to authenticate AI provider key access for {provider_id}")
-                    })?;
-            }
-
-            self.load_provider_key_from_macos_after_auth(provider_id)
-        }
+        return self.load_provider_key_from_macos(provider_id);
 
         #[cfg(not(target_os = "macos"))]
         {
@@ -252,16 +297,43 @@ impl AiProviderKeyStore {
     }
 
     #[cfg(target_os = "macos")]
-    fn load_provider_key_from_macos_after_auth(
-        &self,
-        provider_id: &str,
-    ) -> Result<Option<Zeroizing<String>>> {
-        match self.entry(provider_id)?.get_password() {
-            // Move the backend-owned String directly into a zeroizing owner.
-            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
+    fn load_provider_key_from_macos(&self, provider_id: &str) -> Result<Option<Zeroizing<String>>> {
+        let account = self.account(provider_id);
+        match macos_protected_keychain::get(&self.service, &account) {
+            Ok(secret) => {
+                let secret = Zeroizing::new(secret);
+                let secret = std::str::from_utf8(secret.as_slice()).with_context(|| {
+                    format!("stored AI provider key is not valid UTF-8 for {provider_id}")
+                })?;
+                return Ok(Some(Zeroizing::new(secret.to_owned())));
+            }
+            Err(macos_protected_keychain::ReadError::Backend(error)) => {
+                return Err(error).with_context(|| {
+                    format!("failed to authenticate AI provider key access for {provider_id}")
+                });
+            }
+            Err(macos_protected_keychain::ReadError::NotFound) => {}
+        }
+
+        // Legacy AI keys used an executable ACL. A successful one-time read
+        // migrates the value so cargo rebuilds no longer require a second prompt.
+        let entry = self.entry(provider_id)?;
+        match entry.get_password() {
+            Ok(secret) => {
+                let secret = Zeroizing::new(secret);
+                macos_protected_keychain::store(&self.service, &account, secret.as_bytes())
+                    .with_context(|| {
+                        format!("failed to migrate AI provider key for {provider_id}")
+                    })?;
+                entry.delete_credential().with_context(|| {
+                    format!("failed to remove migrated AI provider key for {provider_id}")
+                })?;
+                Ok(Some(secret))
+            }
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(error)
-                .with_context(|| format!("failed to load AI provider key for {provider_id}")),
+            Err(error) => Err(error).with_context(|| {
+                format!("failed to load legacy AI provider key for {provider_id}")
+            }),
         }
     }
 
@@ -277,7 +349,28 @@ impl AiProviderKeyStore {
             });
         }
 
-        // keyring's apple-native backend keeps the secret out of process argv.
+        #[cfg(target_os = "macos")]
+        {
+            let account = self.account(provider_id);
+            macos_protected_keychain::store(&self.service, &account, api_key.as_bytes())
+                .with_context(|| {
+                    format!("failed to save protected AI provider key for {provider_id}")
+                })?;
+            // Remove an older executable-ACL entry only after the protected
+            // replacement is durable.
+            let entry = self.entry(provider_id)?;
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => return Ok(()),
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("failed to remove legacy AI provider key for {provider_id}")
+                    });
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        // keyring keeps the secret out of process argv on native backends.
         self.entry(provider_id)?
             .set_password(api_key)
             .with_context(|| format!("failed to save AI provider key for {provider_id}"))
@@ -475,5 +568,13 @@ mod tests {
         ] {
             assert!(!source.contains(&keychain_command));
         }
+    }
+
+    #[test]
+    fn macos_key_reads_do_not_stack_explicit_touch_id_with_keychain_authentication() {
+        let source = include_str!("key_store.rs");
+        let explicit_auth_call = ["touch_id", "::authenticate"].concat();
+        assert!(!source.contains(&explicit_auth_call));
+        assert!(source.contains("AccessControlOptions::USER_PRESENCE"));
     }
 }
