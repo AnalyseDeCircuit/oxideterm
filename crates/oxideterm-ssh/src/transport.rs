@@ -284,15 +284,15 @@ pub struct SshCommandOutput {
 #[derive(Clone, Eq, PartialEq)]
 pub struct SshShellBootstrap {
     stage_command: String,
-    launch_input: String,
+    launch_command: String,
     cleanup_command: String,
 }
 
 impl SshShellBootstrap {
-    pub fn new(stage_command: String, launch_input: String, cleanup_command: String) -> Self {
+    pub fn new(stage_command: String, launch_command: String, cleanup_command: String) -> Self {
         Self {
             stage_command,
-            launch_input,
+            launch_command,
             cleanup_command,
         }
     }
@@ -301,8 +301,8 @@ impl SshShellBootstrap {
         &self.stage_command
     }
 
-    pub fn launch_input(&self) -> &str {
-        &self.launch_input
+    pub fn launch_command(&self) -> &str {
+        &self.launch_command
     }
 
     pub fn cleanup_command(&self) -> &str {
@@ -316,7 +316,7 @@ impl std::fmt::Debug for SshShellBootstrap {
         formatter
             .debug_struct("SshShellBootstrap")
             .field("stage_command", &"<redacted>")
-            .field("launch_input_bytes", &self.launch_input.len())
+            .field("launch_command_bytes", &self.launch_command.len())
             .field("cleanup_command", &"<redacted>")
             .finish()
     }

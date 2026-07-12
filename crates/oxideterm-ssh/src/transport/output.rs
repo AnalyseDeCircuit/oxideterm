@@ -1,3 +1,85 @@
+const SSH_BOOTSTRAP_OUTPUT_GATE_TIMEOUT: Duration = Duration::from_secs(2);
+const SSH_BOOTSTRAP_OUTPUT_GATE_MAX_BYTES: usize = 256 * 1024;
+const OXIDETERM_REMOTE_METADATA_OSC_PREFIX: &[u8] = b"\x1b]7719;";
+
+struct SshBootstrapOutputGate {
+    pending: Vec<u8>,
+    deadline: Instant,
+}
+
+impl SshBootstrapOutputGate {
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            deadline: Instant::now() + SSH_BOOTSTRAP_OUTPUT_GATE_TIMEOUT,
+        }
+    }
+
+    fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    fn push(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
+        self.pending.extend_from_slice(bytes);
+        if bootstrap_metadata_osc_is_complete(&self.pending)
+            || self.pending.len() >= SSH_BOOTSTRAP_OUTPUT_GATE_MAX_BYTES
+        {
+            return self.take();
+        }
+        None
+    }
+
+    fn take(&mut self) -> Option<Vec<u8>> {
+        (!self.pending.is_empty()).then(|| std::mem::take(&mut self.pending))
+    }
+}
+
+fn bootstrap_metadata_osc_is_complete(bytes: &[u8]) -> bool {
+    let Some(start) = bytes
+        .windows(OXIDETERM_REMOTE_METADATA_OSC_PREFIX.len())
+        .position(|window| window == OXIDETERM_REMOTE_METADATA_OSC_PREFIX)
+    else {
+        return false;
+    };
+    let payload = &bytes[start + OXIDETERM_REMOTE_METADATA_OSC_PREFIX.len()..];
+    payload.contains(&0x07) || payload.windows(2).any(|window| window == b"\x1b\\")
+}
+
+fn gate_bootstrap_output(
+    gate: &mut Option<SshBootstrapOutputGate>,
+    bytes: &[u8],
+) -> Option<Vec<u8>> {
+    let Some(active_gate) = gate.as_mut() else {
+        return Some(bytes.to_vec());
+    };
+    let released = active_gate.push(bytes);
+    if released.is_some() {
+        *gate = None;
+    }
+    released
+}
+
+fn push_shell_output(
+    batcher: &mut SshOutputBatcher,
+    gate: &mut Option<SshBootstrapOutputGate>,
+    bytes: &[u8],
+) -> bool {
+    gate_bootstrap_output(gate, bytes)
+        .is_some_and(|released| batcher.push(&released))
+}
+
+fn release_bootstrap_output(
+    batcher: &mut SshOutputBatcher,
+    gate: &mut Option<SshBootstrapOutputGate>,
+) -> bool {
+    let Some(mut active_gate) = gate.take() else {
+        return false;
+    };
+    active_gate
+        .take()
+        .is_some_and(|released| batcher.push(&released))
+}
+
 struct SshOutputBatcher {
     pending: Vec<u8>,
     utf8_guard: RawUtf8ResidualGuard,
@@ -203,6 +285,37 @@ mod tests {
 
         assert!(!batcher.push(b"abc"));
         assert_eq!(batcher.take_flush(), Some(b"abc".to_vec()));
+    }
+
+    #[test]
+    fn bootstrap_output_gate_releases_motd_and_launcher_only_after_metadata() {
+        let mut gate = Some(SshBootstrapOutputGate::new());
+
+        assert_eq!(
+            gate_bootstrap_output(&mut gate, b"Welcome to Ubuntu\r\nlauncher\r\n"),
+            None
+        );
+        assert_eq!(
+            gate_bootstrap_output(&mut gate, b"\x1b]7719;v=1;cwd=/home"),
+            None
+        );
+        let released = gate_bootstrap_output(&mut gate, b"\x07prompt").unwrap();
+
+        assert!(gate.is_none());
+        assert!(released.starts_with(b"Welcome to Ubuntu"));
+        assert!(released.ends_with(b"\x07prompt"));
+    }
+
+    #[test]
+    fn bootstrap_output_gate_accepts_split_string_terminator() {
+        let mut gate = Some(SshBootstrapOutputGate::new());
+
+        assert_eq!(
+            gate_bootstrap_output(&mut gate, b"\x1b]7719;v=1\x1b"),
+            None
+        );
+        assert!(gate_bootstrap_output(&mut gate, b"\\").is_some());
+        assert!(gate.is_none());
     }
 
     #[test]

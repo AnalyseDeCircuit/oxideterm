@@ -146,9 +146,9 @@ fn build_remote_metadata_bootstrap(token: &str, nonce: &str) -> SshShellBootstra
     let nushell_config = shell_printf_argument(&remote_nushell_metadata_config());
     let powershell_profile = shell_printf_argument(&remote_powershell_metadata_profile());
 
-    // Interactive line editors can redraw queued input even when PTY echo is
-    // disabled. Erase only the completed launcher row before the real prompt
-    // is rendered, leaving MOTD and last-login output untouched.
+    // Startup output is gated until the first private metadata OSC. Clear the
+    // completed launcher row inside that unrendered batch while preserving all
+    // preceding MOTD and last-login lines.
     let launch_script = format!(
         "stty echo 2>/dev/null || :; [ -t 1 ] && printf '\\033[1A\\r\\033[2K'; __oxide_dir={quoted_remote_dir}; __oxide_shell=${{SHELL:-/bin/sh}}; __oxide_base=${{__oxide_shell##*/}}; case \"$__oxide_base\" in \
 bash) OXIDETERM_REMOTE_METADATA_ID={token} OXIDETERM_BOOTSTRAP_DIR=\"$__oxide_dir\" exec bash --rcfile \"$__oxide_dir/bashrc\" -i ;; \
@@ -172,11 +172,11 @@ printf '%s\\n' {powershell_profile} > \"$__oxide_dir/profile.ps1\" && \
 chmod 600 \"$__oxide_dir/launch\" \"$__oxide_dir/bashrc\" \"$__oxide_dir/.zshrc\" \"$__oxide_dir/fish.fish\" \"$__oxide_dir/config.nu\" \"$__oxide_dir/profile.ps1\"; trap - 0"
     );
     let stage_command = format!("/bin/sh -lc {}", shell_single_quote(&stage_script));
-    let launch_input = format!("/bin/sh {}/launch\r", shell_single_quote(&remote_dir));
+    let launch_command = format!("/bin/sh {}/launch", shell_single_quote(&remote_dir));
     let cleanup_script = format!("rm -rf -- {quoted_remote_dir}");
     let cleanup_command = format!("/bin/sh -lc {}", shell_single_quote(&cleanup_script));
 
-    SshShellBootstrap::new(stage_command, launch_input, cleanup_command)
+    SshShellBootstrap::new(stage_command, launch_command, cleanup_command)
 }
 
 fn remote_bash_metadata_rc() -> String {
@@ -401,16 +401,18 @@ mod ssh_config_tests {
     #[test]
     fn remote_metadata_bootstrap_keeps_private_source_out_of_visible_pty() {
         let bootstrap = build_remote_metadata_bootstrap("token-1", "test-nonce");
-        let input = bootstrap.launch_input();
+        let command = bootstrap.launch_command();
 
-        assert!(input.starts_with("/bin/sh '/tmp/.oxideterm-shell-test-nonce'/launch"));
-        assert!(input.ends_with('\r'));
-        assert_eq!(input.matches('\r').count(), 1);
-        assert!(!input.contains('\n'));
-        assert!(input.len() < 256);
-        assert!(!input.contains("token-1"));
-        assert!(!input.contains("7719"));
-        assert!(!input.contains("__oxideterm"));
+        assert_eq!(
+            command,
+            "/bin/sh '/tmp/.oxideterm-shell-test-nonce'/launch"
+        );
+        assert!(!command.contains('\r'));
+        assert!(!command.contains('\n'));
+        assert!(command.len() < 256);
+        assert!(!command.contains("token-1"));
+        assert!(!command.contains("7719"));
+        assert!(!command.contains("__oxideterm"));
 
         let stage = bootstrap.stage_command();
         assert!(stage.contains("fish --init-command"));
@@ -421,8 +423,9 @@ mod ssh_config_tests {
         assert!(remote_nushell_metadata_config().contains("hooks.pre_prompt"));
         assert!(remote_powershell_metadata_profile().contains("function global:prompt"));
         assert!(stage.contains("OXIDETERM_BOOTSTRAP_DIR"));
+        assert!(stage.contains("\\033[1A"));
 
-        // Validate the exact nested quoting sent over the non-PTY exec channel.
+        // Validate the exact nested quoting used by the hidden staging exec.
         let syntax = std::process::Command::new("/bin/sh")
             .args(["-n", "-c", stage])
             .output()
