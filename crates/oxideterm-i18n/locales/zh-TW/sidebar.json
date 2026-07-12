@@ -16,6 +16,7 @@
       "forwards": "連接埠轉發",
       "forwards_title": "連接埠轉發",
       "runtime": "執行階段",
+      "runtime_description": "監控連線使用情況、系統健康與拓撲",
       "runtime_overview": "概覽",
       "connection_pool": "連線池",
       "connection_monitor": "連線監控",

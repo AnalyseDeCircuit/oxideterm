@@ -11,6 +11,11 @@ impl WorkspaceApp {
         const COMMAND_BAR_FOCUSED_BORDER_ALPHA: u32 = 0x73; // Tauri border-theme-accent/45
 
         let theme = self.tokens.ui;
+        let command_bar_background = if self.window_background_preferences().is_some() {
+            self.workspace_chrome_background(theme.bg)
+        } else {
+            rgba((theme.bg << 8) | COMMAND_BAR_BG_ALPHA)
+        };
         let target = WorkspaceImeTarget::TerminalCommandBar;
         let workspace = cx.entity();
         let input_collapsed = self.terminal_command_input_collapsed;
@@ -178,7 +183,7 @@ impl WorkspaceApp {
             .flex_none()
             .border_t_1()
             .border_color(rgba((theme.border << 8) | COMMAND_BAR_BORDER_ALPHA))
-            .bg(rgba((theme.bg << 8) | COMMAND_BAR_BG_ALPHA))
+            .bg(command_bar_background)
             .px(px(12.0))
             .py(px(4.0))
             .shadow_lg()

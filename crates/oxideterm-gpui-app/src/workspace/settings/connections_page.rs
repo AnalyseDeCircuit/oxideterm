@@ -2,6 +2,8 @@ use super::*;
 
 pub(in crate::workspace) const CONNECTION_IMPORT_PANEL_MAX_WIDTH: f32 = 896.0; // Tauri ConnectionImportPanel max-w-4xl.
 pub(in crate::workspace) const CONNECTION_IDLE_TIMEOUT_CONTROL_WIDTH: f32 = 320.0; // Keep the standalone idle-timeout select from expanding into side panels.
+pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_WIDTH: f32 = 720.0;
+pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_HEIGHT: f32 = 560.0;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_connections_section(
@@ -12,26 +14,19 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         match section_index {
             0 => self.settings_ssh_section(0, cx),
-            1 => self.connection_defaults_section(settings, cx),
+            1 => self.settings_card(
+                "settings_view.connections.title",
+                "settings_view.connections.description",
+                vec![self.connection_defaults_section(settings, cx)],
+            ),
             2 => self.connection_section(
                 "settings_view.connections.idle_timeout.title",
                 "settings_view.connections.idle_timeout.description",
                 vec![self.connection_idle_timeout_control(settings, cx)],
             ),
             3 => self.settings_reconnect_section(0, cx),
-            4 => self.settings_reconnect_section(1, cx),
-            5 => self.settings_reconnect_section(2, cx),
-            6 => {
-                let existing_names = self
-                    .connection_store
-                    .connections()
-                    .iter()
-                    .map(|conn| conn.name.clone())
-                    .collect::<HashSet<_>>();
-                let ssh_hosts = list_ssh_config_hosts(&existing_names).unwrap_or_default();
-                self.ssh_config_import_section(ssh_hosts, cx)
-            }
-            7 => self.connection_importers_section(cx),
+            4 => self.ssh_config_import_section(cx),
+            5 => self.connection_importers_section(cx),
             _ => div().into_any_element(),
         }
     }
@@ -46,19 +41,27 @@ impl WorkspaceApp {
         }
         let keys = list_available_ssh_keys();
         let managed_keys = self.connection_store.managed_ssh_keys();
-        let mut local_list = div().max_w(px(768.0)).flex().flex_col().gap(px(12.0));
+        let mut local_list = div().max_w(px(768.0)).flex().flex_col();
         if keys.is_empty() {
             local_list = local_list.child(self.ssh_keys_empty_state());
         } else {
-            for key in keys {
+            let key_count = keys.len();
+            for (index, key) in keys.into_iter().enumerate() {
                 local_list = local_list.child(self.ssh_key_row(key));
+                if index + 1 < key_count {
+                    local_list = local_list.child(self.card_separator());
+                }
             }
         }
-        let mut managed_list = div().max_w(px(960.0)).flex().flex_col().gap(px(12.0));
-        for key in managed_keys {
+        let managed_key_count = managed_keys.len();
+        let mut managed_list = div().max_w(px(960.0)).flex().flex_col();
+        for (index, key) in managed_keys.into_iter().enumerate() {
             managed_list = managed_list.child(self.managed_ssh_key_row(key, cx));
+            if index + 1 < managed_key_count {
+                managed_list = managed_list.child(self.card_separator());
+            }
         }
-        div()
+        let content = div()
             .flex()
             .flex_col()
             .gap(px(32.0))
@@ -81,8 +84,13 @@ impl WorkspaceApp {
                 self.managed_ssh_keys_empty_state()
             } else {
                 managed_list.into_any_element()
-            })
-            .into_any_element()
+            });
+
+        self.settings_card(
+            "settings_view.ssh_keys.title",
+            "settings_view.ssh_keys.description",
+            vec![content.into_any_element()],
+        )
     }
 
     pub(in crate::workspace) fn connection_defaults_section(
@@ -180,62 +188,209 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ssh_config_import_section(
         &self,
-        ssh_hosts: Vec<SshConfigHost>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.connection_section(
+            "settings_view.connections.ssh_config.title",
+            "settings_view.connections.ssh_config.description",
+            vec![
+                div()
+                    .flex()
+                    .justify_start()
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.connections.ssh_config.open"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::FolderInput,
+                            16.0,
+                            rgb(self.tokens.ui.text),
+                        )),
+                        self.connection_import_secondary_button_options(false),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.open_settings_ssh_config_import_dialog(cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .into_any_element(),
+            ],
+        )
+    }
+
+    pub(in crate::workspace) fn render_settings_ssh_config_import_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.settings_page.ssh_config_import_dialog_open {
+            return None;
+        }
+
+        let ssh_hosts = self.settings_ssh_config_hosts();
         let importable_count = ssh_hosts
             .iter()
             .filter(|host| !host.already_imported)
             .count();
         let selected_count = self.settings_page.settings_selected_ssh_hosts.len();
         let all_selected = importable_count > 0 && selected_count == importable_count;
+        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _event, _window, cx| {
+                this.close_settings_ssh_config_import_dialog(cx);
+                cx.stop_propagation();
+            }),
+        );
 
-        let mut rows = Vec::new();
-        if !ssh_hosts.is_empty() {
-            rows.push(
-                div()
-                    .w_full()
-                    .max_w(px(672.0))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .mb(px(-6.0))
-                    .child(self.ssh_config_toggle_all_button(all_selected, importable_count, cx))
-                    .when(selected_count > 0, |toolbar| {
-                        toolbar.child(self.ssh_config_batch_import_button(selected_count, cx))
-                    })
-                    .into_any_element(),
-            );
-        }
-
+        let mut list = div()
+            .id("settings-ssh-config-dialog-scroll")
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h(px(0.0))
+            .selectable_overflow_y_scroll(
+                &self.selectable_text_scroll_handle("settings-ssh-config-dialog-scroll"),
+            )
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
+            .p(px(8.0));
         if ssh_hosts.is_empty() {
-            rows.push(self.ssh_config_empty_state());
+            list = list.child(self.ssh_config_empty_state());
         } else {
-            let mut list = div()
-                .id("settings-ssh-config-scroll")
-                .w_full()
-                .max_w(px(672.0))
-                .h(px(256.0))
-                .selectable_overflow_y_scroll(
-                    &self.selectable_text_scroll_handle("settings-ssh-config-scroll"),
-                )
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(rgb(self.tokens.ui.border))
-                .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
-                .p(px(8.0));
             for host in ssh_hosts {
                 list = list.child(self.ssh_config_host_row(host, cx));
             }
-            rows.push(list.into_any_element());
         }
 
-        self.connection_section(
-            "settings_view.connections.ssh_config.title",
-            "settings_view.connections.ssh_config.description",
-            rows,
-        )
+        let body = div()
+            .flex_1()
+            .min_h(px(0.0))
+            .px(px(24.0))
+            .py(px(18.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .when(importable_count > 0, |body| {
+                body.child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.0))
+                        .child(self.ssh_config_toggle_all_button(
+                            all_selected,
+                            importable_count,
+                            cx,
+                        ))
+                        .when(selected_count > 0, |toolbar| {
+                            toolbar.child(self.ssh_config_batch_import_button(selected_count, cx))
+                        }),
+                )
+            })
+            .when_some(
+                self.settings_page.settings_connection_status.clone(),
+                |body, status| body.child(self.connection_status_row(status)),
+            )
+            .child(list);
+
+        let form = dialog_content(&self.tokens)
+            .w(px(SSH_CONFIG_IMPORT_DIALOG_WIDTH))
+            .max_w(relative(0.92))
+            .h(px(SSH_CONFIG_IMPORT_DIALOG_HEIGHT))
+            .max_h(relative(0.88))
+            .flex()
+            .flex_col()
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(
+                        &self.tokens,
+                        self.i18n.t("settings_view.connections.ssh_config.title"),
+                    ))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.connections.ssh_config.description"),
+                    )),
+            )
+            .child(body)
+            .child(
+                dialog_footer(&self.tokens).child(self.standard_footer_action_button(
+                    self.i18n.t("settings_view.connections.ssh_config.close"),
+                    ButtonVariant::Secondary,
+                    ConfirmDialogAction::Cancel,
+                    false,
+                    |this, _event, _window, cx| {
+                        this.close_settings_ssh_config_import_dialog(cx);
+                    },
+                    cx,
+                )),
+            );
+
+        Some(settings_dialog_transition(
+            &self.tokens,
+            "ssh-config-import-dialog-form",
+            backdrop,
+            form,
+            self.ssh_config_import_dialog_presence,
+        ))
+    }
+
+    pub(in crate::workspace) fn settings_ssh_config_hosts(&self) -> Vec<SshConfigHost> {
+        let existing_names = self
+            .connection_store
+            .connections()
+            .iter()
+            .map(|connection| connection.name.clone())
+            .collect::<HashSet<_>>();
+        list_ssh_config_hosts(&existing_names).unwrap_or_default()
+    }
+
+    pub(in crate::workspace) fn open_settings_ssh_config_import_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.ssh_config_import_dialog_presence.reopen();
+        self.settings_page.open_ssh_config_import_dialog();
+        self.reset_standard_confirm_focus();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_settings_ssh_config_import_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(generation) = self.ssh_config_import_dialog_presence.begin_exit() else {
+            return;
+        };
+        self.clear_standard_confirm_focus();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if delay.is_zero() {
+            self.settings_page.close_ssh_config_import_dialog();
+            self.ssh_config_import_dialog_presence.reopen();
+            cx.notify();
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this
+                    .ssh_config_import_dialog_presence
+                    .finish_exit(generation)
+                {
+                    this.settings_page.close_ssh_config_import_dialog();
+                    this.ssh_config_import_dialog_presence.reopen();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     pub(in crate::workspace) fn connection_section(
@@ -244,33 +399,16 @@ impl WorkspaceApp {
         description_key: &str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        div()
-            .pt(px(32.0))
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .text_size(px(20.0))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text_heading))
-                            .child(self.i18n.t(title_key)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(description_key)),
-                    ),
-            )
-            .child(separator(&self.tokens, SeparatorOrientation::Horizontal))
-            .children(rows)
-            .into_any_element()
+        let mut card_rows = vec![
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t(description_key))
+                .into_any_element(),
+        ];
+        card_rows.extend(rows);
+
+        self.settings_card(title_key, description_key, card_rows)
     }
 
     pub(in crate::workspace) fn ssh_config_toggle_all_button(
@@ -1053,11 +1191,8 @@ impl WorkspaceApp {
             .items_center()
             .justify_between()
             .gap(px(16.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(self.settings_panel_background(theme.bg_panel))
-            .p(px(16.0))
+            .px(px(4.0))
+            .py(px(12.0))
             .child(
                 div()
                     .min_w(px(0.0))
@@ -1263,11 +1398,8 @@ impl WorkspaceApp {
             .items_center()
             .justify_between()
             .gap(px(16.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(self.settings_panel_background(theme.bg_panel))
-            .p(px(16.0))
+            .px(px(4.0))
+            .py(px(12.0))
             .child(
                 div()
                     .min_w(px(0.0))
@@ -1372,10 +1504,7 @@ impl WorkspaceApp {
         div()
             .w_full()
             .max_w(px(960.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-            .py(px(48.0))
+            .py(px(24.0))
             .text_align(gpui::TextAlign::Center)
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(self.tokens.ui.text_muted))
@@ -2122,10 +2251,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ssh_keys_empty_state(&self) -> AnyElement {
         div()
             .w_full()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-            .py(px(48.0))
+            .py(px(24.0))
             .text_align(gpui::TextAlign::Center)
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .text_color(rgb(self.tokens.ui.text_muted))

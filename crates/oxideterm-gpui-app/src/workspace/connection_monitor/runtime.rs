@@ -1,9 +1,8 @@
 use super::*;
 
-const RUNTIME_HEADER_PADDING_X: f32 = 24.0;
-const RUNTIME_HEADER_PADDING_Y: f32 = 14.0;
-const RUNTIME_SECTION_BUTTON_HEIGHT: f32 = 30.0;
 const RUNTIME_CONTENT_PADDING: f32 = 24.0;
+const RUNTIME_BACKGROUND_PANEL_ALPHA: u32 = 0x66;
+const RUNTIME_BACKGROUND_BORDER_ALPHA: u32 = 0xbf;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_connection_runtime_surface(
@@ -53,71 +52,91 @@ impl WorkspaceApp {
         div()
             .flex_none()
             .flex()
-            .items_center()
-            .justify_between()
-            .gap_4()
-            .px(px(RUNTIME_HEADER_PADDING_X))
-            .py(px(RUNTIME_HEADER_PADDING_Y))
-            .border_b_1()
-            .border_color(rgb(theme.border))
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_page_gap))
+            .px(px(self.tokens.metrics.settings_content_padding))
+            .pt(px(self.tokens.metrics.settings_content_padding))
+            .pb(px(self.tokens.metrics.settings_page_gap))
             // Preserve Tauri's background-image contract: the shared image layer
             // sits behind the tab while ordinary header content stays readable.
             .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .gap_2()
-                    .min_w_0()
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Gauge,
-                        18.0,
-                        rgb(theme.accent),
-                    ))
+                    .flex_wrap()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(16.0))
                     .child(
                         div()
-                            .text_size(px(16.0))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(theme.text_heading))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "connection-runtime-header",
-                                "title",
-                                self.i18n.t("sidebar.panels.runtime"),
-                                theme.text_heading,
-                                cx,
-                            )),
-                    ),
+                            .min_w(px(280.0))
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_2xl))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text_heading))
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "connection-runtime-header",
+                                        "title",
+                                        self.i18n.t("sidebar.panels.runtime"),
+                                        theme.text_heading,
+                                        cx,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_base))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "connection-runtime-header",
+                                        "description",
+                                        self.i18n.t("sidebar.panels.runtime_description"),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
+                            ),
+                    )
+                    .child(self.render_connection_runtime_section_tabs(has_background, cx)),
             )
-            .child(self.render_connection_runtime_section_tabs(cx))
+            .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
             .into_any_element()
     }
 
-    fn render_connection_runtime_section_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_connection_runtime_section_tabs(
+        &self,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex_none()
             .flex()
             .items_center()
-            .gap_1()
-            .p_1()
-            .rounded(px(self.tokens.radii.lg))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .gap(px(8.0))
             .child(self.render_connection_runtime_section_tab(
                 ConnectionRuntimeSection::Overview,
                 "sidebar.panels.runtime_overview",
                 LucideIcon::LayoutList,
+                has_background,
                 cx,
             ))
             .child(self.render_connection_runtime_section_tab(
                 ConnectionRuntimeSection::Health,
                 "sidebar.panels.system_health",
                 LucideIcon::Activity,
+                has_background,
                 cx,
             ))
             .child(self.render_connection_runtime_section_tab(
                 ConnectionRuntimeSection::Topology,
                 "sidebar.panels.connection_matrix",
                 LucideIcon::Network,
+                has_background,
                 cx,
             ))
             .into_any_element()
@@ -128,44 +147,56 @@ impl WorkspaceApp {
         section: ConnectionRuntimeSection,
         label_key: &'static str,
         icon: LucideIcon,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.active_connection_runtime_section == section;
         div()
-            .h(px(RUNTIME_SECTION_BUTTON_HEIGHT))
-            .px_3()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if active {
+                oxideterm_gpui_ui::surface::color_for_background(
+                    theme.border,
+                    has_background,
+                    RUNTIME_BACKGROUND_BORDER_ALPHA,
+                )
+            } else {
+                connection_monitor_surface_bg(theme.bg, has_background)
+            })
+            .bg(if active {
+                oxideterm_gpui_ui::surface::color_for_background(
+                    theme.bg_panel,
+                    has_background,
+                    RUNTIME_BACKGROUND_PANEL_ALPHA,
+                )
+            } else {
+                connection_monitor_surface_bg(theme.bg, has_background)
+            })
+            .px(px(16.0))
+            .py(px(8.0))
             .flex()
             .items_center()
-            .gap_2()
-            .rounded(px(self.tokens.radii.md))
+            .gap(px(8.0))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .whitespace_nowrap()
             .cursor_pointer()
-            .bg(if active {
-                rgb(theme.bg)
-            } else {
-                rgba(0x00000000)
-            })
             .text_color(if active {
                 rgb(theme.text)
             } else {
                 rgb(theme.text_muted)
             })
-            .hover(move |button| button.bg(rgb(theme.bg_hover)))
             .child(Self::render_lucide_icon(
                 icon,
-                14.0,
+                16.0,
                 if active {
                     rgb(theme.accent)
                 } else {
                     rgb(theme.text_muted)
                 },
             ))
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .child(self.i18n.t(label_key)),
-            )
+            .child(self.i18n.t(label_key))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

@@ -16,6 +16,7 @@
       "forwards": "Encaminhamento de portas",
       "forwards_title": "Encaminhamento de portas",
       "runtime": "Tempo de execução",
+      "runtime_description": "Monitore o uso das conexões, a integridade do sistema e a topologia",
       "runtime_overview": "Visão geral",
       "connection_pool": "Pool de conexões",
       "connection_monitor": "Monitor de conexão",

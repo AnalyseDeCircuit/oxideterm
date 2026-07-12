@@ -15,7 +15,7 @@ pub fn set_terminal_cursor_blink(settings: &mut PersistedSettings, value: bool) 
     settings.terminal.cursor_blink = value;
 }
 
-pub fn set_show_fps_overlay(settings: &mut PersistedSettings, value: bool) {
+pub fn set_show_terminal_performance_overlay(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.show_fps_overlay = value;
 }
 
@@ -285,10 +285,6 @@ pub fn built_in_theme_exists(id: &str) -> bool {
 
 pub fn set_terminal_scrollback(settings: &mut PersistedSettings, value: i64) {
     settings.terminal.scrollback = value;
-}
-
-pub fn set_buffer_max_lines(settings: &mut PersistedSettings, value: i64) {
-    settings.buffer.max_lines = value;
 }
 
 pub fn set_load_shell_profile(settings: &mut PersistedSettings, value: bool) {

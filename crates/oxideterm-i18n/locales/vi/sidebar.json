@@ -16,6 +16,7 @@
       "forwards": "Chuyển tiếp cổng",
       "forwards_title": "Chuyển tiếp cổng",
       "runtime": "Thời gian chạy",
+      "runtime_description": "Giám sát mức sử dụng kết nối, tình trạng hệ thống và cấu trúc liên kết",
       "runtime_overview": "Tổng quan",
       "connection_pool": "Nhóm kết nối",
       "connection_monitor": "Giám sát kết nối",

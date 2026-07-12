@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "터미널 분리",
     "cmd_cleanup_dead": "비활성 세션 정리",
     "cleanup_result": "{{count}}개의 비활성 세션을 정리했습니다",
-    "cmd_toggle_fps": "FPS 오버레이 전환",
+    "cmd_toggle_terminal_performance": "터미널 성능 오버레이 전환",
     "cmd_close_pane": "활성 패널 닫기",
     "cmd_reset_panes": "단일 패널로 초기화",
     "cmd_focus_next_pane": "다음 패널로 포커스",

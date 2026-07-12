@@ -16,6 +16,7 @@
       "forwards": "端口转发",
       "forwards_title": "端口转发",
       "runtime": "运行时",
+      "runtime_description": "监控连接使用情况、系统健康和拓扑",
       "runtime_overview": "概览",
       "connection_pool": "连接池",
       "connection_monitor": "连接监控",

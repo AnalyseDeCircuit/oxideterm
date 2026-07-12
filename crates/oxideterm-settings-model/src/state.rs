@@ -67,6 +67,7 @@ pub struct SettingsPageModel {
     pub background_blur_preview: Option<i64>,
     pub background_blur_commit_generation: u64,
     pub background_cache_poll_scheduled: bool,
+    pub ssh_config_import_dialog_open: bool,
     pub settings_selected_ssh_hosts: HashSet<String>,
     pub settings_connection_status: Option<String>,
     pub privilege_scope_id: Option<String>,
@@ -117,6 +118,7 @@ impl Default for SettingsPageModel {
             background_blur_preview: None,
             background_blur_commit_generation: 0,
             background_cache_poll_scheduled: false,
+            ssh_config_import_dialog_open: false,
             settings_selected_ssh_hosts: HashSet::new(),
             settings_connection_status: None,
             privilege_scope_id: None,
@@ -595,6 +597,20 @@ impl SettingsPageModel {
         self.background_cache_poll_scheduled = is_scheduled;
     }
 
+    /// Opens the SSH config import dialog.
+    pub fn open_ssh_config_import_dialog(&mut self) {
+        // Each visit starts from the current scanned host set instead of
+        // carrying selections or status from another import surface.
+        self.settings_selected_ssh_hosts.clear();
+        self.settings_connection_status = None;
+        self.ssh_config_import_dialog_open = true;
+    }
+
+    /// Closes the SSH config import dialog.
+    pub fn close_ssh_config_import_dialog(&mut self) {
+        self.ssh_config_import_dialog_open = false;
+    }
+
     /// Toggles one SSH host selection and returns whether it is now selected.
     pub fn toggle_ssh_host_selection(&mut self, alias: impl Into<String>) -> bool {
         let alias = alias.into();
@@ -671,6 +687,22 @@ mod tests {
 
         assert!(!model.knowledge_create_dialog_open);
         assert!(model.knowledge_new_collection_name.is_empty());
+    }
+
+    #[test]
+    fn ssh_config_import_dialog_tracks_open_state() {
+        let mut model = SettingsPageModel::default();
+        model
+            .settings_selected_ssh_hosts
+            .insert("stale".to_string());
+        model.settings_connection_status = Some("stale status".to_string());
+        model.open_ssh_config_import_dialog();
+        assert!(model.ssh_config_import_dialog_open);
+        assert!(model.settings_selected_ssh_hosts.is_empty());
+        assert!(model.settings_connection_status.is_none());
+
+        model.close_ssh_config_import_dialog();
+        assert!(!model.ssh_config_import_dialog_open);
     }
 
     #[test]

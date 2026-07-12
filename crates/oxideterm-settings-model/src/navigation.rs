@@ -32,7 +32,8 @@ pub fn settings_tab_section_count(
         SettingsTab::Portable => 1,
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
         SettingsTab::Appearance => 4,
-        SettingsTab::Connections => 8,
+        // Reconnect controls share one card and therefore one virtual section.
+        SettingsTab::Connections => 6,
         SettingsTab::Privilege => 1,
         SettingsTab::Network => 4,
         SettingsTab::Sftp => 3,
@@ -53,7 +54,8 @@ pub fn terminal_settings_section_count(page: TerminalSettingsPage) -> usize {
     let page_cards = match page {
         TerminalSettingsPage::Display => 2,
         TerminalSettingsPage::Input => 1,
-        TerminalSettingsPage::Local => 6,
+        // The dedicated keybindings page owns shortcut discovery and editing.
+        TerminalSettingsPage::Local => 4,
         TerminalSettingsPage::CommandBar => 3,
         TerminalSettingsPage::History => 2,
         TerminalSettingsPage::Transfer => 1,
@@ -131,6 +133,10 @@ mod tests {
             terminal_settings_section_count(TerminalSettingsPage::CommandBar),
             4
         );
+        assert_eq!(
+            terminal_settings_section_count(TerminalSettingsPage::Local),
+            5
+        );
     }
 
     #[test]
@@ -144,5 +150,21 @@ mod tests {
         };
 
         assert_eq!(settings_tab_section_count(SettingsTab::Help, dynamic), 6);
+    }
+
+    #[test]
+    fn connections_page_counts_each_top_level_card_once() {
+        let dynamic = SettingsDynamicSectionCounts {
+            terminal_page: TerminalSettingsPage::Display,
+            ai_page: AiSettingsPage::General,
+            visible_keybinding_scope_count: 0,
+            knowledge_has_error: false,
+            knowledge_has_selected_collection: false,
+        };
+
+        assert_eq!(
+            settings_tab_section_count(SettingsTab::Connections, dynamic),
+            6
+        );
     }
 }

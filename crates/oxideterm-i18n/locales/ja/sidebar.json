@@ -16,6 +16,7 @@
       "forwards": "ポートフォワーディング",
       "forwards_title": "ポートフォワーディング",
       "runtime": "ランタイム",
+      "runtime_description": "接続の使用状況、システムの健全性、トポロジーを監視",
       "runtime_overview": "概要",
       "connection_pool": "接続プール",
       "connection_monitor": "接続モニター",

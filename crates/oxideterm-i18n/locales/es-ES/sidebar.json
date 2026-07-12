@@ -16,6 +16,7 @@
       "forwards": "Reenvío de puertos",
       "forwards_title": "Reenvío de puertos",
       "runtime": "Ejecución",
+      "runtime_description": "Supervisa el uso de conexiones, el estado del sistema y la topología",
       "runtime_overview": "Resumen",
       "connection_pool": "Pool de conexiones",
       "connection_monitor": "Monitor de conexión",

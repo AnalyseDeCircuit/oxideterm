@@ -1,6 +1,15 @@
 use super::*;
 
 pub(in crate::workspace) const LOCAL_GIT_BASH_ID: &str = "git-bash";
+// Compact shell rows keep stable scan columns without nesting another card surface.
+const LOCAL_SHELL_NAME_COLUMN_WIDTH: f32 = 160.0;
+const LOCAL_SHELL_PATH_COLUMN_WIDTH: f32 = 240.0;
+const LOCAL_SHELL_ROW_VERTICAL_PADDING: f32 = 8.0;
+
+pub(in crate::workspace) fn local_shell_supports_oh_my_posh(shell_id: Option<&str>) -> bool {
+    // The native injector is compiled only for these Windows PowerShell IDs.
+    matches!(shell_id, Some("powershell" | "pwsh"))
+}
 
 pub(in crate::workspace) fn normalized_local_git_bash_path(path: Option<&str>) -> Option<PathBuf> {
     let path = path?.trim();
@@ -134,83 +143,47 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn local_shortcut_row(
-        &self,
-        label_key: &str,
-        shortcut: &'static str,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .py(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .child(
-                div()
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(self.local_kbd(shortcut))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn local_kbd(&self, shortcut: &'static str) -> AnyElement {
-        div()
-            .px(px(8.0))
-            .py(px(4.0))
-            .rounded(px(self.tokens.radii.sm))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_hover))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(shortcut)
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn available_shell_row(
         &self,
         shell: &ShellInfo,
         default_shell_id: Option<&str>,
     ) -> AnyElement {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
-            .flex_row()
+            .flex_wrap()
             .items_center()
-            .justify_between()
-            .p(px(12.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-            .bg(rgba((self.tokens.ui.bg_panel << 8) | 0x4d))
+            .gap_x(px(16.0))
+            .gap_y(px(4.0))
+            .py(px(LOCAL_SHELL_ROW_VERTICAL_PADDING))
             .child(
-                div().flex().flex_row().items_center().gap(px(12.0)).child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(4.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(shell.label.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(shell.path.display().to_string()),
-                        ),
-                ),
+                div()
+                    .w(px(LOCAL_SHELL_NAME_COLUMN_WIDTH))
+                    .max_w_full()
+                    .flex_none()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(shell.label.clone()),
+            )
+            .child(
+                div()
+                    .w(px(LOCAL_SHELL_PATH_COLUMN_WIDTH))
+                    .max_w_full()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .truncate()
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(shell.path.display().to_string()),
             )
             .when(default_shell_id == Some(shell.id.as_str()), |row| {
-                row.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.warning))
-                        .child(self.i18n.t("settings_view.local_terminal.default")),
-                )
+                row.child(self.text_badge(
+                    self.i18n.t("settings_view.local_terminal.default"),
+                    self.tokens.ui.warning,
+                ))
             })
             .into_any_element()
     }
@@ -294,5 +267,14 @@ mod local_terminal_tests {
     pub(in crate::workspace) fn blank_git_bash_override_keeps_scanned_shells() {
         let shells = vec![ShellInfo::new("cmd", "Command Prompt", "cmd.exe")];
         assert_eq!(effective_local_shells(&shells, Some("  ")), shells);
+    }
+
+    #[test]
+    pub(in crate::workspace) fn oh_my_posh_controls_only_match_powershell_shells() {
+        assert!(local_shell_supports_oh_my_posh(Some("powershell")));
+        assert!(local_shell_supports_oh_my_posh(Some("pwsh")));
+        assert!(!local_shell_supports_oh_my_posh(Some("wsl-ubuntu")));
+        assert!(!local_shell_supports_oh_my_posh(Some("zsh")));
+        assert!(!local_shell_supports_oh_my_posh(None));
     }
 }

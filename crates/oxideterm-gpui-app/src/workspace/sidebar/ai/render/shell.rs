@@ -8,11 +8,13 @@ impl WorkspaceApp {
         let panel = if !enabled {
             ai_chat_panel(&self.tokens)
                 .relative()
+                .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
                 .child(self.render_ai_sidebar_disabled(cx))
                 .into_any_element()
         } else {
             ai_chat_panel(&self.tokens)
                 .relative()
+                .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
                 .child(self.render_ai_sidebar_chat_header(cx))
                 .when_some(self.render_ai_compaction_notice(cx), |panel, notice| {
                     panel.child(notice)
@@ -399,7 +401,7 @@ impl WorkspaceApp {
             .p(px(24.0))
             .text_align(gpui::TextAlign::Center)
             .gap(px(12.0))
-            .bg(rgb(self.tokens.ui.bg))
+            .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
             .child(
                 div()
                     .size(px(48.0))

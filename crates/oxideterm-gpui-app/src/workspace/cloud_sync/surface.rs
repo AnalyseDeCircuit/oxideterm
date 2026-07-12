@@ -213,12 +213,10 @@ impl WorkspaceApp {
         section: CloudSyncSection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state().clone();
         let busy = self.cloud_sync.controller.delivery_rx.is_some();
         let has_background = self.cloud_sync_has_background();
         match section {
-            CloudSyncSection::Header => self.render_cloud_sync_header(&state, cx),
-            CloudSyncSection::TabBar => self.render_cloud_sync_tab_bar(cx),
+            CloudSyncSection::Header => self.render_cloud_sync_header(cx),
             CloudSyncSection::Guide => {
                 if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_guide(&self.cloud_sync.view.form.backend_type, cx)
@@ -228,21 +226,27 @@ impl WorkspaceApp {
             }
             CloudSyncSection::Status => {
                 if self.cloud_sync.view.active_tab == CloudSyncTab::Overview {
-                    self.render_cloud_sync_overview_card(&state, busy, has_background, cx)
+                    self.render_cloud_sync_overview_card(
+                        self.cloud_sync.controller.store.state(),
+                        busy,
+                        has_background,
+                        cx,
+                    )
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::Actions => div().into_any_element(),
             CloudSyncSection::Preview => {
+                let state = self.cloud_sync.controller.store.state();
                 if let Some(preview) = self.cloud_sync.view.upload_preview.as_ref() {
-                    self.render_cloud_sync_upload_preview(preview, &state, busy, cx)
+                    self.render_cloud_sync_upload_preview(preview, state, busy, cx)
                 } else {
                     self.cloud_sync
                         .view
                         .pending_preview
                         .as_ref()
-                        .map(|preview| self.render_cloud_sync_preview(preview, &state, busy, cx))
+                        .map(|preview| self.render_cloud_sync_preview(preview, state, busy, cx))
                         .unwrap_or_else(|| div().into_any_element())
                 }
             }
@@ -255,11 +259,18 @@ impl WorkspaceApp {
             }
             CloudSyncSection::Rollback => match self.cloud_sync.view.active_tab {
                 CloudSyncTab::Overview => self.render_cloud_sync_recent_rollback_backups(busy, cx),
-                CloudSyncTab::History => self.render_cloud_sync_rollback_backups(&state, busy, cx),
+                CloudSyncTab::History => {
+                    // History list setup mutates list state, so keep its snapshot local
+                    // instead of cloning persisted data for every Cloud Sync row.
+                    let state = self.cloud_sync.controller.store.state().clone();
+                    self.render_cloud_sync_rollback_backups(&state, busy, cx)
+                }
                 CloudSyncTab::Configure => div().into_any_element(),
             },
             CloudSyncSection::History => {
                 if self.cloud_sync.view.active_tab == CloudSyncTab::History {
+                    // The mutable nested list renderer requires an owned snapshot.
+                    let state = self.cloud_sync.controller.store.state().clone();
                     self.render_cloud_sync_history(&state, cx)
                 } else {
                     div().into_any_element()
@@ -492,67 +503,62 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn render_cloud_sync_header(
-        &self,
-        state: &CloudSyncPersistedState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_cloud_sync_header(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         div()
+            .w_full()
             .flex()
-            .items_start()
-            .justify_between()
-            .gap(px(16.0))
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_page_gap))
             .child(
                 div()
-                    .min_w(px(0.0))
                     .flex()
-                    .flex_col()
-                    .gap(px(8.0))
+                    .flex_wrap()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(16.0))
                     .child(
                         div()
+                            .min_w(px(280.0))
+                            .flex_1()
                             .flex()
-                            .items_center()
-                            .gap(px(10.0))
-                            .text_size(px(self.tokens.metrics.ui_text_2xl))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text_heading))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Cloud,
-                                22.0,
-                                rgb(theme.accent),
-                            ))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "cloud-sync-panel",
-                                "title",
-                                self.i18n.t("plugin.cloud_sync.panel_title"),
-                                theme.text_heading,
-                                cx,
-                            )),
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_2xl))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(theme.text_heading))
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "cloud-sync-panel",
+                                        "title",
+                                        self.i18n.t("plugin.cloud_sync.panel_title"),
+                                        theme.text_heading,
+                                        cx,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .max_w(px(680.0))
+                                    .text_size(px(self.tokens.metrics.ui_text_base))
+                                    .line_height(px(22.0))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(self.render_display_text_with_role(
+                                        SelectableTextRole::PlainDocument,
+                                        "cloud-sync-panel",
+                                        "subtitle",
+                                        self.i18n.t("plugin.cloud_sync.native_description"),
+                                        theme.text_muted,
+                                        cx,
+                                    )),
+                            ),
                     )
-                    .child(
-                        div()
-                            .max_w(px(680.0))
-                            .text_size(px(self.tokens.metrics.ui_text_base))
-                            .line_height(px(22.0))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "cloud-sync-panel",
-                                "subtitle",
-                                self.i18n.t("plugin.cloud_sync.native_description"),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    ),
+                    .child(self.render_cloud_sync_tab_bar(cx)),
             )
             .child(
-                self.render_cloud_sync_status_chip(
-                    self.i18n
-                        .t(cloud_sync_status_label_key(state.status.clone())),
-                    CloudSyncTone::Accent,
-                ),
+                // Match the Plugin Manager header rhythm with a full-width rule.
+                div().w_full().h(px(1.0)).bg(rgb(theme.border)),
             )
             .into_any_element()
     }
@@ -675,10 +681,24 @@ impl WorkspaceApp {
             .cloud_sync_plugin_card(has_background)
             .child(
                 div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(rgb(theme.text))
-                    .child(self.i18n.t("plugin.cloud_sync.tabs.overview").to_uppercase()),
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("plugin.cloud_sync.tabs.overview").to_uppercase()),
+                    )
+                    .child(
+                        self.render_cloud_sync_status_chip(
+                            self.i18n
+                                .t(cloud_sync_status_label_key(state.status.clone())),
+                            CloudSyncTone::Accent,
+                        ),
+                    ),
             )
             .child(
                 div()

@@ -16,6 +16,7 @@
       "forwards": "포트 포워딩",
       "forwards_title": "포트 포워딩",
       "runtime": "런타임",
+      "runtime_description": "연결 사용량, 시스템 상태 및 토폴로지 모니터링",
       "runtime_overview": "개요",
       "connection_pool": "연결 풀",
       "connection_monitor": "연결 모니터",

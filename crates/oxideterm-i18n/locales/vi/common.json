@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "Tách terminal",
     "cmd_cleanup_dead": "Dọn phiên không hoạt động",
     "cleanup_result": "Đã dọn {{count}} phiên không hoạt động",
-    "cmd_toggle_fps": "Bật/tắt hiển thị FPS",
+    "cmd_toggle_terminal_performance": "Bật/tắt lớp phủ hiệu năng terminal",
     "cmd_close_pane": "Đóng ngăn đang hoạt động",
     "cmd_reset_panes": "Đặt lại thành một ngăn",
     "cmd_focus_next_pane": "Chuyển focus sang ngăn kế tiếp",

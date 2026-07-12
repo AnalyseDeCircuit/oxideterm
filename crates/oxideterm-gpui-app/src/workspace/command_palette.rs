@@ -97,7 +97,7 @@ enum PaletteAction {
     ResetSettings,
     ThemeNext(bool),
     CursorStyle(SettingsCursorStyle),
-    ToggleFps,
+    ToggleTerminalPerformance,
     ShowWelcome,
     RuntimePluginCommand {
         plugin_id: String,
@@ -524,7 +524,7 @@ impl WorkspaceApp {
             PaletteAction::CursorStyle(cursor_style) => {
                 self.edit_settings(|settings| settings.terminal.cursor_style = cursor_style, cx);
             }
-            PaletteAction::ToggleFps => {
+            PaletteAction::ToggleTerminalPerformance => {
                 self.edit_settings(
                     |settings| {
                         settings.terminal.show_fps_overlay = !settings.terminal.show_fps_overlay;
@@ -2507,11 +2507,11 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             action: PaletteAction::CleanupDead,
         },
         CommandSpec {
-            id: "cmd:toggle_fps",
-            label_key: "command_palette.cmd_toggle_fps".into(),
+            id: "cmd:toggle_terminal_performance",
+            label_key: "command_palette.cmd_toggle_terminal_performance".into(),
             icon: LucideIcon::Gauge,
             shortcut_action: None,
-            action: PaletteAction::ToggleFps,
+            action: PaletteAction::ToggleTerminalPerformance,
         },
         keybinding_command(
             "cmd:close_pane",

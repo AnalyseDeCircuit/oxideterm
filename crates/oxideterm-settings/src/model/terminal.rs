@@ -236,6 +236,7 @@ pub struct TerminalSettings {
     pub renderer: RendererType,
     pub terminal_encoding: TerminalEncoding,
     pub adaptive_renderer: AdaptiveRendererMode,
+    // Keep the legacy serialized field name so existing settings continue to load.
     pub show_fps_overlay: bool,
     pub paste_protection: bool,
     pub smart_copy: bool,

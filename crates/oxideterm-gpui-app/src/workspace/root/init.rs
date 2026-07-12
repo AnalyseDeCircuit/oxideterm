@@ -178,6 +178,7 @@ impl WorkspaceApp {
             theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             portable_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -807,7 +808,7 @@ impl WorkspaceApp {
             command_marks_heuristic_detection: terminal.command_marks.heuristic_detection,
             command_marks_show_hover_actions: terminal.command_marks.show_hover_actions,
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
-            show_fps_overlay: terminal.show_fps_overlay,
+            show_performance_overlay: terminal.show_fps_overlay,
             render_policy: self.render_policy.clone(),
             background: self.terminal_background_preferences(background_key),
             transparent_background: self.window_background_preferences().is_some(),
@@ -1021,6 +1022,23 @@ impl WorkspaceApp {
         } else {
             rgb(color)
         }
+    }
+
+    pub(in crate::workspace) fn workspace_sidebar_background(&self, color: u32) -> Rgba {
+        sidebar_surface_background(
+            color,
+            self.window_background_preferences().is_some(),
+            self.tokens.metrics.sidebar_vibrancy_alpha,
+        )
+    }
+
+    pub(in crate::workspace) fn context_sidebar_content_background(&self, color: u32) -> Rgba {
+        // The context sidebar frame owns the sole full-height tint. Nested AI
+        // and Host Tools roots stay transparent so opacity cannot stack.
+        context_sidebar_inner_surface_background(
+            color,
+            self.window_background_preferences().is_some(),
+        )
     }
 
     fn background_image_preferences(&self) -> Option<TerminalBackgroundPreferences> {

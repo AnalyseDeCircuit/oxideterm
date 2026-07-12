@@ -72,7 +72,7 @@ pub struct TerminalUiPreferences {
     pub command_marks_heuristic_detection: bool,
     pub command_marks_show_hover_actions: bool,
     pub terminal_encoding: TerminalEncoding,
-    pub show_fps_overlay: bool,
+    pub show_performance_overlay: bool,
     pub theme: TerminalUiTheme,
     pub render_policy: EffectiveRenderPolicy,
     pub background: Option<TerminalBackgroundPreferences>,
@@ -113,7 +113,7 @@ impl Default for TerminalUiPreferences {
             command_marks_heuristic_detection: false,
             command_marks_show_hover_actions: TERMINAL_COMMAND_MARKS_SHOW_HOVER_ACTIONS,
             terminal_encoding: TerminalEncoding::Utf8,
-            show_fps_overlay: false,
+            show_performance_overlay: false,
             theme: TerminalUiTheme::default(),
             render_policy: EffectiveRenderPolicy::quality(),
             background: None,
@@ -162,10 +162,9 @@ pub(crate) fn terminal_scrollbar_x_for_viewport(viewport_width: Pixels) -> Pixel
     px((f32::from(viewport_width) - TERMINAL_CONTENT_PADDING - SCROLLBAR_WIDTH).max(0.0))
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TerminalRenderStats {
     pub tier: TerminalRenderTier,
-    pub fps: u32,
     pub writes_per_sec: u32,
     pub pending_bytes: usize,
 }
@@ -174,7 +173,6 @@ impl Default for TerminalRenderStats {
     fn default() -> Self {
         Self {
             tier: TerminalRenderTier::Normal,
-            fps: 0,
             writes_per_sec: 0,
             pending_bytes: 0,
         }

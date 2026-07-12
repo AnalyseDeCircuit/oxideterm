@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "Détacher le terminal",
     "cmd_cleanup_dead": "Nettoyer les sessions mortes",
     "cleanup_result": "{{count}} sessions mortes nettoyées",
-    "cmd_toggle_fps": "Basculer l'affichage FPS",
+    "cmd_toggle_terminal_performance": "Basculer la superposition des performances du terminal",
     "cmd_close_pane": "Fermer le panneau actif",
     "cmd_reset_panes": "Réinitialiser en panneau unique",
     "cmd_focus_next_pane": "Focus sur le panneau suivant",

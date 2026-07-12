@@ -1564,7 +1564,7 @@ impl WorkspaceApp {
             .py(px(6.0))
             .border_b_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x4d))
-            .bg(rgb(self.tokens.ui.bg))
+            .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
             .child(
                 div()
                     .flex_1()

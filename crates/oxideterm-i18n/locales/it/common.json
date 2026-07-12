@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "Scollega terminale",
     "cmd_cleanup_dead": "Pulisci sessioni inattive",
     "cleanup_result": "{{count}} sessioni inattive pulite",
-    "cmd_toggle_fps": "Mostra/Nascondi FPS",
+    "cmd_toggle_terminal_performance": "Mostra/Nascondi prestazioni terminale",
     "cmd_close_pane": "Chiudi pannello attivo",
     "cmd_reset_panes": "Reimposta a pannello singolo",
     "cmd_focus_next_pane": "Focus pannello successivo",

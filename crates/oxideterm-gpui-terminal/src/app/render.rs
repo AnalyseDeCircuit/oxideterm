@@ -58,6 +58,12 @@ fn clamp_terminal_context_menu_position(
     )
 }
 
+fn terminal_pane_base_is_transparent(bell_flash: bool, has_window_background: bool) -> bool {
+    // Content-scoped images paint inside the pane above its fallback color.
+    // Only a window-scoped image needs the pane base itself to be transparent.
+    !bell_flash && has_window_background
+}
+
 impl Focusable for TerminalPane {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -95,6 +101,10 @@ impl Render for TerminalPane {
                 self.background_image_cache.render_blurred_image(background),
             )
         });
+        let transparent_pane_base = terminal_pane_base_is_transparent(
+            self.bell_flash,
+            self.preferences.transparent_background,
+        );
         self.drop_retired_images(window, cx);
         let terminal_element = TerminalElement::new_with_images_and_bidi(
             snapshot,
@@ -147,6 +157,8 @@ impl Render for TerminalPane {
             .relative()
             .bg(if self.bell_flash {
                 rgb(self.theme.bell_background)
+            } else if transparent_pane_base {
+                rgba(0x00000000)
             } else {
                 rgb(self.theme.background)
             })
@@ -238,8 +250,8 @@ impl Render for TerminalPane {
             .when_some(self.context_menu.clone(), |pane, menu| {
                 pane.child(self.render_terminal_context_menu(menu, window, cx))
             })
-            .when(self.preferences.show_fps_overlay, |pane| {
-                pane.child(self.render_fps_overlay())
+            .when(self.preferences.show_performance_overlay, |pane| {
+                pane.child(self.render_terminal_performance_overlay())
             })
             .when(
                 self.settings.command_marks_enabled
@@ -1240,7 +1252,7 @@ impl TerminalPane {
             .cloned()
     }
 
-    fn render_fps_overlay(&self) -> AnyElement {
+    fn render_terminal_performance_overlay(&self) -> AnyElement {
         let stats = self.render_stats;
         div()
             .absolute()
@@ -1268,13 +1280,6 @@ impl TerminalPane {
             .child(
                 div()
                     .text_color(rgb(self.theme.foreground))
-                    .child(stats.fps.to_string()),
-            )
-            .child(div().text_color(rgba(0xe6e8eb99)).child("fps"))
-            .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
-            .child(
-                div()
-                    .text_color(rgba(0xe6e8eb99))
                     .child(stats.writes_per_sec.to_string()),
             )
             .child(div().text_color(rgba(0xe6e8eb99)).child("wps"))
@@ -1606,7 +1611,7 @@ fn apply_theme_defaults_to_snapshot(snapshot: &mut TerminalSnapshot, theme: &Ter
 
 #[cfg(test)]
 mod tests {
-    use super::clamp_terminal_context_menu_position;
+    use super::{clamp_terminal_context_menu_position, terminal_pane_base_is_transparent};
 
     #[test]
     fn context_menu_position_collides_with_window_edges() {
@@ -1622,5 +1627,12 @@ mod tests {
             clamp_terminal_context_menu_position(-20.0, 2.0, 800.0, 600.0, 220.0, 300.0, 8.0);
 
         assert_eq!(placement, (8.0, 8.0));
+    }
+
+    #[test]
+    fn terminal_pane_base_exposes_window_background_except_during_bell_flash() {
+        assert!(terminal_pane_base_is_transparent(false, true));
+        assert!(!terminal_pane_base_is_transparent(false, false));
+        assert!(!terminal_pane_base_is_transparent(true, true));
     }
 }

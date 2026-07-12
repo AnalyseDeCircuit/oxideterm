@@ -17,7 +17,6 @@ pub enum CloudSyncTab {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CloudSyncSection {
     Header,
-    TabBar,
     Guide,
     Status,
     Actions,

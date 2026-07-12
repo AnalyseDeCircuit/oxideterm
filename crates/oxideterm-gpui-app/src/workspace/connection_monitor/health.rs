@@ -116,7 +116,7 @@ impl WorkspaceApp {
             .flex_col()
             .min_h_0()
             .overflow_hidden()
-            .bg(self.workspace_chrome_background(theme.bg))
+            .bg(self.context_sidebar_content_background(theme.bg))
             .text_color(rgb(theme.text))
             .child(self.render_host_tools_context_tabs(cx))
             .child(

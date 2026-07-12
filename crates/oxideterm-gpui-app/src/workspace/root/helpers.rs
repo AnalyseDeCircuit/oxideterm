@@ -159,6 +159,29 @@ pub(in crate::workspace) fn alpha_byte(alpha: f32) -> u32 {
     (alpha.clamp(0.0, 1.0) * 255.0).round() as u32
 }
 
+pub(in crate::workspace) fn sidebar_surface_background(
+    color: u32,
+    has_window_background: bool,
+    opacity: f32,
+) -> Rgba {
+    if has_window_background {
+        rgba((color << 8) | alpha_byte(opacity))
+    } else {
+        rgb(color)
+    }
+}
+
+pub(in crate::workspace) fn context_sidebar_inner_surface_background(
+    color: u32,
+    has_window_background: bool,
+) -> Rgba {
+    if has_window_background {
+        rgba(0x00000000)
+    } else {
+        rgb(color)
+    }
+}
+
 pub(in crate::workspace) fn settings_mono_font_family(
     settings: &PersistedSettings,
 ) -> SharedString {
@@ -1506,6 +1529,22 @@ mod helper_tests {
             &enabled_tabs,
             "terminal",
         ));
+    }
+
+    #[test]
+    fn sidebar_background_uses_one_translucent_outer_surface() {
+        assert_eq!(
+            sidebar_surface_background(0x112233, true, 0.64),
+            rgba(0x112233a3)
+        );
+        assert_eq!(
+            context_sidebar_inner_surface_background(0x112233, true),
+            rgba(0x00000000)
+        );
+        assert_eq!(
+            context_sidebar_inner_surface_background(0x112233, false),
+            rgb(0x112233)
+        );
     }
 
     #[test]

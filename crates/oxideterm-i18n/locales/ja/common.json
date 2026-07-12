@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "ターミナルを切り離す",
     "cmd_cleanup_dead": "無効なセッションを削除",
     "cleanup_result": "{{count}} 件の無効なセッションを削除しました",
-    "cmd_toggle_fps": "FPS表示を切り替え",
+    "cmd_toggle_terminal_performance": "ターミナル性能表示を切り替え",
     "cmd_close_pane": "アクティブペインを閉じる",
     "cmd_reset_panes": "シングルペインにリセット",
     "cmd_focus_next_pane": "次のペインにフォーカス",

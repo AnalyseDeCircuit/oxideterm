@@ -16,6 +16,7 @@
       "forwards": "Port Forwarding",
       "forwards_title": "Port Forwarding",
       "runtime": "Runtime",
+      "runtime_description": "Monitor connection usage, system health, and topology",
       "runtime_overview": "Overview",
       "connection_pool": "Connection Pool",
       "connection_monitor": "Connection Monitor",

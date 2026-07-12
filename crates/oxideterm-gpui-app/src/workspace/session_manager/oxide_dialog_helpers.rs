@@ -309,7 +309,7 @@ pub(super) fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18
         "smoothScroll" => i18n.t("settings_view.terminal.smooth_scroll"),
         "renderer" => i18n.t("settings_view.terminal.renderer"),
         "adaptiveRenderer" => i18n.t("settings_view.terminal.adaptive_renderer"),
-        "showFpsOverlay" => i18n.t("settings_view.terminal.show_fps_overlay"),
+        "showFpsOverlay" => i18n.t("settings_view.terminal.show_performance_overlay"),
         "pasteProtection" => i18n.t("settings_view.terminal.paste_protection"),
         "smartCopy" => i18n.t("settings_view.terminal.smart_copy"),
         "osc52Clipboard" => i18n.t("settings_view.terminal.osc52_clipboard"),

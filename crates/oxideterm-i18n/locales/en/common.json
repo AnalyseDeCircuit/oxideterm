@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "Detach Terminal",
     "cmd_cleanup_dead": "Cleanup Dead Sessions",
     "cleanup_result": "Cleaned up {{count}} dead sessions",
-    "cmd_toggle_fps": "Toggle FPS Overlay",
+    "cmd_toggle_terminal_performance": "Toggle Terminal Performance Overlay",
     "cmd_close_pane": "Close Active Pane",
     "cmd_reset_panes": "Reset to Single Pane",
     "cmd_focus_next_pane": "Focus Next Pane",

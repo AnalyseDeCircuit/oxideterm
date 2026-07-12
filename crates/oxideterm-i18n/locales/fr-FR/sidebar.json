@@ -16,6 +16,7 @@
       "forwards": "Transfert de ports",
       "forwards_title": "Transfert de ports",
       "runtime": "Exécution",
+      "runtime_description": "Surveillez l’utilisation des connexions, l’état du système et la topologie",
       "runtime_overview": "Aperçu",
       "connection_pool": "Pool de connexions",
       "connection_monitor": "Moniteur de connexions",

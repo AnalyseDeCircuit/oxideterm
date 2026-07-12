@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "Desanexar terminal",
     "cmd_cleanup_dead": "Limpar sessões inativas",
     "cleanup_result": "{{count}} sessões inativas limpas",
-    "cmd_toggle_fps": "Alternar sobreposição FPS",
+    "cmd_toggle_terminal_performance": "Alternar sobreposição de desempenho do terminal",
     "cmd_close_pane": "Fechar painel ativo",
     "cmd_reset_panes": "Redefinir para painel único",
     "cmd_focus_next_pane": "Focar próximo painel",

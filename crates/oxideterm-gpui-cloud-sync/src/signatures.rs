@@ -20,7 +20,7 @@ pub fn cloud_sync_sections(
     has_pending_preview: bool,
     active_tab: CloudSyncTab,
 ) -> Vec<CloudSyncSection> {
-    let mut sections = vec![CloudSyncSection::Header, CloudSyncSection::TabBar];
+    let mut sections = vec![CloudSyncSection::Header];
     if has_pending_preview {
         sections.push(CloudSyncSection::Preview);
     }
@@ -72,14 +72,12 @@ pub fn cloud_sync_section_signature(
     // the active tab is part of every section signature.
     active_tab.hash(&mut hasher);
     match section {
-        CloudSyncSection::Header => {
-            format!("{:?}", state.status).hash(&mut hasher);
-        }
-        CloudSyncSection::TabBar => {}
+        CloudSyncSection::Header => {}
         CloudSyncSection::Guide => {
             format!("{backend_type:?}").hash(&mut hasher);
         }
         CloudSyncSection::Status => {
+            format!("{:?}", state.status).hash(&mut hasher);
             state.last_error.is_some().hash(&mut hasher);
             has_progress.hash(&mut hasher);
             state.last_sync_at.hash(&mut hasher);
@@ -195,6 +193,22 @@ pub fn cloud_sync_history_signature(entry: &CloudSyncHistoryEntry) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxideterm_cloud_sync::CloudSyncStatus;
+
+    fn section_signature(section: CloudSyncSection, state: &CloudSyncPersistedState) -> u64 {
+        cloud_sync_section_signature(
+            section,
+            state,
+            &state.settings.backend_type,
+            &state.settings.auth_mode,
+            &state.settings.default_conflict_strategy,
+            false,
+            false,
+            false,
+            false,
+            CloudSyncTab::Overview,
+        )
+    }
 
     fn rollback_backup() -> CloudSyncRollbackBackup {
         CloudSyncRollbackBackup {
@@ -215,7 +229,6 @@ mod tests {
             cloud_sync_sections(&state, false, CloudSyncTab::Overview),
             vec![
                 CloudSyncSection::Header,
-                CloudSyncSection::TabBar,
                 CloudSyncSection::Status,
                 CloudSyncSection::RecentHistory,
             ]
@@ -230,7 +243,6 @@ mod tests {
             cloud_sync_sections(&state, false, CloudSyncTab::Configure),
             vec![
                 CloudSyncSection::Header,
-                CloudSyncSection::TabBar,
                 CloudSyncSection::ConfigConnection,
                 CloudSyncSection::ConfigScope,
                 CloudSyncSection::ConfigCoverage,
@@ -253,11 +265,26 @@ mod tests {
             sections,
             vec![
                 CloudSyncSection::Header,
-                CloudSyncSection::TabBar,
                 CloudSyncSection::Preview,
                 CloudSyncSection::History,
                 CloudSyncSection::Rollback,
             ]
+        );
+    }
+
+    #[test]
+    fn status_changes_remeasure_the_overview_card_instead_of_the_page_header() {
+        let idle = CloudSyncPersistedState::default();
+        let mut uploading = idle.clone();
+        uploading.status = CloudSyncStatus::Uploading;
+
+        assert_eq!(
+            section_signature(CloudSyncSection::Header, &idle),
+            section_signature(CloudSyncSection::Header, &uploading),
+        );
+        assert_ne!(
+            section_signature(CloudSyncSection::Status, &idle),
+            section_signature(CloudSyncSection::Status, &uploading),
         );
     }
 }

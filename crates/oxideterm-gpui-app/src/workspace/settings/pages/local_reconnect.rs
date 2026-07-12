@@ -1,3 +1,4 @@
+use super::super::local_terminal::local_shell_supports_oh_my_posh;
 use super::*;
 
 impl WorkspaceApp {
@@ -52,6 +53,14 @@ impl WorkspaceApp {
                         cx,
                     ),
                 );
+                if cfg!(target_os = "windows")
+                    && local_shell_supports_oh_my_posh(
+                        settings.local_terminal.default_shell_id.as_deref(),
+                    )
+                {
+                    shell_rows.push(self.card_separator());
+                    shell_rows.extend(self.local_oh_my_posh_rows(settings, cx));
+                }
                 self.settings_card(
                     "settings_view.local_terminal.shell",
                     "settings_view.local_terminal.default_shell_hint",
@@ -71,117 +80,100 @@ impl WorkspaceApp {
             ),
             2 => self.local_privilege_credentials_card(cx),
             3 => {
-                let mut oh_my_posh_rows = vec![self.checkbox_row(
-                    "settings_view.local_terminal.oh_my_posh_enable",
-                    "settings_view.local_terminal.oh_my_posh_enable_hint",
-                    settings.local_terminal.oh_my_posh_enabled,
-                    set_oh_my_posh,
-                    cx,
-                )];
-                if settings.local_terminal.oh_my_posh_enabled {
-                    oh_my_posh_rows.push(
-                        div()
-                            .px(px(12.0))
-                            .py(px(8.0))
-                            .rounded(px(self.tokens.radii.sm))
-                            .border_1()
-                            .border_color(rgba((self.tokens.ui.info << 8) | 0x33))
-                            .bg(rgba((self.tokens.ui.info << 8) | 0x1a))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.info))
-                                    .child(format!(
-                                        "💡 {}",
-                                        self.i18n.t("settings_view.local_terminal.oh_my_posh_note")
-                                    )),
-                            )
-                            .into_any_element(),
-                    );
-                    oh_my_posh_rows.push(self.card_separator());
-                    oh_my_posh_rows.push(
-                        self.setting_row(
-                            "settings_view.local_terminal.oh_my_posh_theme",
-                            "settings_view.local_terminal.oh_my_posh_theme_hint",
-                            self.settings_text_input_control(
-                                SettingsInput::LocalOhMyPoshTheme,
-                                settings
-                                    .local_terminal
-                                    .oh_my_posh_theme
-                                    .clone()
-                                    .unwrap_or_default(),
-                                self.i18n
-                                    .t("settings_view.local_terminal.oh_my_posh_theme_placeholder"),
-                                300.0,
-                                cx,
-                            ),
-                            cx,
-                        ),
-                    );
-                }
-                self.settings_card(
-                    "settings_view.local_terminal.oh_my_posh",
-                    "settings_view.local_terminal.oh_my_posh_note",
-                    oh_my_posh_rows,
-                )
-            }
-            4 => {
-                let shortcut_default = if cfg!(target_os = "macos") {
-                    "⌘T"
-                } else {
-                    "Ctrl+T"
-                };
-                let shortcut_launcher = if cfg!(target_os = "macos") {
-                    "⌘⇧T"
-                } else {
-                    "Ctrl+Shift+T"
-                };
-                self.settings_card(
-                    "settings_view.local_terminal.shortcuts",
-                    "settings_view.local_terminal.custom_env_hint",
-                    vec![
-                        self.local_shortcut_row(
-                            "settings_view.local_terminal.new_default_shell",
-                            shortcut_default,
-                        ),
-                        self.card_separator(),
-                        self.local_shortcut_row(
-                            "settings_view.local_terminal.new_shell_launcher",
-                            shortcut_launcher,
-                        ),
-                    ],
-                )
-            }
-            5 => {
                 let effective_shells = self.effective_local_shells_for_settings(settings);
                 let shell_list = if effective_shells.is_empty() {
-                    vec![
-                        div()
-                            .text_align(gpui::TextAlign::Center)
-                            .py(px(32.0))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("settings_view.local_terminal.loading_shells"))
-                            .into_any_element(),
-                    ]
+                    div()
+                        .text_align(gpui::TextAlign::Center)
+                        .py(px(32.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.local_terminal.loading_shells"))
+                        .into_any_element()
                 } else {
-                    effective_shells
-                        .iter()
-                        .map(|shell| {
-                            self.available_shell_row(
-                                shell,
-                                settings.local_terminal.default_shell_id.as_deref(),
-                            )
-                        })
-                        .collect()
+                    let shell_count = effective_shells.len();
+                    let mut list = div().w_full().min_w(px(0.0)).flex().flex_col();
+                    for (index, shell) in effective_shells.iter().enumerate() {
+                        list = list.child(self.available_shell_row(
+                            shell,
+                            settings.local_terminal.default_shell_id.as_deref(),
+                        ));
+                        if index + 1 < shell_count {
+                            list = list.child(self.card_separator());
+                        }
+                    }
+                    list.into_any_element()
                 };
                 self.settings_card(
                     "settings_view.local_terminal.available_shells",
                     "settings_view.local_terminal.select_shell",
-                    shell_list,
+                    vec![shell_list],
                 )
             }
             _ => div().into_any_element(),
         }
+    }
+
+    fn local_oh_my_posh_rows(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut rows = vec![
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(self.tokens.ui.text))
+                .child(self.i18n.t("settings_view.local_terminal.oh_my_posh"))
+                .into_any_element(),
+            self.checkbox_row(
+                "settings_view.local_terminal.oh_my_posh_enable",
+                "settings_view.local_terminal.oh_my_posh_enable_hint",
+                settings.local_terminal.oh_my_posh_enabled,
+                set_oh_my_posh,
+                cx,
+            ),
+        ];
+        if settings.local_terminal.oh_my_posh_enabled {
+            rows.push(
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgba((self.tokens.ui.info << 8) | 0x33))
+                    .bg(rgba((self.tokens.ui.info << 8) | 0x1a))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.info))
+                            .child(format!(
+                                "💡 {}",
+                                self.i18n.t("settings_view.local_terminal.oh_my_posh_note")
+                            )),
+                    )
+                    .into_any_element(),
+            );
+            rows.push(self.card_separator());
+            rows.push(
+                self.setting_row(
+                    "settings_view.local_terminal.oh_my_posh_theme",
+                    "settings_view.local_terminal.oh_my_posh_theme_hint",
+                    self.settings_text_input_control(
+                        SettingsInput::LocalOhMyPoshTheme,
+                        settings
+                            .local_terminal
+                            .oh_my_posh_theme
+                            .clone()
+                            .unwrap_or_default(),
+                        self.i18n
+                            .t("settings_view.local_terminal.oh_my_posh_theme_placeholder"),
+                        300.0,
+                        cx,
+                    ),
+                    cx,
+                ),
+            );
+        }
+        rows
     }
 
     pub(in crate::workspace) fn local_privilege_credentials_card(
@@ -277,79 +269,85 @@ impl WorkspaceApp {
         section_index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if section_index != 0 {
+            return div().into_any_element();
+        }
+
         let settings = self.settings_store.settings();
         let reconnect_enabled = settings.reconnect.enabled;
-        match section_index {
-            0 => self.reconnect_enabled_row(reconnect_enabled, cx),
-            1 => separator(&self.tokens, SeparatorOrientation::Horizontal).into_any_element(),
-            2 => div()
-                .flex()
-                .flex_col()
-                .gap(px(24.0))
-                .opacity(if reconnect_enabled { 1.0 } else { 0.4 })
-                .child(
-                    div()
-                        .text_size(px(18.0))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(self.tokens.ui.text_heading))
-                        .child(self.i18n.t("settings_view.reconnect.strategy")),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
-                        .flex()
-                        .flex_row()
-                        .gap(px(32.0))
-                        .child(self.reconnect_select_field(
-                            "settings_view.reconnect.max_attempts",
-                            "settings_view.reconnect.max_attempts_hint",
-                            SettingsSelect::ReconnectMaxAttempts,
-                            reconnect_attempt_label(settings.reconnect.max_attempts),
-                            reconnect_enabled,
-                            cx,
-                        ))
-                        .child(self.reconnect_select_field(
-                            "settings_view.reconnect.base_delay",
-                            "settings_view.reconnect.base_delay_hint",
-                            SettingsSelect::ReconnectBaseDelay,
-                            reconnect_delay_label(settings.reconnect.base_delay_ms),
-                            reconnect_enabled,
-                            cx,
-                        )),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
-                        .flex()
-                        .flex_row()
-                        .gap(px(32.0))
-                        .child(self.reconnect_select_field(
-                            "settings_view.reconnect.max_delay",
-                            "settings_view.reconnect.max_delay_hint",
-                            SettingsSelect::ReconnectMaxDelay,
-                            reconnect_delay_label(settings.reconnect.max_delay_ms),
-                            reconnect_enabled,
-                            cx,
-                        )),
-                )
-                .child(
-                    div()
-                        .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
-                        .p(px(16.0))
-                        .rounded(px(self.tokens.radii.md))
-                        .border_1()
-                        .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-                        .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-                        .shadow(oxideterm_gpui_ui::theme_card_shadow(&self.tokens))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("settings_view.reconnect.formula_hint")),
-                )
-                .into_any_element(),
-            _ => div().into_any_element(),
-        }
+        // Keep reconnect controls in one virtual-list item so the shared card
+        // surface cannot be split by list spacing or independent measurement.
+        let strategy = div()
+            .flex()
+            .flex_col()
+            .gap(px(24.0))
+            .opacity(if reconnect_enabled { 1.0 } else { 0.4 })
+            .child(
+                div()
+                    .text_size(px(18.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text_heading))
+                    .child(self.i18n.t("settings_view.reconnect.strategy")),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+                    .flex()
+                    .flex_row()
+                    .gap(px(32.0))
+                    .child(self.reconnect_select_field(
+                        "settings_view.reconnect.max_attempts",
+                        "settings_view.reconnect.max_attempts_hint",
+                        SettingsSelect::ReconnectMaxAttempts,
+                        reconnect_attempt_label(settings.reconnect.max_attempts),
+                        reconnect_enabled,
+                        cx,
+                    ))
+                    .child(self.reconnect_select_field(
+                        "settings_view.reconnect.base_delay",
+                        "settings_view.reconnect.base_delay_hint",
+                        SettingsSelect::ReconnectBaseDelay,
+                        reconnect_delay_label(settings.reconnect.base_delay_ms),
+                        reconnect_enabled,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+                    .flex()
+                    .flex_row()
+                    .gap(px(32.0))
+                    .child(self.reconnect_select_field(
+                        "settings_view.reconnect.max_delay",
+                        "settings_view.reconnect.max_delay_hint",
+                        SettingsSelect::ReconnectMaxDelay,
+                        reconnect_delay_label(settings.reconnect.max_delay_ms),
+                        reconnect_enabled,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+                    .pt(px(4.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.reconnect.formula_hint")),
+            )
+            .into_any_element();
+
+        self.settings_card(
+            "settings_view.reconnect.title",
+            "settings_view.reconnect.description",
+            vec![
+                self.reconnect_enabled_row(reconnect_enabled, cx),
+                self.card_separator(),
+                strategy,
+            ],
+        )
     }
 
     pub(in crate::workspace) fn reconnect_enabled_row(

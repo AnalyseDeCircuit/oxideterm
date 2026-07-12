@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "Terminal abtrennen",
     "cmd_cleanup_dead": "Tote Sitzungen bereinigen",
     "cleanup_result": "{{count}} tote Sitzungen bereinigt",
-    "cmd_toggle_fps": "FPS-Anzeige umschalten",
+    "cmd_toggle_terminal_performance": "Terminal-Leistungsanzeige umschalten",
     "cmd_close_pane": "Aktiven Bereich schließen",
     "cmd_reset_panes": "Auf einzelnen Bereich zurücksetzen",
     "cmd_focus_next_pane": "Nächsten Bereich fokussieren",

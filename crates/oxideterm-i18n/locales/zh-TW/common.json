@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "分離終端",
     "cmd_cleanup_dead": "清理失效工作階段",
     "cleanup_result": "已清理 {{count}} 個失效工作階段",
-    "cmd_toggle_fps": "切換 FPS 顯示",
+    "cmd_toggle_terminal_performance": "切換終端效能浮層",
     "cmd_close_pane": "關閉目前窗格",
     "cmd_reset_panes": "重設為單一窗格",
     "cmd_focus_next_pane": "聚焦下一個窗格",

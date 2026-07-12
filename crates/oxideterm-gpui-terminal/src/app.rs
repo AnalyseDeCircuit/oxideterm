@@ -216,7 +216,6 @@ pub struct TerminalPane {
     last_drain_budget_exhausted: bool,
     render_stats: TerminalRenderStats,
     render_stats_window_start: Instant,
-    render_stats_window_frames: u32,
     render_stats_window_writes: usize,
     image_cache: ImageRenderCache,
     layout_cache: Arc<Mutex<TerminalLayoutCache>>,
@@ -586,7 +585,6 @@ impl TerminalPane {
             last_drain_budget_exhausted: false,
             render_stats: TerminalRenderStats::default(),
             render_stats_window_start: Instant::now(),
-            render_stats_window_frames: 0,
             render_stats_window_writes: 0,
             image_cache: {
                 let mut cache = ImageRenderCache::default();
@@ -1527,7 +1525,7 @@ impl TerminalPane {
         if report.changed {
             self.last_terminal_activity = now;
         }
-        self.update_render_stats(&report, now);
+        let render_stats_changed = self.update_render_stats(&report, now);
 
         let mut event_effect = TerminalEventEffect::default();
         for event in events {
@@ -1542,7 +1540,9 @@ impl TerminalPane {
             }
             self.snapshot = self.stamp_snapshot(snapshot);
             needs_notify = true;
-        } else if self.preferences.show_fps_overlay || cleared_command_mark_selection {
+        } else if (self.preferences.show_performance_overlay && render_stats_changed)
+            || cleared_command_mark_selection
+        {
             needs_notify = true;
         }
         if self.advance_smooth_scroll_animation() {
@@ -1651,26 +1651,44 @@ impl TerminalPane {
         }
     }
 
-    fn update_render_stats(&mut self, report: &TerminalDrainReport, now: Instant) {
-        self.render_stats_window_frames = self.render_stats_window_frames.saturating_add(1);
+    fn update_render_stats(&mut self, report: &TerminalDrainReport, now: Instant) -> bool {
         let writes = report
             .events_drained
             .max(usize::from(report.changed && report.drained_bytes > 0));
         self.render_stats_window_writes = self.render_stats_window_writes.saturating_add(writes);
         let elapsed = now.saturating_duration_since(self.render_stats_window_start);
         let tier = self.current_render_tier();
-        self.render_stats.tier = tier;
-        self.render_stats.pending_bytes = report.pending_bytes;
-        if elapsed >= Duration::from_millis(500) {
+        let published_writes_per_sec = if elapsed >= Duration::from_millis(500) {
             let seconds = elapsed.as_secs_f64().max(0.001);
-            self.render_stats.fps =
-                (f64::from(self.render_stats_window_frames) / seconds).round() as u32;
-            self.render_stats.writes_per_sec =
-                (self.render_stats_window_writes as f64 / seconds).round() as u32;
+            let writes_per_sec = (self.render_stats_window_writes as f64 / seconds).round() as u32;
             self.render_stats_window_start = now;
-            self.render_stats_window_frames = 0;
             self.render_stats_window_writes = 0;
+            Some(writes_per_sec)
+        } else {
+            None
+        };
+        Self::apply_render_stats_sample(
+            &mut self.render_stats,
+            tier,
+            report.pending_bytes,
+            published_writes_per_sec,
+        )
+    }
+
+    fn apply_render_stats_sample(
+        stats: &mut TerminalRenderStats,
+        tier: TerminalRenderTier,
+        pending_bytes: usize,
+        published_writes_per_sec: Option<u32>,
+    ) -> bool {
+        let previous_stats = *stats;
+        stats.tier = tier;
+        stats.pending_bytes = pending_bytes;
+        if let Some(writes_per_sec) = published_writes_per_sec {
+            stats.writes_per_sec = writes_per_sec;
         }
+        // The diagnostics overlay must never create a redraw loop merely to observe itself.
+        *stats != previous_stats
     }
 
     fn handle_terminal_event(
@@ -2399,6 +2417,30 @@ mod tests {
         let cols = whole_cells_in_span(grid_span, cell_width);
 
         assert_eq!(cols, 15);
+    }
+
+    #[test]
+    fn performance_overlay_requests_redraw_only_when_published_stats_change() {
+        let mut stats = TerminalRenderStats::default();
+
+        assert!(!TerminalPane::apply_render_stats_sample(
+            &mut stats,
+            TerminalRenderTier::Normal,
+            0,
+            None,
+        ));
+        assert!(TerminalPane::apply_render_stats_sample(
+            &mut stats,
+            TerminalRenderTier::Idle,
+            0,
+            Some(7),
+        ));
+        assert!(!TerminalPane::apply_render_stats_sample(
+            &mut stats,
+            TerminalRenderTier::Idle,
+            0,
+            None,
+        ));
     }
 
     #[test]

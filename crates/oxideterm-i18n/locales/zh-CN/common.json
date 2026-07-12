@@ -90,7 +90,7 @@
     "cmd_detach_terminal": "分离终端",
     "cmd_cleanup_dead": "清理僵死会话",
     "cleanup_result": "已清理 {{count}} 个僵死会话",
-    "cmd_toggle_fps": "切换 FPS 显示",
+    "cmd_toggle_terminal_performance": "切换终端性能浮层",
     "cmd_close_pane": "关闭当前窗格",
     "cmd_reset_panes": "重置为单窗格",
     "cmd_focus_next_pane": "聚焦下一个窗格",

@@ -325,13 +325,12 @@ pub fn cloud_sync_action_panel(tokens: &ThemeTokens, actions: AnyElement) -> Any
         .into_any_element()
 }
 
-/// Centered pill-style tab bar used to switch Cloud Sync page views.
+/// Compact pill-style tab bar used beside the Cloud Sync page title.
 pub fn cloud_sync_tab_bar(children: impl IntoIterator<Item = AnyElement>) -> Div {
     div()
-        .w_full()
+        .flex_none()
         .flex()
         .items_center()
-        .justify_center()
         .gap(px(8.0))
         .children(children)
 }
@@ -361,6 +360,7 @@ pub fn cloud_sync_tab_button(tokens: &ThemeTokens, active: bool, child: AnyEleme
         .gap(px(7.0))
         .text_size(px(tokens.metrics.ui_text_sm))
         .font_weight(FontWeight::MEDIUM)
+        .whitespace_nowrap()
         .text_color(rgb(if active {
             theme.accent
         } else {

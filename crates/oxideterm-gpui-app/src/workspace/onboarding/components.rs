@@ -1,5 +1,5 @@
 use super::*;
-use oxideterm_gpui_ui::checkbox;
+use oxideterm_gpui_ui::{ActionSlotRowOptions, action_slot_row, checkbox};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn onboarding_step_heading(
@@ -122,9 +122,43 @@ impl WorkspaceApp {
         } else {
             rgb(self.tokens.ui.border)
         };
-        div()
+        let trailing = badge
+            .map(|badge| {
+                div()
+                    .rounded(px(self.tokens.radii.xs))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .px(px(4.0))
+                    .py(px(1.0))
+                    .text_size(px(9.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(badge.to_string())
+                    .into_any_element()
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        // The shared body slot owns the flexible width so localized titles do
+        // not collapse to their minimum-content width inside the two-column grid.
+        let content = div()
+            .min_w(px(0.0))
             .flex()
-            .gap(px(10.0))
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t(&format!("onboarding.{key}"))),
+            )
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
+            )
+            .into_any_element();
+        div()
             .p(px(14.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
@@ -134,52 +168,17 @@ impl WorkspaceApp {
             } else {
                 rgb(self.tokens.ui.bg_card)
             })
-            .child(Self::render_lucide_icon(
-                icon,
-                16.0,
-                rgb(self.tokens.ui.accent),
+            .child(action_slot_row(
+                &self.tokens,
+                ActionSlotRowOptions::new().align_start().gap(10.0),
+                Some(Self::render_lucide_icon(
+                    icon,
+                    16.0,
+                    rgb(self.tokens.ui.accent),
+                )),
+                content,
+                trailing,
             ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .min_w(px(0.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t(&format!("onboarding.{key}"))),
-                            )
-                            .when_some(badge, |row, badge| {
-                                row.child(
-                                    div()
-                                        .rounded(px(self.tokens.radii.xs))
-                                        .border_1()
-                                        .border_color(rgb(self.tokens.ui.border))
-                                        .px(px(4.0))
-                                        .py(px(1.0))
-                                        .text_size(px(9.0))
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(badge.to_string()),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
-                    ),
-            )
             .into_any_element()
     }
 

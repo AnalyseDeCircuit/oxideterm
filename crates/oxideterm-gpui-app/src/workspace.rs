@@ -714,6 +714,7 @@ pub(crate) struct WorkspaceApp {
     theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence,
     knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence,
     knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     ai_mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     portable_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,

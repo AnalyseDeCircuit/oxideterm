@@ -200,23 +200,35 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("plugin_manager");
         match index {
+            // Keep page-level navigation beside the title and wrap it as one group on narrow views.
             0 => div()
                 .flex()
-                .flex_col()
-                .gap(px(8.0))
+                .flex_wrap()
+                .items_start()
+                .justify_between()
+                .gap(px(16.0))
                 .child(
                     div()
-                        .text_size(px(self.tokens.metrics.ui_text_2xl))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text_heading))
-                        .child(self.i18n.t("plugin.manager_title")),
+                        .min_w(px(280.0))
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_2xl))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(theme.text_heading))
+                                .child(self.i18n.t("plugin.manager_title")),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_base))
+                                .text_color(rgb(theme.text_muted))
+                                .child(self.i18n.t("plugin.manager_description")),
+                        ),
                 )
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_base))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("plugin.manager_description")),
-                )
+                .child(self.render_native_plugin_tab_bar(has_background, cx))
                 .into_any_element(),
             1 => div()
                 .w_full()
@@ -419,21 +431,14 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(24.0))
-            .child(self.render_native_plugin_tab_bar(has_background, cx))
-            .child(match self.native_plugin_manager.active_tab {
-                NativePluginManagerTab::Installed => {
-                    self.render_native_plugin_installed_card(has_background, cx)
-                }
-                NativePluginManagerTab::Browse => {
-                    self.render_native_plugin_browse_content(has_background, cx)
-                }
-            })
-            .into_any_element()
+        match self.native_plugin_manager.active_tab {
+            NativePluginManagerTab::Installed => {
+                self.render_native_plugin_installed_card(has_background, cx)
+            }
+            NativePluginManagerTab::Browse => {
+                self.render_native_plugin_browse_content(has_background, cx)
+            }
+        }
     }
 
     fn render_native_plugin_tab_bar(
@@ -444,6 +449,7 @@ impl WorkspaceApp {
         let plugin_count = self.native_plugin_runtime.registry.plugins().len();
         let update_count = self.native_plugin_manager.available_updates.len();
         div()
+            .flex_none()
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -500,6 +506,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::MEDIUM)
+            .whitespace_nowrap()
             .text_color(rgb(if active { theme.text } else { theme.text_muted }))
             .cursor(CursorStyle::PointingHand)
             .on_mouse_down(
@@ -840,7 +847,10 @@ impl WorkspaceApp {
                     )
                 },
             )
-            .child(self.render_native_plugin_manager_status())
+            .when_some(
+                self.render_native_plugin_manager_status(),
+                |panel, status| panel.child(status),
+            )
             .into_any_element()
     }
 
@@ -1228,14 +1238,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_native_plugin_manager_status(&self) -> AnyElement {
+    fn render_native_plugin_manager_status(&self) -> Option<AnyElement> {
         let theme = self.tokens.ui;
         let (icon, color, message) = match &self.native_plugin_manager.operation_status {
-            NativePluginManagerOperationStatus::Idle => (
-                LucideIcon::ShieldCheck,
-                theme.text_muted,
-                self.i18n.t("plugin.url_disclaimer"),
-            ),
+            // The dedicated disclaimer card below already owns the idle-state guidance.
+            NativePluginManagerOperationStatus::Idle => return None,
             NativePluginManagerOperationStatus::Busy(message) => {
                 (LucideIcon::RefreshCw, theme.warning, message.clone())
             }
@@ -1246,17 +1253,19 @@ impl WorkspaceApp {
                 (LucideIcon::ShieldAlert, theme.error, message.clone())
             }
         };
-        div()
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .line_height(px(18.0))
-            .text_color(rgb(color))
-            .child(Self::render_lucide_icon(icon, 14.0, rgb(color)))
-            .child(message)
-            .into_any_element()
+        Some(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .line_height(px(18.0))
+                .text_color(rgb(color))
+                .child(Self::render_lucide_icon(icon, 14.0, rgb(color)))
+                .child(message)
+                .into_any_element(),
+        )
     }
 
     fn start_native_plugin_package_install(

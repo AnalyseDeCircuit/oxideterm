@@ -53,120 +53,115 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         let proxy = settings.network.upstream_proxy.as_ref();
         match section_index {
-            0 => div()
-                .w_full()
-                .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(20.0))
-                .child(self.network_checkbox_row(
+            0 => self.plain_settings_card(vec![
+                self.network_checkbox_row(
                     "settings_view.network.disclaimer",
                     "settings_view.network.disclaimer_hint",
                     settings.network.upstream_proxy_disclaimer_accepted,
                     true,
                     Self::toggle_settings_network_disclaimer,
                     cx,
-                ))
-                .child(self.network_checkbox_row(
+                ),
+                self.card_separator(),
+                self.network_checkbox_row(
                     "settings_view.network.enabled",
                     "settings_view.network.enabled_hint",
                     proxy.is_some(),
                     settings.network.upstream_proxy_disclaimer_accepted,
                     Self::toggle_settings_network_enabled,
                     cx,
-                ))
-                .into_any_element(),
-            1 => div()
-                .w_full()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(24.0))
-                .opacity(if proxy.is_some() { 1.0 } else { 0.4 })
-                .child(
-                    div()
-                        .text_size(px(18.0))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(self.tokens.ui.text_heading))
-                        .child(self.i18n.t("settings_view.network.proxy")),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_wrap()
-                        .items_start()
-                        .gap(px(32.0))
-                        .child(
-                            self.network_responsive_field(
-                                SETTINGS_NETWORK_FIELD_WIDTH,
-                                self.network_select_field(
-                                    "settings_view.network.protocol",
-                                    "settings_view.network.protocol_hint",
-                                    SettingsSelect::NetworkProxyProtocol,
-                                    network_proxy_protocol_label(
-                                        proxy
-                                            .map(|proxy| proxy.protocol)
-                                            .unwrap_or(SettingsUpstreamProxyProtocol::Socks5),
-                                        &self.i18n,
+                ),
+            ]),
+            1 => {
+                self.settings_card(
+                    "settings_view.network.proxy",
+                    "settings_view.network.protocol_hint",
+                    vec![
+                        div()
+                            .w_full()
+                            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(self.tokens.metrics.settings_row_gap))
+                            // Keep the card structure visible while its controls are disabled.
+                            .opacity(if proxy.is_some() { 1.0 } else { 0.4 })
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w(px(0.0))
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_start()
+                                    .gap(px(32.0))
+                                    .child(self.network_responsive_field(
+                                        SETTINGS_NETWORK_FIELD_WIDTH,
+                                        self.network_select_field(
+                                            "settings_view.network.protocol",
+                                            "settings_view.network.protocol_hint",
+                                            SettingsSelect::NetworkProxyProtocol,
+                                            network_proxy_protocol_label(
+                                                proxy.map(|proxy| proxy.protocol).unwrap_or(
+                                                    SettingsUpstreamProxyProtocol::Socks5,
+                                                ),
+                                                &self.i18n,
+                                            ),
+                                            proxy.is_some(),
+                                            cx,
+                                        ),
+                                    ))
+                                    .child(
+                                        self.network_responsive_field(
+                                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
+                                            self.network_input_field(
+                                                "settings_view.network.port",
+                                                "settings_view.network.port_hint",
+                                                SettingsInput::NetworkProxyPort,
+                                                proxy
+                                                    .map(|proxy| proxy.port.to_string())
+                                                    .unwrap_or_else(|| "1080".to_string()),
+                                                "1080".to_string(),
+                                                SETTINGS_NETWORK_PORT_FIELD_WIDTH,
+                                                proxy.is_some(),
+                                                cx,
+                                            ),
+                                        ),
                                     ),
-                                    proxy.is_some(),
-                                    cx,
-                                ),
-                            ),
-                        )
-                        .child(
-                            self.network_responsive_field(
-                                SETTINGS_NETWORK_PORT_FIELD_WIDTH,
-                                self.network_input_field(
-                                    "settings_view.network.port",
-                                    "settings_view.network.port_hint",
-                                    SettingsInput::NetworkProxyPort,
+                            )
+                            .child(self.network_full_width_input(
+                                "settings_view.network.host",
+                                "settings_view.network.host_hint",
+                                SettingsInput::NetworkProxyHost,
+                                proxy.map(|proxy| proxy.host.clone()).unwrap_or_default(),
+                                "127.0.0.1".to_string(),
+                                proxy.is_some(),
+                                cx,
+                            ))
+                            .child(
+                                self.network_full_width_input(
+                                    "settings_view.network.no_proxy",
+                                    "settings_view.network.no_proxy_hint",
+                                    SettingsInput::NetworkProxyNoProxy,
                                     proxy
-                                        .map(|proxy| proxy.port.to_string())
-                                        .unwrap_or_else(|| "1080".to_string()),
-                                    "1080".to_string(),
-                                    SETTINGS_NETWORK_PORT_FIELD_WIDTH,
+                                        .map(|proxy| proxy.no_proxy.clone())
+                                        .unwrap_or_default(),
+                                    "localhost,127.0.0.1,*.internal".to_string(),
                                     proxy.is_some(),
                                     cx,
                                 ),
-                            ),
-                        ),
+                            )
+                            .child(self.network_checkbox_row(
+                                "settings_view.network.remote_dns",
+                                "settings_view.network.remote_dns_hint",
+                                proxy.map(|proxy| proxy.remote_dns).unwrap_or(true),
+                                proxy.is_some(),
+                                Self::toggle_settings_network_remote_dns,
+                                cx,
+                            ))
+                            .into_any_element(),
+                    ],
                 )
-                .child(self.network_full_width_input(
-                    "settings_view.network.host",
-                    "settings_view.network.host_hint",
-                    SettingsInput::NetworkProxyHost,
-                    proxy.map(|proxy| proxy.host.clone()).unwrap_or_default(),
-                    "127.0.0.1".to_string(),
-                    proxy.is_some(),
-                    cx,
-                ))
-                .child(
-                    self.network_full_width_input(
-                        "settings_view.network.no_proxy",
-                        "settings_view.network.no_proxy_hint",
-                        SettingsInput::NetworkProxyNoProxy,
-                        proxy
-                            .map(|proxy| proxy.no_proxy.clone())
-                            .unwrap_or_default(),
-                        "localhost,127.0.0.1,*.internal".to_string(),
-                        proxy.is_some(),
-                        cx,
-                    ),
-                )
-                .child(self.network_checkbox_row(
-                    "settings_view.network.remote_dns",
-                    "settings_view.network.remote_dns_hint",
-                    proxy.map(|proxy| proxy.remote_dns).unwrap_or(true),
-                    proxy.is_some(),
-                    Self::toggle_settings_network_remote_dns,
-                    cx,
-                ))
-                .into_any_element(),
+            }
             2 => self.settings_network_auth_section(proxy, cx),
             3 => self.settings_network_test_section(proxy.is_some(), cx),
             _ => div().into_any_element(),
@@ -197,10 +192,11 @@ impl WorkspaceApp {
 
         let mut section = div()
             .w_full()
+            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .flex()
             .flex_col()
-            .gap(px(24.0))
+            .gap(px(self.tokens.metrics.settings_row_gap))
             .opacity(if proxy.is_some() { 1.0 } else { 0.4 })
             .child(
                 div()
@@ -238,7 +234,11 @@ impl WorkspaceApp {
                 .child(self.network_password_field(auth_has_saved_password, proxy.is_some(), cx));
         }
 
-        section.into_any_element()
+        self.settings_card(
+            "settings_view.network.auth",
+            "settings_view.network.auth_hint",
+            vec![section.into_any_element()],
+        )
     }
 
     pub(in crate::workspace) fn settings_network_test_section(
@@ -263,32 +263,20 @@ impl WorkspaceApp {
             || host_value.trim().is_empty()
             || port_value.trim().parse::<u16>().is_err();
 
-        div()
+        let content = div()
             .w_full()
             .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .flex()
             .flex_col()
-            .gap(px(16.0))
+            .gap(px(self.tokens.metrics.settings_card_gap))
             .opacity(if proxy_enabled { 1.0 } else { 0.4 })
             .child(
                 div()
                     .min_w(px(0.0))
-                    .grid()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(18.0))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text_heading))
-                            .child(self.i18n.t("settings_view.network.test_title")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("settings_view.network.test_hint")),
-                    ),
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.network.test_hint")),
             )
             .child(
                 div()
@@ -371,7 +359,13 @@ impl WorkspaceApp {
                         },
                     ),
             )
-            .into_any_element()
+            .into_any_element();
+
+        self.settings_card(
+            "settings_view.network.test_title",
+            "settings_view.network.test_hint",
+            vec![content],
+        )
     }
 
     pub(in crate::workspace) fn network_responsive_field(

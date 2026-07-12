@@ -1,5 +1,7 @@
 use super::*;
 
+const SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX: usize = 5;
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_settings(
         &mut self,
@@ -78,6 +80,10 @@ impl WorkspaceApp {
             .when_some(
                 self.render_settings_select_overlay(cx),
                 |surface, overlay| surface.child(overlay),
+            )
+            .when_some(
+                self.render_settings_ssh_config_import_dialog(cx),
+                |surface, modal| surface.child(modal),
             )
             .when_some(
                 self.render_settings_managed_key_dialog(cx),
@@ -397,27 +403,31 @@ impl WorkspaceApp {
                     .managed_ssh_keys()
                     .len()
                     .hash(&mut hasher);
-                self.settings_page
-                    .settings_connection_status
-                    .is_some()
-                    .hash(&mut hasher);
                 self.settings_managed_key_status.is_some().hash(&mut hasher);
-                self.settings_connection_import_source
-                    .tag()
-                    .hash(&mut hasher);
-                self.settings_connection_import_paths
-                    .len()
-                    .hash(&mut hasher);
-                self.settings_connection_import_preview
-                    .as_ref()
-                    .map(|preview| preview.drafts.len())
-                    .hash(&mut hasher);
-                self.settings_selected_connection_import_drafts
-                    .len()
-                    .hash(&mut hasher);
-                self.settings_connection_import_duplicate_strategy
-                    .tag()
-                    .hash(&mut hasher);
+                if settings_connection_importers_list_item(index) {
+                    // Importer state only changes the final importer card. Invalidating
+                    // earlier measured rows makes GPUI move the current scroll anchor.
+                    self.settings_page
+                        .settings_connection_status
+                        .is_some()
+                        .hash(&mut hasher);
+                    self.settings_connection_import_source
+                        .tag()
+                        .hash(&mut hasher);
+                    self.settings_connection_import_paths
+                        .len()
+                        .hash(&mut hasher);
+                    self.settings_connection_import_preview
+                        .as_ref()
+                        .map(|preview| preview.drafts.len())
+                        .hash(&mut hasher);
+                    self.settings_selected_connection_import_drafts
+                        .len()
+                        .hash(&mut hasher);
+                    self.settings_connection_import_duplicate_strategy
+                        .tag()
+                        .hash(&mut hasher);
+                }
             }
             SettingsTab::Privilege => {
                 self.settings_page.privilege_scope_id.hash(&mut hasher);
@@ -1050,5 +1060,23 @@ pub(in crate::workspace) fn hash_string_bool_map(
     for (key, value) in values {
         key.hash(hasher);
         value.hash(hasher);
+    }
+}
+
+fn settings_connection_importers_list_item(list_index: usize) -> bool {
+    list_index
+        .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
+        .is_some_and(|section_index| section_index == SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connection_importer_height_signature_only_targets_importer_row() {
+        assert!(!settings_connection_importers_list_item(0));
+        assert!(!settings_connection_importers_list_item(5));
+        assert!(settings_connection_importers_list_item(6));
     }
 }

@@ -26,7 +26,7 @@ impl WorkspaceApp {
             .py(px(6.0))
             .border_t_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
-            .bg(rgb(self.tokens.ui.bg))
+            .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
             .child(self.render_ai_model_selector(
                 AiModelSelectorScope::Sidebar,
                 SelectAnchorId::AiModelSelector,

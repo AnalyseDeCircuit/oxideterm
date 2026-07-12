@@ -642,10 +642,10 @@ impl WorkspaceApp {
                     ),
                     self.card_separator(),
                     self.checkbox_row(
-                        "settings_view.terminal.show_fps_overlay",
-                        "settings_view.terminal.show_fps_overlay_hint",
+                        "settings_view.terminal.show_performance_overlay",
+                        "settings_view.terminal.show_performance_overlay_hint",
                         settings.terminal.show_fps_overlay,
-                        set_show_fps_overlay,
+                        set_show_terminal_performance_overlay,
                         cx,
                     ),
                 ]);
@@ -781,29 +781,16 @@ impl WorkspaceApp {
             (TerminalSettingsPage::History, 1) => self.settings_card(
                 "settings_view.terminal.buffer",
                 "settings_view.terminal.scrollback_hint",
-                vec![
-                    self.number_row(
-                        "settings_view.terminal.scrollback",
-                        "settings_view.terminal.scrollback_hint",
-                        settings.terminal.scrollback,
-                        500,
-                        500,
-                        20000,
-                        set_terminal_scrollback,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.number_row(
-                        "settings_view.terminal.backend_buffer_lines",
-                        "settings_view.terminal.backend_buffer_lines_hint",
-                        settings.buffer.max_lines,
-                        500,
-                        5000,
-                        12000,
-                        set_buffer_max_lines,
-                        cx,
-                    ),
-                ],
+                vec![self.number_row(
+                    "settings_view.terminal.scrollback",
+                    "settings_view.terminal.scrollback_hint",
+                    settings.terminal.scrollback,
+                    500,
+                    500,
+                    20000,
+                    set_terminal_scrollback,
+                    cx,
+                )],
             ),
             (TerminalSettingsPage::Transfer, 0) => self.settings_card(
                 "settings_view.terminal.in_band_transfer.title",

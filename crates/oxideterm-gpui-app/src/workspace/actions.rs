@@ -930,7 +930,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.settings_page.settings_reset_confirm_open
+        if self.settings_page.ssh_config_import_dialog_open {
+            if event.keystroke.key.as_str() == "escape" {
+                self.close_settings_ssh_config_import_dialog(cx);
+            }
+            // The import dialog owns keyboard input while it is mounted.
+            true
+        } else if self.settings_page.settings_reset_confirm_open
             && self.settings_reset_confirm_presence.phase()
                 == oxideterm_gpui_ui::motion::ExitPhase::Visible
         {
