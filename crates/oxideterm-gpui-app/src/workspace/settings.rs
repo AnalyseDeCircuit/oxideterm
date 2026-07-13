@@ -190,17 +190,23 @@ mod surface;
 mod terminal_controls;
 mod terminal_display;
 mod update;
+mod update_ui;
 
 pub(in crate::workspace) use ai_page::AiTextEditorDialog;
 use ai_page::{AI_CONTEXT_MAX_CHAR_OPTIONS, AI_CONTEXT_VISIBLE_LINE_OPTIONS, AI_PROVIDER_SELECT_W};
-use cli_companion::{CLI_COMPANION_COMMAND_NAME, cli_install_path};
+pub(in crate::workspace) use cli_companion::{
+    CLI_COMPANION_COMMAND_NAME, LEGACY_CLI_COMPANION_COMMAND_NAME, cli_install_path,
+};
 use connections_page::{
     connection_idle_timeout_options, connection_import_duplicate_strategy_label,
     connection_import_source_label, connection_import_source_options,
 };
 use network_page::{NetworkProxyAuthMode, network_proxy_auth_label, network_proxy_protocol_label};
 use pages::settings_keybinding_scope_matches;
-pub(in crate::workspace) use update::{NativeUpdateDelivery, NativeUpdateUiState};
+pub(in crate::workspace) use update::{
+    NativeUpdateDelivery, NativeUpdateUiState, native_update_progress_hint,
+    native_update_progress_ratio,
+};
 
 fn settings_tab_lucide(icon: SettingsTabIcon) -> LucideIcon {
     match icon {

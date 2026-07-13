@@ -99,6 +99,7 @@ enum PaletteAction {
     CursorStyle(SettingsCursorStyle),
     ToggleTerminalPerformance,
     ShowWelcome,
+    ShowVersionMigration,
     RuntimePluginCommand {
         plugin_id: String,
         command: String,
@@ -533,6 +534,7 @@ impl WorkspaceApp {
                 );
             }
             PaletteAction::ShowWelcome => self.open_onboarding_from_palette(cx),
+            PaletteAction::ShowVersionMigration => self.open_version_migration_from_palette(cx),
             PaletteAction::RuntimePluginCommand { plugin_id, command } => {
                 self.dispatch_native_plugin_command(plugin_id, command, cx);
             }
@@ -2586,6 +2588,13 @@ fn help_palette_specs() -> Vec<CommandSpec> {
             shortcut_action: None,
             action: PaletteAction::ShowWelcome,
         },
+        CommandSpec {
+            id: "cmd:show_version_migration",
+            label_key: "command_palette.cmd_show_version_migration".into(),
+            icon: LucideIcon::Sparkles,
+            shortcut_action: None,
+            action: PaletteAction::ShowVersionMigration,
+        },
     ]
 }
 
@@ -2765,6 +2774,16 @@ mod tests {
             .expect("native Raw UDP terminal command");
 
         assert!(matches!(spec.action, PaletteAction::OpenRawUdpTerminal));
+    }
+
+    #[test]
+    fn help_palette_specs_include_reopenable_version_migration() {
+        let spec = help_palette_specs()
+            .into_iter()
+            .find(|spec| spec.id == "cmd:show_version_migration")
+            .expect("version migration command");
+
+        assert!(matches!(spec.action, PaletteAction::ShowVersionMigration));
     }
 
     #[test]

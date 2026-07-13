@@ -506,6 +506,55 @@ mod tests {
     }
 
     #[test]
+    fn major_version_migration_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "migration.overview_title",
+            "migration.cli_page_title",
+            "migration.cli_migrate",
+            "migration.gpui_title",
+            "migration.gpui_memory_description",
+            "migration.visual_title",
+            "migration.visual_disable_hint",
+            "migration.features_title",
+            "migration.features_sftp_description",
+            "migration.internal_title",
+            "migration.continue_button",
+            "command_palette.cmd_show_version_migration",
+        ];
+        let english = I18n::new(Locale::En);
+
+        // The migration tour is shown before ordinary settings navigation, so
+        // every shipped locale must own its critical release and repair copy.
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                let translated = i18n.t(key);
+                assert_ne!(translated, key, "{locale:?} missing {key}");
+                if locale != Locale::En {
+                    assert_ne!(
+                        translated,
+                        english.t(key),
+                        "{locale:?} falls back for {key}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn plugin_manager_strings_exist_in_every_locale() {
         let locales = [
             Locale::De,

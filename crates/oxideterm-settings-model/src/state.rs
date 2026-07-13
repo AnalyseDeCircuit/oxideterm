@@ -20,6 +20,8 @@ pub struct CliCompanionStatus {
     pub bundled: bool,
     pub installed: bool,
     pub install_path: Option<String>,
+    pub legacy_installed: bool,
+    pub legacy_install_path: Option<String>,
     pub bundle_path: Option<String>,
     pub app_version: String,
     pub matches_bundled: Option<bool>,

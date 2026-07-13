@@ -19,6 +19,7 @@ pub struct ToastView {
     pub status_text: Option<String>,
     pub progress: Option<f32>,
     pub variant: ToastVariant,
+    pub actions: Option<AnyElement>,
     pub close: Option<AnyElement>,
 }
 
@@ -101,6 +102,17 @@ pub fn toast(tokens: &ThemeTokens, view: ToastView) -> AnyElement {
                                     .bg(rgb(tokens.ui.accent))
                                     .w(gpui::relative((progress / 100.0).clamp(0.0, 1.0))),
                             ),
+                    )
+                })
+                .when_some(view.actions, |content, actions| {
+                    content.child(
+                        div()
+                            .mt(px(tokens.spacing.two))
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(tokens.spacing.two))
+                            .child(actions),
                     )
                 }),
         )

@@ -101,6 +101,13 @@ fn current_instance_scope() -> &'static str {
     instance_scope_for_build(env!("CARGO_PKG_VERSION"), cfg!(debug_assertions))
 }
 
+pub(crate) fn single_instance_runtime_paths_for_data_dir(data_dir: &Path) -> [PathBuf; 2] {
+    // Startup creates these files before the pre-2.0 snapshot check. Exposing
+    // their exact paths prevents current runtime state from looking like 1.x data.
+    let paths = InstancePaths::for_data_dir(data_dir, current_instance_scope());
+    [paths.lock_path, paths.state_path]
+}
+
 pub(crate) fn acquire_or_forward(
     ssh_launch_path: Option<PathBuf>,
 ) -> Result<SingleInstanceOutcome> {

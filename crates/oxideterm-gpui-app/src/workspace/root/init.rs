@@ -12,6 +12,7 @@ impl WorkspaceApp {
         let focus_handle = cx.focus_handle();
         let mut settings_store = SettingsStore::load_default()?;
         settings_store.settings_mut().sidebar_ui.zen_mode = false;
+        let version_migration = VersionMigrationState::from_settings_path(settings_store.path())?;
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
         // Native plugin discovery intentionally stops at manifest parsing.
@@ -168,6 +169,7 @@ impl WorkspaceApp {
                 ssh_config_hosts_loading: false,
                 error: None,
             },
+            version_migration,
             onboarding: OnboardingState::from_settings(&settings),
             shortcuts_modal: ShortcutsModalState {
                 open: false,
@@ -337,6 +339,12 @@ impl WorkspaceApp {
             native_update_rx: None,
             native_update_polling: false,
             native_update_cancel: None,
+            native_update_package: None,
+            native_update_notification_open: false,
+            native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            native_update_release_notes_open: false,
+            native_update_release_notes_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(
+            ),
             native_update_release_notes_scroll: MarkdownVirtualListScrollHandle::new(),
             settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
             desktop_presence_rx,
@@ -656,6 +664,9 @@ impl WorkspaceApp {
             workspace.ensure_ai_chat_initialized();
             workspace.bootstrap_ai_mcp_registry();
         }
+        if workspace.version_migration.open {
+            workspace.refresh_cli_companion_status(cx);
+        }
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.restore_session_tree_snapshot();
         let window_handle = window.window_handle();
@@ -735,6 +746,7 @@ impl WorkspaceApp {
             }
         })
         .detach();
+        workspace.schedule_automatic_native_update_check(cx);
         Ok(workspace)
     }
 

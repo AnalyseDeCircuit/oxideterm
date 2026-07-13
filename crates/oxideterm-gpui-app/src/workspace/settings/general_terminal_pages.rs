@@ -92,6 +92,10 @@ impl WorkspaceApp {
                 let cli_installed = cli_status.is_some_and(|status| status.installed);
                 let cli_bundled = cli_status.is_some_and(|status| status.bundled);
                 let cli_needs_reinstall = cli_status.is_some_and(|status| status.needs_reinstall);
+                let legacy_cli_installed = cli_status.is_some_and(|status| status.legacy_installed);
+                let legacy_cli_path = cli_status
+                    .and_then(|status| status.legacy_install_path.clone())
+                    .unwrap_or_default();
                 let cli_path = cli_status
                     .and_then(|status| status.install_path.clone())
                     .unwrap_or_else(|| cli_install_path().display().to_string());
@@ -275,6 +279,79 @@ impl WorkspaceApp {
                             },
                         )
                         .into_any_element(),
+                    if legacy_cli_installed {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(12.0))
+                            .p(px(12.0))
+                            .rounded(px(self.tokens.radii.md))
+                            .border_1()
+                            .border_color(rgba((self.tokens.ui.warning << 8) | 0x80))
+                            .bg(rgba((self.tokens.ui.warning << 8) | 0x12))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(220.0))
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(4.0))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(8.0))
+                                            .child(Self::render_lucide_icon(
+                                                LucideIcon::AlertTriangle,
+                                                16.0,
+                                                rgb(self.tokens.ui.warning),
+                                            ))
+                                            .child(
+                                                div()
+                                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                                    .text_color(rgb(self.tokens.ui.text))
+                                                    .child(self.i18n.t("migration.cli_legacy_found")),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .text_color(rgb(self.tokens.ui.text_muted))
+                                            .child(self.i18n.t("migration.cli_legacy_settings_hint")),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w(px(0.0))
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .font_family(settings_mono_font_family(
+                                                self.settings_store.settings(),
+                                            ))
+                                            .text_color(rgb(self.tokens.ui.text_muted))
+                                            .truncate()
+                                            .child(format!(
+                                                "{LEGACY_CLI_COMPANION_COMMAND_NAME} · {legacy_cli_path}"
+                                            )),
+                                    ),
+                            )
+                            .child(self.cli_companion_action_button(
+                                self.i18n.t("migration.cli_uninstall_legacy"),
+                                LucideIcon::Trash2,
+                                ButtonVariant::Ghost,
+                                cli_loading,
+                                |this, _event, _window, cx| {
+                                    this.uninstall_legacy_cli_companion(cx)
+                                },
+                                cx,
+                            ))
+                            .into_any_element()
+                    } else {
+                        div().into_any_element()
+                    },
                 ])
             }
             3 if cfg!(any(target_os = "windows", target_os = "macos")) => {

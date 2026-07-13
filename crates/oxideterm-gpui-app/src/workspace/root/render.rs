@@ -286,6 +286,14 @@ impl Render for WorkspaceApp {
                 } else if this.handle_session_manager_basic_dialog_footer_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_native_update_release_notes_key(event, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.version_migration.open
+                    && this.handle_version_migration_key(event, cx)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.onboarding.open && this.handle_onboarding_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -980,11 +988,18 @@ impl Render for WorkspaceApp {
             .when(self.command_palette.open, |root| {
                 root.child(self.render_command_palette(cx))
             })
-            .when(self.onboarding.open, |root| {
-                root.child(self.render_onboarding_modal(window, cx))
+            .when(self.version_migration.open, |root| {
+                root.child(self.render_version_migration_modal(window, cx))
             })
+            .when(
+                self.onboarding.open && !self.version_migration.open,
+                |root| root.child(self.render_onboarding_modal(window, cx)),
+            )
             .when(self.settings_page.legal_notice_open, |root| {
                 root.child(self.render_help_legal_notice_dialog(cx))
+            })
+            .when(self.native_update_release_notes_open, |root| {
+                root.child(self.render_native_update_release_notes_dialog(cx))
             })
             .when(self.shortcuts_modal.open, |root| {
                 root.child(self.render_shortcuts_modal(cx))
@@ -1507,12 +1522,14 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let update_notification = self.render_native_update_notification(cx);
         if self.workspace_toasts.is_empty()
             && self.plugin_progress_toasts.is_empty()
             && !self
                 .connection_trace_toasts
                 .values()
                 .any(|trace| trace.displayed.is_some())
+            && update_notification.is_none()
         {
             return None;
         }
@@ -1529,6 +1546,7 @@ impl WorkspaceApp {
                 status_text: toast.notice.status_text.clone(),
                 progress: toast.notice.progress,
                 variant: toast_variant_from_terminal(toast.notice.variant),
+                actions: None,
                 close: Some(
                     toast_close(&self.tokens)
                         .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
@@ -1557,6 +1575,7 @@ impl WorkspaceApp {
                         status_text: toast.notice.status_text.clone(),
                         progress: toast.notice.progress,
                         variant: toast_variant_from_terminal(toast.notice.variant),
+                        actions: None,
                         close: Some(
                             toast_close(&self.tokens)
                                 .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
@@ -1592,6 +1611,7 @@ impl WorkspaceApp {
                         ConnectionTraceStatus::Failed => ToastVariant::Error,
                         _ => ToastVariant::Default,
                     },
+                    actions: None,
                     close: Some(
                         toast_close(&self.tokens)
                             .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
@@ -1608,7 +1628,8 @@ impl WorkspaceApp {
             });
         let toasts = standard_toasts
             .chain(plugin_progress_toasts)
-            .chain(trace_toasts);
+            .chain(trace_toasts)
+            .chain(update_notification);
         Some(toaster(&self.tokens, toasts).into_any_element())
     }
 

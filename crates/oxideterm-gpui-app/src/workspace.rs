@@ -51,6 +51,7 @@ mod terminal_context_actions;
 mod terminal_cwd;
 mod terminal_git;
 mod terminal_project;
+mod version_migration;
 mod virtual_list;
 
 use std::{
@@ -71,6 +72,7 @@ use self::{
     ai_lazy::LazyAiRagStore,
     settings::SettingsManagedKeyDialog,
     sidebar::{ContextSidebarPanel, ContextSidebarTool},
+    version_migration::VersionMigrationState,
 };
 use anyhow::Result;
 use gpui::{
@@ -156,7 +158,7 @@ use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
-    toast::{ToastVariant, ToastView, toast_close},
+    toast::{ToastVariant, ToastView, toast_action, toast_close},
     toaster::toaster,
     tooltip::tooltip_content,
 };
@@ -710,6 +712,7 @@ pub(crate) struct WorkspaceApp {
     terminal_cast_player: Option<TerminalCastPlayerState>,
     terminal_cast_seek_dragging: bool,
     command_palette: CommandPaletteState,
+    version_migration: VersionMigrationState,
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
     settings_page: SettingsPageModel,
@@ -819,6 +822,11 @@ pub(crate) struct WorkspaceApp {
     native_update_rx: Option<std::sync::mpsc::Receiver<settings::NativeUpdateDelivery>>,
     native_update_polling: bool,
     native_update_cancel: Option<Arc<AtomicBool>>,
+    native_update_package: Option<oxideterm_update::NativeUpdatePackage>,
+    native_update_notification_open: bool,
+    native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    native_update_release_notes_open: bool,
+    native_update_release_notes_presence: oxideterm_gpui_ui::motion::ExitPresence,
     native_update_release_notes_scroll: MarkdownVirtualListScrollHandle,
     settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     desktop_presence_rx: Option<oxideterm_desktop_presence::DesktopPresenceReceiver>,

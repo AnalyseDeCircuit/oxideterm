@@ -33,7 +33,6 @@ pub(in crate::workspace) const HELP_PREVIEW_NOTICE_BORDER_ALPHA: f32 = 0.30;
 pub(in crate::workspace) const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
 pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BG_ALPHA: f32 = 0.70;
 pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BORDER_ALPHA: f32 = 0.60;
-pub(in crate::workspace) const HELP_RELEASE_NOTES_VIEWPORT_HEIGHT: f32 = 280.0;
 pub(in crate::workspace) const HELP_LEGAL_NOTICE_WIDTH: f32 = 760.0;
 pub(in crate::workspace) const HELP_LEGAL_NOTICE_HEIGHT: f32 = 720.0;
 
@@ -682,39 +681,64 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         match &self.native_update_state {
-            NativeUpdateUiState::Available(package) => Some(
-                div()
+            NativeUpdateUiState::Available(package) => {
+                let has_release_notes = package
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| !body.trim().is_empty());
+                let mut actions = div()
                     .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t("settings_view.help.update_available"))
-                            .child(
-                                div()
-                                    .text_color(rgb(self.tokens.ui.accent))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .child(format!("v{}", package.version)),
-                            ),
-                    )
-                    .child(self.help_release_notes(package.body.as_deref(), cx))
-                    .child(div().flex().justify_end().child(self.help_outline_button(
-                        self.i18n.t("settings_view.help.download_update"),
-                        LucideIcon::Download,
+                    .flex_wrap()
+                    .justify_end()
+                    .gap(px(self.tokens.spacing.two));
+                if has_release_notes {
+                    actions = actions.child(self.help_outline_button(
+                        self.i18n.t("settings_view.help.release_notes"),
+                        LucideIcon::BookOpen,
                         |this, _event, _window, cx| {
-                            this.download_native_update(cx);
+                            this.open_native_update_release_notes(cx);
                         },
                         cx,
-                    )))
-                    .into_any_element(),
-            ),
-            NativeUpdateUiState::Downloading(status) | NativeUpdateUiState::Verifying(status) => {
-                Some(self.help_transfer_progress(status.as_ref(), cx))
+                    ));
+                }
+                actions = actions.child(self.help_outline_button(
+                    self.i18n.t("settings_view.help.download_update"),
+                    LucideIcon::Download,
+                    |this, _event, _window, cx| {
+                        this.download_native_update(cx);
+                    },
+                    cx,
+                ));
+
+                Some(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .text_color(rgb(self.tokens.ui.text))
+                                .child(self.i18n.t("settings_view.help.update_available"))
+                                .child(
+                                    div()
+                                        .text_color(rgb(self.tokens.ui.accent))
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .child(format!("v{}", package.version)),
+                                ),
+                        )
+                        .child(actions)
+                        .into_any_element(),
+                )
+            }
+            NativeUpdateUiState::Downloading(status) => {
+                Some(self.help_transfer_progress(status.as_ref(), false, cx))
+            }
+            NativeUpdateUiState::Verifying(status) => {
+                Some(self.help_transfer_progress(status.as_ref(), true, cx))
             }
             NativeUpdateUiState::Downloaded(_) => Some(
                 div()
@@ -913,81 +937,68 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn help_release_notes(
-        &self,
-        release_body: Option<&str>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(release_body) = release_body.filter(|body| !body.trim().is_empty()) else {
-            return div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.help.no_changelog"))
-                .into_any_element();
-        };
-
-        let mut options = self.localized_markdown_options();
-        options.base_font_size = self.tokens.metrics.ui_text_sm;
-        options.block_gap = 8.0;
-        let code_actions = self.markdown_mermaid_actions(cx);
-
-        div()
-            .h(px(HELP_RELEASE_NOTES_VIEWPORT_HEIGHT))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | alpha_byte(HELP_UPDATE_FOOTER_BORDER_ALPHA),
-            ))
-            .bg(rgba(
-                (self.tokens.ui.bg << 8) | alpha_byte(HELP_UPDATE_FOOTER_BORDER_ALPHA),
-            ))
-            .p(px(12.0))
-            .text_color(rgb(self.tokens.ui.text))
-            .child(
-                // Release notes can be long; use the shared virtual markdown
-                // renderer so headings, lists, links, and code blocks match
-                // other native markdown surfaces without rendering every block.
-                markdown_virtual_with_code_actions(
-                    cx.entity(),
-                    "settings-help-release-notes-markdown",
-                    &self.tokens,
-                    release_body,
-                    &options,
-                    &self.native_update_release_notes_scroll,
-                    &code_actions,
-                ),
-            )
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn help_transfer_progress(
         &self,
         status: Option<&oxideterm_update::ResumableUpdateStatus>,
+        verifying: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let progress_ratio = if verifying {
+            1.0
+        } else {
+            status.and_then(native_update_progress_ratio).unwrap_or(0.0)
+        };
+        let fallback_key = if verifying {
+            "settings_view.help.verifying"
+        } else {
+            "settings_view.help.downloading"
+        };
+
         div()
             .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
             .child(
                 div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
                     .child(
-                        status
-                            .map(native_update_progress_hint)
-                            .unwrap_or_else(|| self.i18n.t("settings_view.help.downloading")),
+                        div()
+                            .min_w(px(0.0))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                status
+                                    .map(native_update_progress_hint)
+                                    .unwrap_or_else(|| self.i18n.t(fallback_key)),
+                            ),
+                    )
+                    .child(self.help_outline_button(
+                        self.i18n.t("settings_view.help.cancel"),
+                        LucideIcon::X,
+                        |this, _event, _window, cx| {
+                            this.cancel_native_update(cx);
+                        },
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .h(px(self.tokens.spacing.one))
+                    .w_full()
+                    .overflow_hidden()
+                    .rounded_full()
+                    .bg(rgba((self.tokens.ui.border << 8) | 0x80))
+                    .child(
+                        div()
+                            .h_full()
+                            .rounded_full()
+                            .bg(rgb(self.tokens.ui.accent))
+                            .w(relative(progress_ratio)),
                     ),
             )
-            .child(self.help_outline_button(
-                self.i18n.t("settings_view.help.cancel"),
-                LucideIcon::X,
-                |this, _event, _window, cx| {
-                    this.cancel_native_update(cx);
-                },
-                cx,
-            ))
             .into_any_element()
     }
 
@@ -1216,37 +1227,4 @@ impl WorkspaceApp {
         }
         .to_string()
     }
-}
-
-pub(in crate::workspace) fn native_update_progress_hint(
-    status: &oxideterm_update::ResumableUpdateStatus,
-) -> String {
-    let downloaded = native_update_format_bytes(status.downloaded_bytes);
-    match status.total_bytes {
-        Some(total) if total > 0 => {
-            let percent = (status.downloaded_bytes.saturating_mul(100) / total).min(100);
-            format!(
-                "{} / {} · {}% · attempt {}",
-                downloaded,
-                native_update_format_bytes(total),
-                percent,
-                status.attempt
-            )
-        }
-        _ => format!("{} · attempt {}", downloaded, status.attempt),
-    }
-}
-
-pub(in crate::workspace) fn native_update_format_bytes(bytes: u64) -> String {
-    if bytes < 1024 {
-        return format!("{bytes} B");
-    }
-    let mut value = bytes as f64;
-    for unit in ["KB", "MB", "GB"] {
-        value /= 1024.0;
-        if value < 1024.0 {
-            return format!("{value:.1} {unit}");
-        }
-    }
-    format!("{:.1} TB", value / 1024.0)
 }

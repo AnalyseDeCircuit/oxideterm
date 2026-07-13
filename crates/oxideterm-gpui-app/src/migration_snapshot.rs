@@ -13,6 +13,7 @@ use anyhow::{Context, Result, anyhow};
 
 const PRE_2_0_SOURCE_VERSION: &str = "pre-2.0.0";
 const SNAPSHOT_MARKER_CONTENT: &[u8] = b"OxideTerm migration snapshot complete\n";
+const NOTICE_MARKER_CONTENT: &[u8] = b"OxideTerm 2.0 migration notice acknowledged\n";
 const MAX_TEMP_PATH_ATTEMPTS: usize = 128;
 static TEMP_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -36,6 +37,27 @@ pub(crate) fn ensure_pre_2_0_migration_snapshot(
         .filter(|parent| !parent.as_os_str().is_empty())
         .ok_or_else(|| anyhow!("settings path has no data directory"))?;
     ensure_versioned_snapshot(data_dir, PRE_2_0_SOURCE_VERSION)
+}
+
+pub(crate) fn pre_2_0_migration_notice_pending(settings_path: &Path) -> Result<bool> {
+    let data_dir = settings_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| anyhow!("settings path has no data directory"))?;
+    let paths = SnapshotPaths::new(data_dir, PRE_2_0_SOURCE_VERSION)?;
+
+    // A backup directory proves mutable data existed before the 2.0 migration.
+    // The snapshot completion marker alone also exists for clean installations.
+    Ok(paths.snapshot.is_dir() && !paths.notice_marker.exists())
+}
+
+pub(crate) fn acknowledge_pre_2_0_migration_notice(settings_path: &Path) -> Result<()> {
+    let data_dir = settings_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| anyhow!("settings path has no data directory"))?;
+    let paths = SnapshotPaths::new(data_dir, PRE_2_0_SOURCE_VERSION)?;
+    write_marker(&paths.notice_marker, NOTICE_MARKER_CONTENT)
 }
 
 fn ensure_versioned_snapshot(
@@ -64,6 +86,18 @@ fn ensure_versioned_snapshot(
             data_dir.display()
         ));
     }
+    let mut ignored_runtime_paths =
+        crate::single_instance::single_instance_runtime_paths_for_data_dir(data_dir).to_vec();
+    if let Some(portable_lock_path) = oxideterm_portable_runtime::portable_instance_lock_path()
+        .ok()
+        .flatten()
+    {
+        ignored_runtime_paths.push(portable_lock_path);
+    }
+    if !directory_contains_migration_source_data(data_dir, &ignored_runtime_paths)? {
+        write_completion_marker(&paths.marker)?;
+        return Ok(MigrationSnapshotOutcome::NoSourceData);
+    }
 
     let temp_snapshot = create_temp_snapshot_path(&paths.snapshot)?;
     let copy_result = (|| {
@@ -85,10 +119,28 @@ fn ensure_versioned_snapshot(
     copy_result.map(|_| MigrationSnapshotOutcome::Created)
 }
 
+fn directory_contains_migration_source_data(
+    data_dir: &Path,
+    ignored_runtime_paths: &[PathBuf],
+) -> Result<bool> {
+    for entry in fs::read_dir(data_dir)
+        .with_context(|| format!("failed to inspect migration source {}", data_dir.display()))?
+    {
+        let path = entry
+            .context("failed to inspect migration source entry")?
+            .path();
+        if !ignored_runtime_paths.contains(&path) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[derive(Debug)]
 struct SnapshotPaths {
     snapshot: PathBuf,
     marker: PathBuf,
+    notice_marker: PathBuf,
 }
 
 impl SnapshotPaths {
@@ -109,9 +161,12 @@ impl SnapshotPaths {
 
         let mut marker_name = snapshot.as_os_str().to_os_string();
         marker_name.push(".complete");
+        let mut notice_marker_name = snapshot.as_os_str().to_os_string();
+        notice_marker_name.push(".notice-complete");
         Ok(Self {
             snapshot,
             marker: PathBuf::from(marker_name),
+            notice_marker: PathBuf::from(notice_marker_name),
         })
     }
 }
@@ -303,6 +358,10 @@ fn commit_snapshot_directory(staged: &Path, snapshot: &Path) -> Result<()> {
 }
 
 fn write_completion_marker(marker: &Path) -> Result<()> {
+    write_marker(marker, SNAPSHOT_MARKER_CONTENT)
+}
+
+fn write_marker(marker: &Path, content: &[u8]) -> Result<()> {
     if marker.exists() {
         return Ok(());
     }
@@ -316,7 +375,7 @@ fn write_completion_marker(marker: &Path) -> Result<()> {
             .create_new(true)
             .write(true)
             .open(&temp_marker)?;
-        file.write_all(SNAPSHOT_MARKER_CONTENT)?;
+        file.write_all(content)?;
         file.flush()?;
         file.sync_all()?;
         drop(file);
@@ -509,5 +568,93 @@ mod tests {
         );
         assert!(!paths.snapshot.exists());
         assert!(paths.marker.is_file());
+    }
+
+    #[test]
+    fn empty_or_runtime_only_source_does_not_create_a_backup() {
+        let root = TestDirectory::new("runtime-only");
+        let data_dir = root.path().join("data");
+        let runtime_lock = data_dir.join(".runtime.lock");
+        let runtime_state = data_dir.join(".runtime.json");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        assert!(!directory_contains_migration_source_data(&data_dir, &[]).unwrap());
+
+        fs::write(&runtime_lock, b"lock").unwrap();
+        fs::write(&runtime_state, b"state").unwrap();
+        assert!(
+            !directory_contains_migration_source_data(
+                &data_dir,
+                &[runtime_lock.clone(), runtime_state]
+            )
+            .unwrap()
+        );
+        assert!(directory_contains_migration_source_data(&data_dir, &[]).unwrap());
+
+        fs::write(data_dir.join("settings.json"), b"legacy settings").unwrap();
+        assert!(directory_contains_migration_source_data(&data_dir, &[runtime_lock]).unwrap());
+    }
+
+    #[test]
+    fn current_single_instance_files_do_not_identify_a_fresh_install_as_legacy() {
+        let root = TestDirectory::new("single-instance-only");
+        let data_dir = root.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        for runtime_path in
+            crate::single_instance::single_instance_runtime_paths_for_data_dir(&data_dir)
+        {
+            fs::write(runtime_path, b"current runtime state").unwrap();
+        }
+
+        assert_eq!(
+            ensure_versioned_snapshot(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap(),
+            MigrationSnapshotOutcome::NoSourceData
+        );
+        let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
+        assert!(!paths.snapshot.exists());
+    }
+
+    #[test]
+    fn migration_notice_only_opens_for_existing_snapshot() {
+        let root = TestDirectory::new("notice-source");
+        let data_dir = root.path().join("data");
+        let settings_path = data_dir.join("settings.json");
+
+        assert_eq!(
+            ensure_pre_2_0_migration_snapshot(&settings_path).unwrap(),
+            MigrationSnapshotOutcome::NoSourceData
+        );
+        assert!(!pre_2_0_migration_notice_pending(&settings_path).unwrap());
+
+        let second_root = TestDirectory::new("notice-existing");
+        let second_data_dir = second_root.path().join("data");
+        let second_settings_path = second_data_dir.join("settings.json");
+        fs::create_dir_all(&second_data_dir).unwrap();
+        fs::write(&second_settings_path, b"legacy settings").unwrap();
+
+        assert_eq!(
+            ensure_pre_2_0_migration_snapshot(&second_settings_path).unwrap(),
+            MigrationSnapshotOutcome::Created
+        );
+        assert!(pre_2_0_migration_notice_pending(&second_settings_path).unwrap());
+    }
+
+    #[test]
+    fn acknowledged_migration_notice_stays_closed() {
+        let root = TestDirectory::new("notice-acknowledged");
+        let data_dir = root.path().join("data");
+        let settings_path = data_dir.join("settings.json");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(&settings_path, b"legacy settings").unwrap();
+
+        ensure_pre_2_0_migration_snapshot(&settings_path).unwrap();
+        acknowledge_pre_2_0_migration_notice(&settings_path).unwrap();
+
+        assert!(!pre_2_0_migration_notice_pending(&settings_path).unwrap());
+        let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
+        assert_eq!(
+            fs::read(paths.notice_marker).unwrap(),
+            NOTICE_MARKER_CONTENT
+        );
     }
 }
