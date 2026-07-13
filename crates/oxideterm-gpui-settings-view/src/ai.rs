@@ -92,20 +92,16 @@ pub fn settings_ai_context_controls_section(
         .into_any_element()
 }
 
-pub fn settings_ai_system_prompt_section(
-    _max_width: f32,
+pub fn settings_ai_editor_summary_section(
+    tokens: &ThemeTokens,
     title: AnyElement,
-    system_prompt_row: AnyElement,
-    first_separator: AnyElement,
-    memory_heading: AnyElement,
-    memory_enabled_row: AnyElement,
-    memory_row: AnyElement,
-    memory_clear_action: AnyElement,
-    second_separator: AnyElement,
-    children: Vec<AnyElement>,
+    description: String,
+    option_row: Option<AnyElement>,
+    status: String,
+    edit_action: AnyElement,
 ) -> AnyElement {
-    // This section owns only vertical composition. Textareas, buttons, and
-    // downstream model controls are still supplied by app/model boundaries.
+    // Long-form text stays outside the settings list. This compact summary
+    // keeps the card scannable while the app owns modal state and persistence.
     div()
         .w_full()
         .min_w(px(0.0))
@@ -113,14 +109,50 @@ pub fn settings_ai_system_prompt_section(
         .flex_col()
         .gap(px(16.0))
         .child(title)
-        .child(system_prompt_row)
-        .child(first_separator)
-        .child(memory_heading)
-        .child(memory_enabled_row)
-        .child(memory_row)
-        .child(memory_clear_action)
-        .child(second_separator)
-        .children(children)
+        .child(
+            div()
+                .text_size(px(tokens.metrics.ui_text_xs))
+                .text_color(rgb(tokens.ui.text_muted))
+                .child(description),
+        )
+        .children(option_row)
+        .child(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(16.0))
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex_1()
+                        .text_size(px(tokens.metrics.ui_text_xs))
+                        .text_color(rgb(tokens.ui.text_muted))
+                        .child(status),
+                )
+                .child(edit_action),
+        )
+        .into_any_element()
+}
+
+pub fn settings_ai_reasoning_section(
+    global_default: AnyElement,
+    model_overrides: AnyElement,
+    max_response_tokens: AnyElement,
+) -> AnyElement {
+    // Reasoning controls form one policy card, separate from prompt content
+    // and context-window sizing so each card has one clear responsibility.
+    div()
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(16.0))
+        .child(global_default)
+        .child(model_overrides)
+        .child(max_response_tokens)
         .into_any_element()
 }
 

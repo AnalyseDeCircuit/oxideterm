@@ -20,7 +20,8 @@ use oxideterm_gpui_ui::{
 use oxideterm_local_files::{
     BOOKMARKS_FILENAME as FILE_MANAGER_BOOKMARKS_FILENAME, LocalArchiveEntry, LocalArchiveInfo,
     LocalBookmark, LocalChecksumResult, LocalClipboardMode, LocalFileEntry, LocalFileType,
-    LocalPreview, LocalPreviewMetadata, LocalSortDirection, LocalSortField,
+    LocalPreview, LocalPreviewMetadata, LocalSidebarLocation, LocalSidebarLocationKind,
+    LocalSortDirection, LocalSortField,
 };
 use oxideterm_preview::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, RodioAudioPreviewBackend,
@@ -216,6 +217,7 @@ pub(super) struct FileManagerState {
     pub(super) dialog_value: String,
     pub(super) clipboard: Option<LocalClipboard>,
     pub(super) bookmarks: Vec<LocalBookmark>,
+    pub(super) sidebar_locations: Vec<LocalSidebarLocation>,
     pub(super) bookmarks_path: PathBuf,
     pub(super) bookmarks_visible: bool,
     pub(super) list_scroll: UniformListScrollHandle,
@@ -272,6 +274,8 @@ impl Default for FileManagerState {
             dialog_value: String::new(),
             clipboard: None,
             bookmarks: Vec::new(),
+            // Resolve system folders once so paint does not repeatedly query the filesystem.
+            sidebar_locations: local_sidebar_locations(),
             bookmarks_path: default_file_manager_bookmarks_path(),
             bookmarks_visible: true,
             list_scroll: UniformListScrollHandle::new(),

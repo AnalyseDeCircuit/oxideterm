@@ -1,5 +1,21 @@
 use super::*;
 
+// Hallmark · pre-emit critique: P4 H5 E4 S5 R5 V4
+fn file_manager_sidebar_location_presentation(
+    kind: LocalSidebarLocationKind,
+) -> (&'static str, LucideIcon) {
+    // Keep path discovery in the domain crate while the GPUI layer owns copy and icons.
+    match kind {
+        LocalSidebarLocationKind::Home => ("fileManager.home", LucideIcon::Home),
+        LocalSidebarLocationKind::Applications => {
+            ("fileManager.applications", LucideIcon::AppWindow)
+        }
+        LocalSidebarLocationKind::Desktop => ("fileManager.desktop", LucideIcon::Monitor),
+        LocalSidebarLocationKind::Documents => ("fileManager.documents", LucideIcon::FileText),
+        LocalSidebarLocationKind::Downloads => ("fileManager.downloads", LucideIcon::Download),
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_file_manager_surface(
         &self,
@@ -206,6 +222,19 @@ impl WorkspaceApp {
                     .bg(file_manager_border(theme.border, has_background)),
             )
             .child(self.render_file_manager_icon_button(
+                LucideIcon::HardDrive,
+                self.i18n.t("fileManager.showDrives"),
+                cx.listener(|this, _event, _window, cx| {
+                    // Drive switching must remain a primary action for removable
+                    // media and Windows volumes, not a context-menu-only command.
+                    this.blur_file_manager_inline_inputs();
+                    this.file_manager.dialog = Some(FileManagerDialog::Drives);
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+                cx.entity(),
+            ))
+            .child(self.render_file_manager_icon_button(
                 LucideIcon::FolderOpen,
                 self.i18n.t("fileManager.browse"),
                 cx.listener(|this, _event, _window, cx| {
@@ -295,188 +324,52 @@ impl WorkspaceApp {
             return self.animate_file_manager_bookmarks_width(panel, expanded);
         }
 
-        panel = panel.child(
-            div()
-                .h(px(FILE_MANAGER_HEADER_HEIGHT))
-                .flex()
-                .items_center()
-                .justify_between()
-                .px(px(12.0))
-                .text_size(px(FILE_MANAGER_TEXT_XS))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(rgb(theme.text_muted))
-                .border_b_1()
-                .border_color(file_manager_border(theme.border, has_background))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Star,
-                            FILE_MANAGER_ICON_SM,
-                            rgb(theme.text_muted),
-                        ))
-                        .child(self.render_selectable_display_text(
-                            "file-manager-bookmarks-title",
-                            (),
-                            self.i18n.t("fileManager.favorites").to_uppercase(),
-                            theme.text_muted,
-                            cx,
-                        )),
-                )
-                .child(self.render_file_manager_icon_button(
-                    LucideIcon::Plus,
-                    self.i18n.t("fileManager.addBookmark"),
-                    cx.listener(|this, _event, _window, cx| {
-                        if !this.is_file_manager_path_bookmarked(&this.file_manager.path) {
-                            this.toggle_file_manager_current_bookmark(cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                    cx.entity(),
-                )),
-        );
-        if self.file_manager.bookmarks.is_empty() {
-            panel = panel.child(
-                div()
-                    .px(px(12.0))
-                    .py(px(16.0))
-                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-no-bookmarks",
-                        (),
-                        self.i18n.t("fileManager.noBookmarks"),
-                        theme.text_muted,
-                        cx,
-                    )),
-            );
+        let mut navigation = div()
+            .flex_1()
+            .min_h(px(0.0))
+            .overflow_y_scrollbar()
+            .py(px(8.0))
+            .child(self.render_file_manager_sidebar_section_header(
+                self.i18n.t("fileManager.favorites"),
+                true,
+                cx,
+            ));
+        for location in self.file_manager.sidebar_locations.clone() {
+            let (label_key, icon) = file_manager_sidebar_location_presentation(location.kind);
+            navigation = navigation.child(self.render_file_manager_sidebar_path_row(
+                location.path,
+                self.i18n.t(label_key),
+                icon,
+                theme.accent,
+                has_background,
+                cx,
+            ));
         }
         for bookmark in self.file_manager.bookmarks.clone() {
-            let active = bookmark.path == self.file_manager.path;
-            let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
-                "file-manager-bookmark-row",
-                &bookmark.id,
-            );
-            panel = panel.child(
-                div()
-                    .h(px(32.0))
-                    .mx(px(8.0))
-                    .mb(px(4.0))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(if active {
-                        rgba((theme.accent << 8) | FILE_MANAGER_SELECTED_BG_ALPHA)
-                    } else {
-                        rgba(theme.bg << 8)
-                    })
-                    .hover(move |row| row.bg(file_manager_hover_bg(theme.bg_hover, has_background)))
-                    .cursor_pointer()
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Folder,
-                        FILE_MANAGER_ICON_MD,
-                        rgb(FILE_MANAGER_BLUE),
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .truncate()
-                            .text_size(px(FILE_MANAGER_TEXT_SM))
-                            .text_color(if active {
-                                rgb(theme.accent)
-                            } else {
-                                rgb(theme.text)
-                            })
-                            .child(self.render_row_safe_selectable_display_text_in_group(
-                                selection_group_id,
-                                "file-manager-bookmark-cell",
-                                ("name", bookmark.id.as_str()),
-                                0,
-                                bookmark.name.clone(),
-                                if active { theme.accent } else { theme.text },
-                                None,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .size(px(24.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.sm))
-                            .hover({
-                                let theme = self.tokens.ui;
-                                move |button| button.bg(rgb(theme.bg_hover))
-                            })
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Pencil,
-                                FILE_MANAGER_ICON_SM,
-                                rgb(theme.text_muted),
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let bookmark = bookmark.clone();
-                                    move |this, _event, _window, cx| {
-                                        this.blur_file_manager_inline_inputs();
-                                        this.open_file_manager_edit_bookmark_dialog(
-                                            bookmark.clone(),
-                                        );
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }
-                                }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .size(px(24.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(self.tokens.radii.sm))
-                            .hover({
-                                let theme = self.tokens.ui;
-                                move |button| button.bg(rgb(theme.bg_hover))
-                            })
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Trash2,
-                                FILE_MANAGER_ICON_SM,
-                                rgb(theme.text_muted),
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener({
-                                    let id = bookmark.id.clone();
-                                    move |this, _event, _window, cx| {
-                                        this.blur_file_manager_inline_inputs();
-                                        this.remove_file_manager_bookmark(&id, cx);
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener({
-                            let path = bookmark.path.clone();
-                            move |this, _event, _window, cx| {
-                                this.blur_file_manager_inline_inputs();
-                                this.set_file_manager_path(path.clone());
-                                cx.stop_propagation();
-                                cx.notify();
-                            }
-                        }),
-                    ),
-            );
+            navigation = navigation.child(self.render_file_manager_sidebar_bookmark_row(
+                bookmark,
+                has_background,
+                cx,
+            ));
         }
-        panel = panel.child(div().flex_1());
+        navigation = navigation.child(div().mt(px(10.0)).child(
+            self.render_file_manager_sidebar_section_header(
+                self.i18n.t("fileManager.sidebarLocations"),
+                false,
+                cx,
+            ),
+        ));
+        for drive in local_drives() {
+            navigation = navigation.child(self.render_file_manager_sidebar_path_row(
+                drive.path,
+                drive.name,
+                LucideIcon::HardDrive,
+                theme.text_secondary,
+                has_background,
+                cx,
+            ));
+        }
+        panel = panel.child(navigation);
         panel = panel.child(
             div()
                 .border_t_1()
@@ -525,6 +418,202 @@ impl WorkspaceApp {
                 ),
         );
         self.animate_file_manager_bookmarks_width(panel, expanded)
+    }
+
+    fn render_file_manager_sidebar_section_header(
+        &self,
+        label: String,
+        show_add_bookmark: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        div()
+            .h(px(28.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .px(px(12.0))
+            .text_size(px(FILE_MANAGER_TEXT_XS))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(rgb(theme.text_muted))
+            .child(label)
+            .when(show_add_bookmark, |header| {
+                header.child(self.render_file_manager_icon_button(
+                    LucideIcon::Plus,
+                    self.i18n.t("fileManager.addBookmark"),
+                    cx.listener(|this, _event, _window, cx| {
+                        if !this.is_file_manager_path_bookmarked(&this.file_manager.path) {
+                            this.toggle_file_manager_current_bookmark(cx);
+                        }
+                        cx.stop_propagation();
+                    }),
+                    cx.entity(),
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn render_file_manager_sidebar_path_row(
+        &self,
+        path: String,
+        label: String,
+        icon: LucideIcon,
+        icon_color: u32,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = path == self.file_manager.path;
+        div()
+            .h(px(30.0))
+            .mx(px(8.0))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.sm))
+            .bg(if active {
+                rgba((theme.accent << 8) | FILE_MANAGER_SELECTED_BG_ALPHA)
+            } else {
+                rgba(theme.bg << 8)
+            })
+            .hover(move |row| row.bg(file_manager_hover_bg(theme.bg_hover, has_background)))
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
+                icon,
+                FILE_MANAGER_ICON_MD,
+                rgb(icon_color),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(FILE_MANAGER_TEXT_SM))
+                    .text_color(if active {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.text)
+                    })
+                    .child(label),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.blur_file_manager_inline_inputs();
+                    this.set_file_manager_path(path.clone());
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_file_manager_sidebar_bookmark_row(
+        &self,
+        bookmark: LocalBookmark,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let active = bookmark.path == self.file_manager.path;
+        div()
+            .h(px(30.0))
+            .mx(px(8.0))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.sm))
+            .bg(if active {
+                rgba((theme.accent << 8) | FILE_MANAGER_SELECTED_BG_ALPHA)
+            } else {
+                rgba(theme.bg << 8)
+            })
+            .hover(move |row| row.bg(file_manager_hover_bg(theme.bg_hover, has_background)))
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
+                LucideIcon::Folder,
+                FILE_MANAGER_ICON_MD,
+                rgb(theme.accent),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(FILE_MANAGER_TEXT_SM))
+                    .text_color(if active {
+                        rgb(theme.accent)
+                    } else {
+                        rgb(theme.text)
+                    })
+                    .child(bookmark.name.clone()),
+            )
+            .child(
+                div()
+                    .size(px(20.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.sm))
+                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Pencil,
+                        FILE_MANAGER_ICON_SM,
+                        rgb(theme.text_muted),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener({
+                            let bookmark = bookmark.clone();
+                            move |this, _event, _window, cx| {
+                                this.blur_file_manager_inline_inputs();
+                                this.open_file_manager_edit_bookmark_dialog(bookmark.clone());
+                                cx.stop_propagation();
+                                cx.notify();
+                            }
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .size(px(20.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(self.tokens.radii.sm))
+                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Trash2,
+                        FILE_MANAGER_ICON_SM,
+                        rgb(theme.text_muted),
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener({
+                            let id = bookmark.id.clone();
+                            move |this, _event, _window, cx| {
+                                this.blur_file_manager_inline_inputs();
+                                this.remove_file_manager_bookmark(&id, cx);
+                                cx.stop_propagation();
+                            }
+                        }),
+                    ),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let path = bookmark.path;
+                    move |this, _event, _window, cx| {
+                        this.blur_file_manager_inline_inputs();
+                        this.set_file_manager_path(path.clone());
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }),
+            )
+            .into_any_element()
     }
 
     fn animate_file_manager_bookmarks_width(&self, panel: gpui::Div, expanded: bool) -> AnyElement {

@@ -1,7 +1,5 @@
 use super::*;
 
-pub(in crate::workspace) const AI_TEXTAREA_SYSTEM_PROMPT_MIN_H: f32 = 80.0; // Tauri rows=4 min-h-[80px].
-pub(in crate::workspace) const AI_TEXTAREA_MEMORY_MIN_H: f32 = 120.0; // Tauri rows=5 min-h-[120px].
 pub(in crate::workspace) const AI_ACP_AGENT_TEXTAREA_MIN_H: f32 = 72.0; // Tauri min-h-[72px] for ACP args/env drafts.
 pub(in crate::workspace) const AI_TOOL_NUMBER_INPUT_W: f32 = 96.0; // Tauri w-24.
 pub(in crate::workspace) const AI_ACP_AGENT_FIELD_MIN_WIDTH: f32 = 220.0; // Keep ACP form fields readable on narrow settings panes.
@@ -1175,73 +1173,96 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_system_prompt_section(
         &self,
         settings: &PersistedSettings,
-        providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        settings_ai_system_prompt_section(
-            AI_PROVIDER_MAX_W,
+        let has_custom_prompt = !settings.ai.custom_system_prompt.trim().is_empty();
+        settings_ai_editor_summary_section(
+            &self.tokens,
             self.ai_section_title("settings_view.ai.system_prompt_title"),
-            self.ai_textarea_row(
-                SettingsInput::AiSystemPrompt,
-                self.i18n.t("settings_view.ai.custom_system_prompt"),
-                self.i18n.t("settings_view.ai.system_prompt_hint"),
-                self.i18n.t("settings_view.ai.system_prompt_placeholder"),
-                settings.ai.custom_system_prompt.clone(),
-                AI_TEXTAREA_SYSTEM_PROMPT_MIN_H,
-                cx,
-            ),
-            self.ai_separator(),
+            self.i18n.t("settings_view.ai.system_prompt_hint"),
+            None,
+            self.i18n.t(if has_custom_prompt {
+                "settings_view.ai.system_prompt_status_custom"
+            } else {
+                "settings_view.ai.system_prompt_status_default"
+            }),
+            self.ai_text_editor_action_button(AiTextEditorDialog::SystemPrompt, cx),
+        )
+    }
+
+    pub(in crate::workspace) fn ai_memory_section(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let has_saved_memory = !settings.ai.memory.content.trim().is_empty();
+        settings_ai_editor_summary_section(
+            &self.tokens,
             settings_ai_icon_heading(
                 Self::render_lucide_icon(LucideIcon::Brain, 16.0, rgb(self.tokens.ui.text)),
                 self.ai_section_title("settings_view.ai.memory_title"),
             )
             .into_any_element(),
-            self.bool_row(
+            self.i18n.t("settings_view.ai.memory_hint"),
+            Some(self.bool_row(
                 "settings_view.ai.memory_enabled",
                 "settings_view.ai.memory_enabled_hint",
                 settings.ai.memory.enabled,
                 set_ai_memory_enabled,
                 cx,
-            ),
-            self.ai_textarea_row(
-                SettingsInput::AiMemoryContent,
-                String::new(),
-                self.i18n.t("settings_view.ai.memory_hint"),
-                self.i18n.t("settings_view.ai.memory_placeholder"),
-                settings.ai.memory.content.clone(),
-                AI_TEXTAREA_MEMORY_MIN_H,
-                cx,
-            ),
-            // Tauri renders memory clear as a ghost small Button. Keep it
-            // on the shared toolbar primitive so disabled state does not
-            // need custom per-section button styling.
-            self.workspace_toolbar_action_button(
-                self.i18n.t("settings_view.ai.memory_clear"),
-                None,
-                ToolbarButtonOptions {
-                    button: ButtonOptions {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: settings.ai.memory.content.trim().is_empty(),
-                    },
-                    ..ToolbarButtonOptions::default()
-                },
-                cx.listener(|this, _event, _window, cx| {
-                    this.edit_settings(|settings| settings.ai.memory.content.clear(), cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element(),
-            self.ai_separator(),
-            vec![
-                self.ai_global_reasoning_section(settings, cx),
-                self.ai_model_reasoning_overrides_section(settings, providers, cx),
-                self.ai_active_model_max_response_tokens_row(settings, cx),
-                self.ai_separator(),
-                self.ai_model_context_windows_section(settings, providers, cx),
-            ],
+            )),
+            self.i18n.t(if has_saved_memory {
+                "settings_view.ai.memory_status_saved"
+            } else {
+                "settings_view.ai.memory_status_empty"
+            }),
+            self.ai_text_editor_action_button(AiTextEditorDialog::Memory, cx),
         )
+    }
+
+    pub(in crate::workspace) fn ai_reasoning_section(
+        &self,
+        settings: &PersistedSettings,
+        providers: &[AiProviderView],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        settings_ai_reasoning_section(
+            self.ai_global_reasoning_section(settings, cx),
+            self.ai_model_reasoning_overrides_section(settings, providers, cx),
+            self.ai_active_model_max_response_tokens_row(settings, cx),
+        )
+    }
+
+    pub(in crate::workspace) fn ai_text_editor_action_button(
+        &self,
+        dialog: AiTextEditorDialog,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.workspace_toolbar_action_button(
+            self.i18n.t(match dialog {
+                AiTextEditorDialog::SystemPrompt => "settings_view.ai.system_prompt_edit",
+                AiTextEditorDialog::Memory => "settings_view.ai.memory_edit",
+            }),
+            Some(Self::render_lucide_icon(
+                LucideIcon::Pencil,
+                12.0,
+                rgb(self.tokens.ui.text),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Outline,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, _event, window, cx| {
+                this.open_ai_text_editor(dialog, window, cx);
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn ai_global_reasoning_section(
@@ -1717,7 +1738,6 @@ impl WorkspaceApp {
         div()
             .w_full()
             .min_w(px(0.0))
-            .opacity(if settings.ai.enabled { 1.0 } else { 0.5 })
             .flex()
             .flex_col()
             .child(self.ai_context_windows_header(cx))

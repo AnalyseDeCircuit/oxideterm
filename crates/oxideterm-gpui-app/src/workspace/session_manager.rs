@@ -16,8 +16,7 @@ use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, RawTcpProfile, RawUdpProfile, SaveConnectionRequest, SavedAuth,
     SavedConnection, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, TelnetProfile,
-    list_ssh_config_hosts,
+    SavedUpstreamProxyProtocol, SecretString, SerialProfile, TelnetProfile,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -25,7 +24,7 @@ use oxideterm_connections::{
         export_connections_to_oxide_with_progress, preflight_export,
         preview_oxide_import_with_progress,
     },
-    resolve_ssh_config_alias, save_request_from_draft, saved_connection_from_ssh_host,
+    save_request_from_draft,
 };
 use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, PersistedForward};
 use oxideterm_gpui_ui::{
@@ -311,10 +310,7 @@ pub(super) struct SessionManagerState {
     pub(super) focused_input: Option<SessionManagerInput>,
     pub(super) show_new_group: bool,
     pub(super) new_group_name: String,
-    pub(super) show_import: bool,
     pub(super) focused_basic_dialog_footer_action: Option<SessionManagerBasicDialogFooterAction>,
-    pub(super) ssh_config_hosts: Vec<SshConfigHost>,
-    pub(super) selected_import_aliases: HashSet<String>,
     pub(super) show_batch_move: bool,
     pub(super) delete_confirm: Option<SessionManagerDeleteConfirm>,
     pub(super) oxide_import_dialog: Option<OxideImportDialogState>,
@@ -339,10 +335,7 @@ impl Default for SessionManagerState {
             focused_input: None,
             show_new_group: false,
             new_group_name: String::new(),
-            show_import: false,
             focused_basic_dialog_footer_action: None,
-            ssh_config_hosts: Vec::new(),
-            selected_import_aliases: HashSet::new(),
             show_batch_move: false,
             delete_confirm: None,
             oxide_import_dialog: None,

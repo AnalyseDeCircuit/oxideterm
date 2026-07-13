@@ -7464,6 +7464,7 @@ name = "oxideterm-local-files"
 version = "2.0.0-gpui-preview.16"
 dependencies = [
  "chrono",
+ "dirs 5.0.1",
  "md5 0.7.0",
  "serde",
  "sha2 0.10.9",

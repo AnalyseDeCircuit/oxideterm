@@ -75,12 +75,13 @@ use self::{
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry,
-    ClipboardItem, Context, Corner, CursorStyle, FocusHandle, Focusable, Image, ImageFormat,
-    IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState, ModifiersChangedEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement,
-    PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollHandle, ScrollWheelEvent,
-    SharedString, Styled, StyledImage, Subscription, TextLayout, Timer, UniformListScrollHandle,
-    WeakEntity, Window, anchored, deferred, div, prelude::*, px, relative, rgb, rgba, svg,
+    ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable, Image,
+    ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
+    ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollHandle,
+    ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, TextLayout, Timer,
+    UniformListScrollHandle, WeakEntity, Window, anchored, deferred, div, prelude::*, px, relative,
+    rgb, rgba, svg,
 };
 use oxideterm_connection_monitor::{
     CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
@@ -721,6 +722,9 @@ pub(crate) struct WorkspaceApp {
     portable_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
     ai_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    // Prompt and memory documents are edited outside the virtual settings list.
+    ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,
+    ai_text_editor: Option<Entity<oxideterm_gpui_editor::TextEditorView>>,
     settings_managed_key_dialog: Option<SettingsManagedKeyDialog>,
     settings_managed_key_status: Option<String>,
     settings_managed_key_file_path: String,

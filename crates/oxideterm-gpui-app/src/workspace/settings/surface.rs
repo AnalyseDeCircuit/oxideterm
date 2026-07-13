@@ -82,10 +82,6 @@ impl WorkspaceApp {
                 |surface, overlay| surface.child(overlay),
             )
             .when_some(
-                self.render_settings_ssh_config_import_dialog(cx),
-                |surface, modal| surface.child(modal),
-            )
-            .when_some(
                 self.render_settings_managed_key_dialog(cx),
                 |surface, modal| surface.child(modal),
             )
@@ -213,9 +209,31 @@ impl WorkspaceApp {
             }
             (AiSettingsPage::Context, 1) => {
                 let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_system_prompt_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Context, 2) => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_memory_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Context, 3) => {
+                let settings = self.settings_store.settings();
                 let provider_views = ai_provider_views(settings);
                 self.ai_disabled_settings_card(
-                    self.ai_system_prompt_section(settings, &provider_views, cx),
+                    self.ai_reasoning_section(settings, &provider_views, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Context, 4) => {
+                let settings = self.settings_store.settings();
+                let provider_views = ai_provider_views(settings);
+                self.ai_disabled_settings_card(
+                    self.ai_model_context_windows_section(settings, &provider_views, cx),
                     settings.ai.enabled,
                 )
             }
@@ -470,29 +488,51 @@ impl WorkspaceApp {
             }
             SettingsTab::Ai => {
                 format!("{:?}", self.settings_page.ai_page).hash(&mut hasher);
-                settings.ai.enabled.hash(&mut hasher);
-                settings.ai.providers.len().hash(&mut hasher);
-                settings.ai.acp_agents.len().hash(&mut hasher);
-                self.settings_page
-                    .ai_provider_settings_expanded
-                    .hash(&mut hasher);
-                self.settings_page.ai_tool_use_expanded.hash(&mut hasher);
-                self.settings_page
-                    .ai_context_windows_expanded
-                    .hash(&mut hasher);
-                self.settings_page
-                    .ai_model_reasoning_expanded
-                    .hash(&mut hasher);
-                hash_string_bool_map(&self.settings_page.expanded_ai_providers, &mut hasher);
-                hash_string_set(&self.settings_page.expanded_ai_provider_models, &mut hasher);
-                hash_string_set(
-                    &self.settings_page.expanded_ai_context_providers,
-                    &mut hasher,
-                );
-                hash_string_set(
-                    &self.settings_page.expanded_ai_model_reasoning_providers,
-                    &mut hasher,
-                );
+                // Hash expansion state only into the virtual row whose height
+                // can change. The compact prompt and memory cards stay stable.
+                match (self.settings_page.ai_page, index) {
+                    (AiSettingsPage::Providers, 2) => {
+                        settings.ai.providers.len().hash(&mut hasher);
+                        self.settings_page
+                            .ai_provider_settings_expanded
+                            .hash(&mut hasher);
+                        hash_string_bool_map(
+                            &self.settings_page.expanded_ai_providers,
+                            &mut hasher,
+                        );
+                        hash_string_set(
+                            &self.settings_page.expanded_ai_provider_models,
+                            &mut hasher,
+                        );
+                    }
+                    (AiSettingsPage::Agents, 2) => {
+                        settings.ai.acp_agents.len().hash(&mut hasher);
+                    }
+                    (AiSettingsPage::Context, 5) => {
+                        settings.ai.providers.len().hash(&mut hasher);
+                        self.settings_page
+                            .ai_model_reasoning_expanded
+                            .hash(&mut hasher);
+                        hash_string_set(
+                            &self.settings_page.expanded_ai_model_reasoning_providers,
+                            &mut hasher,
+                        );
+                    }
+                    (AiSettingsPage::Context, 6) => {
+                        settings.ai.providers.len().hash(&mut hasher);
+                        self.settings_page
+                            .ai_context_windows_expanded
+                            .hash(&mut hasher);
+                        hash_string_set(
+                            &self.settings_page.expanded_ai_context_providers,
+                            &mut hasher,
+                        );
+                    }
+                    (AiSettingsPage::Tools, 2) => {
+                        self.settings_page.ai_tool_use_expanded.hash(&mut hasher);
+                    }
+                    _ => {}
+                }
             }
             SettingsTab::Knowledge => {
                 self.settings_page

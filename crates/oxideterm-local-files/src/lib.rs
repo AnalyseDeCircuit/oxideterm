@@ -21,14 +21,15 @@ pub use listing::{list_local_files, local_file_default_cmp, sorted_local_files};
 pub use model::{
     LocalArchiveEntry, LocalArchiveInfo, LocalBookmark, LocalChecksumResult, LocalClipboardMode,
     LocalDrive, LocalFileEntry, LocalFileType, LocalPreview, LocalPreviewChunk,
-    LocalPreviewMetadata, LocalSortDirection, LocalSortField,
+    LocalPreviewMetadata, LocalSidebarLocation, LocalSidebarLocationKind, LocalSortDirection,
+    LocalSortField,
 };
 pub use operations::{
     copy_recursively, copy_recursively_with_progress, local_operation_unit_count,
 };
 pub use paths::{
-    home_path, join_local_path, local_parent_path, normalize_local_path, unique_copy_path,
-    validate_local_name, would_move_directory_into_itself,
+    home_path, join_local_path, local_parent_path, local_sidebar_locations, normalize_local_path,
+    unique_copy_path, validate_local_name, would_move_directory_into_itself,
 };
 pub use preview::{
     MAX_PREVIEW_SIZE, STREAM_PREVIEW_THRESHOLD, local_file_extension, local_preview_metadata,

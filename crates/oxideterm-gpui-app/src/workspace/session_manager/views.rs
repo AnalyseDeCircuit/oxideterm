@@ -649,7 +649,7 @@ impl WorkspaceApp {
             has_background,
             cx.listener(|this, _event, _window, cx| {
                 this.close_session_row_menus();
-                this.open_ssh_config_import(cx);
+                this.open_settings_ssh_config_import_dialog(cx);
                 cx.stop_propagation();
             }),
             cx,

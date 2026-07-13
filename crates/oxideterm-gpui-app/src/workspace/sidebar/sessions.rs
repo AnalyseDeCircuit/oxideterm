@@ -793,6 +793,9 @@ impl WorkspaceApp {
                 div()
                     .flex()
                     .flex_row()
+                    // Sidebar width is user-controlled, so actions must form
+                    // additional rows instead of extending beyond the card.
+                    .flex_wrap()
                     .items_center()
                     .gap(px(6.0))
                     .children(self.render_active_session_focus_actions(&row, cx)),
@@ -952,6 +955,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .h(px(24.0))
+            .max_w_full()
             .flex()
             .flex_row()
             .items_center()
@@ -965,7 +969,11 @@ impl WorkspaceApp {
                 chip.bg(rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA))
             })
             .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.accent)))
-            .child(label)
+            .child(
+                // Long localized labels stay inside the chip at the narrowest
+                // supported sidebar widths.
+                div().min_w(px(0.0)).truncate().child(label),
+            )
             .on_mouse_down(MouseButton::Left, listener)
             .into_any_element()
     }

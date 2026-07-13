@@ -143,13 +143,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn ai_separator(&self) -> AnyElement {
-        div()
-            .my(px(24.0))
-            .child(self.card_separator())
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn ai_section_title(&self, key: &str) -> AnyElement {
         div()
             .mb(px(16.0))

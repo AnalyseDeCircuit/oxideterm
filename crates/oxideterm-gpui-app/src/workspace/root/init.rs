@@ -184,6 +184,8 @@ impl WorkspaceApp {
             portable_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            ai_text_editor_dialog: None,
+            ai_text_editor: None,
             settings_managed_key_dialog: None,
             settings_managed_key_status: None,
             settings_managed_key_file_path: String::new(),

@@ -6,7 +6,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.session_manager.show_new_group && !self.session_manager.show_import {
+        if !self.session_manager.show_new_group {
             return false;
         }
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
@@ -69,10 +69,6 @@ impl WorkspaceApp {
                 self.session_manager.focused_basic_dialog_footer_action = None;
                 self.create_session_group(cx);
             }
-            SessionManagerBasicDialogFooterAction::Primary if self.session_manager.show_import => {
-                self.session_manager.focused_basic_dialog_footer_action = None;
-                self.import_selected_ssh_hosts(cx);
-            }
             SessionManagerBasicDialogFooterAction::Primary => {}
         }
     }
@@ -81,10 +77,6 @@ impl WorkspaceApp {
         if self.session_manager.show_new_group {
             self.session_manager.show_new_group = false;
             self.session_manager.focused_input = None;
-        }
-        if self.session_manager.show_import {
-            self.session_manager.show_import = false;
-            self.session_manager.selected_import_aliases.clear();
         }
         self.session_manager.focused_basic_dialog_footer_action = None;
         self.ime_marked_text = None;
@@ -142,9 +134,6 @@ impl WorkspaceApp {
             })
             .when(self.session_manager.show_new_group, |surface| {
                 surface.child(self.render_new_group_dialog(cx))
-            })
-            .when(self.session_manager.show_import, |surface| {
-                surface.child(self.render_ssh_config_import_dialog(cx))
             })
             .when_some(
                 self.session_manager.delete_confirm.as_ref(),

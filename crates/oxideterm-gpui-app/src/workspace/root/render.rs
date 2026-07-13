@@ -956,10 +956,23 @@ impl Render for WorkspaceApp {
                 // Mount it here so the backdrop covers every persistent chrome region.
                 root.child(modal)
             })
+            .when_some(
+                self.render_settings_ssh_config_import_dialog(cx),
+                |root, modal| {
+                    // Both Settings and Connections launch the same workspace
+                    // import flow, so its modal cannot be owned by either page.
+                    root.child(modal)
+                },
+            )
             .when(self.terminal_command_specs_editor_open, |root| {
                 // Structured command specs use the same workspace-wide modal
                 // ownership so the settings list never contains a nested editor.
                 root.child(self.render_terminal_command_specs_editor_modal(cx))
+            })
+            .when(self.ai_text_editor_dialog.is_some(), |root| {
+                // Long AI documents use workspace-wide modal ownership so the
+                // settings list keeps compact, independently measured cards.
+                root.child(self.render_ai_text_editor_modal(cx))
             })
             .when(self.session_manager.oxide_import_dialog.is_some(), |root| {
                 // .oxide dialogs are application-level import flows. Portal

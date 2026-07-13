@@ -1,5 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
+#[cfg(unix)]
+use std::collections::HashMap;
 #[cfg(not(unix))]
 use std::{collections::HashSet, path::PathBuf};
 

@@ -191,6 +191,7 @@ mod terminal_controls;
 mod terminal_display;
 mod update;
 
+pub(in crate::workspace) use ai_page::AiTextEditorDialog;
 use ai_page::{AI_CONTEXT_MAX_CHAR_OPTIONS, AI_CONTEXT_VISIBLE_LINE_OPTIONS, AI_PROVIDER_SELECT_W};
 use cli_companion::{CLI_COMPANION_COMMAND_NAME, cli_install_path};
 use connections_page::{

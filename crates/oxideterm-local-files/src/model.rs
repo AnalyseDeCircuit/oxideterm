@@ -51,6 +51,23 @@ pub struct LocalDrive {
     pub read_only: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Identifies the semantic role of an operating-system sidebar directory.
+pub enum LocalSidebarLocationKind {
+    Home,
+    Applications,
+    Desktop,
+    Documents,
+    Downloads,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// A real, navigable directory shown in the local file manager sidebar.
+pub struct LocalSidebarLocation {
+    pub kind: LocalSidebarLocationKind,
+    pub path: String,
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct LocalBookmark {
     pub id: String,

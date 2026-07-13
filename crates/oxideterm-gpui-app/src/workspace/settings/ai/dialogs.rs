@@ -1,6 +1,241 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn render_ai_text_editor_modal(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let dialog = self
+            .ai_text_editor_dialog
+            .expect("AI text editor is rendered only while a dialog is open");
+        let editor = self
+            .ai_text_editor
+            .as_ref()
+            .expect("AI text editor entity exists while its dialog is open")
+            .clone();
+        let (title_key, description_key) = match dialog {
+            AiTextEditorDialog::SystemPrompt => (
+                "settings_view.ai.system_prompt_title",
+                "settings_view.ai.system_prompt_hint",
+            ),
+            AiTextEditorDialog::Memory => (
+                "settings_view.ai.memory_title",
+                "settings_view.ai.memory_hint",
+            ),
+        };
+        let modal = oxideterm_gpui_ui::modal_container(&self.tokens)
+            .w(px(AI_TEXT_EDITOR_MODAL_WIDTH))
+            .max_w_full()
+            .h(px(AI_TEXT_EDITOR_MODAL_HEIGHT))
+            .max_h_full()
+            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    this.close_ai_text_editor(false, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(&self.tokens, self.i18n.t(title_key)))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n.t(description_key),
+                    )),
+            )
+            .child(
+                // TextEditorView owns the sole document scroll viewport. The
+                // modal body only constrains its available layout rectangle.
+                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_hidden()
+                    .child(editor),
+            )
+            .child(
+                dialog_footer(&self.tokens)
+                    .justify_between()
+                    .child(if dialog == AiTextEditorDialog::Memory {
+                        self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.ai.memory_clear"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(|this, _event, _window, cx| {
+                                if let Some(editor) = this.ai_text_editor.clone() {
+                                    editor.update(cx, |editor, cx| {
+                                        editor.replace_text_external(String::new(), cx);
+                                    });
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        )
+                        .into_any_element()
+                    } else {
+                        div().into_any_element()
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(self.tokens.metrics.modal_field_gap))
+                            .child(self.workspace_toolbar_action_button(
+                                self.i18n.t("settings_view.ai.editor_cancel"),
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Outline,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: false,
+                                    },
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.close_ai_text_editor(false, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ))
+                            .child(self.workspace_toolbar_action_button(
+                                self.i18n.t("settings_view.ai.editor_save"),
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Default,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: false,
+                                    },
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.close_ai_text_editor(true, cx);
+                                    cx.stop_propagation();
+                                }),
+                            )),
+                    ),
+            );
+
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_ai_text_editor(false, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(overlay_content_boundary(modal))
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn open_ai_text_editor(
+        &mut self,
+        dialog: AiTextEditorDialog,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = match dialog {
+            AiTextEditorDialog::SystemPrompt => self
+                .settings_store
+                .settings()
+                .ai
+                .custom_system_prompt
+                .clone(),
+            AiTextEditorDialog::Memory => self.settings_store.settings().ai.memory.content.clone(),
+        };
+        self.prepare_modal_interaction_boundary();
+        let tokens = self.tokens;
+        let runtime_settings = self.ide_runtime_settings();
+        let placeholder = self.i18n.t(match dialog {
+            AiTextEditorDialog::SystemPrompt => "settings_view.ai.system_prompt_placeholder",
+            AiTextEditorDialog::Memory => "settings_view.ai.memory_placeholder",
+        });
+        let context_menu_labels = oxideterm_gpui_editor::EditorContextMenuLabels {
+            copy: self.i18n.t("menu.copy"),
+            cut: self.i18n.t("fileManager.cut"),
+            paste: self.i18n.t("menu.paste"),
+            select_all: self.i18n.t("fileManager.selectAll"),
+        };
+        let workspace = cx.entity();
+        let editor = cx.new(|cx| {
+            let mut editor = oxideterm_gpui_editor::TextEditorView::new(value, &tokens, cx);
+            let mut editor_settings = oxideterm_gpui_editor::EditorSettings::default();
+            editor_settings.soft_wrap = true;
+            editor_settings.indentation_markers = false;
+            editor_settings.highlight_special_chars = false;
+            editor_settings.placeholder = Some(placeholder);
+            editor.set_settings(editor_settings, cx);
+            editor.set_context_menu_labels(context_menu_labels);
+            editor.apply_ide_runtime_settings(
+                &tokens,
+                runtime_settings.editor_font_size,
+                runtime_settings.editor_line_height,
+                true,
+                runtime_settings.background_active,
+                cx,
+            );
+            editor.set_on_save(Box::new(move |text, _window, cx| {
+                let text = text.to_string();
+                let _ = workspace.update(cx, |this, cx| {
+                    this.persist_ai_text_editor(dialog, text, cx);
+                });
+                Ok(())
+            }));
+            editor
+        });
+        let focus_handle = editor.read(cx).focus_handle(cx);
+        self.ai_text_editor_dialog = Some(dialog);
+        self.ai_text_editor = Some(editor);
+        window.focus(&focus_handle);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_ai_text_editor(
+        &mut self,
+        save: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self.ai_text_editor_dialog.take() else {
+            return;
+        };
+        let editor = self.ai_text_editor.take();
+        if save && let Some(editor) = editor {
+            let text = editor.read(cx).buffer().text();
+            self.persist_ai_text_editor(dialog, text, cx);
+        }
+        cx.notify();
+    }
+
+    fn persist_ai_text_editor(
+        &mut self,
+        dialog: AiTextEditorDialog,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        // The editor owns transient text; persistence remains scoped to the
+        // selected AI document and never mutates the other modal draft.
+        self.edit_settings(
+            move |settings| match dialog {
+                AiTextEditorDialog::SystemPrompt => settings.ai.custom_system_prompt = text,
+                AiTextEditorDialog::Memory => settings.ai.memory.content = text,
+            },
+            cx,
+        );
+    }
+
     pub(in crate::workspace) fn handle_ai_settings_confirm_key(
         &mut self,
         event: &KeyDownEvent,

@@ -217,12 +217,6 @@ pub(super) fn terminal_serial_flow_from_profile(
     }
 }
 
-pub(super) fn current_username() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "root".to_string())
-}
-
 pub(in crate::workspace) fn form_from_saved_connection(
     conn: &SavedConnection,
     error: Option<String>,

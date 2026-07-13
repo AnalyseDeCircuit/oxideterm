@@ -4,7 +4,7 @@ pub(super) use oxideterm_local_files::{
     bookmark_name_for_path, calculate_local_checksum, can_extract_archive, compress_local_files,
     copy_recursively_with_progress, default_file_manager_bookmarks_path, directory_stats,
     extract_local_archive, home_path, join_local_path, list_local_files, local_drives,
-    local_operation_unit_count, local_parent_path, local_preview_metadata,
+    local_operation_unit_count, local_parent_path, local_preview_metadata, local_sidebar_locations,
     new_file_manager_bookmark_id, normalize_local_path, now_ms, read_local_preview,
     read_local_preview_range, sorted_local_files, unique_copy_path, validate_local_name,
     would_move_directory_into_itself,
