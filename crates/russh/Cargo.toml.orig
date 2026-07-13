@@ -152,3 +152,7 @@ all-features = true
 [[bench]]
 name = "ciphers"
 harness = false
+
+[[bench]]
+name = "sftp_transport"
+harness = false

@@ -226,7 +226,26 @@ async fn open_russh_sftp_session(
                 "Failed to request SFTP subsystem: {error}"
             ))
         })?;
-    RusshSftpSession::new(channel.into_stream())
+    let (reader, writer) = channel.into_stream().into_split();
+    let config = russh_sftp::client::Config {
+        // The live SFTP session owns this shared budget from queue admission
+        // through acknowledgement, matching the existing upload in-flight cap.
+        max_outbound_inflight_bytes: SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES,
+        ..Default::default()
+    };
+    RusshSftpSession::new_owned_with_config(reader, RusshOwnedSftpWriter(writer), config)
         .await
         .map_err(|error| SftpError::SubsystemNotAvailable(error.to_string()))
+}
+
+struct RusshOwnedSftpWriter(russh::ChannelStreamWriter<russh::client::Msg>);
+
+impl russh_sftp::client::OwnedSftpWriter for RusshOwnedSftpWriter {
+    async fn write_owned(&mut self, data: bytes::Bytes) -> std::io::Result<()> {
+        self.0.write_bytes(data).await
+    }
+
+    async fn shutdown(&mut self) -> std::io::Result<()> {
+        self.0.shutdown().await
+    }
 }

@@ -7,14 +7,19 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot},
-};
+use tokio::io::{AsyncRead, AsyncWrite};
 
-use super::{error::Error, runtime, Handler};
+use super::{
+    error::Error,
+    runtime,
+    transport::{
+        run_owned_session, run_session, PendingRequest, SessionTransport, SharedRequests,
+        TryQueueError,
+    },
+    Handler, OwnedSftpWriter,
+};
 use crate::{
-    client::{run, Config},
+    client::Config,
     de,
     extensions::{
         self, FsyncExtension, HardlinkExtension, LimitsExtension, Statvfs, StatvfsExtension,
@@ -28,7 +33,6 @@ use crate::{
 };
 
 pub type SftpResult<T> = Result<T, Error>;
-type SharedRequests = HashMap<Option<u32>, oneshot::Sender<SftpResult<Packet>>>;
 
 pub(crate) struct SessionInner {
     version: Option<u32>,
@@ -37,7 +41,7 @@ pub(crate) struct SessionInner {
 
 impl SessionInner {
     pub fn reply(&mut self, id: Option<u32>, packet: Packet) -> SftpResult<()> {
-        if let Some((_, sender)) = self.requests.remove(&id) {
+        if let Some((_, request)) = self.requests.remove(&id) {
             let validate = if id.is_some() && self.version.is_none() {
                 Err(Error::UnexpectedPacket)
             } else if id.is_none() && self.version.is_some() {
@@ -46,8 +50,9 @@ impl SessionInner {
                 Ok(())
             };
 
+            request.lifecycle.mark_acknowledged();
             // Ignore send error: receiver was dropped (request timed out).
-            let _ = sender.send(validate.clone().map(|_| packet));
+            let _ = request.response.send(validate.clone().map(|_| packet));
 
             return validate;
         }
@@ -118,8 +123,7 @@ impl From<LimitsExtension> for Limits {
 /// then the packet is returned as Ok in other error cases
 /// the packet is stored as Err.
 pub struct RawSftpSession {
-    tx: mpsc::UnboundedSender<Bytes>,
-    requests: Arc<SharedRequests>,
+    transport: SessionTransport,
     next_req_id: AtomicU32,
     handles: AtomicU64,
     timeout: AtomicU64,
@@ -156,11 +160,18 @@ fn checked_packet_len(parts: &[usize]) -> SftpResult<u32> {
     u32::try_from(len).map_err(|_| Error::Limited("sftp packet too large".to_owned()))
 }
 
-fn encode_write_packet(id: u32, handle: &str, offset: u64, data: &[u8]) -> SftpResult<Bytes> {
+struct WritePacketLayout {
+    handle_len: u32,
+    data_len: u32,
+    packet_len: u32,
+    frame_len: usize,
+}
+
+fn write_packet_layout(handle: &str, data_len: usize) -> SftpResult<WritePacketLayout> {
     let handle_len =
         u32::try_from(handle.len()).map_err(|_| Error::Limited("handle too large".to_owned()))?;
-    let data_len =
-        u32::try_from(data.len()).map_err(|_| Error::Limited("write data too large".to_owned()))?;
+    let encoded_data_len =
+        u32::try_from(data_len).map_err(|_| Error::Limited("write data too large".to_owned()))?;
     let packet_len = checked_packet_len(&[
         1,
         std::mem::size_of::<u32>(),
@@ -168,19 +179,33 @@ fn encode_write_packet(id: u32, handle: &str, offset: u64, data: &[u8]) -> SftpR
         handle.len(),
         std::mem::size_of::<u64>(),
         std::mem::size_of::<u32>(),
-        data.len(),
+        data_len,
     ])?;
+    let frame_len = std::mem::size_of::<u32>()
+        .checked_add(packet_len as usize)
+        .ok_or_else(|| Error::Limited("sftp frame length overflow".to_owned()))?;
+
+    Ok(WritePacketLayout {
+        handle_len,
+        data_len: encoded_data_len,
+        packet_len,
+        frame_len,
+    })
+}
+
+fn encode_write_packet(id: u32, handle: &str, offset: u64, data: &[u8]) -> SftpResult<Bytes> {
+    let layout = write_packet_layout(handle, data.len())?;
 
     // SFTP frames are length-prefixed outside the packet body. Building the
     // WRITE frame directly avoids allocating an intermediate Write payload.
-    let mut bytes = BytesMut::with_capacity(std::mem::size_of::<u32>() + packet_len as usize);
-    bytes.put_u32(packet_len);
+    let mut bytes = BytesMut::with_capacity(layout.frame_len);
+    bytes.put_u32(layout.packet_len);
     bytes.put_u8(SSH_FXP_WRITE);
     bytes.put_u32(id);
-    bytes.put_u32(handle_len);
+    bytes.put_u32(layout.handle_len);
     bytes.put_slice(handle.as_bytes());
     bytes.put_u64(offset);
-    bytes.put_u32(data_len);
+    bytes.put_u32(layout.data_len);
     bytes.put_slice(data);
     Ok(bytes.freeze())
 }
@@ -227,10 +252,50 @@ impl RawSftpSession {
             version: None,
             requests: req_map.clone(),
         };
+        let transport = run_session(
+            stream,
+            inner,
+            req_map.clone(),
+            cfg.max_outbound_inflight_bytes,
+        );
 
         Self {
-            tx: run(stream, inner),
-            requests: req_map,
+            transport,
+            next_req_id: AtomicU32::new(1),
+            handles: AtomicU64::new(0),
+            timeout: AtomicU64::new(cfg.request_timeout_secs),
+            limits: Limits::default(),
+        }
+    }
+
+    pub fn new_owned<R, W>(reader: R, writer: W) -> Self
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: OwnedSftpWriter,
+    {
+        Self::new_owned_with_config(reader, writer, Config::default())
+    }
+
+    pub fn new_owned_with_config<R, W>(reader: R, writer: W, cfg: Config) -> Self
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: OwnedSftpWriter,
+    {
+        let req_map = Arc::new(HashMap::new());
+        let inner = SessionInner {
+            version: None,
+            requests: req_map.clone(),
+        };
+        let transport = run_owned_session(
+            reader,
+            writer,
+            inner,
+            req_map.clone(),
+            cfg.max_outbound_inflight_bytes,
+        );
+
+        Self {
+            transport,
             next_req_id: AtomicU32::new(1),
             handles: AtomicU64::new(0),
             timeout: AtomicU64::new(cfg.request_timeout_secs),
@@ -249,52 +314,32 @@ impl RawSftpSession {
         self.limits = limits;
     }
 
-    fn send(
-        &self,
-        id: Option<u32>,
-        packet: Packet,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    async fn send(&self, id: Option<u32>, packet: Packet) -> SftpResult<PendingRequest> {
         let bytes = Bytes::try_from(packet)?;
-        self.send_encoded(id, bytes)
+        self.send_encoded(id, bytes).await
     }
 
-    fn send_encoded(
-        &self,
-        id: Option<u32>,
-        bytes: Bytes,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
-        if self.tx.is_closed() {
-            return Err(Error::UnexpectedBehavior("session closed".into()));
-        }
-
+    async fn send_encoded(&self, id: Option<u32>, bytes: Bytes) -> SftpResult<PendingRequest> {
         if let Some(max_len) = self.limits.packet_len {
             if bytes.len() as u64 > max_len {
                 return Err(Error::Limited("packet exceeds server limit".to_owned()));
             }
         }
-
-        let (tx, rx) = oneshot::channel();
-        self.requests.insert(id, tx);
-        if let Err(error) = self.tx.send(bytes) {
-            // The closed-channel check above is only a fast path; the receiver
-            // can still close between that check and send. Remove the request
-            // waiter so a failed send cannot leave an unreachable map entry.
-            self.requests.remove(&id);
-            return Err(error.into());
-        }
-
-        Ok(rx)
+        self.transport.queue(id, bytes).await
     }
 
     async fn request(&self, id: Option<u32>, packet: Packet) -> SftpResult<Packet> {
-        let rx = self.send(id, packet)?;
+        let rx = self.send(id, packet).await?;
         let timeout = self.timeout.load(Ordering::Relaxed);
 
         match runtime::timeout(Duration::from_secs(timeout), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(Error::UnexpectedBehavior("sender dropped".into())),
             Err(error) => {
-                self.requests.remove(&id);
+                // A timed-out sent request has an unknown remote outcome. End
+                // this live SFTP session so its waiter and byte permit cannot
+                // permanently consume the shared in-flight budget.
+                self.transport.close();
                 Err(error)
             }
         }
@@ -306,11 +351,8 @@ impl RawSftpSession {
 
     /// Closes the inner channel stream. Called by [`Drop`]
     pub fn close_session(&self) -> SftpResult<()> {
-        if self.tx.is_closed() {
-            return Ok(());
-        }
-
-        Ok(self.tx.send(Bytes::new())?)
+        self.transport.close();
+        Ok(())
     }
 
     pub async fn init(&self) -> SftpResult<Version> {
@@ -391,12 +433,31 @@ impl RawSftpSession {
     }
 
     /// Sends a close packet without awaiting the server's acknowledgement.
-    pub(crate) fn close_nowait(
-        &self,
-        handle: String,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    pub(crate) fn close_nowait(&self, handle: String) -> SftpResult<()> {
         let id = self.use_next_id();
-        self.send(Some(id), Close { id, handle }.into())
+        let bytes = Bytes::try_from(Packet::Close(Close { id, handle }))?;
+        let retry_bytes = bytes.clone();
+        match self.transport.try_queue(Some(id), bytes) {
+            Ok(pending) => {
+                // File destructors cannot await queue capacity. Detach a
+                // successfully queued CLOSE so dropping the local handle does
+                // not cancel it before the session writer can send it.
+                pending.detach();
+                Ok(())
+            }
+            Err(TryQueueError::Full { .. }) => {
+                let transport = self.transport.clone();
+                runtime::spawn(async move {
+                    // The close remains owned by this live session while it
+                    // waits for existing sent writes to release byte budget.
+                    if let Ok(pending) = transport.queue(Some(id), retry_bytes).await {
+                        pending.detach();
+                    }
+                });
+                Ok(())
+            }
+            Err(TryQueueError::Sftp(error)) => Err(error),
+        }
     }
 
     pub async fn read<H: Into<String>>(
@@ -427,19 +488,19 @@ impl RawSftpSession {
     }
 
     /// Sends a read packet without awaiting the server's response.
-    pub(crate) fn read_nowait_raw(
+    pub(crate) async fn read_nowait_raw(
         &self,
         handle: &str,
         offset: u64,
         len: u32,
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    ) -> SftpResult<PendingRequest> {
         if self.limits.read_len.is_some_and(|r| len as u64 > r) {
             return Err(Error::Limited("read limit reached".to_owned()));
         }
 
         let id = self.use_next_id();
         let bytes = encode_read_packet(id, handle, offset, len)?;
-        self.send_encoded(Some(id), bytes)
+        self.send_encoded(Some(id), bytes).await
     }
 
     pub async fn write<H: Into<String>>(
@@ -472,19 +533,68 @@ impl RawSftpSession {
     /// Sends a raw write packet without routing bulk data through the generic
     /// packet serializer. This keeps the upload hot path to one data copy into
     /// the final outgoing SFTP frame.
-    pub(crate) fn write_nowait_raw(
+    pub(crate) async fn write_nowait_raw(
         &self,
         handle: &str,
         offset: u64,
         data: &[u8],
-    ) -> SftpResult<oneshot::Receiver<SftpResult<Packet>>> {
+    ) -> SftpResult<PendingRequest> {
         if self.limits.write_len.is_some_and(|w| data.len() as u64 > w) {
             return Err(Error::Limited("write limit reached".to_owned()));
         }
 
+        let layout = write_packet_layout(handle, data.len())?;
+        if self
+            .limits
+            .packet_len
+            .is_some_and(|max_len| layout.frame_len as u64 > max_len)
+        {
+            return Err(Error::Limited("packet exceeds server limit".to_owned()));
+        }
+
+        // Reserve the live-session byte budget before copying upload data into
+        // its final SFTP frame, so capacity waiters cannot accumulate frames
+        // outside the bounded queue.
+        let reservation = self.transport.reserve(layout.frame_len).await?;
         let id = self.use_next_id();
         let bytes = encode_write_packet(id, handle, offset, data)?;
-        self.send_encoded(Some(id), bytes)
+        self.transport
+            .queue_reserved(Some(id), bytes, reservation)
+            .await
+    }
+
+    pub(crate) fn try_write_nowait_raw(
+        &self,
+        handle: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<PendingRequest, TryQueueError> {
+        if self.limits.write_len.is_some_and(|w| data.len() as u64 > w) {
+            return Err(Error::Limited("write limit reached".to_owned()).into());
+        }
+
+        let layout = write_packet_layout(handle, data.len())?;
+        if self
+            .limits
+            .packet_len
+            .is_some_and(|max_len| layout.frame_len as u64 > max_len)
+        {
+            return Err(Error::Limited("packet exceeds server limit".to_owned()).into());
+        }
+
+        let reservation = self.transport.try_reserve(layout.frame_len)?;
+        let id = self.use_next_id();
+        let bytes = encode_write_packet(id, handle, offset, data)?;
+        self.transport
+            .try_queue_reserved(Some(id), bytes, reservation)
+    }
+
+    pub(crate) fn register_outbound_capacity_waker(
+        &self,
+        required_bytes: usize,
+        cx: &std::task::Context<'_>,
+    ) {
+        self.transport.register_capacity_waker(required_bytes, cx);
     }
 
     pub async fn lstat<P: Into<String>>(&self, path: P) -> SftpResult<Attrs> {
@@ -839,6 +949,7 @@ impl Drop for RawSftpSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt;
 
     #[test]
     fn raw_write_packet_matches_generic_packet_encoding() {
@@ -876,5 +987,70 @@ mod tests {
         .expect("generic read packet encodes");
 
         assert_eq!(raw, generic);
+    }
+
+    #[tokio::test]
+    async fn raw_write_waits_for_budget_before_allocating_request_id() {
+        const SESSION_BUDGET_BYTES: usize = 128;
+        let (client_stream, _server_stream) = tokio::io::duplex(256);
+        let session = RawSftpSession::new_with_config(
+            client_stream,
+            Config {
+                max_outbound_inflight_bytes: SESSION_BUDGET_BYTES,
+                ..Config::default()
+            },
+        );
+        let reservation = session
+            .transport
+            .reserve(SESSION_BUDGET_BYTES)
+            .await
+            .expect("test reserves the complete session budget");
+        let next_request_id = session.next_req_id.load(Ordering::Relaxed);
+
+        let result = session.try_write_nowait_raw("handle", 0, b"payload");
+
+        assert!(matches!(result, Err(TryQueueError::Full { .. })));
+        assert_eq!(session.next_req_id.load(Ordering::Relaxed), next_request_id);
+        drop(reservation);
+    }
+
+    #[tokio::test]
+    async fn close_waits_for_session_budget_instead_of_being_dropped() {
+        const SESSION_BUDGET_BYTES: usize = 128;
+        let (client_stream, mut server_stream) = tokio::io::duplex(256);
+        let session = RawSftpSession::new_with_config(
+            client_stream,
+            Config {
+                max_outbound_inflight_bytes: SESSION_BUDGET_BYTES,
+                ..Config::default()
+            },
+        );
+        let reservation = session
+            .transport
+            .reserve(SESSION_BUDGET_BYTES)
+            .await
+            .expect("test reserves the complete session budget");
+
+        session
+            .close_nowait("handle".to_owned())
+            .expect("close is retained by the live session");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), server_stream.read_u32())
+                .await
+                .is_err()
+        );
+
+        drop(reservation);
+        let packet_len = tokio::time::timeout(Duration::from_millis(100), server_stream.read_u32())
+            .await
+            .expect("close sends after budget is released")
+            .expect("close frame length is readable");
+        let mut body = vec![0; packet_len as usize];
+        server_stream
+            .read_exact(&mut body)
+            .await
+            .expect("close frame body is readable");
+        let mut body = Bytes::from(body);
+        assert!(matches!(Packet::try_from(&mut body), Ok(Packet::Close(_))));
     }
 }

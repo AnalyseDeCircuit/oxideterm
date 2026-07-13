@@ -130,6 +130,11 @@ name = "ciphers"
 path = "benches/ciphers.rs"
 harness = false
 
+[[bench]]
+name = "sftp_transport"
+path = "benches/sftp_transport.rs"
+harness = false
+
 [dependencies.aes]
 version = "0.9"
 

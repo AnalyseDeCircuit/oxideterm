@@ -16,7 +16,13 @@ use tokio::{
 
 use super::Metadata;
 use crate::{
-    client::{error::Error, rawsession::SftpResult, session::Features, RawSftpSession},
+    client::{
+        error::Error,
+        rawsession::SftpResult,
+        session::Features,
+        transport::{PendingRequest, TryQueueError},
+        RawSftpSession,
+    },
     protocol::{Packet, StatusCode},
 };
 
@@ -32,14 +38,14 @@ struct FileState {
     f_seek: StateFn<u64>,
     f_flush: StateFn<()>,
     f_shutdown: StateFn<()>,
-    write_acks: VecDeque<oneshot::Receiver<SftpResult<Packet>>>,
+    write_acks: VecDeque<PendingRequest>,
 }
 
 struct PendingRead {
     offset: u64,
     requested_len: usize,
     sent_at: Instant,
-    rx: oneshot::Receiver<SftpResult<Packet>>,
+    rx: PendingRequest,
 }
 
 struct CompletedRead {
@@ -52,7 +58,7 @@ struct CompletedRead {
 struct PendingWrite {
     requested_len: usize,
     sent_at: Instant,
-    rx: oneshot::Receiver<SftpResult<Packet>>,
+    rx: PendingRequest,
 }
 
 const WINDOW_TUNER_ADJUST_INTERVAL: Duration = Duration::from_millis(750);
@@ -793,7 +799,7 @@ impl PipelinedFileDownloader {
         }
     }
 
-    fn fill_pending(&mut self) {
+    async fn fill_pending(&mut self) {
         if self.finished {
             return;
         }
@@ -811,6 +817,7 @@ impl PipelinedFileDownloader {
             let rx = match self
                 .session
                 .read_nowait_raw(&self.handle, offset, requested_len as u32)
+                .await
             {
                 Ok(rx) => rx,
                 Err(error) => {
@@ -1027,7 +1034,7 @@ impl PipelinedFileDownloader {
     /// contiguous file offset is ready for the caller to write.
     pub async fn next_chunk(&mut self) -> SftpResult<Option<PipelinedReadChunk>> {
         loop {
-            self.fill_pending();
+            self.fill_pending().await;
 
             if let Some(data) = self.ready_chunks.remove(&self.next_write_offset) {
                 let offset = self.next_write_offset;
@@ -1276,7 +1283,8 @@ impl PipelinedFileUploader {
             let offset = self.next_write_offset;
             let rx = self
                 .session
-                .write_nowait_raw(&self.handle, offset, &data[..len])?;
+                .write_nowait_raw(&self.handle, offset, &data[..len])
+                .await?;
             self.pending.push_back(PendingWrite {
                 requested_len: len,
                 sent_at: Instant::now(),
@@ -1378,7 +1386,7 @@ fn check_write_packet(result: SftpResult<Packet>) -> SftpResult<()> {
 }
 
 fn poll_oldest_write(
-    pending: &mut VecDeque<oneshot::Receiver<SftpResult<Packet>>>,
+    pending: &mut VecDeque<PendingRequest>,
     cx: &mut Context<'_>,
 ) -> Option<Poll<io::Result<()>>> {
     let rx = pending.front_mut()?;
@@ -1392,7 +1400,7 @@ fn poll_oldest_write(
 }
 
 fn poll_drain_writes(
-    pending: &mut VecDeque<oneshot::Receiver<SftpResult<Packet>>>,
+    pending: &mut VecDeque<PendingRequest>,
     cx: &mut Context<'_>,
 ) -> Poll<io::Result<()>> {
     while let Some(poll) = poll_oldest_write(pending, cx) {
@@ -1552,14 +1560,24 @@ impl AsyncWrite for File {
 
         match self
             .session
-            .write_nowait_raw(&self.handle, offset, &buf[..len])
+            .try_write_nowait_raw(&self.handle, offset, &buf[..len])
         {
             Ok(rx) => {
                 self.pos += len as u64;
                 self.state.write_acks.push_back(rx);
                 Poll::Ready(Ok(len))
             }
-            Err(e) => Poll::Ready(Err(io::Error::other(e.to_string()))),
+            Err(TryQueueError::Full { required_bytes }) => {
+                // The regular AsyncWrite API cannot await byte capacity here.
+                // Register its task and retry when the live session releases
+                // enough queued-or-unacknowledged frame budget.
+                self.session
+                    .register_outbound_capacity_waker(required_bytes, cx);
+                Poll::Pending
+            }
+            Err(TryQueueError::Sftp(error)) => {
+                Poll::Ready(Err(io::Error::other(error.to_string())))
+            }
         }
     }
 
@@ -1722,7 +1740,7 @@ mod tests {
                 offset,
                 requested_len,
                 sent_at: Instant::now(),
-                rx,
+                rx: PendingRequest::from_test_receiver(rx),
             },
             tx,
         )
@@ -1791,7 +1809,7 @@ mod tests {
         assert_eq!(snapshot.window.target_inflight_bytes, initial_inflight);
         assert_eq!(snapshot.window.target_chunk_len, initial_chunk);
 
-        downloader.fill_pending();
+        downloader.fill_pending().await;
 
         assert!(downloader.repair_reads.is_empty());
         assert!(downloader.pending.iter().any(|pending| {

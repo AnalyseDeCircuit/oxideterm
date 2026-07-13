@@ -148,6 +148,66 @@ where
             Err(SendError(())) => Err(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed")),
         }
     }
+
+    async fn reserve_owned_chunk(&self, remaining: usize) -> io::Result<usize> {
+        if self.max_packet_size == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "channel maximum packet size is zero",
+            ));
+        }
+
+        loop {
+            let mut window_size = self.window_size.lock().await;
+            let writable = (self.max_packet_size as usize)
+                .min(*window_size as usize)
+                .min(remaining);
+            if writable > 0 {
+                *window_size -= writable as u32;
+                if *window_size > 0 {
+                    self.notify.notify_one();
+                }
+                return Ok(writable);
+            }
+
+            // Register before releasing the window lock so an adjustment
+            // cannot be lost between observing zero and awaiting notification.
+            let notified = self.notify.notified();
+            drop(window_size);
+            notified.await;
+        }
+    }
+
+    /// Sends owned channel data while preserving the underlying `Bytes`
+    /// allocation across SSH channel fragmentation.
+    pub async fn write_bytes(&mut self, data: Bytes) -> io::Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        if self.send_fut.is_some() || self.window_size_fut.is_some() {
+            return Err(io::Error::other(
+                "owned and AsyncWrite channel sends cannot overlap",
+            ));
+        }
+
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let writable = self.reserve_owned_chunk(data.len() - offset).await?;
+            let end = offset + writable;
+            let chunk = data.slice(offset..end);
+            let message = match self.ext {
+                None => ChannelMsg::Data { data: chunk },
+                Some(ext) => ChannelMsg::ExtendedData { data: chunk, ext },
+            };
+            self.sender
+                .send((self.id, message).into())
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"))?;
+            offset = end;
+        }
+
+        Ok(())
+    }
 }
 
 impl<S> AsyncWrite for ChannelTx<S>

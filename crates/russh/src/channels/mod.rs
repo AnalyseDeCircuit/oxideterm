@@ -9,11 +9,14 @@ use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
 
 pub mod io;
 
+#[cfg(feature = "_bench")]
+pub mod benchmark;
+
 mod channel_ref;
 pub use channel_ref::ChannelRef;
 
 mod channel_stream;
-pub use channel_stream::ChannelStream;
+pub use channel_stream::{ChannelStream, ChannelStreamReader, ChannelStreamWriter};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -722,6 +725,25 @@ mod tests {
         )
     }
 
+    fn test_channel_tx(
+        window_size: WindowSizeRef,
+        max_packet_size: u32,
+    ) -> (
+        io::ChannelTx<(ChannelId, ChannelMsg)>,
+        mpsc::Receiver<(ChannelId, ChannelMsg)>,
+    ) {
+        let (sender, receiver) = mpsc::channel(8);
+        let tx = io::ChannelTx::new(
+            sender,
+            ChannelId(11),
+            window_size.value.clone(),
+            window_size.subscribe(),
+            max_packet_size,
+            None,
+        );
+        (tx, receiver)
+    }
+
     #[tokio::test]
     async fn data_bytes_sends_one_owned_message_when_window_permits() {
         let payload = Bytes::from_static(b"owned data");
@@ -759,6 +781,24 @@ mod tests {
             }
         }
         assert!(receiver.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn channel_tx_write_bytes_preserves_owned_slices() {
+        let payload = Bytes::from_static(b"abcdefghij");
+        let (mut tx, mut receiver) = test_channel_tx(WindowSizeRef::new(1024), 4);
+
+        tx.write_bytes(payload.clone()).await.unwrap();
+
+        for range in [0..4, 4..8, 8..10] {
+            match receiver.recv().await.unwrap() {
+                (ChannelId(11), ChannelMsg::Data { data }) => {
+                    assert_eq!(data, payload.slice(range.clone()));
+                    assert_eq!(data.as_ptr(), payload.slice(range).as_ptr());
+                }
+                msg => panic!("unexpected message: {msg:?}"),
+            }
+        }
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@ use super::{
     error::Error,
     fs::{File, Metadata, ReadDir},
     rawsession::{Limits, SftpResult},
-    RawSftpSession,
+    OwnedSftpWriter, RawSftpSession,
 };
 use crate::{
     client::Config,
@@ -46,8 +46,36 @@ impl SftpSession {
     {
         let max_concurrent_writes = cfg.max_concurrent_writes;
         let max_packet_len = cfg.max_packet_len;
-        let mut session = RawSftpSession::new_with_config(stream, cfg);
+        let session = RawSftpSession::new_with_config(stream, cfg);
+        Self::initialize(session, max_concurrent_writes, max_packet_len).await
+    }
 
+    /// Creates a new session over separate owned reader and writer transports.
+    pub async fn new_owned<R, W>(reader: R, writer: W) -> SftpResult<Self>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: OwnedSftpWriter,
+    {
+        Self::new_owned_with_config(reader, writer, Config::default()).await
+    }
+
+    /// Creates a new owned-transport session with custom configuration.
+    pub async fn new_owned_with_config<R, W>(reader: R, writer: W, cfg: Config) -> SftpResult<Self>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: OwnedSftpWriter,
+    {
+        let max_concurrent_writes = cfg.max_concurrent_writes;
+        let max_packet_len = cfg.max_packet_len;
+        let session = RawSftpSession::new_owned_with_config(reader, writer, cfg);
+        Self::initialize(session, max_concurrent_writes, max_packet_len).await
+    }
+
+    async fn initialize(
+        mut session: RawSftpSession,
+        max_concurrent_writes: usize,
+        max_packet_len: u32,
+    ) -> SftpResult<Self> {
         let version = session.init().await?;
         let has_extension = |name, ver| version.extensions.get(name).is_some_and(|v| v == ver);
 
