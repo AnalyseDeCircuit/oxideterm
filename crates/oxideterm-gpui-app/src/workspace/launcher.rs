@@ -8,11 +8,11 @@ use std::{
 
 use gpui::StatefulInteractiveElement;
 use oxideterm_gpui_ui::{
-    ButtonTone, TextInputView, button,
+    ButtonTone, SurfaceKind, SurfaceOptions, SurfacePadding, TextInputView, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, button_with,
     },
-    text_input_anchor_probe,
+    semantic_surface, text_input_anchor_probe,
 };
 use oxideterm_launcher::{
     self as launcher_core, LauncherAppEntry, LauncherLoadResponse, LauncherRuntimeState, WslDistro,
@@ -22,12 +22,8 @@ use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use super::ime::WorkspaceImeTarget;
 use super::*;
 
-const LAUNCHER_SEARCH_WIDTH: f32 = 320.0; // Tauri max-w-xs.
-const LAUNCHER_SEARCH_H: f32 = 32.0; // Tauri h-8.
-const LAUNCHER_TOP_PADDING: f32 = 20.0; // Tauri pt-5.
-const LAUNCHER_HEADER_PADDING_X: f32 = 24.0; // Tauri px-6.
-const LAUNCHER_HEADER_PADDING_BOTTOM: f32 = 12.0; // Tauri pb-3.
-const LAUNCHER_GRID_PADDING_BOTTOM: f32 = 24.0; // Tauri pb-6.
+const LAUNCHER_SEARCH_WIDTH: f32 = 360.0; // Keeps application search prominent without crowding page actions.
+const LAUNCHER_SEARCH_H: f32 = 32.0; // Matches compact controls used by sibling workspace pages.
 const LAUNCHER_TILE_W: f32 = 88.0; // Tauri minmax(88px, 1fr).
 const LAUNCHER_TILE_MIN_H: f32 = 100.0; // Tauri containIntrinsicSize 92px 100px.
 const LAUNCHER_TILE_PADDING: f32 = 8.0; // Tauri p-2.
@@ -42,15 +38,11 @@ const LAUNCHER_CONSENT_MAX_W: f32 = 384.0; // Tauri max-w-sm.
 const LAUNCHER_CONSENT_ICON: f32 = 56.0; // Tauri w-14 h-14.
 const LAUNCHER_CONSENT_GAP: f32 = 24.0; // Tauri space-y-6.
 const LAUNCHER_CONSENT_DETAIL_GAP: f32 = 10.0; // Tauri gap-2.5.
-const LAUNCHER_CONFIRM_MARGIN_X: f32 = 24.0; // Tauri mx-6.
-const LAUNCHER_CONFIRM_MARGIN_BOTTOM: f32 = 12.0; // Tauri mb-3.
 const LAUNCHER_CONFIRM_PADDING_X: f32 = 12.0; // Tauri px-3.
 const LAUNCHER_CONFIRM_PADDING_Y: f32 = 10.0; // Tauri py-2.5.
 const LAUNCHER_GRID_GAP_X: f32 = 8.0; // Tauri gap-x-2.
 const LAUNCHER_GRID_GAP_Y: f32 = 4.0; // Tauri gap-y-1.
-const LAUNCHER_WHITE_ALPHA_03: u32 = 0x08; // Tauri bg-white/[0.03].
 const LAUNCHER_WHITE_ALPHA_06: u32 = 0x0f; // Tauri bg-white/[0.06].
-const LAUNCHER_WHITE_ALPHA_08: u32 = 0x14; // Tauri bg-white/[0.08].
 const LAUNCHER_TEXT_MUTED_60_ALPHA: u32 = 0x99; // Tauri text-muted/60.
 const LAUNCHER_TEXT_SECONDARY_90_ALPHA: u32 = 0xe6; // Tauri text-secondary/90.
 const LAUNCHER_RED_400: u32 = 0xf87171; // Tauri red-400.
@@ -173,25 +165,36 @@ impl WorkspaceApp {
         }
 
         let has_background = self.launcher_background_active();
-        if !self.launcher.core.enabled {
-            return self.render_launcher_consent(has_background, cx);
-        }
-
-        let filtered_apps = self.filtered_launcher_apps();
+        let enabled = self.launcher.core.enabled;
+        let filtered_apps = if enabled {
+            self.filtered_launcher_apps()
+        } else {
+            Vec::new()
+        };
+        let page_padding = self.tokens.metrics.settings_content_padding;
+        let page_gap = self.tokens.metrics.settings_page_gap;
         div()
             .size_full()
+            .overflow_hidden()
             .flex()
             .flex_col()
+            .gap(px(page_gap))
+            .p(px(page_padding))
             .bg(if has_background {
                 rgba(0x00000000)
             } else {
                 rgb(theme.bg)
             })
-            .child(self.render_launcher_search_header(filtered_apps.len(), cx))
+            .child(self.render_launcher_header(enabled, filtered_apps.len(), cx))
+            .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
             .when(self.launcher.core.show_disable_confirm, |surface| {
                 surface.child(self.render_launcher_disable_confirm(cx))
             })
-            .child(self.render_launcher_content(filtered_apps, window, cx))
+            .child(if enabled {
+                self.render_launcher_content(filtered_apps, window, cx)
+            } else {
+                self.render_launcher_consent(has_background, cx)
+            })
             .into_any_element()
     }
 
@@ -619,119 +622,108 @@ impl WorkspaceApp {
 
     fn render_launcher_consent(&self, has_background: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        div()
-            .size_full()
+        let content = div()
+            .w_full()
+            .max_w(px(LAUNCHER_CONSENT_MAX_W))
             .flex()
             .flex_col()
-            .bg(if has_background {
-                rgba(0x00000000)
-            } else {
-                rgb(theme.bg)
-            })
+            .items_center()
+            .gap(px(LAUNCHER_CONSENT_GAP))
+            .text_align(gpui::TextAlign::Center)
             .child(
                 div()
-                    .flex_1()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .px(px(32.0))
+                    .size(px(LAUNCHER_CONSENT_ICON))
+                    .rounded(px(self.tokens.radii.lg))
+                    .bg(rgba((theme.accent << 8) | 0x1a))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Rocket,
+                        28.0,
+                        rgb(theme.accent),
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
                     .child(
                         div()
-                            .w_full()
-                            .max_w(px(LAUNCHER_CONSENT_MAX_W))
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(px(LAUNCHER_CONSENT_GAP))
-                            .text_align(gpui::TextAlign::Center)
-                            .child(
-                                div()
-                                    .size(px(LAUNCHER_CONSENT_ICON))
-                                    .rounded(px(self.tokens.radii.lg))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(rgba((theme.accent << 8) | 0x1a))
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::Rocket,
-                                        28.0,
-                                        rgb(theme.accent),
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(8.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(16.0))
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .text_color(rgb(theme.text))
-                                            .child(self.i18n.t("launcher.consentTitle")),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(14.0))
-                                            .line_height(px(20.0))
-                                            .text_color(rgb(theme.text_secondary))
-                                            .child(self.i18n.t("launcher.consentDescription")),
-                                    ),
-                            )
-                            .child(self.render_launcher_consent_details())
-                            .child(
-                                button(
-                                    &self.tokens,
-                                    self.i18n.t("launcher.consentEnable"),
-                                    ButtonTone::Primary,
-                                )
-                                .w_full()
-                                .h(px(32.0))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.enable_launcher(cx);
-                                    }),
-                                ),
-                            ),
+                            .text_size(px(16.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text))
+                            .child(self.i18n.t("launcher.consentTitle")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .line_height(px(20.0))
+                            .text_color(rgb(theme.text_secondary))
+                            .child(self.i18n.t("launcher.consentDescription")),
                     ),
             )
+            .child(self.render_launcher_consent_details(has_background))
+            .child(
+                button(
+                    &self.tokens,
+                    self.i18n.t("launcher.consentEnable"),
+                    ButtonTone::Primary,
+                )
+                .w_full()
+                .h(px(32.0))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.enable_launcher(cx);
+                    }),
+                ),
+            );
+        div()
+            .flex_1()
+            .min_h(px(0.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(32.0))
+            .child(content)
             .into_any_element()
     }
 
-    fn render_launcher_consent_details(&self) -> AnyElement {
+    fn render_launcher_consent_details(&self, has_background: bool) -> AnyElement {
         let theme = self.tokens.ui;
         let cache_path = launcher_core::icon_cache_dir()
             .to_string_lossy()
             .into_owned();
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .p(px(12.0))
-            .text_align(gpui::TextAlign::Left)
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_06))
-            .bg(rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_03))
-            .child(self.render_launcher_consent_detail(
-                LucideIcon::Search,
-                self.i18n.t("launcher.consentScan"),
-                None,
-            ))
-            .child(self.render_launcher_consent_detail(
-                LucideIcon::HardDrive,
-                self.i18n.t("launcher.consentCache"),
-                Some(cache_path),
-            ))
-            .child(self.render_launcher_consent_detail(
-                LucideIcon::Shield,
-                self.i18n.t("launcher.consentPrivacy"),
-                None,
-            ))
-            .text_color(rgb(theme.text_muted))
-            .into_any_element()
+        semantic_surface(
+            &self.tokens,
+            SurfaceOptions::new(SurfaceKind::InsetGroup)
+                .padding(SurfacePadding::Normal)
+                .has_background_image(has_background),
+        )
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .text_align(gpui::TextAlign::Left)
+        .child(self.render_launcher_consent_detail(
+            LucideIcon::Search,
+            self.i18n.t("launcher.consentScan"),
+            None,
+        ))
+        .child(self.render_launcher_consent_detail(
+            LucideIcon::HardDrive,
+            self.i18n.t("launcher.consentCache"),
+            Some(cache_path),
+        ))
+        .child(self.render_launcher_consent_detail(
+            LucideIcon::Shield,
+            self.i18n.t("launcher.consentPrivacy"),
+            None,
+        ))
+        .text_color(rgb(theme.text_muted))
+        .into_any_element()
     }
 
     fn render_launcher_consent_detail(
@@ -774,7 +766,49 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_launcher_search_header(
+    fn render_launcher_header(
+        &self,
+        enabled: bool,
+        filtered_count: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let tools = enabled.then(|| self.render_launcher_header_tools(filtered_count, cx));
+        div()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .justify_between()
+            .gap(px(16.0))
+            .flex_none()
+            .child(
+                div()
+                    .min_w(px(280.0))
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_2xl))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text_heading))
+                            .child(self.i18n.t("launcher.title")),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(680.0))
+                            .text_size(px(self.tokens.metrics.ui_text_base))
+                            .line_height(px(22.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("launcher.description")),
+                    ),
+            )
+            .when_some(tools, |header, tools| header.child(tools))
+            .into_any_element()
+    }
+
+    fn render_launcher_header_tools(
         &self,
         filtered_count: usize,
         cx: &mut Context<Self>,
@@ -787,11 +821,9 @@ impl WorkspaceApp {
         div()
             .flex()
             .items_center()
-            .justify_center()
-            .px(px(LAUNCHER_HEADER_PADDING_X))
-            .pt(px(LAUNCHER_TOP_PADDING))
-            .pb(px(LAUNCHER_HEADER_PADDING_BOTTOM))
-            .flex_none()
+            .flex_wrap()
+            .justify_end()
+            .gap(px(8.0))
             .child(
                 div()
                     .relative()
@@ -814,9 +846,7 @@ impl WorkspaceApp {
                         )
                         .h(px(LAUNCHER_SEARCH_H))
                         .pl(px(36.0))
-                        .pr(px(86.0))
-                        .bg(rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_06))
-                        .border_color(rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_08))
+                        .pr(px(12.0))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
@@ -843,43 +873,32 @@ impl WorkspaceApp {
                             14.0,
                             rgba((theme.text_muted << 8) | LAUNCHER_TEXT_MUTED_60_ALPHA),
                         ),
-                    ))
-                    .child(
-                        div()
-                            .absolute()
-                            .right(px(6.0))
-                            .top(px(6.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .text_size(px(10.0))
-                                    .text_color(rgba((theme.text_muted << 8) | 0x80))
-                                    .child(launcher_core::count_label(
-                                        filtered_count,
-                                        self.launcher.core.apps.len(),
-                                    )),
-                            )
-                            .child(self.render_launcher_icon_button(
-                                LucideIcon::RefreshCw,
-                                self.i18n.t("launcher.refresh"),
-                                self.launcher.core.loading,
-                                LauncherHeaderAction::Refresh,
-                                cx,
-                            ))
-                            .child(self.render_launcher_icon_button(
-                                LucideIcon::Power,
-                                self.i18n.t("launcher.disable"),
-                                false,
-                                LauncherHeaderAction::Disable,
-                                cx,
-                            )),
-                    ),
+                    )),
             )
+            .child(
+                div()
+                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .text_size(px(10.0))
+                    .text_color(rgba((theme.text_muted << 8) | 0x80))
+                    .child(launcher_core::count_label(
+                        filtered_count,
+                        self.launcher.core.apps.len(),
+                    )),
+            )
+            .child(self.render_launcher_icon_button(
+                LucideIcon::RefreshCw,
+                self.i18n.t("launcher.refresh"),
+                self.launcher.core.loading,
+                LauncherHeaderAction::Refresh,
+                cx,
+            ))
+            .child(self.render_launcher_icon_button(
+                LucideIcon::Power,
+                self.i18n.t("launcher.disable"),
+                false,
+                LauncherHeaderAction::Disable,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -894,13 +913,13 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         self.workspace_tooltip_icon_button(
             icon,
-            12.0,
+            14.0,
             rgb(theme.text),
             IconButtonOptions {
-                size: 20.0,
+                size: LAUNCHER_SEARCH_H,
                 disabled,
                 idle_opacity: 0.5,
-                ..IconButtonOptions::compact(20.0)
+                ..IconButtonOptions::compact(LAUNCHER_SEARCH_H)
             },
             title,
             "launcher-icon-button",
@@ -918,8 +937,6 @@ impl WorkspaceApp {
 
     fn render_launcher_disable_confirm(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
-            .mx(px(LAUNCHER_CONFIRM_MARGIN_X))
-            .mb(px(LAUNCHER_CONFIRM_MARGIN_BOTTOM))
             .px(px(LAUNCHER_CONFIRM_PADDING_X))
             .py(px(LAUNCHER_CONFIRM_PADDING_Y))
             .rounded(px(self.tokens.radii.md))
@@ -1050,7 +1067,8 @@ impl WorkspaceApp {
         if self.context_sidebar_visible() {
             available_width -= self.ai.chat.sidebar_width;
         }
-        let grid_width = (available_width - LAUNCHER_HEADER_PADDING_X * 2.0).max(LAUNCHER_TILE_W);
+        let page_padding = self.tokens.metrics.settings_content_padding;
+        let grid_width = (available_width - page_padding * 2.0).max(LAUNCHER_TILE_W);
         // The Tauri launcher is a wrapping icon grid. Native virtualizes one
         // horizontal grid row at a time, so columns derive from the same tile
         // width/gap constants instead of hard-coding an app count.
@@ -1093,15 +1111,9 @@ impl WorkspaceApp {
         let Some(row_apps) = apps.get(start..apps.len().min(start + columns)) else {
             return div().into_any_element();
         };
-        let row_count = apps.len().div_ceil(columns);
         div()
-            .px(px(LAUNCHER_HEADER_PADDING_X))
             .when(row_index == 0, |row| row.pt(px(4.0)))
-            .pb(px(if row_index + 1 == row_count {
-                LAUNCHER_GRID_PADDING_BOTTOM
-            } else {
-                LAUNCHER_GRID_GAP_Y
-            }))
+            .pb(px(LAUNCHER_GRID_GAP_Y))
             .flex()
             .items_start()
             .gap_x(px(LAUNCHER_GRID_GAP_X))

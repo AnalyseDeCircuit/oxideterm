@@ -111,9 +111,9 @@ impl WorkspaceApp {
                 .overflow_hidden()
                 .child(match self.notification_center.active_view {
                     WorkspaceActivityView::Notifications => {
-                        self.render_notifications_sidebar_content(cx)
+                        self.render_notifications_center_content(cx)
                     }
-                    WorkspaceActivityView::EventLog => self.render_event_log_sidebar_content(cx),
+                    WorkspaceActivityView::EventLog => self.render_event_log_center_content(cx),
                 }),
             )
             .into_any_element()

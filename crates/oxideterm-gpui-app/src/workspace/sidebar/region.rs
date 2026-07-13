@@ -533,11 +533,10 @@ impl WorkspaceApp {
         div().flex_1().w_full().into_any_element()
     }
 
-    pub(in crate::workspace) fn render_notifications_sidebar_content(
+    pub(in crate::workspace) fn render_notifications_center_content(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let filtered = self
             .notification_center
             .notifications
@@ -574,28 +573,6 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.render_notifications_toolbar(cx))
-            .when(
-                self.notification_center.notifications.dnd_enabled,
-                |content| {
-                    content.child(
-                        div()
-                            .border_b_1()
-                            .border_color(rgb(theme.border))
-                            .bg(rgba((theme.warning << 8) | 0x1a))
-                            .px_3()
-                            .py_2()
-                            .text_size(px(11.0))
-                            .text_color(rgb(theme.warning))
-                            .child(self.render_selectable_display_text(
-                                "notifications-dnd",
-                                (),
-                                self.i18n.t("event_log.dnd.on"),
-                                theme.warning,
-                                cx,
-                            )),
-                    )
-                },
-            )
             .child(
                 div()
                     .id("notifications-sidebar-scroll")
@@ -603,22 +580,10 @@ impl WorkspaceApp {
                     .min_h(px(0.0))
                     .overflow_hidden()
                     .when(row_count == 0, |content| {
-                        content.child(
-                            div()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(px(12.0))
-                                .text_color(rgb(theme.text_muted))
-                                .child(self.render_selectable_display_text(
-                                    "notifications-empty",
-                                    (),
-                                    self.i18n.t("event_log.notification_empty"),
-                                    theme.text_muted,
-                                    cx,
-                                )),
-                        )
+                        content.child(self.render_activity_empty_state(
+                            LucideIcon::Inbox,
+                            self.i18n.t("event_log.notification_empty"),
+                        ))
                     })
                     .when(row_count > 0, |content| {
                         content.child(tauri_virtual_list(
@@ -639,19 +604,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_notifications_toolbar(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(32.0))
+    fn render_notifications_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        self.activity_toolbar_shell()
             .flex()
             .items_center()
-            .gap(px(4.0))
-            .px_2()
-            .border_b_1()
-            .border_color(rgb(theme.border))
             .child(self.render_activity_icon_button(
                 LucideIcon::Bell,
                 self.notification_center.notifications.dnd_enabled,
@@ -663,6 +619,20 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
+            .when(
+                self.notification_center.notifications.dnd_enabled,
+                |toolbar| {
+                    toolbar.child(oxideterm_gpui_ui::status_pill(
+                        &self.tokens,
+                        self.i18n.t("event_log.dnd.on"),
+                        oxideterm_gpui_ui::StatusPillOptions::new(
+                            oxideterm_gpui_ui::StatusTone::Warning,
+                        )
+                        .compact(),
+                    ))
+                },
+            )
+            .child(self.render_activity_toolbar_divider())
             .child(self.render_activity_icon_button(
                 LucideIcon::ListTree,
                 self.notification_center.notifications.filter.status
@@ -697,6 +667,7 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(div().flex_1())
+            .child(self.render_activity_toolbar_divider())
             .child(self.render_activity_icon_button(
                 LucideIcon::Check,
                 false,
@@ -720,11 +691,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_event_log_sidebar_content(
+    pub(in crate::workspace) fn render_event_log_center_content(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
         let filtered = self
             .notification_center
             .event_log
@@ -757,25 +727,6 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.render_event_log_toolbar(cx))
-            .when(self.notification_center.event_log.dnd_enabled, |content| {
-                content.child(
-                    div()
-                        .border_b_1()
-                        .border_color(rgb(theme.border))
-                        .bg(rgba((theme.warning << 8) | 0x1a))
-                        .px_3()
-                        .py_2()
-                        .text_size(px(11.0))
-                        .text_color(rgb(theme.warning))
-                        .child(self.render_selectable_display_text(
-                            "event-log-dnd",
-                            (),
-                            self.i18n.t("event_log.dnd.on"),
-                            theme.warning,
-                            cx,
-                        )),
-                )
-            })
             .child(
                 div()
                     .id("event-log-sidebar-scroll")
@@ -784,22 +735,10 @@ impl WorkspaceApp {
                     .w_full()
                     .overflow_hidden()
                     .when(row_count == 0, |content| {
-                        content.child(
-                            div()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(px(12.0))
-                                .text_color(rgb(theme.text_muted))
-                                .child(self.render_selectable_display_text(
-                                    "event-log-empty",
-                                    (),
-                                    self.i18n.t("event_log.empty"),
-                                    theme.text_muted,
-                                    cx,
-                                )),
-                        )
+                        content.child(self.render_activity_empty_state(
+                            LucideIcon::History,
+                            self.i18n.t("event_log.empty"),
+                        ))
                     })
                     .when(row_count > 0, |content| {
                         content.child(tauri_virtual_uniform_list(
@@ -854,26 +793,18 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(in crate::workspace) fn render_event_log_toolbar(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_event_log_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let counts = self.filtered_event_log_counts();
-        div()
-            .h(px(32.0))
+        self.activity_toolbar_shell()
             .flex()
             .items_center()
-            .gap(px(4.0))
-            .px_2()
-            .border_b_1()
-            .border_color(rgb(theme.border))
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.0))
-                    .text_size(px(10.0))
+                    .gap(px(self.tokens.spacing.two))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .child(self.render_count_chip(
                         LucideIcon::AlertCircle,
                         theme.error,
@@ -900,6 +831,17 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
+            .when(self.notification_center.event_log.dnd_enabled, |toolbar| {
+                toolbar.child(oxideterm_gpui_ui::status_pill(
+                    &self.tokens,
+                    self.i18n.t("event_log.dnd.on"),
+                    oxideterm_gpui_ui::StatusPillOptions::new(
+                        oxideterm_gpui_ui::StatusTone::Warning,
+                    )
+                    .compact(),
+                ))
+            })
+            .child(self.render_activity_toolbar_divider())
             .child(self.render_activity_icon_button(
                 LucideIcon::ListTree,
                 self.notification_center.event_log.filter.severity
@@ -935,7 +877,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_activity_icon_button(
+    fn render_activity_icon_button(
         &self,
         icon: LucideIcon,
         active: bool,
@@ -956,7 +898,7 @@ impl WorkspaceApp {
         };
         self.workspace_icon_action_button(
             icon,
-            12.0,
+            self.tokens.metrics.ui_button_icon_size,
             icon_color,
             oxideterm_gpui_ui::button::IconButtonOptions {
                 background: Some(background),
@@ -964,12 +906,51 @@ impl WorkspaceApp {
                 // Tauri activity toolbar icons are fully opaque in both normal
                 // and active states; muting is represented by icon color.
                 ..oxideterm_gpui_ui::button::IconButtonOptions::opaque_toolbar(
-                    22.0,
-                    oxideterm_gpui_ui::button::ButtonRadius::Sm,
+                    self.tokens.metrics.ui_button_sm_height,
+                    oxideterm_gpui_ui::button::ButtonRadius::Md,
                 )
             },
             listener,
             cx,
+        )
+        .into_any_element()
+    }
+
+    fn activity_toolbar_shell(&self) -> gpui::Div {
+        let theme = self.tokens.ui;
+        // The full-page center needs workspace-scale controls instead of the
+        // former 32px sidebar toolbar stretched across the content surface.
+        div()
+            .h(px(
+                self.tokens.metrics.ui_button_lg_height + self.tokens.spacing.three
+            ))
+            .gap(px(self.tokens.spacing.two))
+            .px(px(self.tokens.spacing.three))
+            .border_b_1()
+            .border_color(rgb(theme.border))
+    }
+
+    fn render_activity_toolbar_divider(&self) -> AnyElement {
+        div()
+            .mx(px(self.tokens.spacing.one))
+            .h(px(self.tokens.metrics.ui_button_sm_height))
+            .w(px(self.tokens.metrics.divider_height))
+            .bg(rgb(self.tokens.ui.border))
+            .into_any_element()
+    }
+
+    fn render_activity_empty_state(&self, icon: LucideIcon, label: String) -> AnyElement {
+        let theme = self.tokens.ui;
+        oxideterm_gpui_ui::empty_state(
+            &self.tokens,
+            Self::render_lucide_icon(
+                icon,
+                self.tokens.metrics.ui_button_icon_size,
+                rgb(theme.accent),
+            ),
+            label,
+            None,
+            None,
         )
         .into_any_element()
     }

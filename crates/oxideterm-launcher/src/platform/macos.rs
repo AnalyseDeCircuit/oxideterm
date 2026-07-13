@@ -20,6 +20,7 @@ const APP_DIRS: &[&str] = &[
     "/System/Applications",
     "/System/Applications/Utilities",
 ];
+const APP_ICON_PIXEL_SIZE: u32 = 128; // A 64-point icon needs a 2x backing image on Retina displays.
 
 pub fn list_apps() -> Result<LauncherListResponse, String> {
     let icon_cache_dir = icon_cache_dir();
@@ -125,8 +126,14 @@ fn mdls_raw(app_path: &Path, key: &str) -> Option<String> {
 }
 
 fn cache_key_for_path(app_path: &str) -> String {
+    cache_key_for_path_at_size(app_path, APP_ICON_PIXEL_SIZE)
+}
+
+fn cache_key_for_path_at_size(app_path: &str, pixel_size: u32) -> String {
     let mut hasher = DefaultHasher::new();
+    // The output size is part of the key so quality changes never reuse stale PNG files.
     app_path.hash(&mut hasher);
+    pixel_size.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
@@ -161,7 +168,10 @@ fn batch_extract_icons(entries: &mut [LauncherAppEntry], icon_cache_dir: &Path) 
     let mut swift_lines = vec![
         "import AppKit".to_string(),
         "let ws = NSWorkspace.shared".to_string(),
-        "let size = NSSize(width: 64, height: 64)".to_string(),
+        format!(
+            "let size = NSSize(width: {0}, height: {0})",
+            APP_ICON_PIXEL_SIZE
+        ),
     ];
     for (_index, app_path, png_path) in &needed {
         let app_escaped = app_path.replace('\\', "\\\\").replace('"', "\\\"");
@@ -173,9 +183,10 @@ fn batch_extract_icons(entries: &mut [LauncherAppEntry], icon_cache_dir: &Path) 
             r#"do {{
   let img = ws.icon(forFile: "{app}")
   img.size = size
-  let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+  let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: {pixel_size}, pixelsHigh: {pixel_size}, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
   NSGraphicsContext.saveGraphicsState()
   NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+  NSGraphicsContext.current?.imageInterpolation = .high
   img.draw(in: NSRect(origin: .zero, size: size))
   NSGraphicsContext.restoreGraphicsState()
   let png = rep.representation(using: .png, properties: [:])!
@@ -183,6 +194,7 @@ fn batch_extract_icons(entries: &mut [LauncherAppEntry], icon_cache_dir: &Path) 
 }} catch {{}}"#,
             app = app_escaped,
             png = png_escaped,
+            pixel_size = APP_ICON_PIXEL_SIZE,
         ));
     }
 
@@ -194,5 +206,24 @@ fn batch_extract_icons(entries: &mut [LauncherAppEntry], icon_cache_dir: &Path) 
         if png_path.exists() {
             entries[index].icon_path = Some(png_path.to_string_lossy().to_string());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn icon_cache_key_changes_with_output_resolution() {
+        let app_path = "/Applications/OxideTerm.app";
+
+        assert_ne!(
+            cache_key_for_path_at_size(app_path, 64),
+            cache_key_for_path_at_size(app_path, 128)
+        );
+        assert_eq!(
+            cache_key_for_path(app_path),
+            cache_key_for_path_at_size(app_path, APP_ICON_PIXEL_SIZE)
+        );
     }
 }
