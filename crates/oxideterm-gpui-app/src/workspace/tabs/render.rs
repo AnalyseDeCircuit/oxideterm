@@ -68,15 +68,15 @@ impl WorkspaceApp {
             .iter()
             .enumerate()
             .filter(|(_, tab)| !self.detached_tabs.contains(&tab.id));
-        let visual_tab_count = live_tabs.clone().count() + self.main_window_tabs.closing_tabs.len();
+        let visual_tab_count = live_tabs.clone().count() + self.main_window_tabs.exiting_tabs.len();
         for visual_index in 0..visual_tab_count {
-            if let Some(closing) = self
+            if let Some(exiting) = self
                 .main_window_tabs
-                .closing_tabs
+                .exiting_tabs
                 .iter()
-                .find(|closing| closing.visual_index == visual_index)
+                .find(|exiting| exiting.visual_index == visual_index)
             {
-                scroll_viewport = scroll_viewport.child(self.render_closing_tab_visual(closing));
+                scroll_viewport = scroll_viewport.child(self.render_exiting_tab_visual(exiting));
                 continue;
             }
             let Some((tab_index, tab)) = live_tabs.next() else {
@@ -381,12 +381,12 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_closing_tab_visual(&self, closing: &ClosingTabVisual) -> AnyElement {
+    fn render_exiting_tab_visual(&self, exiting: &ExitingTabVisual) -> AnyElement {
         let theme = self.tokens.ui;
         let tab = div()
             .h_full()
             .flex_none()
-            .w(px(closing.width))
+            .w(px(exiting.width))
             .relative()
             .px(px(self.tokens.metrics.tab_padding_x))
             .flex()
@@ -394,17 +394,17 @@ impl WorkspaceApp {
             .gap(px(self.tokens.metrics.tab_gap))
             .border_r_1()
             .border_color(rgb(theme.border))
-            .bg(self.workspace_chrome_background(if closing.was_active {
+            .bg(self.workspace_chrome_background(if exiting.was_active {
                 theme.bg_panel
             } else {
                 theme.bg
             }))
-            .text_color(rgb(if closing.was_active {
+            .text_color(rgb(if exiting.was_active {
                 theme.text
             } else {
                 theme.text_muted
             }))
-            .when(closing.was_active, |tab| {
+            .when(exiting.was_active, |tab| {
                 tab.child(
                     div()
                         .absolute()
@@ -416,9 +416,9 @@ impl WorkspaceApp {
                 )
             })
             .child(Self::render_lucide_icon(
-                tab_kind_icon(&closing.kind),
+                tab_kind_icon(&exiting.kind),
                 self.tokens.metrics.tab_icon_size,
-                rgb(if closing.was_active {
+                rgb(if exiting.was_active {
                     theme.text
                 } else {
                     theme.text_muted
@@ -429,7 +429,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .text_size(px(self.tokens.metrics.tab_font_size))
-                    .child(closing.title.clone()),
+                    .child(exiting.title.clone()),
             )
             .child(Self::render_lucide_icon(
                 LucideIcon::X,
@@ -438,9 +438,9 @@ impl WorkspaceApp {
             ));
         oxideterm_gpui_ui::motion::horizontal_reveal(
             &self.tokens,
-            ("workspace-tab-close", closing.tab_id.0),
+            ("workspace-tab-exit", exiting.tab_id.0),
             tab,
-            closing.width,
+            exiting.width,
             false,
         )
     }

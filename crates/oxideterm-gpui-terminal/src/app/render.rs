@@ -1213,8 +1213,7 @@ impl TerminalPane {
     ) -> AnyElement {
         let disabled =
             self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
-        let trigger = context_menu_sub_trigger(&self.theme.tokens, label, false, disabled)
-            .w_full();
+        let trigger = context_menu_sub_trigger(&self.theme.tokens, label, false, disabled).w_full();
 
         context_menu_action(
             trigger,

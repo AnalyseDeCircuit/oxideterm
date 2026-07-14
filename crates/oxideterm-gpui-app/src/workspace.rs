@@ -563,7 +563,7 @@ struct TabContextMenu {
 }
 
 #[derive(Clone, Debug)]
-struct ClosingTabVisual {
+struct ExitingTabVisual {
     tab_id: TabId,
     kind: TabKind,
     title: String,
@@ -589,7 +589,7 @@ struct WorkspaceWindowTabState {
     drag: Option<TabDragState>,
     context_menu: Option<TabContextMenu>,
     close_confirm: Option<TabCloseConfirm>,
-    closing_tabs: Vec<ClosingTabVisual>,
+    exiting_tabs: Vec<ExitingTabVisual>,
     scroll_handle: ScrollHandle,
     scrollbar_drag: Option<TabbarScrollbarDragState>,
     scrollbar_hovered: bool,
@@ -622,7 +622,7 @@ impl WorkspaceWindowTabState {
             drag: None,
             context_menu: None,
             close_confirm: None,
-            closing_tabs: Vec::new(),
+            exiting_tabs: Vec::new(),
             scroll_handle: ScrollHandle::new(),
             scrollbar_drag: None,
             scrollbar_hovered: false,

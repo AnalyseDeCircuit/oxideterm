@@ -73,9 +73,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.detached_tabs.contains(&tab_id) || self.tab_by_id(tab_id).is_none() {
+        if self.detached_tabs.contains(&tab_id) {
             return;
         }
+        let Some(tab_index) = self.tab_index_by_id(tab_id) else {
+            return;
+        };
+        // Capture the source tab before it leaves the live strip. The snapshot
+        // is committed only after native window creation succeeds.
+        let exiting_visual = self.tab_exit_visual(tab_index);
 
         self.detached_tabs.insert(tab_id);
         self.activate_nearest_visible_main_tab(tab_id, window, cx);
@@ -99,6 +105,8 @@ impl WorkspaceApp {
         if open_result.is_err() {
             self.detached_tabs.remove(&tab_id);
             self.main_window_tabs.active_tab_id = Some(tab_id);
+        } else if let Some(exiting_visual) = exiting_visual {
+            self.begin_tab_visual_exit(exiting_visual, cx);
         }
         self.sync_active_tab_surface();
         cx.notify();
@@ -605,7 +613,7 @@ impl WorkspaceApp {
         let content =
             self.wrap_content_background(content, Some(tab_background_key(&tab.kind)), window, cx);
 
-        div()
+        let window_content = div()
             .size_full()
             .relative()
             .flex()
@@ -616,7 +624,19 @@ impl WorkspaceApp {
             .when_some(
                 self.render_detached_tab_return_drag_preview(tab_id, window),
                 |root, preview| root.child(preview),
-            )
+            );
+        let window_content = oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            ("detached-tab-window-enter", tab_id.0),
+            window_content,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+
+        // Keep the native window base opaque while its workspace content fades in.
+        div()
+            .size_full()
+            .bg(rgb(self.tokens.ui.bg))
+            .child(window_content)
             .into_any_element()
     }
 

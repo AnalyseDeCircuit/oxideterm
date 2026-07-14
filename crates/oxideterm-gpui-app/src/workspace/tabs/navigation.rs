@@ -1,6 +1,6 @@
 use super::*;
 
-fn closing_tab_visual_index(live_visual_index: usize, occupied_indices: &[usize]) -> usize {
+fn tab_exit_visual_index(live_visual_index: usize, occupied_indices: &[usize]) -> usize {
     let mut visual_index = live_visual_index;
     for occupied in occupied_indices {
         if *occupied <= visual_index {
@@ -835,31 +835,7 @@ impl WorkspaceApp {
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let old_active_tab_id = self.main_window_tabs.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
-        let closing_visual = self.tabs.get(index).and_then(|tab| {
-            if self.detached_tabs.contains(&tab.id) {
-                return None;
-            }
-            let live_visual_index = self.tabs[..index]
-                .iter()
-                .filter(|candidate| !self.detached_tabs.contains(&candidate.id))
-                .count();
-            let mut occupied_indices = self
-                .main_window_tabs
-                .closing_tabs
-                .iter()
-                .map(|closing| closing.visual_index)
-                .collect::<Vec<_>>();
-            occupied_indices.sort_unstable();
-            let visual_index = closing_tab_visual_index(live_visual_index, &occupied_indices);
-            Some(ClosingTabVisual {
-                tab_id: tab.id,
-                kind: tab.kind.clone(),
-                title: self.tab_display_title(tab),
-                width: self.tab_visual_width(tab),
-                visual_index,
-                was_active: Some(tab.id) == old_active_tab_id,
-            })
-        });
+        let exiting_visual = self.tab_exit_visual(index);
         let tab = self.tabs.remove(index);
         self.detached_tabs.remove(&tab.id);
         if self
@@ -943,13 +919,44 @@ impl WorkspaceApp {
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
-        if let Some(closing_visual) = closing_visual {
-            self.begin_tab_visual_exit(closing_visual, cx);
+        if let Some(exiting_visual) = exiting_visual {
+            self.begin_tab_visual_exit(exiting_visual, cx);
         }
         cx.notify();
     }
 
-    fn begin_tab_visual_exit(&mut self, closing_visual: ClosingTabVisual, cx: &mut Context<Self>) {
+    pub(super) fn tab_exit_visual(&self, index: usize) -> Option<ExitingTabVisual> {
+        let tab = self.tabs.get(index)?;
+        if self.detached_tabs.contains(&tab.id) {
+            return None;
+        }
+        let live_visual_index = self.tabs[..index]
+            .iter()
+            .filter(|candidate| !self.detached_tabs.contains(&candidate.id))
+            .count();
+        let mut occupied_indices = self
+            .main_window_tabs
+            .exiting_tabs
+            .iter()
+            .map(|exiting| exiting.visual_index)
+            .collect::<Vec<_>>();
+        occupied_indices.sort_unstable();
+        let visual_index = tab_exit_visual_index(live_visual_index, &occupied_indices);
+        Some(ExitingTabVisual {
+            tab_id: tab.id,
+            kind: tab.kind.clone(),
+            title: self.tab_display_title(tab),
+            width: self.tab_visual_width(tab),
+            visual_index,
+            was_active: Some(tab.id) == self.main_window_tabs.active_tab_id,
+        })
+    }
+
+    pub(super) fn begin_tab_visual_exit(
+        &mut self,
+        exiting_visual: ExitingTabVisual,
+        cx: &mut Context<Self>,
+    ) {
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
@@ -957,24 +964,24 @@ impl WorkspaceApp {
         if delay.is_zero() {
             return;
         }
-        let tab_id = closing_visual.tab_id;
-        self.main_window_tabs.closing_tabs.push(closing_visual);
+        let tab_id = exiting_visual.tab_id;
+        self.main_window_tabs.exiting_tabs.push(exiting_visual);
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
             let _ = weak.update(cx, |this, cx| {
                 let Some(position) = this
                     .main_window_tabs
-                    .closing_tabs
+                    .exiting_tabs
                     .iter()
-                    .position(|closing| closing.tab_id == tab_id)
+                    .position(|exiting| exiting.tab_id == tab_id)
                 else {
                     return;
                 };
-                let removed_index = this.main_window_tabs.closing_tabs[position].visual_index;
-                this.main_window_tabs.closing_tabs.remove(position);
-                for closing in &mut this.main_window_tabs.closing_tabs {
-                    if closing.visual_index > removed_index {
-                        closing.visual_index -= 1;
+                let removed_index = this.main_window_tabs.exiting_tabs[position].visual_index;
+                this.main_window_tabs.exiting_tabs.remove(position);
+                for exiting in &mut this.main_window_tabs.exiting_tabs {
+                    if exiting.visual_index > removed_index {
+                        exiting.visual_index -= 1;
                     }
                 }
                 cx.notify();
@@ -1576,10 +1583,10 @@ mod tests {
     }
 
     #[test]
-    fn closing_tab_visual_indices_preserve_parallel_batch_order() {
-        assert_eq!(closing_tab_visual_index(1, &[]), 1);
-        assert_eq!(closing_tab_visual_index(1, &[1]), 2);
-        assert_eq!(closing_tab_visual_index(1, &[1, 2]), 3);
-        assert_eq!(closing_tab_visual_index(0, &[2]), 0);
+    fn tab_exit_visual_indices_preserve_parallel_batch_order() {
+        assert_eq!(tab_exit_visual_index(1, &[]), 1);
+        assert_eq!(tab_exit_visual_index(1, &[1]), 2);
+        assert_eq!(tab_exit_visual_index(1, &[1, 2]), 3);
+        assert_eq!(tab_exit_visual_index(0, &[2]), 0);
     }
 }
