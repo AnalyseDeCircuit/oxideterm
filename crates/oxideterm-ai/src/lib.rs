@@ -111,10 +111,8 @@ pub use suggestions::{
     parse_ai_suggestions,
 };
 pub use target_projection::{
-    AiIdeTargetInput, AiRawTcpTargetInput, AiRawUdpTargetInput, AiSftpTargetInput,
-    AiTargetProjection, connect_result_terminal_projection, ide_workspace_target_projection,
-    opened_local_terminal_projection, raw_tcp_terminal_label, raw_tcp_terminal_metadata,
-    raw_udp_terminal_label, raw_udp_terminal_metadata, sftp_target_projection,
+    AiIdeTargetInput, AiSftpTargetInput, AiTargetProjection, connect_result_terminal_projection,
+    ide_workspace_target_projection, opened_local_terminal_projection, sftp_target_projection,
 };
 pub use tool_protocol::{
     AiOrchestratorObligation, AiOrchestratorObligationMode, ai_classify_orchestrator_obligation,

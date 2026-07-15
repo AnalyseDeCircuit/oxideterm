@@ -107,26 +107,6 @@ pub(super) fn merge_structured_preview_fields(
         changed |=
             merge_serial_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
     }
-    if selection.raw_tcp_profiles
-        && let (Some(remote), Some(base)) = (
-            preview.raw_tcp_profiles_snapshot.as_mut(),
-            preview.base_raw_tcp_profiles_snapshot.as_ref(),
-        )
-    {
-        let local = connection_store.export_raw_tcp_profiles_snapshot()?;
-        changed |=
-            merge_raw_tcp_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
-    }
-    if selection.raw_udp_profiles
-        && let (Some(remote), Some(base)) = (
-            preview.raw_udp_profiles_snapshot.as_mut(),
-            preview.base_raw_udp_profiles_snapshot.as_ref(),
-        )
-    {
-        let local = connection_store.export_raw_udp_profiles_snapshot()?;
-        changed |=
-            merge_raw_udp_profile_records(remote, base, &local, conflict_strategy, Utc::now())?;
-    }
     Ok(changed)
 }
 
@@ -257,84 +237,6 @@ pub(super) fn merge_serial_profile_records(
     remote: &mut SerialProfilesSyncSnapshot,
     base: &SerialProfilesSyncSnapshot,
     local: &SerialProfilesSyncSnapshot,
-    conflict_strategy: &ConflictStrategy,
-    merged_at: chrono::DateTime<Utc>,
-) -> Result<bool> {
-    let base_records = base
-        .records
-        .iter()
-        .map(|profile| (profile.id.as_str(), profile))
-        .collect::<BTreeMap<_, _>>();
-    let local_records = local
-        .records
-        .iter()
-        .map(|profile| (profile.id.as_str(), profile))
-        .collect::<BTreeMap<_, _>>();
-    let mut changed = false;
-    for remote_profile in &mut remote.records {
-        let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
-            continue;
-        };
-        let Some(local_profile) = local_records.get(remote_profile.id.as_str()).copied() else {
-            continue;
-        };
-        if let Some(mut merged_profile) = merge_structured_model_fields(
-            base_profile,
-            local_profile,
-            remote_profile,
-            conflict_strategy,
-        )? {
-            merged_profile.updated_at = merged_at;
-            *remote_profile = merged_profile;
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-pub(super) fn merge_raw_tcp_profile_records(
-    remote: &mut RawTcpProfilesSyncSnapshot,
-    base: &RawTcpProfilesSyncSnapshot,
-    local: &RawTcpProfilesSyncSnapshot,
-    conflict_strategy: &ConflictStrategy,
-    merged_at: chrono::DateTime<Utc>,
-) -> Result<bool> {
-    let base_records = base
-        .records
-        .iter()
-        .map(|profile| (profile.id.as_str(), profile))
-        .collect::<BTreeMap<_, _>>();
-    let local_records = local
-        .records
-        .iter()
-        .map(|profile| (profile.id.as_str(), profile))
-        .collect::<BTreeMap<_, _>>();
-    let mut changed = false;
-    for remote_profile in &mut remote.records {
-        let Some(base_profile) = base_records.get(remote_profile.id.as_str()).copied() else {
-            continue;
-        };
-        let Some(local_profile) = local_records.get(remote_profile.id.as_str()).copied() else {
-            continue;
-        };
-        if let Some(mut merged_profile) = merge_structured_model_fields(
-            base_profile,
-            local_profile,
-            remote_profile,
-            conflict_strategy,
-        )? {
-            merged_profile.updated_at = merged_at;
-            *remote_profile = merged_profile;
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-pub(super) fn merge_raw_udp_profile_records(
-    remote: &mut RawUdpProfilesSyncSnapshot,
-    base: &RawUdpProfilesSyncSnapshot,
-    local: &RawUdpProfilesSyncSnapshot,
     conflict_strategy: &ConflictStrategy,
     merged_at: chrono::DateTime<Utc>,
 ) -> Result<bool> {

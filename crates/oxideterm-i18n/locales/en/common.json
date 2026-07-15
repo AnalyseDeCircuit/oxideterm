@@ -107,10 +107,8 @@
     "session_ssh_terminal": "SSH Terminal",
     "cmd_open_serial_terminal": "Open Serial Terminal",
     "cmd_open_telnet_terminal": "Open Telnet Terminal",
-    "cmd_open_raw_tcp_terminal": "Open Raw TCP Terminal",
     "cmd_open_rdp_preview": "Open RDP Preview",
-    "cmd_open_vnc_preview": "Open VNC Preview",
-    "cmd_open_raw_udp_terminal": "Open Raw UDP Terminal"
+    "cmd_open_vnc_preview": "Open VNC Preview"
   },
   "shortcuts_modal": {
     "title": "Keyboard Shortcuts",
@@ -325,7 +323,6 @@
         "sync_forwards": "Sync saved forwards",
         "sync_quick_commands": "Sync quick commands",
         "sync_serial_profiles": "Sync serial profiles",
-        "sync_raw_tcp_profiles": "Sync Raw TCP profiles",
         "sync_app_settings": "Sync application settings",
         "include_local_terminal_env_vars": "Include local terminal environment variables",
         "sync_plugin_settings": "Sync plugin settings",
@@ -335,8 +332,7 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
         "microsoft_access_token": "Microsoft Access Token",
-        "google_oauth_client_id": "Google OAuth Client ID",
-        "sync_raw_udp_profiles": "Sync Raw UDP profiles"
+        "google_oauth_client_id": "Google OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -367,15 +363,13 @@
         "forwards_detail": "Saved port forwarding rules are included with their owner connection metadata.",
         "quick_commands_detail": "Quick command definitions are included.",
         "serial_profiles_detail": "Serial connection profiles are included.",
-        "raw_tcp_profiles_detail": "Raw TCP connection profiles are included.",
         "app_settings_sections_detail": "Selected sections: {{sections}}",
         "app_settings_disabled_detail": "Application settings are excluded by the current sync scope.",
         "plugin_settings_all_detail": "All syncable plugin settings are included.",
         "plugin_settings_selected_detail": "Selected plugins: {{plugins}}",
         "plugin_settings_disabled_detail": "Plugin settings are excluded by the current sync scope.",
         "sensitive_credentials_enabled_detail": "Encrypted sensitive credential objects are included.",
-        "sensitive_credentials_disabled_detail": "Connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded until sensitive credential sync is enabled.",
-        "raw_udp_profiles_detail": "Raw UDP connection profiles are included."
+        "sensitive_credentials_disabled_detail": "Connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded until sensitive credential sync is enabled."
       },
       "notes": {
         "upload_only": "Auto sync only uploads. Remote updates always require user confirmation.",
@@ -391,13 +385,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync rollback backup",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{rawTcpProfiles}} Raw TCP profiles, {{rawUdpProfiles}} Raw UDP profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
       },
       "history": {
         "action_upload": "Upload",
         "action_pull": "Pull",
         "action_restore": "Restore",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{rawTcpProfiles}} Raw TCP profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
       },
       "errors": {
         "operation_in_progress": "Another cloud sync operation is already running.",
@@ -538,7 +532,6 @@
         "total_forwards": "Forwards",
         "quick_commands_label": "Quick Commands",
         "serial_profiles_label": "Serial Profiles",
-        "raw_tcp_profiles_label": "Raw TCP Profiles",
         "will_import": "Will import",
         "will_merge": "Will merge",
         "will_replace": "Will replace",
@@ -557,7 +550,6 @@
         "toggle_forwards": "Import saved forwards ({{count}})",
         "toggle_quick_commands": "Import quick commands ({{count}})",
         "toggle_serial_profiles": "Import serial profiles ({{count}})",
-        "toggle_raw_tcp_profiles": "Import Raw TCP profiles ({{count}})",
         "section_field_count": "{{count}} fields",
         "section_general": "General",
         "section_terminal_appearance": "Terminal Appearance",
@@ -581,9 +573,7 @@
         "toggle_sensitive_credentials": "Import sensitive credentials ({{count}})",
         "sensitive_summary_title": "Sensitive credentials",
         "sensitive_remote_summary": "Remote encrypted credentials include {{connections}} connection record(s) and {{portableSecrets}} portable secret(s). Values stay hidden.",
-        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s).",
-        "raw_udp_profiles_label": "Raw UDP Profiles",
-        "toggle_raw_udp_profiles": "Import Raw UDP profiles ({{count}})"
+        "sensitive_upload_summary": "Will upload {{passwords}} password(s), {{keyPassphrases}} key passphrase(s), {{managedKeys}} managed key(s), {{managedKeyPassphrases}} managed-key passphrase(s), and {{portableSecrets}} portable secret(s)."
       },
       "confirm": {
         "import_title": "Import remote snapshot?",
@@ -901,8 +891,8 @@
     "features_eyebrow": "PAGE 5 · CAPABILITIES",
     "features_title": "More protocols, stronger workflows",
     "features_description": "2.0 expands connection types and host operations while rebuilding performance-sensitive paths such as SFTP.",
-    "features_telnet_title": "Telnet, serial, Raw TCP, and Raw UDP",
-    "features_telnet_description": "New native session types cover legacy systems, devices, and direct socket diagnostics.",
+    "features_telnet_title": "Telnet, serial",
+    "features_telnet_description": "New native session types cover legacy systems and serial devices.",
     "features_remote_title": "Built-in RDP and VNC",
     "features_remote_description": "Remote desktop sessions now live beside terminal and file workflows.",
     "features_host_tools_title": "Host Tools",
@@ -1084,8 +1074,6 @@
     "ai_tools_later_hint": "All AI and tool settings can be configured later in Settings. No API keys are required during setup.",
     "remote_ide": "Remote IDE workspace",
     "remote_ide_desc": "SFTP-backed project tree, multi-tab editing, dirty tracking, and conflict-aware saves.",
-    "raw_sockets": "Raw TCP/UDP tools",
-    "raw_sockets_desc": "Debug text or hex protocols with raw TCP streams and UDP datagrams.",
     "serial_console": "Serial terminal runtime",
     "serial_console_desc": "Open local serial devices with status controls, line policy, hex mode, Break, DTR, and RTS.",
     "remote_desktop": "RDP and VNC",

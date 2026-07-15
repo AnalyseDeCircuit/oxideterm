@@ -3,7 +3,7 @@
 <p align="center">
   <strong>面向远程服务器、带 AI 能力的原生运维工作区 —— 纯 Rust 原生应用</strong>
   <br>
-  SSH、Telnet、串口、RDP/VNC、SFTP、端口转发、Raw TCP/UDP 和轻量编辑，集中在一个原生工作区。
+  SSH、Telnet、串口、RDP/VNC、SFTP、端口转发 和轻量编辑，集中在一个原生工作区。
   <br>
   GPU 直接渲染。免费，无需注册。
   <br>
@@ -38,11 +38,11 @@
 
 ## OxideTerm 是什么
 
-OxideTerm 是面向 SSH 与远程运维的开源工作区。终端、文件、端口转发、主机工具、Raw Socket 和远程桌面都集中在同一个工作区中。
+OxideTerm 是面向 SSH 与远程运维的开源工作区。终端、文件、端口转发、主机工具和远程桌面都集中在同一个工作区中。
 
 **你可以做什么：**
 
-- 在同一个工作区中管理 SSH、Telnet、串口、RDP/VNC、SFTP、端口转发、Raw TCP/UDP、本地 Shell 与轻量编辑
+- 在同一个工作区中管理 SSH、Telnet、串口、RDP/VNC、SFTP、端口转发、本地 Shell 与轻量编辑
 - 通过 Grace Period 重连机制，应对短暂网络中断并维持远程工作
 - 使用你自己的 AI 服务商，让 OxideSens 检查活动会话并执行经过批准的工作区操作
 
@@ -86,7 +86,7 @@ OxideTerm 将连接、文件、转发、主机工具、自动化与 AI 上下文
 
 | 类别 | 功能 |
 |---|---|
-| **终端与连接** | 本地 Shell、SSH、Telnet、串口、Raw TCP/UDP、分屏、多跳路由与稳定重连 |
+| **终端与连接** | 本地 Shell、SSH、Telnet、串口、分屏、多跳路由与稳定重连 |
 | **文件与远程编辑** | SFTP、传输队列、收藏夹、安全写入、项目树与多标签编辑 |
 | **转发与网络** | 本地、远程与动态 SOCKS5 转发、已保存规则与 Socket 调试 |
 | **主机运维与远程桌面** | 监控、进程、服务、日志、端口、任务、磁盘、软件包、容器、tmux、RDP 与 VNC |
@@ -109,7 +109,7 @@ OxideTerm 将连接、文件、转发、主机工具、自动化与 AI 上下文
 
 ## 内部实现
 
-OxideTerm 将终端、SSH、Telnet、RDP、VNC、Raw TCP/UDP、SFTP、转发、IDE、AI、插件和 CLI 整合在同一套 Rust 架构中。下方列出了面向开发者的技术细节。
+OxideTerm 将终端、SSH、Telnet、RDP、VNC、SFTP、转发、IDE、AI、插件和 CLI 整合在同一套 Rust 架构中。下方列出了面向开发者的技术细节。
 
 <details>
 <summary><strong>架构、SSH 内部、GPUI 外壳、重连、AI、插件与更多细节</strong></summary>
@@ -172,7 +172,7 @@ OxideSens 采用 BYOK 模式，并在进程内构建上下文：
 
 整个 UI 使用 GPUI 直接绘制，没有 DOM/CSS/JavaScript 渲染管线：
 
-- 工作区标签类型：本地终端、SSH、Telnet、串口、RDP、VNC、Raw TCP/UDP、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
+- 工作区标签类型：本地终端、SSH、Telnet、串口、RDP、VNC、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
 - 二叉窗格树与可拖拽分隔条，每个终端标签最多 4 个窗格
 - 命令面板、全局快捷键和侧边栏都使用 GPUI primitive
 - 即时模式渲染直接响应 Rust 状态变化，无需序列化往返

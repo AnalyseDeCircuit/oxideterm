@@ -135,15 +135,6 @@
       "delete_failed": "Telnet-Profil konnte nicht gelöscht werden",
       "confirm_delete": "Telnet-Profil \"{{name}}\" löschen?"
     },
-    "raw_tcp_profiles": {
-      "title": "Raw-TCP-Profile",
-      "count": "{{count}} Profil(e)",
-      "open": "Öffnen",
-      "delete": "Löschen",
-      "open_failed": "Raw-TCP-Profil konnte nicht geöffnet werden",
-      "delete_failed": "Raw-TCP-Profil konnte nicht gelöscht werden",
-      "confirm_delete": "Raw-TCP-Profil \"{{name}}\" löschen?"
-    },
     "privilege_credentials": {
       "title": "Privileg-Anmeldedaten",
       "description": "Separate Anmeldedaten für sudo/su-Prompts speichern. Secrets bleiben im System-Schlüsselbund und werden erst nach Klick auf die Terminal-Hilfe gelesen.",
@@ -184,15 +175,6 @@
       "list_header": "Gespeicherte Sitzungen",
       "expand_all": "Alle erweitern",
       "collapse_all": "Alle einklappen"
-    },
-    "raw_udp_profiles": {
-      "title": "Raw-UDP-Profile",
-      "count": "{{count}} Profil(e)",
-      "open": "Öffnen",
-      "delete": "Löschen",
-      "open_failed": "Raw-UDP-Profil konnte nicht geöffnet werden",
-      "delete_failed": "Raw-UDP-Profil konnte nicht gelöscht werden",
-      "confirm_delete": "Raw-UDP-Profil \"{{name}}\" löschen?"
     }
   }
 }

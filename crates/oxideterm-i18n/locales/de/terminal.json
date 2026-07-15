@@ -13,7 +13,6 @@
       "copy": "Kopieren",
       "copy_title": "Befehlsausgabe kopieren",
       "copy_command": "Befehl kopieren",
-      "reconnect_transport": "Neu verbinden",
       "send_to_ai": "An OxideSens senden",
       "fill_command_bar": "Befehlsleiste füllen",
       "insert_selection_into_command": "Auswahl hier einfügen",

@@ -167,46 +167,6 @@ impl TerminalSession {
         })
     }
 
-    pub fn raw_tcp_with_graphics_and_encoding(
-        config: RawTcpSessionConfig,
-        cols: usize,
-        rows: usize,
-        graphics_options: GraphicsOptions,
-        encoding: TerminalEncoding,
-        scrollback_lines: usize,
-    ) -> Self {
-        Self {
-            backend: Box::new(RawTcpSession::new(
-                config,
-                cols,
-                rows,
-                graphics_options,
-                encoding,
-                scrollback_lines,
-            )),
-        }
-    }
-
-    pub fn raw_udp_with_graphics_and_encoding(
-        config: RawUdpSessionConfig,
-        cols: usize,
-        rows: usize,
-        graphics_options: GraphicsOptions,
-        encoding: TerminalEncoding,
-        scrollback_lines: usize,
-    ) -> Self {
-        Self {
-            backend: Box::new(RawUdpSession::new(
-                config,
-                cols,
-                rows,
-                graphics_options,
-                encoding,
-                scrollback_lines,
-            )),
-        }
-    }
-
     pub fn kind(&self) -> TerminalSessionKind {
         self.backend.kind()
     }
@@ -257,14 +217,6 @@ impl TerminalSession {
 
     pub fn set_output_events_enabled(&mut self, enabled: bool) {
         self.backend.set_output_events_enabled(enabled);
-    }
-
-    pub fn set_raw_tcp_runtime_options(&mut self, options: RawTcpRuntimeOptions) -> Result<()> {
-        self.backend.set_raw_tcp_runtime_options(options)
-    }
-
-    pub fn set_raw_udp_runtime_options(&mut self, options: RawUdpRuntimeOptions) -> Result<()> {
-        self.backend.set_raw_udp_runtime_options(options)
     }
 
     pub fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {

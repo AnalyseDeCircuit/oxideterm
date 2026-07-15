@@ -3,7 +3,7 @@
 <p align="center">
   <strong>面向遠端伺服器、具備 AI 能力的原生維運工作區 —— 純 Rust 原生應用</strong>
   <br>
-  SSH、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發、Raw TCP/UDP 和輕量編輯，集中在一個原生工作區。
+  SSH、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發 和輕量編輯，集中在一個原生工作區。
   <br>
   GPU 直接渲染。免費，無需註冊。
   <br>
@@ -38,11 +38,11 @@
 
 ## OxideTerm 是什麼
 
-OxideTerm 是面向 SSH 與遠端維運的開源工作區。終端、檔案、連接埠轉發、主機工具、Raw Socket 和遠端桌面都集中在同一個工作區中。
+OxideTerm 是面向 SSH 與遠端維運的開源工作區。終端、檔案、連接埠轉發、主機工具和遠端桌面都集中在同一個工作區中。
 
 **你可以做什麼：**
 
-- 在同一個工作區中管理 SSH、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發、Raw TCP/UDP、本機 Shell 與輕量編輯
+- 在同一個工作區中管理 SSH、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發、本機 Shell 與輕量編輯
 - 透過 Grace Period 重連機制，應對短暫網路中斷並維持遠端工作
 - 使用你自己的 AI 服務商，讓 OxideSens 檢查作用中的工作階段並執行經過核准的工作區操作
 
@@ -86,7 +86,7 @@ OxideTerm 將連線、檔案、轉發、主機工具、自動化與 AI 上下文
 
 | 類別 | 功能 |
 |---|---|
-| **終端與連線** | 本機 Shell、SSH、Telnet、序列埠、Raw TCP/UDP、分割窗格、多跳路由與穩定重連 |
+| **終端與連線** | 本機 Shell、SSH、Telnet、序列埠、分割窗格、多跳路由與穩定重連 |
 | **檔案與遠端編輯** | SFTP、傳輸佇列、收藏夾、安全寫入、專案樹與多分頁編輯 |
 | **轉發與網路** | 本機、遠端與動態 SOCKS5 轉發、已儲存規則與 Socket 除錯 |
 | **主機維運與遠端桌面** | 監控、行程、服務、日誌、連接埠、工作、磁碟、套件、容器、tmux、RDP 與 VNC |
@@ -109,7 +109,7 @@ OxideTerm 將連線、檔案、轉發、主機工具、自動化與 AI 上下文
 
 ## 內部實作
 
-OxideTerm 將終端、SSH、Telnet、RDP、VNC、Raw TCP/UDP、SFTP、轉發、IDE、AI、插件和 CLI 整合在同一套 Rust 架構中。下方列出了面向開發者的技術細節。
+OxideTerm 將終端、SSH、Telnet、RDP、VNC、SFTP、轉發、IDE、AI、插件和 CLI 整合在同一套 Rust 架構中。下方列出了面向開發者的技術細節。
 
 <details>
 <summary><strong>架構、SSH 內部、GPUI 外殼、重連、AI、插件與更多細節</strong></summary>
@@ -172,7 +172,7 @@ OxideSens 採用 BYOK 模式，並在行程內建立上下文：
 
 整個 UI 使用 GPUI 直接繪製，沒有 DOM/CSS/JavaScript rendering pipeline：
 
-- 工作區分頁類型：本地終端、SSH、Telnet、序列埠、RDP、VNC、Raw TCP/UDP、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
+- 工作區分頁類型：本地終端、SSH、Telnet、序列埠、RDP、VNC、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
 - Binary pane tree 與可拖曳 divider，每個 terminal tab 最多 4 個 pane
 - Command palette、global key bindings 與 sidebar 都使用 GPUI primitive
 - 即時模式渲染直接回應 Rust 狀態變化，無需序列化往返

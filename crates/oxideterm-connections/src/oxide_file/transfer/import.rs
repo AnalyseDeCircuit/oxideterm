@@ -62,8 +62,6 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
-        raw_tcp_profiles_json,
-        raw_udp_profiles_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -95,53 +93,6 @@ fn apply_oxide_import_with_options_inner(
             })?;
         }
     }
-    let raw_tcp_profiles_snapshot = raw_tcp_profiles_json
-        .as_deref()
-        .map(|snapshot_json| {
-            serde_json::from_str::<RawTcpProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Invalid Raw TCP profiles snapshot in .oxide payload: {error}"
-                ))
-            })
-        })
-        .transpose()?;
-    if options.import_raw_tcp_profiles {
-        for profile in raw_tcp_profiles_snapshot
-            .as_ref()
-            .into_iter()
-            .flat_map(|snapshot| &snapshot.records)
-        {
-            profile.validate().map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Failed to validate Raw TCP profiles from .oxide payload: {error}"
-                ))
-            })?;
-        }
-    }
-    let raw_udp_profiles_snapshot = raw_udp_profiles_json
-        .as_deref()
-        .map(|snapshot_json| {
-            serde_json::from_str::<RawUdpProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Invalid Raw UDP profiles snapshot in .oxide payload: {error}"
-                ))
-            })
-        })
-        .transpose()?;
-    if options.import_raw_udp_profiles {
-        for profile in raw_udp_profiles_snapshot
-            .as_ref()
-            .into_iter()
-            .flat_map(|snapshot| &snapshot.records)
-        {
-            profile.validate().map_err(|error| {
-                OxideFileError::InvalidFormat(format!(
-                    "Failed to validate Raw UDP profiles from .oxide payload: {error}"
-                ))
-            })?;
-        }
-    }
-
     current_step += 1;
     report_progress("filtering_selection", current_step);
     let mut selected_connections =
@@ -163,8 +114,6 @@ fn apply_oxide_import_with_options_inner(
         app_settings_json,
         quick_commands_json,
         serial_profiles_json,
-        raw_tcp_profiles_json,
-        raw_udp_profiles_json,
         plugin_settings,
         portable_secrets: if options.import_portable_secrets {
             portable_secrets.clone()
@@ -312,40 +261,6 @@ fn apply_oxide_import_with_options_inner(
                     serial_profiles_count.saturating_sub(result.imported_serial_profiles);
             } else {
                 result.skipped_serial_profiles = serial_profiles_count;
-            }
-        }
-
-        if let Some(raw_tcp_profiles_snapshot) = raw_tcp_profiles_snapshot {
-            let raw_tcp_profiles_count = raw_tcp_profiles_snapshot.records.len();
-            if options.import_raw_tcp_profiles {
-                result.imported_raw_tcp_profiles = store
-                    .apply_raw_tcp_profiles_snapshot(raw_tcp_profiles_snapshot)
-                    .map_err(|error| {
-                        OxideFileError::InvalidFormat(format!(
-                            "Failed to import Raw TCP profiles from .oxide payload: {error}"
-                        ))
-                    })?;
-                result.skipped_raw_tcp_profiles =
-                    raw_tcp_profiles_count.saturating_sub(result.imported_raw_tcp_profiles);
-            } else {
-                result.skipped_raw_tcp_profiles = raw_tcp_profiles_count;
-            }
-        }
-
-        if let Some(raw_udp_profiles_snapshot) = raw_udp_profiles_snapshot {
-            let raw_udp_profiles_count = raw_udp_profiles_snapshot.records.len();
-            if options.import_raw_udp_profiles {
-                result.imported_raw_udp_profiles = store
-                    .apply_raw_udp_profiles_snapshot(raw_udp_profiles_snapshot)
-                    .map_err(|error| {
-                        OxideFileError::InvalidFormat(format!(
-                            "Failed to import Raw UDP profiles from .oxide payload: {error}"
-                        ))
-                    })?;
-                result.skipped_raw_udp_profiles =
-                    raw_udp_profiles_count.saturating_sub(result.imported_raw_udp_profiles);
-            } else {
-                result.skipped_raw_udp_profiles = raw_udp_profiles_count;
             }
         }
 

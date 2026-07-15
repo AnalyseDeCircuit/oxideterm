@@ -389,8 +389,6 @@ pub fn cloud_sync_preview_fact_rows(
     ]];
     if summary.quick_commands > 0
         || summary.serial_profiles > 0
-        || summary.raw_tcp_profiles > 0
-        || summary.raw_udp_profiles > 0
         || summary.sensitive_credentials > 0
     {
         rows.push(vec![
@@ -401,14 +399,6 @@ pub fn cloud_sync_preview_fact_rows(
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.serial_profiles_label",
                 value: CloudSyncPreviewFactValue::Count(summary.serial_profiles),
-            },
-            CloudSyncPreviewFactSpec {
-                label_key: "plugin.cloud_sync.preview.raw_tcp_profiles_label",
-                value: CloudSyncPreviewFactValue::Count(summary.raw_tcp_profiles),
-            },
-            CloudSyncPreviewFactSpec {
-                label_key: "plugin.cloud_sync.preview.raw_udp_profiles_label",
-                value: CloudSyncPreviewFactValue::Count(summary.raw_udp_profiles),
             },
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.sensitive_credentials_label",
@@ -487,16 +477,6 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                     .as_ref()
                     .map(|snapshot| snapshot.records.len())
                     .unwrap_or(0),
-                raw_tcp_profiles: preview
-                    .raw_tcp_profiles_snapshot
-                    .as_ref()
-                    .map(|snapshot| snapshot.records.len())
-                    .unwrap_or(0),
-                raw_udp_profiles: preview
-                    .raw_udp_profiles_snapshot
-                    .as_ref()
-                    .map(|snapshot| snapshot.records.len())
-                    .unwrap_or(0),
                 sensitive_credentials: preview
                     .sensitive_credentials_preview
                     .as_ref()
@@ -530,8 +510,6 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: 0,
-            raw_tcp_profiles: preview.metadata.raw_tcp_profiles_count.unwrap_or(0),
-            raw_udp_profiles: preview.metadata.raw_udp_profiles_count.unwrap_or(0),
             sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
             has_app_settings: preview.preview.has_app_settings,
             app_settings_sections: preview

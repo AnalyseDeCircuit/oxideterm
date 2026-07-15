@@ -996,7 +996,7 @@
       "legal_notice_close": "关闭",
       "safety_title": "授权使用与隐私",
       "safety_authorized": "OxideTerm 仅用于已授权的系统管理、调试、远程运维、设备接入和文件传输。请只在你拥有、管理或明确获准操作的系统上使用。",
-      "safety_connections": "SSH、SFTP、Telnet、串口、RDP/VNC、Raw TCP/UDP、端口转发和跳板机功能都会连接到你选择的目标。请确认这些连接、路由和转发流量符合组织规则与当地要求。",
+      "safety_connections": "SSH、SFTP、Telnet、串口、RDP/VNC、端口转发和跳板机功能都会连接到你选择的目标。请确认这些连接、路由和转发流量符合组织规则与当地要求。",
       "safety_prohibited": "请勿将 OxideTerm 用于未授权访问、凭据攻击、规避网络限制、隐蔽远控、漏洞利用、破坏性活动或数据外泄。",
       "safety_privacy": "OxideTerm 默认作为本地客户端运行，不要求账号，不收集遥测，也不会把终端内容、连接配置、命令历史、私钥或凭据上传到 OxideTerm 服务。",
       "safety_secrets": "凭据和 API Key 应尽量保存在系统安全存储中。分享日志、截图、导出包、诊断信息或提示词前，请先检查并脱敏秘密、主机名、用户名和内部路径。",

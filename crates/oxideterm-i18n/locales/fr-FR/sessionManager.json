@@ -135,15 +135,6 @@
       "delete_failed": "Impossible de supprimer le profil Telnet",
       "confirm_delete": "Supprimer le profil Telnet \"{{name}}\" ?"
     },
-    "raw_tcp_profiles": {
-      "title": "Profils Raw TCP",
-      "count": "{{count}} profil(s)",
-      "open": "Ouvrir",
-      "delete": "Supprimer",
-      "open_failed": "Impossible d'ouvrir le profil Raw TCP",
-      "delete_failed": "Impossible de supprimer le profil Raw TCP",
-      "confirm_delete": "Supprimer le profil Raw TCP \"{{name}}\" ?"
-    },
     "privilege_credentials": {
       "title": "Identifiants de privilège",
       "description": "Stocke des identifiants séparés pour les invites sudo/su. Les secrets restent dans le trousseau système et ne sont lus qu’après un clic sur l’aide du terminal.",
@@ -184,15 +175,6 @@
       "list_header": "Sessions enregistrées",
       "expand_all": "Tout développer",
       "collapse_all": "Tout réduire"
-    },
-    "raw_udp_profiles": {
-      "title": "Profils Raw UDP",
-      "count": "{{count}} profil(s)",
-      "open": "Ouvrir",
-      "delete": "Supprimer",
-      "open_failed": "Impossible d’ouvrir le profil Raw UDP",
-      "delete_failed": "Impossible de supprimer le profil Raw UDP",
-      "confirm_delete": "Supprimer le profil Raw UDP \"{{name}}\" ?"
     }
   }
 }

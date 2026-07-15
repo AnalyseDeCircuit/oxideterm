@@ -65,8 +65,6 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -156,8 +154,6 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.host_key_challenge = None;
@@ -217,40 +213,6 @@ impl WorkspaceApp {
             )
         {
             self.submit_telnet_connection_form(action, window, cx);
-            return;
-        }
-        if self
-            .new_connection_form
-            .as_ref()
-            .is_some_and(|form| form.transport == NewConnectionTransport::RawTcp)
-            && self.drill_down_parent_node_id.is_none()
-            && matches!(
-                new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
-                ),
-                NewConnectionFormMode::NewConnection
-            )
-        {
-            self.submit_raw_tcp_connection_form(action, window, cx);
-            return;
-        }
-        if self
-            .new_connection_form
-            .as_ref()
-            .is_some_and(|form| form.transport == NewConnectionTransport::RawUdp)
-            && self.drill_down_parent_node_id.is_none()
-            && matches!(
-                new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
-                ),
-                NewConnectionFormMode::NewConnection
-            )
-        {
-            self.submit_raw_udp_connection_form(action, window, cx);
             return;
         }
         if self
@@ -676,293 +638,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn submit_raw_tcp_connection_form(
-        &mut self,
-        action: NewConnectionSubmitAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(form) = self.new_connection_form.as_mut() else {
-            return;
-        };
-        let host = form.host.trim().to_string();
-        let port = form
-            .port
-            .trim()
-            .parse::<u16>()
-            .ok()
-            .filter(|port| *port > 0);
-        if host.is_empty() {
-            form.error = Some(self.i18n.t("modals.new_connection.raw_tcp_host_required"));
-            cx.notify();
-            return;
-        }
-        let Some(port) = port else {
-            form.error = Some(self.i18n.t("modals.new_connection.raw_tcp_invalid_port"));
-            cx.notify();
-            return;
-        };
-        let line_ending = form.raw_tcp_line_ending.clone();
-        let display_mode = form.raw_tcp_display_mode.clone();
-        let send_mode = form.raw_tcp_send_mode.clone();
-        let tls_mode = form.raw_tcp_tls_mode.clone();
-        let tls_verification = form.raw_tcp_tls_verification.clone();
-        let tls_server_name = form.raw_tcp_tls_server_name.trim().to_string();
-        let tls_server_name = (!tls_server_name.is_empty()).then_some(tls_server_name);
-        let editing_profile_id = self.editing_raw_tcp_profile_id.clone();
-
-        let should_save_profile = action != NewConnectionSubmitAction::Connect;
-        let mut save_request = should_save_profile.then(|| {
-            raw_tcp_save_request_from_form(
-                form,
-                editing_profile_id.clone(),
-                &host,
-                port,
-                tls_server_name.clone(),
-                &self.i18n,
-            )
-        });
-        let config = raw_tcp_session_config_from_form(
-            host,
-            port,
-            line_ending,
-            display_mode,
-            send_mode,
-            tls_mode,
-            tls_verification,
-            tls_server_name,
-        );
-        form.pending = true;
-        form.error = None;
-
-        if action == NewConnectionSubmitAction::Save {
-            let request =
-                save_request.expect("Raw TCP save action must build a Raw TCP profile request");
-            match self.connection_store.upsert_raw_tcp_profile(request) {
-                Ok(_) => {
-                    if editing_profile_id.is_some() {
-                        self.session_manager.status =
-                            Some(self.i18n.t("sessionManager.edit_properties.save"));
-                    }
-                    self.queue_cloud_sync_dirty_refresh(cx);
-                    self.new_connection_form = None;
-                    self.editing_raw_tcp_profile_id = None;
-                    self.editing_raw_udp_profile_id = None;
-                    self.close_new_connection_select();
-                    self.focus_active_pane(window, cx);
-                }
-                Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.raw_tcp_save_failed")
-                        ));
-                    }
-                }
-            }
-            cx.notify();
-            return;
-        }
-
-        if action == NewConnectionSubmitAction::SaveAndConnect {
-            let request = save_request
-                .take()
-                .expect("Raw TCP save-and-open action must build a Raw TCP profile request");
-            match self.connection_store.upsert_raw_tcp_profile(request) {
-                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
-                Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.raw_tcp_save_failed")
-                        ));
-                    }
-                    cx.notify();
-                    return;
-                }
-            }
-        }
-
-        // Raw TCP follows the local-terminal transport boundary: no SSH node,
-        // no saved SSH auth, and no host-tool side effects.
-        match self.create_raw_tcp_terminal_tab(config, window, cx) {
-            Ok(_) => {
-                if let Some(request) = save_request {
-                    match self.connection_store.upsert_raw_tcp_profile(request) {
-                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
-                        Err(error) => {
-                            self.session_manager.status = Some(format!(
-                                "{}: {error}",
-                                self.i18n.t("modals.new_connection.raw_tcp_save_failed")
-                            ));
-                        }
-                    }
-                }
-                self.new_connection_form = None;
-                self.editing_raw_tcp_profile_id = None;
-                self.editing_raw_udp_profile_id = None;
-                self.close_new_connection_select();
-            }
-            Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = false;
-                    form.error = Some(error.to_string());
-                }
-            }
-        }
-        cx.notify();
-    }
-
-    pub(super) fn submit_raw_udp_connection_form(
-        &mut self,
-        action: NewConnectionSubmitAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(form) = self.new_connection_form.as_mut() else {
-            return;
-        };
-        let remote_host = form.host.trim().to_string();
-        let remote_port = form
-            .port
-            .trim()
-            .parse::<u16>()
-            .ok()
-            .filter(|port| *port > 0);
-        let local_bind_host = form.raw_udp_local_bind_host.trim().to_string();
-        let local_bind_host = (!local_bind_host.is_empty()).then_some(local_bind_host);
-        let local_bind_port = if form.raw_udp_local_bind_port.trim().is_empty() {
-            Some(0)
-        } else {
-            form.raw_udp_local_bind_port.trim().parse::<u16>().ok()
-        };
-        if remote_host.is_empty() {
-            form.error = Some(self.i18n.t("modals.new_connection.raw_udp_host_required"));
-            cx.notify();
-            return;
-        }
-        let Some(remote_port) = remote_port else {
-            form.error = Some(self.i18n.t("modals.new_connection.raw_udp_invalid_port"));
-            cx.notify();
-            return;
-        };
-        let Some(local_bind_port) = local_bind_port else {
-            form.error = Some(
-                self.i18n
-                    .t("modals.new_connection.raw_udp_invalid_local_bind_port"),
-            );
-            cx.notify();
-            return;
-        };
-
-        let line_ending = form.raw_udp_line_ending.clone();
-        let display_mode = form.raw_udp_display_mode.clone();
-        let send_mode = form.raw_udp_send_mode.clone();
-        let editing_profile_id = self.editing_raw_udp_profile_id.clone();
-
-        let should_save_profile = action != NewConnectionSubmitAction::Connect;
-        let mut save_request = should_save_profile.then(|| {
-            raw_udp_save_request_from_form(
-                form,
-                editing_profile_id.clone(),
-                &remote_host,
-                remote_port,
-                local_bind_host.clone(),
-                local_bind_port,
-                &self.i18n,
-            )
-        });
-        let config = raw_udp_session_config_from_form(
-            remote_host,
-            remote_port,
-            local_bind_host,
-            local_bind_port,
-            line_ending,
-            display_mode,
-            send_mode,
-        );
-        form.pending = true;
-        form.error = None;
-
-        if action == NewConnectionSubmitAction::Save {
-            let request =
-                save_request.expect("Raw UDP save action must build a Raw UDP profile request");
-            match self.connection_store.upsert_raw_udp_profile(request) {
-                Ok(_) => {
-                    if editing_profile_id.is_some() {
-                        self.session_manager.status =
-                            Some(self.i18n.t("sessionManager.edit_properties.save"));
-                    }
-                    self.queue_cloud_sync_dirty_refresh(cx);
-                    self.new_connection_form = None;
-                    self.editing_raw_udp_profile_id = None;
-                    self.close_new_connection_select();
-                    self.focus_active_pane(window, cx);
-                }
-                Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.raw_udp_save_failed")
-                        ));
-                    }
-                }
-            }
-            cx.notify();
-            return;
-        }
-
-        if action == NewConnectionSubmitAction::SaveAndConnect {
-            let request = save_request
-                .take()
-                .expect("Raw UDP save-and-open action must build a Raw UDP profile request");
-            match self.connection_store.upsert_raw_udp_profile(request) {
-                Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
-                Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.raw_udp_save_failed")
-                        ));
-                    }
-                    cx.notify();
-                    return;
-                }
-            }
-        }
-
-        // Raw UDP opens as a local datagram transport, not an SSH node.
-        match self.create_raw_udp_terminal_tab(config, window, cx) {
-            Ok(_) => {
-                if let Some(request) = save_request {
-                    match self.connection_store.upsert_raw_udp_profile(request) {
-                        Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
-                        Err(error) => {
-                            self.session_manager.status = Some(format!(
-                                "{}: {error}",
-                                self.i18n.t("modals.new_connection.raw_udp_save_failed")
-                            ));
-                        }
-                    }
-                }
-                self.new_connection_form = None;
-                self.editing_raw_udp_profile_id = None;
-                self.close_new_connection_select();
-            }
-            Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = false;
-                    form.error = Some(error.to_string());
-                }
-            }
-        }
-        cx.notify();
-    }
-
     pub(super) fn submit_remote_desktop_connection_form(
         &mut self,
         window: &mut Window,
@@ -1165,8 +840,6 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = Some(action);
         self.close_new_connection_select();
@@ -1190,8 +863,6 @@ impl WorkspaceApp {
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -1237,8 +908,6 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -1327,8 +996,6 @@ impl WorkspaceApp {
                             .take();
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
-                        self.editing_raw_tcp_profile_id = None;
-                        self.editing_raw_udp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.queue_cloud_sync_dirty_refresh(cx);
@@ -1410,8 +1077,6 @@ impl WorkspaceApp {
                         self.new_connection_form = None;
                         self.editing_saved_connection_id = None;
                         self.editing_saved_connection_connect_after_save_node_id = None;
-                        self.editing_raw_tcp_profile_id = None;
-                        self.editing_raw_udp_profile_id = None;
                         self.duplicating_saved_connection_id = None;
                         self.close_new_connection_select();
                         self.session_manager.status =

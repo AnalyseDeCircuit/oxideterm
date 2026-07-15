@@ -4,11 +4,8 @@ mod tests {
     use std::fs;
 
     use crate::{
-        PrivilegeCredentialKind, RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode,
-        RawTcpTlsMode, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpProfile,
-        RawUdpSendMode, SavePrivilegeCredentialRequest, SaveRawTcpProfileRequest,
-        SaveRawUdpProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
-        SerialFlowControl,
+        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SaveSerialProfileRequest,
+        SavedUpstreamProxyProtocol, SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
     };
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
     use russh::keys::ssh_key::LineEnding;
@@ -178,9 +175,9 @@ mod tests {
         source
             .upsert_imported_connection(saved_connection("conn-1", "Prod"))
             .unwrap();
-        let mut invalid_profile = RawUdpProfile::new("Invalid", "example.test", 9000);
-        invalid_profile.remote_host.clear();
-        let raw_udp_snapshot = RawUdpProfilesSyncSnapshot {
+        let mut invalid_profile = SerialProfile::new("Invalid", "/dev/cu.invalid");
+        invalid_profile.port_path.clear();
+        let serial_snapshot = SerialProfilesSyncSnapshot {
             revision: "invalid".to_string(),
             exported_at: Utc::now().to_rfc3339(),
             records: vec![invalid_profile],
@@ -190,7 +187,7 @@ mod tests {
             &["conn-1".to_string()],
             "secret!",
             OxideExportOptions {
-                raw_udp_profiles_json: Some(serde_json::to_string(&raw_udp_snapshot).unwrap()),
+                serial_profiles_json: Some(serde_json::to_string(&serial_snapshot).unwrap()),
                 ..OxideExportOptions::default()
             },
         )
@@ -230,16 +227,15 @@ mod tests {
             .upsert_imported_connection(imported_connection)
             .unwrap();
         source
-            .upsert_raw_udp_profile(SaveRawUdpProfileRequest {
-                id: Some("raw-udp-import".to_string()),
-                name: "Imported UDP".to_string(),
-                remote_host: "udp.example.com".to_string(),
-                remote_port: 9000,
-                ..SaveRawUdpProfileRequest::default()
+            .upsert_serial_profile(SaveSerialProfileRequest {
+                id: Some("serial-import".to_string()),
+                name: "Imported Serial".to_string(),
+                port_path: "/dev/cu.imported".to_string(),
+                ..SaveSerialProfileRequest::default()
             })
             .unwrap();
-        let raw_udp_profiles_json =
-            serde_json::to_string_pretty(&source.export_raw_udp_profiles_snapshot().unwrap())
+        let serial_profiles_json =
+            serde_json::to_string_pretty(&source.export_serial_profiles_snapshot().unwrap())
                 .unwrap();
         let exported = export_connections_to_oxide(
             &source,
@@ -247,7 +243,7 @@ mod tests {
             IMPORT_PASSWORD,
             OxideExportOptions {
                 include_passwords: true,
-                raw_udp_profiles_json: Some(raw_udp_profiles_json),
+                serial_profiles_json: Some(serial_profiles_json),
                 ..OxideExportOptions::default()
             },
         )
@@ -303,7 +299,6 @@ mod tests {
             original_connections
         );
         assert_eq!(target.serial_profiles(), original_serial_profiles);
-        assert!(target.raw_udp_profiles().is_empty());
         assert_eq!(fs::read(&target_path).unwrap(), original_file);
 
         let reloaded = ConnectionStore::load(target_path).unwrap();
@@ -316,7 +311,6 @@ mod tests {
             original_connections
         );
         assert_eq!(reloaded.serial_profiles(), original_serial_profiles);
-        assert!(reloaded.raw_udp_profiles().is_empty());
     }
 
     #[test]
@@ -388,235 +382,21 @@ mod tests {
     }
 
     #[test]
-    fn export_import_roundtrip_preserves_raw_tcp_profiles() {
-        let mut source = temp_store("raw-tcp-profile-source");
-        source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-        let profile = source
-            .upsert_raw_tcp_profile(SaveRawTcpProfileRequest {
-                id: Some("raw-tcp-1".to_string()),
-                name: "Lab socket".to_string(),
-                group: Some("Lab".to_string()),
-                host: "device.local".to_string(),
-                port: 9000,
-                line_ending: Some(RawTcpLineEnding::Cr),
-                display_mode: Some(RawTcpDisplayMode::Mixed),
-                send_mode: Some(RawTcpSendMode::Hex),
-                tls_mode: Some(RawTcpTlsMode::Enabled),
-                tls_verification: Some(RawTcpTlsVerification::AllowInvalidCertificates),
-                tls_server_name: Some("lab.example.com".to_string()),
-                connect_on_open: Some(true),
-            })
-            .unwrap();
-        let raw_tcp_profiles_json =
-            serde_json::to_string_pretty(&source.export_raw_tcp_profiles_snapshot().unwrap())
-                .unwrap();
-
-        let bytes = export_connections_to_oxide(
-            &source,
-            &["conn-1".to_string()],
-            "secret!",
-            OxideExportOptions {
-                raw_tcp_profiles_json: Some(raw_tcp_profiles_json),
-                ..OxideExportOptions::default()
-            },
-        )
+    fn legacy_oxide_payload_ignores_removed_raw_profile_sections() {
+        // Older archives remain readable because removed sections deserialize as unknown fields.
+        let payload: EncryptedPayload = serde_json::from_value(serde_json::json!({
+            "version": 2,
+            "connections": [],
+            "raw_tcp_profiles_json": "{\"records\":[]}",
+            "raw_udp_profiles_json": "{\"records\":[]}",
+            "checksum": "legacy-checksum"
+        }))
         .unwrap();
-        let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.raw_tcp_profiles_count, Some(1));
 
-        let preview = preview_oxide_import(
-            &temp_store("raw-tcp-profile-preview"),
-            &bytes,
-            "secret!",
-            ImportConflictStrategy::Rename,
-        )
-        .unwrap();
-        assert_eq!(preview.raw_tcp_profiles_count, 1);
-
-        let mut target = temp_store("raw-tcp-profile-target");
-        let imported = apply_oxide_import(
-            &mut target,
-            &bytes,
-            "secret!",
-            ImportConflictStrategy::Rename,
-        )
-        .unwrap();
-        assert_eq!(imported.imported_raw_tcp_profiles, 1);
-        assert_eq!(target.raw_tcp_profiles(), &[profile]);
-
-        let mut skipped_target = temp_store("raw-tcp-profile-skip-target");
-        let skipped = apply_oxide_import_with_options(
-            &mut skipped_target,
-            &bytes,
-            "secret!",
-            OxideImportOptions {
-                import_raw_tcp_profiles: false,
-                ..OxideImportOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(skipped.imported_raw_tcp_profiles, 0);
-        assert_eq!(skipped.skipped_raw_tcp_profiles, 1);
-        assert!(skipped_target.raw_tcp_profiles().is_empty());
-    }
-
-    #[test]
-    fn export_import_roundtrip_preserves_raw_udp_profiles() {
-        let mut source = temp_store("raw-udp-profile-source");
-        source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-        let profile = source
-            .upsert_raw_udp_profile(SaveRawUdpProfileRequest {
-                id: Some("raw-udp-1".to_string()),
-                name: "Lab datagrams".to_string(),
-                group: Some("Lab".to_string()),
-                remote_host: "device.local".to_string(),
-                remote_port: 9001,
-                local_bind_host: Some("0.0.0.0".to_string()),
-                local_bind_port: Some(0),
-                line_ending: Some(RawUdpLineEnding::CrLf),
-                display_mode: Some(RawUdpDisplayMode::Mixed),
-                send_mode: Some(RawUdpSendMode::Hex),
-                connect_on_open: Some(true),
-            })
-            .unwrap();
-        let raw_udp_profiles_json =
-            serde_json::to_string_pretty(&source.export_raw_udp_profiles_snapshot().unwrap())
-                .unwrap();
-
-        let bytes = export_connections_to_oxide(
-            &source,
-            &["conn-1".to_string()],
-            "secret!",
-            OxideExportOptions {
-                raw_udp_profiles_json: Some(raw_udp_profiles_json),
-                ..OxideExportOptions::default()
-            },
-        )
-        .unwrap();
-        let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.raw_udp_profiles_count, Some(1));
-
-        let preview = preview_oxide_import(
-            &temp_store("raw-udp-profile-preview"),
-            &bytes,
-            "secret!",
-            ImportConflictStrategy::Rename,
-        )
-        .unwrap();
-        assert_eq!(preview.raw_udp_profiles_count, 1);
-
-        let mut target = temp_store("raw-udp-profile-target");
-        let imported = apply_oxide_import(
-            &mut target,
-            &bytes,
-            "secret!",
-            ImportConflictStrategy::Rename,
-        )
-        .unwrap();
-        assert_eq!(imported.imported_raw_udp_profiles, 1);
-        assert_eq!(target.raw_udp_profiles(), &[profile]);
-
-        let mut skipped_target = temp_store("raw-udp-profile-skip-target");
-        let skipped = apply_oxide_import_with_options(
-            &mut skipped_target,
-            &bytes,
-            "secret!",
-            OxideImportOptions {
-                import_raw_udp_profiles: false,
-                ..OxideImportOptions::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(skipped.imported_raw_udp_profiles, 0);
-        assert_eq!(skipped.skipped_raw_udp_profiles, 1);
-        assert!(skipped_target.raw_udp_profiles().is_empty());
-    }
-
-    #[test]
-    fn raw_udp_profile_import_conflict_uses_same_id_endpoint_timestamp() {
-        fn source_with_raw_udp_profile(
-            store_name: &str,
-            remote_host: &str,
-            remote_port: u16,
-        ) -> ConnectionStore {
-            let mut store = temp_store(store_name);
-            store
-                .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-                .unwrap();
-            store
-                .upsert_raw_udp_profile(SaveRawUdpProfileRequest {
-                    id: Some("raw-udp-conflict".to_string()),
-                    name: "Datagram sink".to_string(),
-                    remote_host: remote_host.to_string(),
-                    remote_port,
-                    ..SaveRawUdpProfileRequest::default()
-                })
-                .unwrap();
-            store
-        }
-
-        fn export_raw_udp_profiles(source: &ConnectionStore) -> Vec<u8> {
-            let raw_udp_profiles_json =
-                serde_json::to_string_pretty(&source.export_raw_udp_profiles_snapshot().unwrap())
-                    .unwrap();
-            export_connections_to_oxide(
-                source,
-                &["conn-1".to_string()],
-                "secret!",
-                OxideExportOptions {
-                    raw_udp_profiles_json: Some(raw_udp_profiles_json),
-                    ..OxideExportOptions::default()
-                },
-            )
-            .unwrap()
-        }
-
-        let older_source = source_with_raw_udp_profile("raw-udp-conflict-old", "old.example", 9000);
-        let older_bytes = export_raw_udp_profiles(&older_source);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        let mut newer_target =
-            source_with_raw_udp_profile("raw-udp-conflict-newer-target", "current.example", 9001);
-
-        let skipped = apply_oxide_import(
-            &mut newer_target,
-            &older_bytes,
-            "secret!",
-            ImportConflictStrategy::Replace,
-        )
-        .unwrap();
-        assert_eq!(skipped.imported_raw_udp_profiles, 0);
-        assert_eq!(skipped.skipped_raw_udp_profiles, 1);
-        assert_eq!(
-            newer_target.raw_udp_profiles()[0].remote_host,
-            "current.example"
-        );
-        assert_eq!(newer_target.raw_udp_profiles()[0].remote_port, 9001);
-
-        let mut older_target =
-            source_with_raw_udp_profile("raw-udp-conflict-older-target", "stale.example", 9002);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        let newer_source =
-            source_with_raw_udp_profile("raw-udp-conflict-new-source", "incoming.example", 9003);
-        let newer_bytes = export_raw_udp_profiles(&newer_source);
-
-        let replaced = apply_oxide_import(
-            &mut older_target,
-            &newer_bytes,
-            "secret!",
-            ImportConflictStrategy::Replace,
-        )
-        .unwrap();
-        assert_eq!(replaced.imported_raw_udp_profiles, 1);
-        assert_eq!(replaced.skipped_raw_udp_profiles, 0);
-        assert_eq!(
-            older_target.raw_udp_profiles()[0].remote_host,
-            "incoming.example"
-        );
-        assert_eq!(older_target.raw_udp_profiles()[0].remote_port, 9003);
+        let serialized = serde_json::to_value(payload).unwrap();
+        assert_eq!(serialized["version"], 2);
+        assert!(serialized.get("raw_tcp_profiles_json").is_none());
+        assert!(serialized.get("raw_udp_profiles_json").is_none());
     }
 
     #[test]

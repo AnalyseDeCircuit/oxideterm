@@ -147,8 +147,6 @@ include!("session/ssh_config.rs");
 include!("session/ssh_pty.rs");
 include!("session/telnet.rs");
 include!("session/serial.rs");
-include!("session/raw_tcp.rs");
-include!("session/raw_udp.rs");
 
 #[cfg(test)]
 mod tests {

@@ -433,14 +433,6 @@ impl WorkspaceApp {
                 .ok(),
             quick_commands,
             serial_profiles: self.connection_store.export_serial_profiles_snapshot().ok(),
-            raw_tcp_profiles: self
-                .connection_store
-                .export_raw_tcp_profiles_snapshot()
-                .ok(),
-            raw_udp_profiles: self
-                .connection_store
-                .export_raw_udp_profiles_snapshot()
-                .ok(),
             app_settings_sections,
         }
     }

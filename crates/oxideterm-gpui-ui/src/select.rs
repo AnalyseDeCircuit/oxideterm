@@ -114,14 +114,6 @@ pub enum SelectAnchorId {
     NewConnectionSerialStopBits,
     NewConnectionSerialParity,
     NewConnectionSerialFlowControl,
-    NewConnectionRawTcpLineEnding,
-    NewConnectionRawTcpDisplayMode,
-    NewConnectionRawTcpSendMode,
-    NewConnectionRawTcpTlsMode,
-    NewConnectionRawTcpTlsVerification,
-    NewConnectionRawUdpLineEnding,
-    NewConnectionRawUdpDisplayMode,
-    NewConnectionRawUdpSendMode,
     SettingsConnectionImportSource,
     SettingsConnectionImportDuplicateStrategy,
     CloudSyncBackend,
@@ -212,14 +204,6 @@ impl SelectAnchorId {
                 | Self::NewConnectionSerialStopBits
                 | Self::NewConnectionSerialParity
                 | Self::NewConnectionSerialFlowControl
-                | Self::NewConnectionRawTcpLineEnding
-                | Self::NewConnectionRawTcpDisplayMode
-                | Self::NewConnectionRawTcpSendMode
-                | Self::NewConnectionRawTcpTlsMode
-                | Self::NewConnectionRawTcpTlsVerification
-                | Self::NewConnectionRawUdpLineEnding
-                | Self::NewConnectionRawUdpDisplayMode
-                | Self::NewConnectionRawUdpSendMode
         )
     }
 
@@ -743,11 +727,6 @@ mod tests {
         );
         assert!(SelectAnchorId::NewConnectionUpstreamProxyAuth.is_new_connection_select_trigger());
         assert!(SelectAnchorId::NewConnectionSerialPort.is_new_connection_select_trigger());
-        assert!(SelectAnchorId::NewConnectionRawTcpTlsMode.is_new_connection_select_trigger());
-        assert!(SelectAnchorId::NewConnectionRawUdpLineEnding.is_new_connection_select_trigger());
-        assert!(SelectAnchorId::NewConnectionRawUdpDisplayMode.is_new_connection_select_trigger());
-        assert!(SelectAnchorId::NewConnectionRawUdpSendMode.is_new_connection_select_trigger());
-
         assert!(!SelectAnchorId::SettingsLanguage.is_new_connection_select_trigger());
         assert!(!SelectAnchorId::AiModelSelector.is_new_connection_select_trigger());
     }

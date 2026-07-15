@@ -22,12 +22,6 @@ impl WorkspaceApp {
         let skipped_serial_profiles = preview.as_ref().is_some_and(|preview| {
             preview.serial_profiles_count > 0 && result.skipped_serial_profiles > 0
         });
-        let skipped_raw_tcp_profiles = preview.as_ref().is_some_and(|preview| {
-            preview.raw_tcp_profiles_count > 0 && result.skipped_raw_tcp_profiles > 0
-        });
-        let skipped_raw_udp_profiles = preview.as_ref().is_some_and(|preview| {
-            preview.raw_udp_profiles_count > 0 && result.skipped_raw_udp_profiles > 0
-        });
         let skipped_portable_secrets = preview.as_ref().is_some_and(|preview| {
             preview.portable_secret_count > 0 && result.skipped_portable_secrets > 0
         });
@@ -112,42 +106,6 @@ impl WorkspaceApp {
         if skipped_serial_profiles {
             card = card.child(self.render_oxide_import_result_line(
                 self.i18n.t("modals.import.skipped_serial_profiles"),
-                tone,
-                cx,
-            ));
-        }
-        if result.imported_raw_tcp_profiles > 0 {
-            card = card.child(
-                self.render_oxide_import_result_line(
-                    self.i18n
-                        .t("modals.import.imported_raw_tcp_profiles")
-                        .replace("{{count}}", &result.imported_raw_tcp_profiles.to_string()),
-                    tone,
-                    cx,
-                ),
-            );
-        }
-        if skipped_raw_tcp_profiles {
-            card = card.child(self.render_oxide_import_result_line(
-                self.i18n.t("modals.import.skipped_raw_tcp_profiles"),
-                tone,
-                cx,
-            ));
-        }
-        if result.imported_raw_udp_profiles > 0 {
-            card = card.child(
-                self.render_oxide_import_result_line(
-                    self.i18n
-                        .t("modals.import.imported_raw_udp_profiles")
-                        .replace("{{count}}", &result.imported_raw_udp_profiles.to_string()),
-                    tone,
-                    cx,
-                ),
-            );
-        }
-        if skipped_raw_udp_profiles {
-            card = card.child(self.render_oxide_import_result_line(
-                self.i18n.t("modals.import.skipped_raw_udp_profiles"),
                 tone,
                 cx,
             ));

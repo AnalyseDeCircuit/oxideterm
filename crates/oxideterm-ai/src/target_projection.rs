@@ -33,33 +33,6 @@ pub struct AiIdeTargetInput {
     pub project_name: Option<String>,
 }
 
-/// Neutral Raw TCP settings used to describe a local socket target.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AiRawTcpTargetInput {
-    pub endpoint_label: String,
-    pub host: String,
-    pub port: u16,
-    pub line_ending: String,
-    pub display_mode: String,
-    pub send_mode: String,
-    pub tls_enabled: bool,
-    pub tls_verification: String,
-    pub tls_server_name: Option<String>,
-}
-
-/// Neutral Raw UDP settings used to describe a local datagram target.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AiRawUdpTargetInput {
-    pub remote_endpoint_label: String,
-    pub remote_host: String,
-    pub remote_port: u16,
-    pub local_bind_host: Option<String>,
-    pub local_bind_port: u16,
-    pub line_ending: String,
-    pub display_mode: String,
-    pub send_mode: String,
-}
-
 pub fn connect_result_terminal_projection(
     target: &AiTargetProjection,
     original_label: &str,
@@ -160,46 +133,6 @@ pub fn ide_workspace_target_projection(input: AiIdeTargetInput) -> AiTargetProje
     }
 }
 
-pub fn raw_tcp_terminal_label(input: &AiRawTcpTargetInput) -> String {
-    let scheme = if input.tls_enabled { "TLS" } else { "TCP" };
-    format!("{scheme} {}", input.endpoint_label)
-}
-
-pub fn raw_tcp_terminal_metadata(input: &AiRawTcpTargetInput) -> Value {
-    json!({
-        "terminalType": "raw_tcp",
-        "terminalTransport": "raw_tcp",
-        "host": input.host,
-        "port": input.port,
-        "lineEnding": input.line_ending,
-        "displayMode": input.display_mode,
-        "sendMode": input.send_mode,
-        "tls": {
-            "enabled": input.tls_enabled,
-            "verification": input.tls_verification,
-            "serverName": input.tls_server_name,
-        },
-    })
-}
-
-pub fn raw_udp_terminal_label(input: &AiRawUdpTargetInput) -> String {
-    format!("UDP {}", input.remote_endpoint_label)
-}
-
-pub fn raw_udp_terminal_metadata(input: &AiRawUdpTargetInput) -> Value {
-    json!({
-        "terminalType": "raw_udp",
-        "terminalTransport": "raw_udp",
-        "remoteHost": input.remote_host,
-        "remotePort": input.remote_port,
-        "localBindHost": input.local_bind_host,
-        "localBindPort": input.local_bind_port,
-        "lineEnding": input.line_ending,
-        "displayMode": input.display_mode,
-        "sendMode": input.send_mode,
-    })
-}
-
 fn insert_optional_ref(refs: &mut BTreeMap<String, String>, key: &str, value: Option<&str>) {
     if let Some(value) = value {
         refs.insert(key.to_string(), value.to_string());
@@ -292,35 +225,5 @@ mod tests {
         assert_eq!(projection.refs["tabId"], "editor-a");
         assert_eq!(projection.metadata["rootPath"], "/srv/project");
         assert_eq!(projection.metadata["activeTabId"], "editor-a");
-    }
-
-    #[test]
-    fn raw_socket_projection_describes_transport_without_runtime_types() {
-        let tcp = AiRawTcpTargetInput {
-            endpoint_label: "socket.internal:9000".to_string(),
-            host: "socket.internal".to_string(),
-            port: 9000,
-            line_ending: "lf".to_string(),
-            display_mode: "text".to_string(),
-            send_mode: "text".to_string(),
-            tls_enabled: true,
-            tls_verification: "system".to_string(),
-            tls_server_name: None,
-        };
-        let udp = AiRawUdpTargetInput {
-            remote_endpoint_label: "udp.internal:8125".to_string(),
-            remote_host: "udp.internal".to_string(),
-            remote_port: 8125,
-            local_bind_host: Some("127.0.0.1".to_string()),
-            local_bind_port: 0,
-            line_ending: "none".to_string(),
-            display_mode: "mixed".to_string(),
-            send_mode: "hex".to_string(),
-        };
-
-        assert_eq!(raw_tcp_terminal_label(&tcp), "TLS socket.internal:9000");
-        assert_eq!(raw_tcp_terminal_metadata(&tcp)["tls"]["enabled"], true);
-        assert_eq!(raw_udp_terminal_label(&udp), "UDP udp.internal:8125");
-        assert_eq!(raw_udp_terminal_metadata(&udp)["remotePort"], 8125);
     }
 }

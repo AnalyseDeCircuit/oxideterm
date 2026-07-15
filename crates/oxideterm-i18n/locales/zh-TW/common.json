@@ -107,8 +107,6 @@
     "cmd_open_cloud_sync": "開啟雲端同步",
     "cmd_open_serial_terminal": "開啟序列埠終端機",
     "cmd_open_telnet_terminal": "開啟 Telnet 終端機",
-    "cmd_open_raw_tcp_terminal": "開啟 Raw TCP 終端",
-    "cmd_open_raw_udp_terminal": "開啟 Raw UDP 終端",
     "cmd_open_rdp_preview": "開啟 RDP 預覽",
     "cmd_open_vnc_preview": "開啟 VNC 預覽"
   },
@@ -333,8 +331,6 @@
         "sync_forwards": "同步已儲存的轉送",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步序列埠設定",
-        "sync_raw_tcp_profiles": "同步 Raw TCP 設定",
-        "sync_raw_udp_profiles": "同步 Raw UDP 設定",
         "sync_app_settings": "同步應用程式設定",
         "include_local_terminal_env_vars": "包含本機終端環境變數",
         "sync_plugin_settings": "同步外掛設定",
@@ -375,8 +371,6 @@
         "forwards_detail": "已儲存的連接埠轉送規則會連同所屬連線中繼資料一起同步。",
         "quick_commands_detail": "快捷命令定義會參與同步。",
         "serial_profiles_detail": "序列埠連線設定會參與同步。",
-        "raw_tcp_profiles_detail": "Raw TCP 連線設定會參與同步。",
-        "raw_udp_profiles_detail": "Raw UDP 連線設定會參與同步。",
         "app_settings_sections_detail": "已選取分組：{{sections}}",
         "app_settings_disabled_detail": "目前同步範圍已排除應用程式設定。",
         "plugin_settings_all_detail": "所有可同步外掛設定都會參與同步。",
@@ -399,13 +393,13 @@
       },
       "backup": {
         "description": "Oxide 雲端同步回滾備份",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{rawTcpProfiles}} 個 Raw TCP 設定，{{rawUdpProfiles}} 個 Raw UDP 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 個敏感憑證"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 個敏感憑證"
       },
       "history": {
         "action_upload": "上傳",
         "action_pull": "拉取",
         "action_restore": "還原",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{rawTcpProfiles}} 個 Raw TCP 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 個敏感憑證"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 個敏感憑證"
       },
       "errors": {
         "operation_in_progress": "另一個雲端同步操作正在執行，請稍後再試。",
@@ -546,8 +540,6 @@
         "total_forwards": "轉送數",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "序列埠設定",
-        "raw_tcp_profiles_label": "Raw TCP 設定",
-        "raw_udp_profiles_label": "Raw UDP 設定",
         "will_import": "將匯入",
         "will_merge": "將合併",
         "will_replace": "將取代",
@@ -566,8 +558,6 @@
         "toggle_forwards": "匯入已儲存的轉送（{{count}}）",
         "toggle_quick_commands": "匯入快捷命令（{{count}}）",
         "toggle_serial_profiles": "匯入序列埠設定（{{count}}）",
-        "toggle_raw_tcp_profiles": "匯入 Raw TCP 設定（{{count}}）",
-        "toggle_raw_udp_profiles": "匯入 Raw UDP 設定（{{count}}）",
         "section_field_count": "{{count}} 個欄位",
         "section_general": "一般",
         "section_terminal_appearance": "終端外觀",
@@ -901,8 +891,8 @@
     "features_eyebrow": "第 5 頁 · 功能",
     "features_title": "更多通訊協定，更強的工作流程",
     "features_description": "2.0 擴充連線類型與主機操作，並重新打造 SFTP 等效能敏感路徑。",
-    "features_telnet_title": "Telnet、序列埠、Raw TCP 與 Raw UDP",
-    "features_telnet_description": "新的原生工作階段類型可支援舊式系統、裝置與直接 Socket 診斷。",
+    "features_telnet_title": "Telnet、序列埠",
+    "features_telnet_description": "新的原生工作階段類型可支援舊式系統與序列埠裝置。",
     "features_remote_title": "內建 RDP 與 VNC",
     "features_remote_description": "遠端桌面工作階段現在可與終端及檔案工作流程並列使用。",
     "features_host_tools_title": "Host Tools",
@@ -1084,8 +1074,6 @@
     "ai_tools_later_hint": "所有 AI 和工具設定皆可稍後在設定中調整。初始設定期間無需提供 API 金鑰。",
     "remote_ide": "遠端 IDE 工作區",
     "remote_ide_desc": "基於 SFTP 的專案樹、多分頁編輯、髒狀態追蹤與衝突感知儲存。",
-    "raw_sockets": "Raw TCP/UDP 工具",
-    "raw_sockets_desc": "使用 Raw TCP 串流與 UDP 資料報除錯文字或十六進位協定。",
     "serial_console": "序列埠終端執行階段",
     "serial_console_desc": "開啟本機序列埠裝置，支援狀態控制、換行策略、十六進位模式、Break、DTR 與 RTS。",
     "remote_desktop": "RDP 與 VNC",

@@ -156,8 +156,6 @@ impl WorkspaceApp {
             terminal_project_panel: terminal_project::TerminalProjectPanelState::default(),
             detached_local_terminals: HashMap::new(),
             serial_terminal_configs: HashMap::new(),
-            raw_tcp_terminal_configs: HashMap::new(),
-            raw_udp_terminal_configs: HashMap::new(),
             detached_local_terminals_popover_open: false,
             terminal_cast_player: None,
             terminal_cast_seek_dragging: false,
@@ -369,8 +367,6 @@ impl WorkspaceApp {
             drill_down_parent_node_id: None,
             editing_saved_connection_id: None,
             editing_saved_connection_connect_after_save_node_id: None,
-            editing_raw_tcp_profile_id: None,
-            editing_raw_udp_profile_id: None,
             duplicating_saved_connection_id: None,
             saved_connection_prompt_action: None,
             open_new_connection_select: None,
@@ -850,9 +846,6 @@ impl WorkspaceApp {
                 copy: self.i18n.t("terminal.command_selection.copy"),
                 copy_title: self.i18n.t("terminal.command_selection.copy_title"),
                 copy_command: self.i18n.t("terminal.command_selection.copy_command"),
-                reconnect_transport: self
-                    .i18n
-                    .t("terminal.command_selection.reconnect_transport"),
                 send_to_ai: self.i18n.t("terminal.command_selection.send_to_ai"),
                 fill_command_bar: self.i18n.t("terminal.command_selection.fill_command_bar"),
                 insert_selection_into_command: self

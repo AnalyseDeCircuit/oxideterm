@@ -107,10 +107,8 @@
     "cmd_open_cloud_sync": "Apri sincronizzazione cloud",
     "cmd_open_serial_terminal": "Apri terminale seriale",
     "cmd_open_telnet_terminal": "Apri terminale Telnet",
-    "cmd_open_raw_tcp_terminal": "Apri terminale Raw TCP",
     "cmd_open_rdp_preview": "Apri anteprima RDP",
-    "cmd_open_vnc_preview": "Apri anteprima VNC",
-    "cmd_open_raw_udp_terminal": "Apri terminale Raw UDP"
+    "cmd_open_vnc_preview": "Apri anteprima VNC"
   },
   "common": {
     "enabled": "Attivato",
@@ -333,7 +331,6 @@
         "sync_forwards": "Sincronizza inoltri salvati",
         "sync_quick_commands": "Sincronizza comandi rapidi",
         "sync_serial_profiles": "Sincronizza profili seriali",
-        "sync_raw_tcp_profiles": "Sincronizza profili Raw TCP",
         "sync_app_settings": "Sincronizza impostazioni applicazione",
         "include_local_terminal_env_vars": "Includi variabili d’ambiente del terminale locale",
         "sync_plugin_settings": "Sincronizza impostazioni plugin",
@@ -343,8 +340,7 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "ID client OAuth Microsoft",
         "microsoft_access_token": "Token di accesso Microsoft",
-        "google_oauth_client_id": "ID client OAuth Google",
-        "sync_raw_udp_profiles": "Sincronizza profili Raw UDP"
+        "google_oauth_client_id": "ID client OAuth Google"
       },
       "auth": {
         "bearer": "Bearer",
@@ -375,15 +371,13 @@
         "forwards_detail": "Le regole di port forwarding salvate sono incluse insieme ai metadati della connessione proprietaria.",
         "quick_commands_detail": "Le definizioni dei comandi rapidi sono incluse.",
         "serial_profiles_detail": "I profili di connessione seriale sono inclusi.",
-        "raw_tcp_profiles_detail": "I profili di connessione Raw TCP sono inclusi.",
         "app_settings_sections_detail": "Sezioni selezionate: {{sections}}",
         "app_settings_disabled_detail": "Le impostazioni dell'applicazione sono escluse dall'ambito di sincronizzazione corrente.",
         "plugin_settings_all_detail": "Sono incluse tutte le impostazioni dei plugin sincronizzabili.",
         "plugin_settings_selected_detail": "Plugin selezionati: {{plugins}}",
         "plugin_settings_disabled_detail": "Le impostazioni dei plugin sono escluse dall'ambito di sincronizzazione corrente.",
         "sensitive_credentials_enabled_detail": "Sono inclusi gli oggetti crittografati con credenziali sensibili.",
-        "sensitive_credentials_disabled_detail": "Password di connessione, passphrase delle chiavi, chiavi private gestite, chiavi AI e credenziali di privilegio sono escluse finché non abiliti la sincronizzazione delle credenziali sensibili.",
-        "raw_udp_profiles_detail": "I profili di connessione Raw UDP sono inclusi."
+        "sensitive_credentials_disabled_detail": "Password di connessione, passphrase delle chiavi, chiavi private gestite, chiavi AI e credenziali di privilegio sono escluse finché non abiliti la sincronizzazione delle credenziali sensibili."
       },
       "notes": {
         "upload_only": "La sincronizzazione automatica esegue solo il caricamento. Gli aggiornamenti remoti richiedono sempre la conferma dell'utente.",
@@ -399,13 +393,13 @@
       },
       "backup": {
         "description": "Backup di ripristino Oxide Cloud Sync",
-        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{rawTcpProfiles}} profili Raw TCP, {{rawUdpProfiles}} profili Raw UDP, {{pluginSettingsCount}} impostazioni plugin, {{size}}, {{sensitiveCredentials}} credenziali sensibili"
+        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{pluginSettingsCount}} impostazioni plugin, {{size}}, {{sensitiveCredentials}} credenziali sensibili"
       },
       "history": {
         "action_upload": "Caricamento",
         "action_pull": "Scaricamento",
         "action_restore": "Ripristino",
-        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{rawTcpProfiles}} profili Raw TCP, {{pluginSettingsCount}} impostazioni plugin, {{sensitiveCredentials}} credenziali sensibili"
+        "summary_line": "{{connections}} connessioni, {{forwards}} inoltri, {{quickCommands}} comandi rapidi, {{serialProfiles}} profili seriali, {{pluginSettingsCount}} impostazioni plugin, {{sensitiveCredentials}} credenziali sensibili"
       },
       "errors": {
         "operation_in_progress": "Un'altra operazione di sincronizzazione cloud è già in corso.",
@@ -546,7 +540,6 @@
         "total_forwards": "Inoltri",
         "quick_commands_label": "Comandi rapidi",
         "serial_profiles_label": "Profili seriali",
-        "raw_tcp_profiles_label": "Profili Raw TCP",
         "will_import": "Verrà importato",
         "will_merge": "Saranno uniti",
         "will_replace": "Saranno sostituiti",
@@ -565,7 +558,6 @@
         "toggle_forwards": "Importa inoltri salvati ({{count}})",
         "toggle_quick_commands": "Importa comandi rapidi ({{count}})",
         "toggle_serial_profiles": "Importa profili seriali ({{count}})",
-        "toggle_raw_tcp_profiles": "Importa profili Raw TCP ({{count}})",
         "section_field_count": "{{count}} campi",
         "section_general": "Generale",
         "section_terminal_appearance": "Aspetto terminale",
@@ -589,9 +581,7 @@
         "toggle_sensitive_credentials": "Importa credenziali sensibili ({{count}})",
         "sensitive_summary_title": "Credenziali sensibili",
         "sensitive_remote_summary": "Le credenziali remote cifrate includono {{connections}} record di connessione e {{portableSecrets}} segreti portabili. I valori restano nascosti.",
-        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili.",
-        "raw_udp_profiles_label": "Profili Raw UDP",
-        "toggle_raw_udp_profiles": "Importa profili Raw UDP ({{count}})"
+        "sensitive_upload_summary": "Caricherà {{passwords}} password, {{keyPassphrases}} passphrase di chiavi, {{managedKeys}} chiavi gestite, {{managedKeyPassphrases}} passphrase di chiavi gestite e {{portableSecrets}} segreti portabili."
       },
       "confirm": {
         "import_title": "Importare lo snapshot remoto?",
@@ -901,8 +891,8 @@
     "features_eyebrow": "PAGINA 5 · FUNZIONALITÀ",
     "features_title": "Più protocolli, flussi di lavoro più potenti",
     "features_description": "La versione 2.0 amplia i tipi di connessione e le operazioni sugli host, ricostruendo al contempo i percorsi sensibili alle prestazioni come SFTP.",
-    "features_telnet_title": "Telnet, seriale, Raw TCP e Raw UDP",
-    "features_telnet_description": "I nuovi tipi di sessione nativi coprono sistemi precedenti, dispositivi e diagnostica diretta dei socket.",
+    "features_telnet_title": "Telnet, seriale",
+    "features_telnet_description": "I nuovi tipi di sessione nativi supportano sistemi precedenti e dispositivi seriali.",
     "features_remote_title": "RDP e VNC integrati",
     "features_remote_description": "Le sessioni desktop remote ora affiancano i flussi di lavoro di terminale e file.",
     "features_host_tools_title": "Host Tools",
@@ -1084,8 +1074,6 @@
     "ai_tools_later_hint": "Tutte le impostazioni di AI e strumenti possono essere configurate in seguito nelle Impostazioni. Non sono necessarie chiavi API durante la configurazione iniziale.",
     "remote_ide": "Workspace IDE remoto",
     "remote_ide_desc": "Albero progetto basato su SFTP, modifica multi-scheda, tracciamento modifiche e salvataggi consapevoli dei conflitti.",
-    "raw_sockets": "Strumenti Raw TCP/UDP",
-    "raw_sockets_desc": "Esegui il debug di protocolli testuali o esadecimali con stream TCP grezzi e datagrammi UDP.",
     "serial_console": "Runtime terminale seriale",
     "serial_console_desc": "Apri dispositivi seriali locali con controlli di stato, politica di fine riga, modalità esadecimale, Break, DTR e RTS.",
     "remote_desktop": "RDP e VNC",

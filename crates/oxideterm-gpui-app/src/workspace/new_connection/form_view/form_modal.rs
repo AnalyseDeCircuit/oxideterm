@@ -20,18 +20,6 @@ impl WorkspaceApp {
         let duplicate_mode = mode == NewConnectionFormMode::DuplicateTemplate;
         let edit_properties_mode = mode.submits_saved_connection_properties();
         let drill_down_mode = self.drill_down_parent_node_id.is_some();
-        let raw_tcp_edit_mode = self.editing_raw_tcp_profile_id.is_some()
-            && !prompt_mode
-            && !duplicate_mode
-            && !edit_properties_mode
-            && !drill_down_mode
-            && form.transport == NewConnectionTransport::RawTcp;
-        let raw_udp_edit_mode = self.editing_raw_udp_profile_id.is_some()
-            && !prompt_mode
-            && !duplicate_mode
-            && !edit_properties_mode
-            && !drill_down_mode
-            && form.transport == NewConnectionTransport::RawUdp;
         let modal_max_height = f32::from(window.viewport_size().height)
             * self.tokens.metrics.modal_max_viewport_height_ratio;
         let serial_mode = !prompt_mode
@@ -44,16 +32,6 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Telnet;
-        let raw_tcp_mode = !prompt_mode
-            && !duplicate_mode
-            && !edit_properties_mode
-            && !drill_down_mode
-            && form.transport == NewConnectionTransport::RawTcp;
-        let raw_udp_mode = !prompt_mode
-            && !duplicate_mode
-            && !edit_properties_mode
-            && !drill_down_mode
-            && form.transport == NewConnectionTransport::RawUdp;
         let remote_desktop_protocol =
             if !prompt_mode && !duplicate_mode && !edit_properties_mode && !drill_down_mode {
                 match form.transport {
@@ -73,16 +51,12 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::WslGraphics;
-        let local_transport_mode = serial_mode || telnet_mode || raw_tcp_mode || raw_udp_mode;
+        let local_transport_mode = serial_mode || telnet_mode;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
         let ssh_submission_mode =
             !local_transport_mode && !remote_desktop_mode && !wsl_graphics_mode;
-        let shows_transport_selector = !prompt_mode
-            && !duplicate_mode
-            && !edit_properties_mode
-            && !drill_down_mode
-            && !raw_tcp_edit_mode
-            && !raw_udp_edit_mode;
+        let shows_transport_selector =
+            !prompt_mode && !duplicate_mode && !edit_properties_mode && !drill_down_mode;
         let title = if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
@@ -92,8 +66,6 @@ impl WorkspaceApp {
         } else if duplicate_mode {
             self.i18n
                 .t("sessionManager.edit_properties.duplicate_title")
-        } else if raw_tcp_edit_mode {
-            self.i18n.t("sessionManager.edit_properties.title")
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.title")
         } else {
@@ -116,14 +88,10 @@ impl WorkspaceApp {
         } else if duplicate_mode {
             self.i18n
                 .t("sessionManager.edit_properties.duplicate_description")
-        } else if raw_tcp_edit_mode {
-            self.i18n.t("sessionManager.edit_properties.description")
         } else if edit_properties_mode {
             self.i18n.t("sessionManager.edit_properties.description")
         } else if telnet_mode {
             self.i18n.t("modals.new_connection.telnet_description")
-        } else if raw_tcp_mode {
-            self.i18n.t("modals.new_connection.raw_tcp_description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
         } else if remote_desktop_protocol
@@ -149,9 +117,6 @@ impl WorkspaceApp {
                     .is_ok_and(|baud| baud > 0)
         } else if telnet_mode {
             !form.host.trim().is_empty() && form.port.trim().parse::<u16>().is_ok()
-        } else if raw_tcp_mode {
-            !form.host.trim().is_empty()
-                && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
         } else if remote_desktop_protocol
             == Some(oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp)
         {
@@ -255,12 +220,6 @@ impl WorkspaceApp {
                                         .when(telnet_mode, |content| {
                                             content.child(self.render_telnet_form_branch(cx))
                                         })
-                                        .when(raw_tcp_mode, |content| {
-                                            content.child(self.render_raw_tcp_form_branch(cx))
-                                        })
-                                        .when(raw_udp_mode, |content| {
-                                            content.child(self.render_raw_udp_form_branch(cx))
-                                        })
                                         .when(wsl_graphics_mode, |content| {
                                             content.child(self.render_wsl_graphics_form_branch(cx))
                                         })
@@ -271,8 +230,6 @@ impl WorkspaceApp {
                                         .when(
                                             !serial_mode
                                                 && !telnet_mode
-                                                && !raw_tcp_mode
-                                                && !raw_udp_mode
                                                 && !wsl_graphics_mode
                                                 && !remote_desktop_mode,
                                             |content| {
@@ -901,8 +858,7 @@ impl WorkspaceApp {
                             !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
-                                && !wsl_graphics_mode
-                                && !raw_tcp_edit_mode,
+                                && !wsl_graphics_mode,
                             |footer| {
                                 footer
                                     .child(self.render_connection_button(
@@ -940,15 +896,6 @@ impl WorkspaceApp {
                                     ))
                             },
                         )
-                        .when(raw_tcp_edit_mode, |footer| {
-                            footer.child(self.render_connection_button(
-                                self.i18n.t("sessionManager.edit_properties.save"),
-                                true,
-                                ConnectionButtonAction::Save,
-                                primary_disabled,
-                                cx,
-                            ))
-                        })
                         .when(
                             edit_properties_mode
                                 || self.saved_connection_prompt_action.is_some(),

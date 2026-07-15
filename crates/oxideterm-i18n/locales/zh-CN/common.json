@@ -107,10 +107,8 @@
     "session_ssh_terminal": "SSH 终端",
     "cmd_open_serial_terminal": "打开串口终端",
     "cmd_open_telnet_terminal": "打开 Telnet 终端",
-    "cmd_open_raw_tcp_terminal": "打开 Raw TCP 终端",
     "cmd_open_rdp_preview": "打开 RDP 预览",
-    "cmd_open_vnc_preview": "打开 VNC 预览",
-    "cmd_open_raw_udp_terminal": "打开 Raw UDP 终端"
+    "cmd_open_vnc_preview": "打开 VNC 预览"
   },
   "shortcuts_modal": {
     "title": "键盘快捷键",
@@ -325,7 +323,6 @@
         "sync_forwards": "同步已保存的转发",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步串口配置",
-        "sync_raw_tcp_profiles": "同步 Raw TCP 配置",
         "sync_app_settings": "同步应用设置",
         "include_local_terminal_env_vars": "包含本地终端环境变量",
         "sync_plugin_settings": "同步插件设置",
@@ -335,8 +332,7 @@
         "github_oauth_client_id": "GitHub OAuth Client ID",
         "microsoft_oauth_client_id": "Microsoft OAuth Client ID",
         "microsoft_access_token": "Microsoft 访问令牌",
-        "google_oauth_client_id": "Google OAuth Client ID",
-        "sync_raw_udp_profiles": "同步 Raw UDP 配置"
+        "google_oauth_client_id": "Google OAuth Client ID"
       },
       "auth": {
         "bearer": "Bearer",
@@ -367,15 +363,13 @@
         "forwards_detail": "已保存的端口转发规则会连同所属连接元数据一起同步。",
         "quick_commands_detail": "快捷命令定义会参与同步。",
         "serial_profiles_detail": "串口连接配置会参与同步。",
-        "raw_tcp_profiles_detail": "Raw TCP 连接配置会参与同步。",
         "app_settings_sections_detail": "已选择分组：{{sections}}",
         "app_settings_disabled_detail": "当前同步范围已排除应用设置。",
         "plugin_settings_all_detail": "所有可同步插件设置都会参与同步。",
         "plugin_settings_selected_detail": "已选择插件：{{plugins}}",
         "plugin_settings_disabled_detail": "当前同步范围已排除插件设置。",
         "sensitive_credentials_enabled_detail": "加密后的敏感凭据对象会参与同步。",
-        "sensitive_credentials_disabled_detail": "连接密码、密钥密码、托管私钥、AI 密钥和提权凭据会被排除，直到启用敏感凭据同步。",
-        "raw_udp_profiles_detail": "Raw UDP 连接配置会参与同步。"
+        "sensitive_credentials_disabled_detail": "连接密码、密钥密码、托管私钥、AI 密钥和提权凭据会被排除，直到启用敏感凭据同步。"
       },
       "notes": {
         "upload_only": "自动同步只会自动上传。发现远端更新后，仍然需要用户显式确认。",
@@ -391,13 +385,13 @@
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{rawTcpProfiles}} 个 Raw TCP 配置，{{rawUdpProfiles}} 个 Raw UDP 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上传",
         "action_pull": "拉取",
         "action_restore": "恢复",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{rawTcpProfiles}} 个 Raw TCP 配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
         "operation_in_progress": "另一个云同步操作正在运行，请稍后再试。",
@@ -538,7 +532,6 @@
         "total_forwards": "转发数",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "串口配置",
-        "raw_tcp_profiles_label": "Raw TCP 配置",
         "will_import": "将导入",
         "will_merge": "将合并",
         "will_replace": "将替换",
@@ -557,7 +550,6 @@
         "toggle_forwards": "导入已保存的转发（{{count}}）",
         "toggle_quick_commands": "导入快捷命令（{{count}}）",
         "toggle_serial_profiles": "导入串口配置（{{count}}）",
-        "toggle_raw_tcp_profiles": "导入 Raw TCP 配置（{{count}}）",
         "section_field_count": "{{count}} 个字段",
         "section_general": "常规",
         "section_terminal_appearance": "终端外观",
@@ -581,9 +573,7 @@
         "toggle_sensitive_credentials": "导入敏感凭据（{{count}}）",
         "sensitive_summary_title": "敏感凭据",
         "sensitive_remote_summary": "远端加密凭据包含 {{connections}} 个连接记录和 {{portableSecrets}} 个可移植密钥。具体值始终隐藏。",
-        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植密钥。",
-        "raw_udp_profiles_label": "Raw UDP 配置",
-        "toggle_raw_udp_profiles": "导入 Raw UDP 配置（{{count}}）"
+        "sensitive_upload_summary": "将上传 {{passwords}} 个密码、{{keyPassphrases}} 个密钥口令、{{managedKeys}} 个托管密钥、{{managedKeyPassphrases}} 个托管密钥口令和 {{portableSecrets}} 个可移植密钥。"
       },
       "confirm": {
         "import_title": "确认导入远端快照？",
@@ -901,8 +891,8 @@
     "features_eyebrow": "第 5 页 · 功能能力",
     "features_title": "更多协议，更强工作流",
     "features_description": "2.0 扩展了连接类型与主机运维能力，并重构了 SFTP 等性能敏感链路。",
-    "features_telnet_title": "Telnet、串口、原始 TCP 与 UDP",
-    "features_telnet_description": "新增原生会话类型，覆盖旧式系统、设备连接和直接套接字诊断。",
+    "features_telnet_title": "Telnet、串口",
+    "features_telnet_description": "新增原生会话类型，覆盖旧式系统和串口设备。",
     "features_remote_title": "内置 RDP 与 VNC",
     "features_remote_description": "远程桌面会话现在可以和终端、文件工作流并列使用。",
     "features_host_tools_title": "主机工具",
@@ -1084,8 +1074,6 @@
     "ai_tools_later_hint": "所有 AI 和工具设置均可稍后在设置中配置。初始设置期间无需提供 API 密钥。",
     "remote_ide": "远程 IDE 工作区",
     "remote_ide_desc": "基于 SFTP 的项目树、多标签编辑、脏状态跟踪和冲突感知保存。",
-    "raw_sockets": "Raw TCP/UDP 工具",
-    "raw_sockets_desc": "用 Raw TCP 流和 UDP 数据报调试文本或十六进制协议。",
     "serial_console": "串口终端运行时",
     "serial_console_desc": "打开本地串口设备，支持状态控制、换行策略、十六进制模式、Break、DTR 和 RTS。",
     "remote_desktop": "RDP 与 VNC",

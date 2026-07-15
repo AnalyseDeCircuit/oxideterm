@@ -1387,8 +1387,6 @@ impl WorkspaceApp {
             forwards: self.forwarding_registry.list_all_saved_forwards().len(),
             quick_commands: 0,
             serial_profiles: self.connection_store.serial_profiles().len(),
-            raw_tcp_profiles: self.connection_store.raw_tcp_profiles().len(),
-            raw_udp_profiles: self.connection_store.raw_udp_profiles().len(),
             sensitive_credentials: 0,
             has_app_settings: true,
             plugin_settings_count: 0,

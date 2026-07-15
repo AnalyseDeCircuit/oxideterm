@@ -9,8 +9,7 @@ use std::{
 
 use gpui::{Context, Window};
 use oxideterm_connections::{
-    RawTcpProfile, RawUdpProfile, SaveConnectionRequest, SaveRawTcpProfileRequest,
-    SaveRawUdpProfileRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
+    SaveConnectionRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
     SavedUpstreamProxyProtocol, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
@@ -49,11 +48,7 @@ use oxideterm_session_adapter::{
     managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
     ssh_config_from_saved_connection,
 };
-use oxideterm_terminal::{
-    RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode, RawTcpSessionConfig, RawTcpTlsConfig,
-    RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding, RawUdpSendMode,
-    RawUdpSessionConfig, SerialSessionConfig, TelnetSessionConfig,
-};
+use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
 
 mod connect;
 mod conversion;
@@ -176,8 +171,6 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();
@@ -215,104 +208,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn open_raw_tcp_connection_form(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_new_connection_form(window, cx);
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.transport = NewConnectionTransport::RawTcp;
-            form.port = super::form_state::RAW_TCP_DEFAULT_PORT_TEXT.to_string();
-            form.focused_field = super::form_state::NewConnectionField::Host;
-            form.field_focused = false;
-        }
-    }
-
-    pub(in crate::workspace) fn open_raw_udp_connection_form(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_new_connection_form(window, cx);
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.transport = NewConnectionTransport::RawUdp;
-            form.port = super::form_state::RAW_UDP_DEFAULT_PORT_TEXT.to_string();
-            form.focused_field = super::form_state::NewConnectionField::Host;
-            form.field_focused = false;
-        }
-    }
-
-    pub(in crate::workspace) fn open_raw_tcp_profile_editor(
-        &mut self,
-        id: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(profile) = self
-            .connection_store
-            .raw_tcp_profiles()
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        else {
-            return;
-        };
-
-        self.prepare_modal_interaction_boundary();
-        self.new_connection_form = Some(form_from_raw_tcp_profile(
-            &profile,
-            self.i18n.t("ssh.form.ungrouped"),
-        ));
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = Some(id.to_string());
-        self.editing_raw_udp_profile_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
-        self.new_connection_caret_visible = true;
-        self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn open_raw_udp_profile_editor(
-        &mut self,
-        id: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(profile) = self
-            .connection_store
-            .raw_udp_profiles()
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        else {
-            return;
-        };
-
-        self.prepare_modal_interaction_boundary();
-        self.new_connection_form = Some(form_from_raw_udp_profile(
-            &profile,
-            self.i18n.t("ssh.form.ungrouped"),
-        ));
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = Some(id.to_string());
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
-        self.new_connection_caret_visible = true;
-        self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
-        cx.notify();
-    }
-
     pub(in crate::workspace) fn open_drill_down_form(
         &mut self,
         parent_node_id: NodeId,
@@ -347,8 +242,6 @@ impl WorkspaceApp {
         self.drill_down_parent_node_id = Some(parent_node_id);
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;
-        self.editing_raw_tcp_profile_id = None;
-        self.editing_raw_udp_profile_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
         self.close_new_connection_select();

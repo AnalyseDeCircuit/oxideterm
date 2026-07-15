@@ -76,14 +76,6 @@ impl ConnectionStore {
         &self.data.telnet_profiles
     }
 
-    pub fn raw_tcp_profiles(&self) -> &[RawTcpProfile] {
-        &self.data.raw_tcp_profiles
-    }
-
-    pub fn raw_udp_profiles(&self) -> &[RawUdpProfile] {
-        &self.data.raw_udp_profiles
-    }
-
     pub fn groups(&self) -> &[String] {
         &self.data.groups
     }
@@ -555,188 +547,6 @@ impl ConnectionStore {
         let Some(profile) = self
             .data
             .telnet_profiles
-            .iter_mut()
-            .find(|profile| profile.id == id)
-        else {
-            return Ok(false);
-        };
-        let now = Utc::now();
-        profile.last_used_at = Some(now);
-        profile.updated_at = now;
-        self.save()?;
-        Ok(true)
-    }
-
-    pub fn upsert_raw_tcp_profile(
-        &mut self,
-        request: SaveRawTcpProfileRequest,
-    ) -> Result<RawTcpProfile> {
-        let group = normalize_optional_group_name(request.group.as_deref())?;
-        let now = Utc::now();
-        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let mut profile = self
-            .data
-            .raw_tcp_profiles
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-            .unwrap_or_else(|| {
-                let mut profile =
-                    RawTcpProfile::new(request.name.trim(), request.host.trim(), request.port);
-                profile.id = id.clone();
-                profile
-            });
-
-        profile.name = request.name.trim().to_string();
-        profile.group = group;
-        profile.host = request.host.trim().to_string();
-        profile.port = request.port;
-        profile.line_ending = request.line_ending.unwrap_or_default();
-        profile.display_mode = request.display_mode.unwrap_or_default();
-        profile.send_mode = request.send_mode.unwrap_or_default();
-        profile.tls_mode = request.tls_mode.unwrap_or_default();
-        profile.tls_verification = request.tls_verification.unwrap_or_default();
-        // Empty SNI means "use the host"; keeping it as None avoids persisting
-        // a value that would fail direct RawTcpProfile validation.
-        profile.tls_server_name = request
-            .tls_server_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|server_name| !server_name.is_empty())
-            .map(ToOwned::to_owned);
-        profile.connect_on_open = request.connect_on_open.unwrap_or(false);
-        if !self
-            .data
-            .raw_tcp_profiles
-            .iter()
-            .any(|existing| existing.id == id)
-        {
-            profile.created_at = now;
-        }
-        profile.updated_at = now;
-        profile.validate()?;
-
-        if let Some(existing) = self
-            .data
-            .raw_tcp_profiles
-            .iter_mut()
-            .find(|existing| existing.id == id)
-        {
-            *existing = profile.clone();
-        } else {
-            self.data.raw_tcp_profiles.push(profile.clone());
-        }
-        self.normalize();
-        self.save()?;
-        Ok(profile)
-    }
-
-    pub fn delete_raw_tcp_profile(&mut self, id: &str) -> Result<bool> {
-        let before = self.data.raw_tcp_profiles.len();
-        self.data.raw_tcp_profiles.retain(|profile| profile.id != id);
-        let deleted = self.data.raw_tcp_profiles.len() != before;
-        if deleted {
-            self.save()?;
-        }
-        Ok(deleted)
-    }
-
-    pub fn mark_raw_tcp_profile_used(&mut self, id: &str) -> Result<bool> {
-        let Some(profile) = self
-            .data
-            .raw_tcp_profiles
-            .iter_mut()
-            .find(|profile| profile.id == id)
-        else {
-            return Ok(false);
-        };
-        let now = Utc::now();
-        profile.last_used_at = Some(now);
-        profile.updated_at = now;
-        self.save()?;
-        Ok(true)
-    }
-
-    pub fn upsert_raw_udp_profile(
-        &mut self,
-        request: SaveRawUdpProfileRequest,
-    ) -> Result<RawUdpProfile> {
-        let group = normalize_optional_group_name(request.group.as_deref())?;
-        let now = Utc::now();
-        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let mut profile = self
-            .data
-            .raw_udp_profiles
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-            .unwrap_or_else(|| {
-                let mut profile = RawUdpProfile::new(
-                    request.name.trim(),
-                    request.remote_host.trim(),
-                    request.remote_port,
-                );
-                profile.id = id.clone();
-                profile
-            });
-
-        profile.name = request.name.trim().to_string();
-        profile.group = group;
-        profile.remote_host = request.remote_host.trim().to_string();
-        profile.remote_port = request.remote_port;
-        // Empty bind host means wildcard. Keep that as None so the profile does
-        // not persist platform-specific "any" addresses.
-        profile.local_bind_host = request
-            .local_bind_host
-            .as_deref()
-            .map(str::trim)
-            .filter(|host| !host.is_empty())
-            .map(ToOwned::to_owned);
-        profile.local_bind_port = request.local_bind_port.unwrap_or(0);
-        profile.line_ending = request.line_ending.unwrap_or_default();
-        profile.display_mode = request.display_mode.unwrap_or_default();
-        profile.send_mode = request.send_mode.unwrap_or_default();
-        profile.connect_on_open = request.connect_on_open.unwrap_or(false);
-        if !self
-            .data
-            .raw_udp_profiles
-            .iter()
-            .any(|existing| existing.id == id)
-        {
-            profile.created_at = now;
-        }
-        profile.updated_at = now;
-        profile.validate()?;
-
-        if let Some(existing) = self
-            .data
-            .raw_udp_profiles
-            .iter_mut()
-            .find(|existing| existing.id == id)
-        {
-            *existing = profile.clone();
-        } else {
-            self.data.raw_udp_profiles.push(profile.clone());
-        }
-        self.normalize();
-        self.save()?;
-        Ok(profile)
-    }
-
-    pub fn delete_raw_udp_profile(&mut self, id: &str) -> Result<bool> {
-        let before = self.data.raw_udp_profiles.len();
-        self.data.raw_udp_profiles.retain(|profile| profile.id != id);
-        let deleted = self.data.raw_udp_profiles.len() != before;
-        if deleted {
-            self.save()?;
-        }
-        Ok(deleted)
-    }
-
-    pub fn mark_raw_udp_profile_used(&mut self, id: &str) -> Result<bool> {
-        let Some(profile) = self
-            .data
-            .raw_udp_profiles
             .iter_mut()
             .find(|profile| profile.id == id)
         else {
@@ -1938,18 +1748,6 @@ impl ConnectionStore {
                     .iter()
                     .filter_map(|profile| profile.group.clone()),
             )
-            .chain(
-                self.data
-                    .raw_tcp_profiles
-                    .iter()
-                    .filter_map(|profile| profile.group.clone()),
-            )
-            .chain(
-                self.data
-                    .raw_udp_profiles
-                    .iter()
-                    .filter_map(|profile| profile.group.clone()),
-            )
             .collect::<Vec<_>>();
         for group in implicit_local_groups {
             if !self.data.groups.contains(&group) {
@@ -1971,12 +1769,6 @@ impl ConnectionStore {
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
         self.data
             .telnet_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-        self.data
-            .raw_tcp_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-        self.data
-            .raw_udp_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     }
 

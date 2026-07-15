@@ -5,8 +5,6 @@
 
 pub const SSH_DEFAULT_PORT_TEXT: &str = "22";
 pub const TELNET_DEFAULT_PORT_TEXT: &str = "23";
-pub const RAW_TCP_DEFAULT_PORT_TEXT: &str = "";
-pub const RAW_UDP_DEFAULT_PORT_TEXT: &str = "";
 pub const RDP_DEFAULT_PORT_TEXT: &str = "3389";
 pub const VNC_DEFAULT_PORT_TEXT: &str = "5900";
 
@@ -14,8 +12,6 @@ pub const VNC_DEFAULT_PORT_TEXT: &str = "5900";
 pub enum ConnectionTransport {
     Ssh,
     Telnet,
-    RawTcp,
-    RawUdp,
     Serial,
     Rdp,
     Vnc,
@@ -32,8 +28,6 @@ pub fn transport_default_port(transport: ConnectionTransport) -> Option<&'static
     match transport {
         ConnectionTransport::Ssh => Some(SSH_DEFAULT_PORT_TEXT),
         ConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
-        ConnectionTransport::RawTcp => Some(RAW_TCP_DEFAULT_PORT_TEXT),
-        ConnectionTransport::RawUdp => Some(RAW_UDP_DEFAULT_PORT_TEXT),
         ConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
         ConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
         ConnectionTransport::Serial | ConnectionTransport::WslGraphics => None,
@@ -76,21 +70,9 @@ pub fn transport_username_transition(
         {
             Some(TransportUsernameTransition::Clear)
         }
-        ConnectionTransport::RawTcp | ConnectionTransport::RawUdp
-            if matches!(
-                previous_transport,
-                ConnectionTransport::Ssh | ConnectionTransport::Rdp
-            ) && matches!(username, "root" | "Administrator") =>
-        {
-            Some(TransportUsernameTransition::Clear)
-        }
         ConnectionTransport::Ssh
-            if matches!(
-                previous_transport,
-                ConnectionTransport::Rdp
-                    | ConnectionTransport::RawTcp
-                    | ConnectionTransport::RawUdp
-            ) && (username == "Administrator" || username.is_empty()) =>
+            if previous_transport == ConnectionTransport::Rdp
+                && (username == "Administrator" || username.is_empty()) =>
         {
             Some(TransportUsernameTransition::Set("root"))
         }

@@ -996,7 +996,7 @@
       "legal_notice_close": "Đóng",
       "safety_title": "Sử dụng được ủy quyền và quyền riêng tư",
       "safety_authorized": "OxideTerm dành cho quản trị hệ thống, gỡ lỗi, vận hành từ xa, truy cập thiết bị và truyền tệp đã được ủy quyền. Chỉ dùng trên hệ thống bạn sở hữu, quản lý hoặc được phép vận hành rõ ràng.",
-      "safety_connections": "SSH, SFTP, Telnet, Serial, RDP/VNC, Raw TCP/UDP, chuyển tiếp cổng và proxy jump sẽ kết nối tới mục tiêu bạn chọn. Hãy bảo đảm các kết nối, tuyến và lưu lượng chuyển tiếp này được tổ chức của bạn và quy định địa phương cho phép.",
+      "safety_connections": "SSH, SFTP, Telnet, Serial, RDP/VNC, chuyển tiếp cổng và proxy jump sẽ kết nối tới mục tiêu bạn chọn. Hãy bảo đảm các kết nối, tuyến và lưu lượng chuyển tiếp này được tổ chức của bạn và quy định địa phương cho phép.",
       "safety_prohibited": "Không dùng OxideTerm cho truy cập trái phép, tấn công thông tin xác thực, né tránh hạn chế mạng, điều khiển từ xa che giấu, khai thác lỗ hổng, hoạt động phá hoại hoặc rò rỉ dữ liệu.",
       "safety_privacy": "OxideTerm mặc định chạy như một ứng dụng khách cục bộ. Ứng dụng không yêu cầu tài khoản, không thu thập telemetry và không tải nội dung terminal, hồ sơ kết nối, lịch sử lệnh, khóa riêng hoặc thông tin xác thực lên dịch vụ OxideTerm.",
       "safety_secrets": "Thông tin xác thực và API key nên được giữ trong kho bảo mật của hệ thống khi được hỗ trợ. Trước khi chia sẻ nhật ký, ảnh chụp, gói xuất, chẩn đoán hoặc prompt, hãy kiểm tra và che bí mật, tên máy chủ, tên người dùng và đường dẫn nội bộ.",

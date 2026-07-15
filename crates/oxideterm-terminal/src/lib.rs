@@ -59,15 +59,12 @@ pub use oxideterm_terminal_encoding::{
 pub use oxideterm_trzsz::{TrzszTransferDirection, TrzszTransferPolicy, TrzszTransferSelection};
 pub use process::{TerminalLifecycle, TerminalProcessInfo, TerminalProcessProbe};
 pub use session::{
-    RawTcpDisplayMode, RawTcpLineEnding, RawTcpRuntimeOptions, RawTcpSendMode, RawTcpSessionConfig,
-    RawTcpTlsConfig, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding,
-    RawUdpRuntimeOptions, RawUdpSendMode, RawUdpSessionConfig, SerialControlLine,
-    SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
-    SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,
-    SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetSessionConfig, TerminalDrainBudget,
-    TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor, TerminalResize,
-    TerminalSession, TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
-    serial_list_ports,
+    SerialControlLine, SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode,
+    SerialFlowControl, SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions,
+    SerialSendMode, SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetSessionConfig,
+    TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor,
+    TerminalResize, TerminalSession, TerminalSessionBackend, TerminalSessionKind,
+    TerminalSessionStatus, serial_list_ports,
 };
 pub use shell_completion::{
     TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,

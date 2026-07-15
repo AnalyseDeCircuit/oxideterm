@@ -231,10 +231,6 @@ pub struct RawSyncScope {
     #[serde(default)]
     pub sync_serial_profiles: Option<bool>,
     #[serde(default)]
-    pub sync_raw_tcp_profiles: Option<bool>,
-    #[serde(default)]
-    pub sync_raw_udp_profiles: Option<bool>,
-    #[serde(default)]
     pub sync_sensitive_credentials: Option<bool>,
     #[serde(default)]
     pub sync_app_settings: Option<bool>,
@@ -259,10 +255,6 @@ pub struct SyncScope {
     pub sync_quick_commands: bool,
     #[serde(default = "default_true")]
     pub sync_serial_profiles: bool,
-    #[serde(default = "default_true")]
-    pub sync_raw_tcp_profiles: bool,
-    #[serde(default = "default_true")]
-    pub sync_raw_udp_profiles: bool,
     #[serde(default)]
     pub sync_sensitive_credentials: bool,
     #[serde(default = "default_true")]
@@ -295,10 +287,6 @@ pub struct LocalSyncMetadata {
     #[serde(default)]
     pub serial_profiles_revision: Option<String>,
     #[serde(default)]
-    pub raw_tcp_profiles_revision: Option<String>,
-    #[serde(default)]
-    pub raw_udp_profiles_revision: Option<String>,
-    #[serde(default)]
     pub sensitive_credentials_revision: Option<String>,
     #[serde(default)]
     pub settings_revision: Option<String>,
@@ -320,10 +308,6 @@ pub struct StructuredLocalState {
     #[serde(default)]
     pub serial_profiles: Option<String>,
     #[serde(default)]
-    pub raw_tcp_profiles: Option<String>,
-    #[serde(default)]
-    pub raw_udp_profiles: Option<String>,
-    #[serde(default)]
     pub sensitive_credentials: Option<String>,
     #[serde(default)]
     pub app_settings: BTreeMap<String, Option<String>>,
@@ -342,10 +326,6 @@ pub struct StructuredDirtySections {
     pub quick_commands: bool,
     #[serde(default)]
     pub serial_profiles: bool,
-    #[serde(default)]
-    pub raw_tcp_profiles: bool,
-    #[serde(default)]
-    pub raw_udp_profiles: bool,
     #[serde(default)]
     pub sensitive_credentials: bool,
     #[serde(default)]
@@ -374,10 +354,6 @@ pub struct StructuredSectionRevisions {
     #[serde(default)]
     pub serial_profiles: Option<String>,
     #[serde(default)]
-    pub raw_tcp_profiles: Option<String>,
-    #[serde(default)]
-    pub raw_udp_profiles: Option<String>,
-    #[serde(default)]
     pub sensitive_credentials: Option<String>,
     #[serde(default)]
     pub app_settings: BTreeMap<String, String>,
@@ -396,10 +372,6 @@ pub struct StructuredApplySelection {
     pub quick_commands: bool,
     #[serde(default)]
     pub serial_profiles: bool,
-    #[serde(default)]
-    pub raw_tcp_profiles: bool,
-    #[serde(default)]
-    pub raw_udp_profiles: bool,
     #[serde(default)]
     pub sensitive_credentials: bool,
     #[serde(default)]
@@ -429,10 +401,6 @@ pub struct StructuredManifestSections {
     pub quick_commands: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles: Option<StructuredObjectEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_tcp_profiles: Option<StructuredObjectEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_udp_profiles: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_credentials: Option<StructuredObjectEntry>,
     #[serde(default)]
@@ -492,12 +460,6 @@ pub fn normalize_sync_scope(
             .unwrap_or(true),
         sync_serial_profiles: scope
             .and_then(|scope| scope.sync_serial_profiles)
-            .unwrap_or(true),
-        sync_raw_tcp_profiles: scope
-            .and_then(|scope| scope.sync_raw_tcp_profiles)
-            .unwrap_or(true),
-        sync_raw_udp_profiles: scope
-            .and_then(|scope| scope.sync_raw_udp_profiles)
             .unwrap_or(true),
         // Sensitive credentials currently reuse the encrypted connection archive, so they must not
         // be synced when connection sync is disabled.
@@ -578,14 +540,6 @@ pub fn build_structured_local_state(
             .sync_serial_profiles
             .then(|| local_metadata.serial_profiles_revision.clone())
             .flatten(),
-        raw_tcp_profiles: scope
-            .sync_raw_tcp_profiles
-            .then(|| local_metadata.raw_tcp_profiles_revision.clone())
-            .flatten(),
-        raw_udp_profiles: scope
-            .sync_raw_udp_profiles
-            .then(|| local_metadata.raw_udp_profiles_revision.clone())
-            .flatten(),
         sensitive_credentials: scope
             .sync_sensitive_credentials
             .then(|| local_metadata.sensitive_credentials_revision.clone())
@@ -613,12 +567,6 @@ pub fn compute_structured_dirty_sections(
         serial_profiles: scope.sync_serial_profiles
             && current_state.serial_profiles
                 != baseline_state.and_then(|state| state.serial_profiles.clone()),
-        raw_tcp_profiles: scope.sync_raw_tcp_profiles
-            && current_state.raw_tcp_profiles
-                != baseline_state.and_then(|state| state.raw_tcp_profiles.clone()),
-        raw_udp_profiles: scope.sync_raw_udp_profiles
-            && current_state.raw_udp_profiles
-                != baseline_state.and_then(|state| state.raw_udp_profiles.clone()),
         sensitive_credentials: scope.sync_sensitive_credentials
             && current_state.sensitive_credentials
                 != baseline_state.and_then(|state| state.sensitive_credentials.clone()),
@@ -673,8 +621,6 @@ pub fn compute_structured_dirty_sections(
         || dirty_sections.forwards
         || dirty_sections.quick_commands
         || dirty_sections.serial_profiles
-        || dirty_sections.raw_tcp_profiles
-        || dirty_sections.raw_udp_profiles
         || dirty_sections.sensitive_credentials
         || dirty_sections.app_settings.values().any(|dirty| *dirty)
         || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
@@ -728,16 +674,6 @@ pub fn build_manifest_section_revisions(
             .serial_profiles
             .as_ref()
             .map(|entry| entry.revision.clone()),
-        raw_tcp_profiles: manifest
-            .sections
-            .raw_tcp_profiles
-            .as_ref()
-            .map(|entry| entry.revision.clone()),
-        raw_udp_profiles: manifest
-            .sections
-            .raw_udp_profiles
-            .as_ref()
-            .map(|entry| entry.revision.clone()),
         sensitive_credentials: manifest
             .sections
             .sensitive_credentials
@@ -777,12 +713,6 @@ pub fn merge_structured_baseline(
     if selection.serial_profiles {
         merged.serial_profiles = next_state.serial_profiles.clone();
     }
-    if selection.raw_tcp_profiles {
-        merged.raw_tcp_profiles = next_state.raw_tcp_profiles.clone();
-    }
-    if selection.raw_udp_profiles {
-        merged.raw_udp_profiles = next_state.raw_udp_profiles.clone();
-    }
     if selection.sensitive_credentials {
         merged.sensitive_credentials = next_state.sensitive_credentials.clone();
     }
@@ -818,12 +748,6 @@ pub fn count_structured_upload_plan_units(
     }
     if scope.sync_serial_profiles {
         total += usize::from(local_metadata.serial_profiles_revision.is_some());
-    }
-    if scope.sync_raw_tcp_profiles {
-        total += usize::from(local_metadata.raw_tcp_profiles_revision.is_some());
-    }
-    if scope.sync_raw_udp_profiles {
-        total += usize::from(local_metadata.raw_udp_profiles_revision.is_some());
     }
     if scope.sync_sensitive_credentials {
         total += usize::from(local_metadata.sensitive_credentials_revision.is_some());
@@ -866,14 +790,6 @@ pub fn quick_commands_object_path(revision: &str) -> String {
 
 pub fn serial_profiles_object_path(revision: &str) -> String {
     format!("structured/serial-profiles/{revision}.json")
-}
-
-pub fn raw_tcp_profiles_object_path(revision: &str) -> String {
-    format!("structured/raw-tcp-profiles/{revision}.json")
-}
-
-pub fn raw_udp_profiles_object_path(revision: &str) -> String {
-    format!("structured/raw-udp-profiles/{revision}.json")
 }
 
 pub fn sensitive_credentials_object_path(revision: &str) -> String {
@@ -1077,6 +993,41 @@ mod tests {
     }
 
     #[test]
+    fn structured_manifest_ignores_removed_raw_profile_sections() {
+        let manifest: StructuredManifest = serde_json::from_value(serde_json::json!({
+            "format": STRUCTURED_MANIFEST_FORMAT,
+            "revision": "manifest-rev",
+            "uploadedAt": "2026-07-15T00:00:00Z",
+            "deviceId": "legacy-device",
+            "contentType": STRUCTURED_MANIFEST_CONTENT_TYPE,
+            "scope": {
+                "syncRawTcpProfiles": true,
+                "syncRawUdpProfiles": true
+            },
+            "sections": {
+                "rawTcpProfiles": {
+                    "revision": "raw-tcp-rev",
+                    "path": "structured/raw-tcp-profiles/raw-tcp-rev.json",
+                    "recordCount": 1,
+                    "contentType": "application/json"
+                },
+                "rawUdpProfiles": {
+                    "revision": "raw-udp-rev",
+                    "path": "structured/raw-udp-profiles/raw-udp-rev.json",
+                    "recordCount": 1,
+                    "contentType": "application/json"
+                }
+            }
+        }))
+        .expect("legacy manifest should deserialize");
+
+        // Removed legacy sections are accepted on read but never emitted again.
+        let encoded = serde_json::to_string(&manifest).expect("manifest should serialize");
+        assert!(!encoded.contains("rawTcpProfiles"));
+        assert!(!encoded.contains("rawUdpProfiles"));
+    }
+
+    #[test]
     fn computes_dirty_sections_against_structured_baseline() {
         let scope = SyncScope {
             plugin_ids: Some(strings(&["plugin-a"])),
@@ -1100,8 +1051,6 @@ mod tests {
             forwards: Some("fwd-1".into()),
             quick_commands: None,
             serial_profiles: None,
-            raw_tcp_profiles: None,
-            raw_udp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-1".into())),
@@ -1184,8 +1133,6 @@ mod tests {
             forwards: Some("fwd-old".into()),
             quick_commands: None,
             serial_profiles: None,
-            raw_tcp_profiles: None,
-            raw_udp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-old".into())),
@@ -1198,8 +1145,6 @@ mod tests {
             forwards: Some("fwd-new".into()),
             quick_commands: None,
             serial_profiles: None,
-            raw_tcp_profiles: None,
-            raw_udp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-new".into())),

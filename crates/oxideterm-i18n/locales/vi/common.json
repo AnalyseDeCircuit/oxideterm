@@ -107,8 +107,6 @@
     "cmd_open_cloud_sync": "Mở đồng bộ đám mây",
     "cmd_open_serial_terminal": "Mở terminal serial",
     "cmd_open_telnet_terminal": "Mở terminal Telnet",
-    "cmd_open_raw_tcp_terminal": "Mở terminal Raw TCP",
-    "cmd_open_raw_udp_terminal": "Mở terminal Raw UDP",
     "cmd_open_rdp_preview": "Mở bản xem trước RDP",
     "cmd_open_vnc_preview": "Mở bản xem trước VNC"
   },
@@ -333,8 +331,6 @@
         "sync_forwards": "Đồng bộ chuyển tiếp đã lưu",
         "sync_quick_commands": "Đồng bộ lệnh nhanh",
         "sync_serial_profiles": "Đồng bộ hồ sơ serial",
-        "sync_raw_tcp_profiles": "Đồng bộ hồ sơ Raw TCP",
-        "sync_raw_udp_profiles": "Đồng bộ hồ sơ Raw UDP",
         "sync_app_settings": "Đồng bộ cài đặt ứng dụng",
         "include_local_terminal_env_vars": "Bao gồm biến môi trường terminal cục bộ",
         "sync_plugin_settings": "Đồng bộ cài đặt plugin",
@@ -375,8 +371,6 @@
         "forwards_detail": "Quy tắc chuyển tiếp cổng đã lưu được đưa vào cùng siêu dữ liệu kết nối sở hữu.",
         "quick_commands_detail": "Định nghĩa lệnh nhanh được đưa vào.",
         "serial_profiles_detail": "Hồ sơ kết nối serial được đưa vào.",
-        "raw_tcp_profiles_detail": "Hồ sơ kết nối Raw TCP được đưa vào.",
-        "raw_udp_profiles_detail": "Hồ sơ kết nối Raw UDP được đưa vào.",
         "app_settings_sections_detail": "Phần đã chọn: {{sections}}",
         "app_settings_disabled_detail": "Cài đặt ứng dụng bị loại trừ khỏi phạm vi đồng bộ hiện tại.",
         "plugin_settings_all_detail": "Tất cả cài đặt plugin có thể đồng bộ đều được đưa vào.",
@@ -399,13 +393,13 @@
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{rawTcpProfiles}} hồ sơ Raw TCP, {{rawUdpProfiles}} hồ sơ Raw UDP, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "history": {
         "action_upload": "Tải lên",
         "action_pull": "Tải xuống",
         "action_restore": "Khôi phục",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{rawTcpProfiles}} hồ sơ Raw TCP, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "errors": {
         "operation_in_progress": "Một thao tác đồng bộ đám mây khác đang chạy.",
@@ -546,8 +540,6 @@
         "total_forwards": "Chuyển tiếp",
         "quick_commands_label": "Lệnh nhanh",
         "serial_profiles_label": "Hồ sơ serial",
-        "raw_tcp_profiles_label": "Hồ sơ Raw TCP",
-        "raw_udp_profiles_label": "Hồ sơ Raw UDP",
         "will_import": "Sẽ nhập",
         "will_merge": "Sẽ được gộp",
         "will_replace": "Sẽ được thay thế",
@@ -566,8 +558,6 @@
         "toggle_forwards": "Nhập chuyển tiếp đã lưu ({{count}})",
         "toggle_quick_commands": "Nhập lệnh nhanh ({{count}})",
         "toggle_serial_profiles": "Nhập hồ sơ serial ({{count}})",
-        "toggle_raw_tcp_profiles": "Nhập hồ sơ Raw TCP ({{count}})",
-        "toggle_raw_udp_profiles": "Nhập hồ sơ Raw UDP ({{count}})",
         "section_field_count": "{{count}} trường",
         "section_general": "Chung",
         "section_terminal_appearance": "Giao diện terminal",
@@ -992,8 +982,6 @@
     "ai_tools_later_hint": "Tất cả cài đặt AI và công cụ đều có thể được cấu hình sau trong phần Cài đặt. Không cần API key trong quá trình thiết lập ban đầu.",
     "remote_ide": "Không gian IDE từ xa",
     "remote_ide_desc": "Cây dự án dựa trên SFTP, chỉnh sửa nhiều tab, theo dõi thay đổi và lưu có nhận biết xung đột.",
-    "raw_sockets": "Công cụ Raw TCP/UDP",
-    "raw_sockets_desc": "Gỡ lỗi giao thức văn bản hoặc hex bằng luồng TCP thô và datagram UDP.",
     "serial_console": "Runtime terminal serial",
     "serial_console_desc": "Mở thiết bị serial cục bộ với điều khiển trạng thái, chính sách xuống dòng, chế độ hex, Break, DTR và RTS.",
     "remote_desktop": "RDP và VNC",
@@ -1070,8 +1058,8 @@
     "features_eyebrow": "TRANG 5 · KHẢ NĂNG",
     "features_title": "Nhiều giao thức hơn, quy trình mạnh mẽ hơn",
     "features_description": "Phiên bản 2.0 mở rộng các loại kết nối và thao tác máy chủ, đồng thời xây dựng lại những luồng nhạy cảm với hiệu năng như SFTP.",
-    "features_telnet_title": "Telnet, serial, Raw TCP và Raw UDP",
-    "features_telnet_description": "Các loại phiên native mới hỗ trợ hệ thống cũ, thiết bị và chẩn đoán socket trực tiếp.",
+    "features_telnet_title": "Telnet, serial",
+    "features_telnet_description": "Các loại phiên native mới hỗ trợ hệ thống cũ và thiết bị nối tiếp.",
     "features_remote_title": "Tích hợp RDP và VNC",
     "features_remote_description": "Các phiên desktop từ xa giờ đây nằm cạnh quy trình terminal và tệp.",
     "features_host_tools_title": "Công cụ máy chủ",

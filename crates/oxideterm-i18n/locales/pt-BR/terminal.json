@@ -13,7 +13,6 @@
       "copy": "Copiar",
       "copy_title": "Copiar saída do comando",
       "copy_command": "Copiar comando",
-      "reconnect_transport": "Reconectar",
       "send_to_ai": "Enviar para OxideSens",
       "fill_command_bar": "Preencher barra de comandos",
       "insert_selection_into_command": "Inserir seleção aqui",

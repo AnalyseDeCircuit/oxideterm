@@ -135,15 +135,6 @@
       "delete_failed": "No se pudo eliminar el perfil Telnet",
       "confirm_delete": "¿Eliminar el perfil Telnet \"{{name}}\"?"
     },
-    "raw_tcp_profiles": {
-      "title": "Perfiles Raw TCP",
-      "count": "{{count}} perfil(es)",
-      "open": "Abrir",
-      "delete": "Eliminar",
-      "open_failed": "No se pudo abrir el perfil Raw TCP",
-      "delete_failed": "No se pudo eliminar el perfil Raw TCP",
-      "confirm_delete": "¿Eliminar el perfil Raw TCP \"{{name}}\"?"
-    },
     "privilege_credentials": {
       "title": "Credenciales de privilegios",
       "description": "Guarda credenciales separadas para prompts sudo/su. Los secretos permanecen en el llavero del sistema y solo se leen tras hacer clic en el asistente del terminal.",
@@ -184,15 +175,6 @@
       "list_header": "Sesiones guardadas",
       "expand_all": "Expandir todo",
       "collapse_all": "Contraer todo"
-    },
-    "raw_udp_profiles": {
-      "title": "Perfiles Raw UDP",
-      "count": "{{count}} perfil(es)",
-      "open": "Abrir",
-      "delete": "Eliminar",
-      "open_failed": "No se pudo abrir el perfil Raw UDP",
-      "delete_failed": "No se pudo eliminar el perfil Raw UDP",
-      "confirm_delete": "¿Eliminar el perfil Raw UDP \"{{name}}\"?"
     }
   }
 }

@@ -118,14 +118,10 @@ impl CloudSyncOperationService {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
-            raw_tcp_profiles_snapshot: None,
-            raw_udp_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
-            base_raw_tcp_profiles_snapshot: None,
-            base_raw_udp_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: std::collections::BTreeMap::new(),
@@ -161,18 +157,6 @@ impl CloudSyncOperationService {
                 .await?;
             preview.serial_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
         }
-        if let Some(entry) = preview.manifest.sections.raw_tcp_profiles.as_ref() {
-            let object = self
-                .read_required_object(settings, &metadata_secrets, entry)
-                .await?;
-            preview.raw_tcp_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
-        }
-        if let Some(entry) = preview.manifest.sections.raw_udp_profiles.as_ref() {
-            let object = self
-                .read_required_object(settings, &metadata_secrets, entry)
-                .await?;
-            preview.raw_udp_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
-        }
         if let Some(previous) = previous_remote_sections {
             preview.base_connections_snapshot = read_optional_snapshot_at_revision(
                 self,
@@ -204,22 +188,6 @@ impl CloudSyncOperationService {
                 &metadata_secrets,
                 previous.serial_profiles.as_deref(),
                 serial_profiles_object_path,
-            )
-            .await?;
-            preview.base_raw_tcp_profiles_snapshot = read_optional_snapshot_at_revision(
-                self,
-                settings,
-                &metadata_secrets,
-                previous.raw_tcp_profiles.as_deref(),
-                raw_tcp_profiles_object_path,
-            )
-            .await?;
-            preview.base_raw_udp_profiles_snapshot = read_optional_snapshot_at_revision(
-                self,
-                settings,
-                &metadata_secrets,
-                previous.raw_udp_profiles.as_deref(),
-                raw_udp_profiles_object_path,
             )
             .await?;
         }

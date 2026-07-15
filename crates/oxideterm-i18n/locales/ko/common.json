@@ -107,8 +107,6 @@
     "cmd_open_cloud_sync": "클라우드 동기화 열기",
     "cmd_open_serial_terminal": "시리얼 터미널 열기",
     "cmd_open_telnet_terminal": "Telnet 터미널 열기",
-    "cmd_open_raw_tcp_terminal": "Raw TCP 터미널 열기",
-    "cmd_open_raw_udp_terminal": "Raw UDP 터미널 열기",
     "cmd_open_rdp_preview": "RDP 미리보기 열기",
     "cmd_open_vnc_preview": "VNC 미리보기 열기"
   },
@@ -333,8 +331,6 @@
         "sync_forwards": "저장된 포워딩 동기화",
         "sync_quick_commands": "빠른 명령 동기화",
         "sync_serial_profiles": "시리얼 프로필 동기화",
-        "sync_raw_tcp_profiles": "Raw TCP 프로필 동기화",
-        "sync_raw_udp_profiles": "Raw UDP 프로필 동기화",
         "sync_app_settings": "앱 설정 동기화",
         "include_local_terminal_env_vars": "로컬 터미널 환경 변수 포함",
         "sync_plugin_settings": "플러그인 설정 동기화",
@@ -375,8 +371,6 @@
         "forwards_detail": "저장된 포트 포워딩 규칙이 소유 연결 메타데이터와 함께 포함됩니다.",
         "quick_commands_detail": "빠른 명령 정의가 포함됩니다.",
         "serial_profiles_detail": "시리얼 연결 프로필이 포함됩니다.",
-        "raw_tcp_profiles_detail": "Raw TCP 연결 프로필이 포함됩니다.",
-        "raw_udp_profiles_detail": "Raw UDP 연결 프로필이 포함됩니다.",
         "app_settings_sections_detail": "선택한 섹션: {{sections}}",
         "app_settings_disabled_detail": "현재 동기화 범위에서 애플리케이션 설정이 제외됩니다.",
         "plugin_settings_all_detail": "동기화 가능한 모든 플러그인 설정이 포함됩니다.",
@@ -399,13 +393,13 @@
       },
       "backup": {
         "description": "Oxide 클라우드 동기화 롤백 백업",
-        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, Raw TCP 프로필 {{rawTcpProfiles}}개, Raw UDP 프로필 {{rawUdpProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, {{size}}, 민감한 자격 증명 {{sensitiveCredentials}}개"
+        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, {{size}}, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "history": {
         "action_upload": "업로드",
         "action_pull": "가져오기",
         "action_restore": "복원",
-        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, Raw TCP 프로필 {{rawTcpProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, 민감한 자격 증명 {{sensitiveCredentials}}개"
+        "summary_line": "연결 {{connections}}개, 포워딩 {{forwards}}개, 빠른 명령 {{quickCommands}}개, 시리얼 프로필 {{serialProfiles}}개, 플러그인 설정 {{pluginSettingsCount}}개, 민감한 자격 증명 {{sensitiveCredentials}}개"
       },
       "errors": {
         "operation_in_progress": "다른 클라우드 동기화 작업이 실행 중입니다. 잠시 후 다시 시도하세요.",
@@ -546,8 +540,6 @@
         "total_forwards": "포워딩 수",
         "quick_commands_label": "빠른 명령",
         "serial_profiles_label": "시리얼 프로필",
-        "raw_tcp_profiles_label": "Raw TCP 프로필",
-        "raw_udp_profiles_label": "Raw UDP 프로필",
         "will_import": "가져올 항목",
         "will_merge": "병합 대상",
         "will_replace": "대체 대상",
@@ -566,8 +558,6 @@
         "toggle_forwards": "저장된 포워딩 가져오기 ({{count}})",
         "toggle_quick_commands": "빠른 명령 가져오기 ({{count}})",
         "toggle_serial_profiles": "시리얼 프로필 가져오기 ({{count}})",
-        "toggle_raw_tcp_profiles": "Raw TCP 프로필 가져오기 ({{count}})",
-        "toggle_raw_udp_profiles": "Raw UDP 프로필 가져오기 ({{count}})",
         "section_field_count": "{{count}}개 필드",
         "section_general": "일반",
         "section_terminal_appearance": "터미널 모양",
@@ -901,8 +891,8 @@
     "features_eyebrow": "5페이지 · 기능",
     "features_title": "더 많은 프로토콜과 강화된 작업 흐름",
     "features_description": "2.0은 연결 유형과 호스트 작업을 확장하는 동시에 SFTP처럼 성능에 민감한 경로를 다시 구축했습니다.",
-    "features_telnet_title": "Telnet, 직렬, Raw TCP, Raw UDP",
-    "features_telnet_description": "새로운 네이티브 세션 유형으로 레거시 시스템, 장치, 직접 소켓 진단을 지원합니다.",
+    "features_telnet_title": "Telnet, 직렬",
+    "features_telnet_description": "새로운 네이티브 세션 유형으로 레거시 시스템과 시리얼 장치를 지원합니다.",
     "features_remote_title": "내장 RDP 및 VNC",
     "features_remote_description": "이제 원격 데스크톱 세션을 터미널 및 파일 작업 흐름과 나란히 사용할 수 있습니다.",
     "features_host_tools_title": "Host Tools",
@@ -1084,8 +1074,6 @@
     "ai_tools_later_hint": "모든 AI 및 도구 설정은 나중에 설정에서 구성할 수 있습니다. 초기 설정 중 API 키는 필요하지 않습니다.",
     "remote_ide": "원격 IDE 워크스페이스",
     "remote_ide_desc": "SFTP 기반 프로젝트 트리, 다중 탭 편집, 변경 상태 추적, 충돌 인식 저장을 제공합니다.",
-    "raw_sockets": "Raw TCP/UDP 도구",
-    "raw_sockets_desc": "Raw TCP 스트림과 UDP 데이터그램으로 텍스트 또는 16진 프로토콜을 디버그합니다.",
     "serial_console": "시리얼 터미널 런타임",
     "serial_console_desc": "로컬 시리얼 장치를 열고 상태 제어, 줄바꿈 정책, 16진 모드, Break, DTR, RTS를 사용합니다.",
     "remote_desktop": "RDP와 VNC",

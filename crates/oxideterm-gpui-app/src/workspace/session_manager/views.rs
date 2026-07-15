@@ -5,8 +5,6 @@ pub(super) enum SessionManagerDisplayItem {
     Connection(ConnectionInfo),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
-    RawTcp(RawTcpProfile),
-    RawUdp(RawUdpProfile),
 }
 
 impl SessionManagerDisplayItem {
@@ -15,8 +13,6 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.id,
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
-            Self::RawTcp(profile) => &profile.id,
-            Self::RawUdp(profile) => &profile.id,
         }
     }
 
@@ -25,8 +21,6 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.name,
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
-            Self::RawTcp(profile) => &profile.name,
-            Self::RawUdp(profile) => &profile.name,
         }
     }
 
@@ -35,8 +29,6 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.group.as_deref(),
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
-            Self::RawTcp(profile) => profile.group.as_deref(),
-            Self::RawUdp(profile) => profile.group.as_deref(),
         }
     }
 
@@ -45,8 +37,6 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => connection.last_used_at.clone(),
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
-            Self::RawTcp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
-            Self::RawUdp(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
         }
     }
 
@@ -55,8 +45,6 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.host,
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
-            Self::RawTcp(profile) => &profile.host,
-            Self::RawUdp(profile) => &profile.remote_host,
         }
     }
 
@@ -65,15 +53,13 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => u32::from(connection.port),
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
-            Self::RawTcp(profile) => u32::from(profile.port),
-            Self::RawUdp(profile) => u32::from(profile.remote_port),
         }
     }
 
     pub(super) fn username(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.username,
-            Self::Serial(_) | Self::Telnet(_) | Self::RawTcp(_) | Self::RawUdp(_) => "",
+            Self::Serial(_) | Self::Telnet(_) => "",
         }
     }
 
@@ -82,8 +68,6 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => auth_label(connection.auth_type).to_lowercase(),
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
-            Self::RawTcp(_) => "raw tcp".to_string(),
-            Self::RawUdp(_) => "raw udp".to_string(),
         }
     }
 
@@ -97,28 +81,6 @@ impl SessionManagerDisplayItem {
             }
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Telnet(profile) => format!("{}:{}", profile.host, profile.port),
-            Self::RawTcp(profile) => {
-                let endpoint = format!("{}:{}", profile.host, profile.port);
-                if matches!(
-                    profile.tls_mode,
-                    oxideterm_connections::RawTcpTlsMode::Enabled
-                ) {
-                    format!("{endpoint} · TLS")
-                } else {
-                    endpoint
-                }
-            }
-            Self::RawUdp(profile) => {
-                let endpoint = format!("{}:{}", profile.remote_host, profile.remote_port);
-                if let Some(bind_host) = profile.local_bind_host.as_deref() {
-                    format!(
-                        "{endpoint} · bind {}:{}",
-                        bind_host, profile.local_bind_port
-                    )
-                } else {
-                    endpoint
-                }
-            }
         }
     }
 
@@ -147,31 +109,6 @@ impl SessionManagerDisplayItem {
                 profile.port,
                 profile.group.as_deref().unwrap_or_default()
             ),
-            Self::RawTcp(profile) => format!(
-                "{}\n{}\n{}\n{}\n{}\n{}",
-                profile.name,
-                profile.host,
-                profile.port,
-                profile.group.as_deref().unwrap_or_default(),
-                profile.tls_server_name.as_deref().unwrap_or_default(),
-                if matches!(
-                    profile.tls_mode,
-                    oxideterm_connections::RawTcpTlsMode::Enabled
-                ) {
-                    "tls"
-                } else {
-                    "tcp"
-                }
-            ),
-            Self::RawUdp(profile) => format!(
-                "{}\n{}\n{}\n{}\n{}\n{}",
-                profile.name,
-                profile.remote_host,
-                profile.remote_port,
-                profile.local_bind_host.as_deref().unwrap_or_default(),
-                profile.local_bind_port,
-                profile.group.as_deref().unwrap_or_default()
-            ),
         }
     }
 
@@ -183,8 +120,6 @@ impl SessionManagerDisplayItem {
             }
             Self::Serial(_) => LucideIcon::Radio,
             Self::Telnet(_) => LucideIcon::Terminal,
-            Self::RawTcp(_) => LucideIcon::Cable,
-            Self::RawUdp(_) => LucideIcon::Radio,
         }
     }
 }
@@ -222,20 +157,6 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::Telnet),
-            )
-            .chain(
-                self.connection_store
-                    .raw_tcp_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::RawTcp),
-            )
-            .chain(
-                self.connection_store
-                    .raw_udp_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::RawUdp),
             )
             .filter(|item| {
                 query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
@@ -1010,8 +931,6 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| rgba(0x0ea5e933)),
             SessionManagerDisplayItem::Serial(_) => rgba(0xf59e0b33),
             SessionManagerDisplayItem::Telnet(_) => rgba(0x22c55e33),
-            SessionManagerDisplayItem::RawTcp(_) => rgba(0xf9731633),
-            SessionManagerDisplayItem::RawUdp(_) => rgba(0x38bdf833),
         };
         let fg = match item {
             SessionManagerDisplayItem::Connection(connection) => connection
@@ -1022,8 +941,6 @@ impl WorkspaceApp {
                 .unwrap_or_else(|| rgb(0x7dd3fc)),
             SessionManagerDisplayItem::Serial(_) => rgb(0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => rgb(0x86efac),
-            SessionManagerDisplayItem::RawTcp(_) => rgb(0xfb923c),
-            SessionManagerDisplayItem::RawUdp(_) => rgb(0x67e8f9),
         };
         div()
             .w(px(MANAGER_ROW_ICON_SIZE))
@@ -1181,112 +1098,6 @@ impl WorkspaceApp {
                         cx,
                     ))
             }
-            SessionManagerDisplayItem::RawTcp(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id;
-                div()
-                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(MANAGER_ROW_ACTION_GAP))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::Play,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.accent),
-                        has_background,
-                        move |this, _event, window, cx| {
-                            this.open_saved_raw_tcp_profile(&open_id, window, cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::Pencil,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.text),
-                        has_background,
-                        move |this, _event, window, cx| {
-                            this.open_raw_tcp_profile_editor(&edit_id, window, cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::MoreVertical,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.text),
-                        has_background,
-                        move |this, event, _window, cx| {
-                            this.open_session_manager_row_action_menu(
-                                SessionManagerRowActionTarget::RawTcp(menu_id.clone()),
-                                f32::from(event.position.x),
-                                f32::from(event.position.y),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-            }
-            SessionManagerDisplayItem::RawUdp(profile) => {
-                let open_id = profile.id.clone();
-                let edit_id = profile.id.clone();
-                let menu_id = profile.id;
-                div()
-                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(MANAGER_ROW_ACTION_GAP))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::Play,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.accent),
-                        has_background,
-                        move |this, _event, window, cx| {
-                            this.open_saved_raw_udp_profile(&open_id, window, cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::Pencil,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.text),
-                        has_background,
-                        move |this, _event, window, cx| {
-                            this.open_raw_udp_profile_editor(&edit_id, window, cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_row_icon_button(
-                        LucideIcon::MoreVertical,
-                        MANAGER_ROW_ACTION_BUTTON,
-                        MANAGER_ROW_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.text),
-                        has_background,
-                        move |this, event, _window, cx| {
-                            this.open_session_manager_row_action_menu(
-                                SessionManagerRowActionTarget::RawUdp(menu_id.clone()),
-                                f32::from(event.position.x),
-                                f32::from(event.position.y),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-            }
         }
     }
 
@@ -1302,10 +1113,9 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Connection(_) => {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
-            SessionManagerRowActionTarget::Serial(_)
-            | SessionManagerRowActionTarget::Telnet(_)
-            | SessionManagerRowActionTarget::RawTcp(_)
-            | SessionManagerRowActionTarget::RawUdp(_) => MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT,
+            SessionManagerRowActionTarget::Serial(_) | SessionManagerRowActionTarget::Telnet(_) => {
+                MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT
+            }
         };
         let placement = browser_behavior::clamp_context_menu_position(
             menu.x - MANAGER_ROW_ACTION_MENU_WIDTH + MANAGER_ROW_ACTION_BUTTON / 2.0,
@@ -1375,14 +1185,6 @@ impl WorkspaceApp {
                 id.clone(),
                 self.i18n.t("sessionManager.telnet_profiles.delete"),
             ),
-            SessionManagerRowActionTarget::RawTcp(id) => (
-                id.clone(),
-                self.i18n.t("sessionManager.raw_tcp_profiles.delete"),
-            ),
-            SessionManagerRowActionTarget::RawUdp(id) => (
-                id.clone(),
-                self.i18n.t("sessionManager.raw_udp_profiles.delete"),
-            ),
         };
         popup = popup.child(
             self.render_session_manager_menu_action(
@@ -1407,12 +1209,6 @@ impl WorkspaceApp {
                         }
                         SessionManagerRowActionTarget::Telnet(_) => {
                             this.request_delete_telnet_profile(&delete_id, cx)
-                        }
-                        SessionManagerRowActionTarget::RawTcp(_) => {
-                            this.request_delete_raw_tcp_profile(&delete_id, cx)
-                        }
-                        SessionManagerRowActionTarget::RawUdp(_) => {
-                            this.request_delete_raw_udp_profile(&delete_id, cx)
                         }
                     }
                     cx.stop_propagation();
@@ -1499,12 +1295,6 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Telnet(profile) => {
                 self.open_saved_telnet_profile(&profile.id, window, cx)
-            }
-            SessionManagerDisplayItem::RawTcp(profile) => {
-                self.open_saved_raw_tcp_profile(&profile.id, window, cx)
-            }
-            SessionManagerDisplayItem::RawUdp(profile) => {
-                self.open_saved_raw_udp_profile(&profile.id, window, cx)
             }
         }
     }

@@ -52,8 +52,6 @@ fn dirty_snapshot() -> CloudSyncLocalSnapshot {
         forwards_record_count: 0,
         quick_commands_record_count: 0,
         serial_profiles_record_count: 0,
-        raw_tcp_profiles_record_count: 0,
-        raw_udp_profiles_record_count: 0,
         sensitive_credentials_record_count: 0,
     }
 }
@@ -258,8 +256,6 @@ fn upload_conflict_check_rejects_changed_sensitive_credentials_section() {
         forwards_record_count: 0,
         quick_commands_record_count: 0,
         serial_profiles_record_count: 0,
-        raw_tcp_profiles_record_count: 0,
-        raw_udp_profiles_record_count: 0,
         sensitive_credentials_record_count: 1,
     };
     let metadata = RemoteMetadata {

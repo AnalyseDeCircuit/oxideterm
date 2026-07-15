@@ -34,7 +34,7 @@ const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 14.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 13.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
 const TERMINAL_MODEM_SUBMENU_ACTION_COUNT: f32 = 6.0;
 const TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM: f32 = 9.0;
@@ -786,11 +786,6 @@ impl TerminalPane {
             .command_selection_labels
             .replace_command_with_selection
             .clone();
-        let reconnect_transport_label = self
-            .preferences
-            .command_selection_labels
-            .reconnect_transport
-            .clone();
         let find_label = self.preferences.command_selection_labels.find.clone();
         let select_command_label = self
             .preferences
@@ -828,16 +823,13 @@ impl TerminalPane {
         let insert_target = menu.target;
         let replace_target = menu.target;
         let modem_submenu_open = menu.modem_submenu_open;
-        let raw_socket_transport = self.is_raw_socket_transport();
-
         let tokens = &self.theme.tokens;
         let menu_visible =
             self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let submenu_height = tokens.metrics.ui_menu_padding * 2.0
             + TERMINAL_MODEM_SUBMENU_ACTION_COUNT * context_menu_item_height_estimate(tokens);
         let modem_trigger_top_offset = tokens.metrics.ui_menu_padding
-            + (TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM
-                + if raw_socket_transport { 1.0 } else { 0.0 })
+            + TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM
                 * context_menu_item_height_estimate(tokens)
             + TERMINAL_CONTEXT_MENU_SEPARATORS_BEFORE_MODEM
                 * context_menu_separator_height_estimate(tokens);
@@ -910,17 +902,6 @@ impl TerminalPane {
                     },
                     cx,
                 ))
-                .when(raw_socket_transport, |content| {
-                    content.child(self.render_terminal_context_menu_item(
-                        reconnect_transport_label,
-                        !self.can_reconnect_raw_socket(),
-                        |this, _event, _window, cx| {
-                            this.dismiss_terminal_context_menu(cx);
-                            this.reconnect_raw_socket(cx);
-                        },
-                        cx,
-                    ))
-                })
                 .child(context_menu_separator(tokens))
                 .child(self.render_terminal_context_menu_item(
                     send_to_ai_label,

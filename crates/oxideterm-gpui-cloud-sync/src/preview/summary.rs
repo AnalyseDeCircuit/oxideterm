@@ -164,20 +164,6 @@ pub fn cloud_sync_coverage_model(raw_scope: &RawSyncScope) -> Vec<CloudSyncCover
             ),
         },
         CloudSyncCoverageItem {
-            label_key: "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
-            status: coverage_status_from_bool(scope.sync_raw_tcp_profiles),
-            detail: CloudSyncCoverageDetail::Static(
-                "plugin.cloud_sync.coverage.raw_tcp_profiles_detail",
-            ),
-        },
-        CloudSyncCoverageItem {
-            label_key: "plugin.cloud_sync.settings.sync_raw_udp_profiles",
-            status: coverage_status_from_bool(scope.sync_raw_udp_profiles),
-            detail: CloudSyncCoverageDetail::Static(
-                "plugin.cloud_sync.coverage.raw_udp_profiles_detail",
-            ),
-        },
-        CloudSyncCoverageItem {
             label_key: "plugin.cloud_sync.settings.sync_app_settings",
             status: app_settings_status,
             detail: CloudSyncCoverageDetail::AppSettingsSections(scope.app_settings_sections),
@@ -236,18 +222,6 @@ pub fn cloud_sync_preview_impact_items(
         "plugin.cloud_sync.preview.serial_profiles_label",
         summary.serial_profiles,
         selection.import_serial_profiles,
-    );
-    push_preview_impact(
-        &mut items,
-        "plugin.cloud_sync.preview.raw_tcp_profiles_label",
-        summary.raw_tcp_profiles,
-        selection.import_raw_tcp_profiles,
-    );
-    push_preview_impact(
-        &mut items,
-        "plugin.cloud_sync.preview.raw_udp_profiles_label",
-        summary.raw_udp_profiles,
-        selection.import_raw_udp_profiles,
     );
     push_preview_impact(
         &mut items,
@@ -352,26 +326,6 @@ pub fn cloud_sync_upload_diff_items(
     );
     push_section_diff(
         &mut items,
-        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_raw_tcp_profiles"),
-        scope.sync_raw_tcp_profiles,
-        current.raw_tcp_profiles.as_deref(),
-        baseline.and_then(|state| state.raw_tcp_profiles.as_deref()),
-        remote.and_then(|sections| sections.raw_tcp_profiles.as_deref()),
-        remote_known,
-        Some(snapshot.raw_tcp_profiles_record_count),
-    );
-    push_section_diff(
-        &mut items,
-        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_raw_udp_profiles"),
-        scope.sync_raw_udp_profiles,
-        current.raw_udp_profiles.as_deref(),
-        baseline.and_then(|state| state.raw_udp_profiles.as_deref()),
-        remote.and_then(|sections| sections.raw_udp_profiles.as_deref()),
-        remote_known,
-        Some(snapshot.raw_udp_profiles_record_count),
-    );
-    push_section_diff(
-        &mut items,
         CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_sensitive_credentials"),
         scope.sync_sensitive_credentials,
         current.sensitive_credentials.as_deref(),
@@ -441,32 +395,6 @@ pub fn cloud_sync_apply_diff_items(
         Some(
             preview
                 .serial_profiles_snapshot
-                .as_ref()
-                .map_or(0, |snapshot| snapshot.records.len()),
-        ),
-    );
-    push_apply_section_diff(
-        &mut items,
-        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_raw_tcp_profiles"),
-        selection.import_raw_tcp_profiles,
-        remote.raw_tcp_profiles.as_deref(),
-        local.raw_tcp_profiles.as_deref(),
-        Some(
-            preview
-                .raw_tcp_profiles_snapshot
-                .as_ref()
-                .map_or(0, |snapshot| snapshot.records.len()),
-        ),
-    );
-    push_apply_section_diff(
-        &mut items,
-        CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_raw_udp_profiles"),
-        selection.import_raw_udp_profiles,
-        remote.raw_udp_profiles.as_deref(),
-        local.raw_udp_profiles.as_deref(),
-        Some(
-            preview
-                .raw_udp_profiles_snapshot
                 .as_ref()
                 .map_or(0, |snapshot| snapshot.records.len()),
         ),
@@ -585,17 +513,6 @@ pub fn cloud_sync_apply_field_diff_items(
             &selection.conflict_strategy,
         );
     }
-    if selection.import_raw_tcp_profiles
-        && let Some(remote) = preview.raw_tcp_profiles_snapshot.as_ref()
-    {
-        push_raw_tcp_profile_field_diffs(
-            &mut items,
-            remote,
-            preview.base_raw_tcp_profiles_snapshot.as_ref(),
-            local.raw_tcp_profiles.as_ref(),
-            &selection.conflict_strategy,
-        );
-    }
     if selection.import_app_settings {
         push_app_settings_field_diffs(&mut items, preview, selection, local);
     }
@@ -649,15 +566,6 @@ pub fn cloud_sync_upload_field_diff_items(
         push_upload_serial_profile_field_diffs(
             &mut items,
             remote_preview.serial_profiles_snapshot.as_ref(),
-            local,
-        );
-    }
-    if scope.sync_raw_tcp_profiles
-        && let Some(local) = local.raw_tcp_profiles.as_ref()
-    {
-        push_upload_raw_tcp_profile_field_diffs(
-            &mut items,
-            remote_preview.raw_tcp_profiles_snapshot.as_ref(),
             local,
         );
     }

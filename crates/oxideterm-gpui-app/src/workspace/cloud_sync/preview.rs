@@ -343,14 +343,6 @@ impl WorkspaceApp {
                 CloudSyncUploadSelectionAction::ToggleSerialProfiles,
             ),
             (
-                "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
-                CloudSyncUploadSelectionAction::ToggleRawTcpProfiles,
-            ),
-            (
-                "plugin.cloud_sync.settings.sync_raw_udp_profiles",
-                CloudSyncUploadSelectionAction::ToggleRawUdpProfiles,
-            ),
-            (
                 "plugin.cloud_sync.settings.sync_sensitive_credentials",
                 CloudSyncUploadSelectionAction::ToggleSensitiveCredentials,
             ),
@@ -403,12 +395,6 @@ impl WorkspaceApp {
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.sync_serial_profiles || !selection.serial_profile_item_ids.is_empty()
             }
-            CloudSyncUploadSelectionAction::ToggleRawTcpProfiles => {
-                selection.sync_raw_tcp_profiles || !selection.raw_tcp_profile_item_ids.is_empty()
-            }
-            CloudSyncUploadSelectionAction::ToggleRawUdpProfiles => {
-                selection.sync_raw_udp_profiles || !selection.raw_udp_profile_item_ids.is_empty()
-            }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 selection.sync_sensitive_credentials
             }
@@ -433,12 +419,6 @@ impl WorkspaceApp {
             }
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.serial_profile_item_ids.len()
-            }
-            CloudSyncUploadSelectionAction::ToggleRawTcpProfiles => {
-                selection.raw_tcp_profile_item_ids.len()
-            }
-            CloudSyncUploadSelectionAction::ToggleRawUdpProfiles => {
-                selection.raw_udp_profile_item_ids.len()
             }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 return self.cloud_sync_upload_sensitive_summary(selection);
@@ -872,12 +852,6 @@ impl WorkspaceApp {
             "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
                 CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
             ),
-            "plugin.cloud_sync.settings.sync_raw_tcp_profiles" => Some(
-                CloudSyncPreviewSelectionAction::ToggleRawTcpProfileItem(item.item_key.clone()),
-            ),
-            "plugin.cloud_sync.settings.sync_raw_udp_profiles" => Some(
-                CloudSyncPreviewSelectionAction::ToggleRawUdpProfileItem(item.item_key.clone()),
-            ),
             "plugin.cloud_sync.settings.sync_app_settings" => Some(
                 CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),
             ),
@@ -902,12 +876,6 @@ impl WorkspaceApp {
             }
             CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(id) => {
                 selection.selected_serial_profile_ids.contains(id)
-            }
-            CloudSyncPreviewSelectionAction::ToggleRawTcpProfileItem(id) => {
-                selection.selected_raw_tcp_profile_ids.contains(id)
-            }
-            CloudSyncPreviewSelectionAction::ToggleRawUdpProfileItem(id) => {
-                selection.selected_raw_udp_profile_ids.contains(id)
             }
             CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(id) => {
                 selection.selected_app_settings_sections.contains(id)
@@ -992,12 +960,6 @@ impl WorkspaceApp {
             ),
             "plugin.cloud_sync.settings.sync_serial_profiles" => Some(
                 CloudSyncUploadSelectionAction::ToggleSerialProfileItem(item.item_key.clone()),
-            ),
-            "plugin.cloud_sync.settings.sync_raw_tcp_profiles" => Some(
-                CloudSyncUploadSelectionAction::ToggleRawTcpProfileItem(item.item_key.clone()),
-            ),
-            "plugin.cloud_sync.settings.sync_raw_udp_profiles" => Some(
-                CloudSyncUploadSelectionAction::ToggleRawUdpProfileItem(item.item_key.clone()),
             ),
             "plugin.cloud_sync.settings.sync_app_settings" => Some(
                 CloudSyncUploadSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),

@@ -1,14 +1,11 @@
 use std::fmt;
 
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, PrivilegeCredentialKind, RawTcpDisplayMode, RawTcpLineEnding,
-    RawTcpSendMode, RawTcpTlsMode, RawTcpTlsVerification, RawUdpDisplayMode, RawUdpLineEnding,
-    RawUdpSendMode, SavedUpstreamProxyProtocol, TransportUsernameTransition,
-    transport_port_replacement, transport_username_transition,
+    AuthType, ConnectionInfo, PrivilegeCredentialKind, SavedUpstreamProxyProtocol,
+    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
-    ConnectionTransport as NewConnectionTransport, RAW_TCP_DEFAULT_PORT_TEXT,
-    RAW_UDP_DEFAULT_PORT_TEXT, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
+    ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
     TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
 };
 
@@ -144,14 +141,6 @@ pub(in crate::workspace) enum NewConnectionSelect {
     SerialStopBits,
     SerialParity,
     SerialFlowControl,
-    RawTcpLineEnding,
-    RawTcpDisplayMode,
-    RawTcpSendMode,
-    RawTcpTlsMode,
-    RawTcpTlsVerification,
-    RawUdpLineEnding,
-    RawUdpDisplayMode,
-    RawUdpSendMode,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -198,11 +187,6 @@ pub(in crate::workspace) enum NewConnectionField {
     SerialBaudRate,
     SerialProfileName,
     TelnetProfileName,
-    RawTcpProfileName,
-    RawTcpTlsServerName,
-    RawUdpProfileName,
-    RawUdpLocalBindHost,
-    RawUdpLocalBindPort,
 }
 
 #[derive(Clone)]
@@ -385,19 +369,6 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) serial_flow_control: oxideterm_terminal::SerialFlowControl,
     pub(in crate::workspace) serial_profile_name: String,
     pub(in crate::workspace) telnet_profile_name: String,
-    pub(in crate::workspace) raw_tcp_profile_name: String,
-    pub(in crate::workspace) raw_tcp_line_ending: RawTcpLineEnding,
-    pub(in crate::workspace) raw_tcp_display_mode: RawTcpDisplayMode,
-    pub(in crate::workspace) raw_tcp_send_mode: RawTcpSendMode,
-    pub(in crate::workspace) raw_tcp_tls_mode: RawTcpTlsMode,
-    pub(in crate::workspace) raw_tcp_tls_verification: RawTcpTlsVerification,
-    pub(in crate::workspace) raw_tcp_tls_server_name: String,
-    pub(in crate::workspace) raw_udp_profile_name: String,
-    pub(in crate::workspace) raw_udp_local_bind_host: String,
-    pub(in crate::workspace) raw_udp_local_bind_port: String,
-    pub(in crate::workspace) raw_udp_line_ending: RawUdpLineEnding,
-    pub(in crate::workspace) raw_udp_display_mode: RawUdpDisplayMode,
-    pub(in crate::workspace) raw_udp_send_mode: RawUdpSendMode,
 }
 
 impl fmt::Debug for NewConnectionForm {
@@ -465,19 +436,6 @@ impl fmt::Debug for NewConnectionForm {
             .field("serial_flow_control", &self.serial_flow_control)
             .field("serial_profile_name", &self.serial_profile_name)
             .field("telnet_profile_name", &self.telnet_profile_name)
-            .field("raw_tcp_profile_name", &self.raw_tcp_profile_name)
-            .field("raw_tcp_line_ending", &self.raw_tcp_line_ending)
-            .field("raw_tcp_display_mode", &self.raw_tcp_display_mode)
-            .field("raw_tcp_send_mode", &self.raw_tcp_send_mode)
-            .field("raw_tcp_tls_mode", &self.raw_tcp_tls_mode)
-            .field("raw_tcp_tls_verification", &self.raw_tcp_tls_verification)
-            .field("raw_tcp_tls_server_name", &self.raw_tcp_tls_server_name)
-            .field("raw_udp_profile_name", &self.raw_udp_profile_name)
-            .field("raw_udp_local_bind_host", &self.raw_udp_local_bind_host)
-            .field("raw_udp_local_bind_port", &self.raw_udp_local_bind_port)
-            .field("raw_udp_line_ending", &self.raw_udp_line_ending)
-            .field("raw_udp_display_mode", &self.raw_udp_display_mode)
-            .field("raw_udp_send_mode", &self.raw_udp_send_mode)
             .finish()
     }
 }
@@ -540,19 +498,6 @@ impl Default for NewConnectionForm {
             serial_flow_control: oxideterm_terminal::SerialFlowControl::None,
             serial_profile_name: String::new(),
             telnet_profile_name: String::new(),
-            raw_tcp_profile_name: String::new(),
-            raw_tcp_line_ending: RawTcpLineEnding::default(),
-            raw_tcp_display_mode: RawTcpDisplayMode::default(),
-            raw_tcp_send_mode: RawTcpSendMode::default(),
-            raw_tcp_tls_mode: RawTcpTlsMode::default(),
-            raw_tcp_tls_verification: RawTcpTlsVerification::default(),
-            raw_tcp_tls_server_name: String::new(),
-            raw_udp_profile_name: String::new(),
-            raw_udp_local_bind_host: String::new(),
-            raw_udp_local_bind_port: "0".to_string(),
-            raw_udp_line_ending: RawUdpLineEnding::default(),
-            raw_udp_display_mode: RawUdpDisplayMode::default(),
-            raw_udp_send_mode: RawUdpSendMode::default(),
         }
     }
 }
@@ -616,47 +561,6 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Host,
             NewConnectionField::Port,
             NewConnectionField::TelnetProfileName,
-        ];
-        let index = fields
-            .iter()
-            .position(|candidate| *candidate == field)
-            .unwrap_or(0);
-        let next = if forward {
-            (index + 1) % fields.len()
-        } else if index == 0 {
-            fields.len() - 1
-        } else {
-            index - 1
-        };
-        return fields[next];
-    }
-    if transport == NewConnectionTransport::RawTcp {
-        let fields = [
-            NewConnectionField::Host,
-            NewConnectionField::Port,
-            NewConnectionField::RawTcpTlsServerName,
-            NewConnectionField::RawTcpProfileName,
-        ];
-        let index = fields
-            .iter()
-            .position(|candidate| *candidate == field)
-            .unwrap_or(0);
-        let next = if forward {
-            (index + 1) % fields.len()
-        } else if index == 0 {
-            fields.len() - 1
-        } else {
-            index - 1
-        };
-        return fields[next];
-    }
-    if transport == NewConnectionTransport::RawUdp {
-        let fields = [
-            NewConnectionField::Host,
-            NewConnectionField::Port,
-            NewConnectionField::RawUdpLocalBindHost,
-            NewConnectionField::RawUdpLocalBindPort,
-            NewConnectionField::RawUdpProfileName,
         ];
         let index = fields
             .iter()
@@ -931,11 +835,6 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
-        NewConnectionField::RawTcpProfileName => &mut form.raw_tcp_profile_name,
-        NewConnectionField::RawTcpTlsServerName => &mut form.raw_tcp_tls_server_name,
-        NewConnectionField::RawUdpProfileName => &mut form.raw_udp_profile_name,
-        NewConnectionField::RawUdpLocalBindHost => &mut form.raw_udp_local_bind_host,
-        NewConnectionField::RawUdpLocalBindPort => &mut form.raw_udp_local_bind_port,
     }
 }
 
@@ -1018,11 +917,6 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
-        NewConnectionField::RawTcpProfileName => &form.raw_tcp_profile_name,
-        NewConnectionField::RawTcpTlsServerName => &form.raw_tcp_tls_server_name,
-        NewConnectionField::RawUdpProfileName => &form.raw_udp_profile_name,
-        NewConnectionField::RawUdpLocalBindHost => &form.raw_udp_local_bind_host,
-        NewConnectionField::RawUdpLocalBindPort => &form.raw_udp_local_bind_port,
     }
 }
 
@@ -1095,10 +989,7 @@ pub(in crate::workspace) fn text_from_keystroke(keystroke: &gpui::Keystroke) -> 
 #[cfg(test)]
 mod tests {
     use gpui::{Keystroke, Modifiers};
-    use oxideterm_connections::{
-        AuthType, ConnectionInfo, RawTcpDisplayMode, RawTcpLineEnding, RawTcpSendMode,
-        RawTcpTlsMode, RawTcpTlsVerification, SavedUpstreamProxyPolicy,
-    };
+    use oxideterm_connections::{AuthType, ConnectionInfo, SavedUpstreamProxyPolicy};
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
@@ -1212,58 +1103,6 @@ mod tests {
                 true,
             ),
             NewConnectionField::Host
-        );
-    }
-
-    #[test]
-    fn raw_tcp_form_defaults_match_plain_text_socket_mode() {
-        let form = NewConnectionForm {
-            transport: NewConnectionTransport::RawTcp,
-            ..NewConnectionForm::default()
-        };
-
-        assert_eq!(form.raw_tcp_line_ending, RawTcpLineEnding::CrLf);
-        assert_eq!(form.raw_tcp_display_mode, RawTcpDisplayMode::Text);
-        assert_eq!(form.raw_tcp_send_mode, RawTcpSendMode::Text);
-        assert_eq!(form.raw_tcp_tls_mode, RawTcpTlsMode::Disabled);
-        assert_eq!(form.raw_tcp_tls_verification, RawTcpTlsVerification::System);
-        assert!(form.raw_tcp_tls_server_name.is_empty());
-    }
-
-    #[test]
-    fn raw_tcp_transport_tabs_through_endpoint_tls_name_and_profile_name() {
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Host,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::RawTcp,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::Port
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::Port,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::RawTcp,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::RawTcpTlsServerName
-        );
-        assert_eq!(
-            next_connection_field(
-                NewConnectionField::RawTcpTlsServerName,
-                super::SshAuthTab::Password,
-                NewConnectionTransport::RawTcp,
-                super::NewConnectionUpstreamProxyPolicy::UseGlobal,
-                super::NewConnectionUpstreamProxyAuth::None,
-                true,
-            ),
-            NewConnectionField::RawTcpProfileName
         );
     }
 

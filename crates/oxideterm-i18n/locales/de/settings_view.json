@@ -996,7 +996,7 @@
       "legal_notice_close": "Schließen",
       "safety_title": "Autorisierte Nutzung & Datenschutz",
       "safety_authorized": "OxideTerm ist für autorisierte Systemadministration, Debugging, Fernwartung, Gerätezugriff und Dateiübertragung vorgesehen. Verwenden Sie es nur auf Systemen, die Sie besitzen, verwalten oder ausdrücklich bedienen dürfen.",
-      "safety_connections": "SSH, SFTP, Telnet, Serial, RDP/VNC, Raw TCP/UDP, Portweiterleitung und Proxy-Jump verbinden sich mit Zielen, die Sie auswählen. Stellen Sie sicher, dass diese Verbindungen, Routen und weitergeleiteten Daten nach Ihren Organisationsregeln und lokalen Vorgaben erlaubt sind.",
+      "safety_connections": "SSH, SFTP, Telnet, Serial, RDP/VNC, Portweiterleitung und Proxy-Jump verbinden sich mit Zielen, die Sie auswählen. Stellen Sie sicher, dass diese Verbindungen, Routen und weitergeleiteten Daten nach Ihren Organisationsregeln und lokalen Vorgaben erlaubt sind.",
       "safety_prohibited": "Verwenden Sie OxideTerm nicht für unbefugten Zugriff, Angriffe auf Zugangsdaten, das Umgehen von Netzwerkbeschränkungen, verdeckte Fernsteuerung, Ausnutzung von Schwachstellen, destruktive Aktivitäten oder Datenabfluss.",
       "safety_privacy": "OxideTerm läuft standardmäßig als lokaler Client. Es erfordert kein Konto, sammelt keine Telemetrie und lädt keine Terminalinhalte, Verbindungsprofile, Befehlsverläufe, privaten Schlüssel oder Zugangsdaten zu einem OxideTerm-Dienst hoch.",
       "safety_secrets": "Zugangsdaten und API-Schlüssel sollten, sofern unterstützt, im sicheren Systemspeicher bleiben. Prüfen und schwärzen Sie Geheimnisse, Hostnamen, Benutzernamen und interne Pfade, bevor Sie Logs, Screenshots, Exporte, Diagnosen oder Prompts teilen.",

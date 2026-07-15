@@ -62,28 +62,6 @@ pub(super) fn filter_serial_profiles_snapshot(
     }
 }
 
-pub(super) fn filter_raw_tcp_profiles_snapshot(
-    snapshot: &mut RawTcpProfilesSyncSnapshot,
-    selected_ids: Option<&BTreeSet<String>>,
-) {
-    if let Some(selected_ids) = selected_ids {
-        snapshot
-            .records
-            .retain(|profile| selected_ids.contains(&profile.id));
-    }
-}
-
-pub(super) fn filter_raw_udp_profiles_snapshot(
-    snapshot: &mut RawUdpProfilesSyncSnapshot,
-    selected_ids: Option<&BTreeSet<String>>,
-) {
-    if let Some(selected_ids) = selected_ids {
-        snapshot
-            .records
-            .retain(|profile| selected_ids.contains(&profile.id));
-    }
-}
-
 pub(super) fn filter_quick_commands_snapshot_json(
     snapshot_json: &mut String,
     selected_ids: Option<&BTreeSet<String>>,
@@ -160,8 +138,6 @@ pub(super) fn has_structured_conflict(
             || dirty_sections.forwards
             || dirty_sections.quick_commands
             || dirty_sections.serial_profiles
-            || dirty_sections.raw_tcp_profiles
-            || dirty_sections.raw_udp_profiles
             || dirty_sections.sensitive_credentials
             || dirty_sections.app_settings.values().any(|dirty| *dirty)
             || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
@@ -177,12 +153,6 @@ pub(super) fn has_structured_conflict(
         return true;
     }
     if dirty_sections.serial_profiles && remote.serial_profiles != previous.serial_profiles {
-        return true;
-    }
-    if dirty_sections.raw_tcp_profiles && remote.raw_tcp_profiles != previous.raw_tcp_profiles {
-        return true;
-    }
-    if dirty_sections.raw_udp_profiles && remote.raw_udp_profiles != previous.raw_udp_profiles {
         return true;
     }
     if dirty_sections.sensitive_credentials

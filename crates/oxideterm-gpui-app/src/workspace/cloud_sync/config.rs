@@ -33,18 +33,6 @@ impl WorkspaceApp {
                 cx,
             ),
             self.render_cloud_sync_scope_bool_toggle(
-                "plugin.cloud_sync.settings.sync_raw_tcp_profiles",
-                scope.sync_raw_tcp_profiles,
-                |scope, next| scope.sync_raw_tcp_profiles = Some(next),
-                cx,
-            ),
-            self.render_cloud_sync_scope_bool_toggle(
-                "plugin.cloud_sync.settings.sync_raw_udp_profiles",
-                scope.sync_raw_udp_profiles,
-                |scope, next| scope.sync_raw_udp_profiles = Some(next),
-                cx,
-            ),
-            self.render_cloud_sync_scope_bool_toggle(
                 "plugin.cloud_sync.settings.sync_sensitive_credentials",
                 scope.sync_sensitive_credentials,
                 |scope, next| scope.sync_sensitive_credentials = Some(next),

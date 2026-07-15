@@ -996,7 +996,7 @@
       "legal_notice_close": "關閉",
       "safety_title": "授權使用與隱私",
       "safety_authorized": "OxideTerm 僅用於已授權的系統管理、除錯、遠端維運、裝置存取與檔案傳輸。請只在你擁有、管理或明確獲准操作的系統上使用。",
-      "safety_connections": "SSH、SFTP、Telnet、串口、RDP/VNC、Raw TCP/UDP、連接埠轉送與跳板機功能都會連線到你選擇的目標。請確認這些連線、路由與轉送流量符合組織規則與當地要求。",
+      "safety_connections": "SSH、SFTP、Telnet、串口、RDP/VNC、連接埠轉送與跳板機功能都會連線到你選擇的目標。請確認這些連線、路由與轉送流量符合組織規則與當地要求。",
       "safety_prohibited": "請勿將 OxideTerm 用於未授權存取、憑證攻擊、規避網路限制、隱蔽遠控、漏洞利用、破壞性活動或資料外洩。",
       "safety_privacy": "OxideTerm 預設作為本機客戶端執行，不要求帳號，不收集遙測，也不會把終端機內容、連線設定、命令歷史、私鑰或憑證上傳到 OxideTerm 服務。",
       "safety_secrets": "憑證和 API Key 應盡量保存在系統安全儲存中。分享日誌、截圖、匯出包、診斷資訊或提示詞前，請先檢查並遮蔽秘密、主機名、使用者名稱和內部路徑。",

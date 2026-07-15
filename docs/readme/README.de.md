@@ -3,7 +3,7 @@
 <p align="center">
   <strong>KI-gestützter nativer Betriebsarbeitsbereich für Remote-Server — native App aus reinem Rust</strong>
   <br>
-  SSH, Telnet, serielle Terminals, RDP/VNC, SFTP, Portweiterleitung, Raw TCP/UDP und leichtes Editieren in einem nativen Arbeitsbereich.
+  SSH, Telnet, serielle Terminals, RDP/VNC, SFTP, Portweiterleitung und leichtes Editieren in einem nativen Arbeitsbereich.
   <br>
   GPU-gerendert. Kostenlos. Kein Konto nötig.
   <br>
@@ -38,11 +38,11 @@
 
 ## Was OxideTerm ist
 
-OxideTerm ist ein Open-Source-Arbeitsbereich für SSH und Remote-Betrieb. Terminal, Dateien, Portweiterleitungen, Host-Werkzeuge, Raw Sockets und Remote-Desktops bleiben in einem gemeinsamen Arbeitsbereich.
+OxideTerm ist ein Open-Source-Arbeitsbereich für SSH und Remote-Betrieb. Terminal, Dateien, Portweiterleitungen, Host-Werkzeuge und Remote-Desktops bleiben in einem gemeinsamen Arbeitsbereich.
 
 **Was Sie tun können:**
 
-- SSH, Telnet, serielle Verbindungen, RDP/VNC, SFTP, Portweiterleitungen, Raw TCP/UDP, lokale Shells und leichtes Editieren in einem Arbeitsbereich verwalten
+- SSH, Telnet, serielle Verbindungen, RDP/VNC, SFTP, Portweiterleitungen, lokale Shells und leichtes Editieren in einem Arbeitsbereich verwalten
 - Remote-Arbeit mit Grace-Period-Wiederverbindung über kurze Netzwerkausfälle hinweg aufrechterhalten
 - OxideSens aktive Sitzungen prüfen und freigegebene Arbeitsbereichsaktionen über Ihren eigenen KI-Anbieter ausführen lassen
 
@@ -86,7 +86,7 @@ OxideTerm hält Verbindungen, Dateien, Weiterleitungen, Host-Werkzeuge, Automati
 
 | Kategorie | Funktionen |
 |---|---|
-| **Terminal und Verbindungen** | Lokale Shells, SSH, Telnet, seriell, Raw TCP/UDP, geteilte Bereiche, Multi-Hop-Routen und stabile Wiederverbindung |
+| **Terminal und Verbindungen** | Lokale Shells, SSH, Telnet, seriell, geteilte Bereiche, Multi-Hop-Routen und stabile Wiederverbindung |
 | **Dateien und Remote-Bearbeitung** | SFTP, Übertragungswarteschlangen, Lesezeichen, sichere Schreibvorgänge, Projektbäume und Mehrfachbearbeitung |
 | **Weiterleitung und Netzwerk** | Lokale, entfernte und dynamische SOCKS5-Weiterleitung, gespeicherte Regeln und Socket-Debugging |
 | **Host-Betrieb und Remote-Desktop** | Überwachung, Prozesse, Dienste, Logs, Ports, Aufgaben, Datenträger, Pakete, Container, tmux, RDP und VNC |
@@ -109,7 +109,7 @@ OxideTerm hält Verbindungen, Dateien, Weiterleitungen, Host-Werkzeuge, Automati
 
 ## Architektur
 
-OxideTerm vereint Terminal, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, Forwarding, IDE, KI, Plugins und CLI in einer Rust-Architektur. Die technischen Details folgen unten.
+OxideTerm vereint Terminal, SSH, Telnet, RDP, VNC, SFTP, Forwarding, IDE, KI, Plugins und CLI in einer Rust-Architektur. Die technischen Details folgen unten.
 
 <details>
 <summary><strong>Architektur, SSH-Internals, GPUI-Shell, Reconnect, KI, Plugins und mehr</strong></summary>
@@ -172,7 +172,7 @@ OxideSens bleibt BYOK zuerst, mit Kontextaufbau direkt im Prozess:
 
 Die UI wird direkt mit GPUI gezeichnet, ohne DOM/CSS/JavaScript-Rendering-Pipeline:
 
-- Workspace-Tab-Typen: lokale, SSH-, Telnet-, serielle, RDP-, VNC- und Raw-TCP/UDP-Terminals, SFTP, IDE, Forwards, Settings, Plugins, Topology und mehr
+- Workspace-Tab-Typen: lokale, SSH-, Telnet-, serielle, RDP-, VNC-, SFTP, IDE, Forwards, Settings, Plugins, Topology und mehr
 - Binärer Pane-Tree mit ziehbaren Dividern, bis zu vier Panes pro Terminal-Tab
 - Command Palette, globale Tastenkürzel und Sidebars bestehen aus GPUI-Primitives
 - Immediate-mode Rendering reagiert auf Rust-State ohne Serialisierungs-Roundtrip

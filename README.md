@@ -3,7 +3,7 @@
 <p align="center">
   <strong>AI-Powered SSH Client and Remote Operations Workspace</strong>
   <br>
-  SSH, Telnet, Serial, RDP/VNC, SFTP, port forwarding, Raw TCP/UDP, and lightweight editing in one native workspace.
+  SSH, Telnet, Serial, RDP/VNC, SFTP, port forwarding, and lightweight editing in one native workspace.
   <br>
   GPU-rendered. Free. No account needed.
   <br>
@@ -37,11 +37,11 @@
 
 ## What OxideTerm Is
 
-OxideTerm is an open-source, local-first workspace for connecting to servers and working across terminals, files, forwarding, host tools, raw sockets, and remote desktops.
+OxideTerm is an open-source, local-first workspace for connecting to servers and working across terminals, files, forwarding, host tools, and remote desktops.
 
 **What you can do:**
 
-- Manage SSH, Telnet, Serial, RDP/VNC, SFTP, port forwards, Raw TCP/UDP sockets, local shells, and lightweight editing in one native workspace
+- Manage SSH, Telnet, Serial, RDP/VNC, SFTP, port forwards, local shells, and lightweight editing in one native workspace
 - Keep remote work alive through network hiccups with Grace Period reconnect
 - Ask OxideSens AI to inspect live sessions and perform approved workspace actions through your own AI provider
 
@@ -53,9 +53,9 @@ Your connections and operational data stay under your control. OxideTerm require
 
 | If you care about... | OxideTerm gives you... |
 |---|---|
-| One remote node, many tools | Terminal, SFTP, port forwarding, RDP/VNC, Raw TCP/UDP, trzsz, native IDE, monitoring, and OxideSens AI stay attached to the same workspace |
+| One remote node, many tools | Terminal, SFTP, port forwarding, RDP/VNC, trzsz, native IDE, monitoring, and OxideSens AI stay attached to the same workspace |
 | A desktop app without Electron or a bundled WebView | GPUI draws the interface directly on a GPU surface, without shipping a browser runtime |
-| Local-first operations workflows | SSH, Telnet, SFTP, forwarding, RDP/VNC, Raw TCP/UDP, local shell, serial terminals, and config work without signup |
+| Local-first operations workflows | SSH, Telnet, SFTP, forwarding, RDP/VNC, local shell, serial terminals, and config work without signup |
 | BYOK OxideSens AI instead of platform credits | OxideSens uses your OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint with MCP, RAG, and approved workspace actions |
 | Reconnect stability | Grace Period probes the old connection for 30s before replacing it, so TUI apps can survive short network drops |
 | Pure-Rust SSH and credential safety | The SSH stack uses `russh` + `ring` without OpenSSL/libssh2; stored credentials use the OS keychain, and `.oxide` bundles use ChaCha20-Poly1305 + Argon2id |
@@ -99,7 +99,7 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 
 | Category | Features |
 |---|---|
-| **Terminal & Connections** | Local shells, SSH, Telnet, serial, Raw TCP/UDP, split panes, shell integration, command marks, recording, trzsz transfers, terminal graphics, multi-hop routes, host-key verification, Agent forwarding, 2FA, and Grace Period reconnect |
+| **Terminal & Connections** | Local shells, SSH, Telnet, serial, split panes, shell integration, command marks, recording, trzsz transfers, terminal graphics, multi-hop routes, host-key verification, Agent forwarding, 2FA, and Grace Period reconnect |
 | **Files & Remote Editing** | SFTP browsing, transfer queues, speed limits, progress and ETA, bookmarks, safe writes, local file management, remote project trees, multi-tab editing, conflict handling, and workspace restore |
 | **Forwarding & Networking** | Local, remote, and dynamic SOCKS5 forwarding, saved rules, reconnect-aware restore, remote port detection, connection topology, and ad-hoc socket debugging |
 | **Host Operations & Remote Desktop** | Host monitoring, processes, services, logs, ports, tasks, disks, packages, containers, tmux, built-in RDP and VNC, clipboard, input, reconnect, and viewport-aware sizing |
@@ -122,7 +122,7 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 
 ## Under the Hood
 
-OxideTerm keeps terminal, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, forwarding, editing, AI, plugins, and CLI in one Rust architecture. The implementation notes below are for readers who want the engineering details.
+OxideTerm keeps terminal, SSH, Telnet, RDP, VNC, SFTP, forwarding, editing, AI, plugins, and CLI in one Rust architecture. The implementation notes below are for readers who want the engineering details.
 
 <details>
 <summary><strong>Architecture, SSH internals, GPUI shell, reconnect, AI, plugins, and more</strong></summary>
@@ -196,7 +196,7 @@ OxideSens is BYOK-first, with context building performed in-process:
 The entire UI is written in Rust using GPUI (Zed's GPU-backed UI framework):
 
 - **No CSS, no DOM, no JavaScript** in the rendering pipeline
-- **Workspace tab types**: local terminal, SSH, Telnet, Serial, RDP, VNC, SFTP, IDE, port forwards, Raw TCP/UDP, session manager, cloud sync, settings, plugins, topology, monitoring, file manager, launcher, graphics, and custom plugin tabs
+- **Workspace tab types**: local terminal, SSH, Telnet, Serial, RDP, VNC, SFTP, IDE, port forwards, session manager, cloud sync, settings, plugins, topology, monitoring, file manager, launcher, graphics, and custom plugin tabs
 - **Split pane system**: binary pane tree, draggable dividers, up to 4 panes per terminal tab
 - **Command palette**, global key bindings, sidebar panels — all GPUI primitives
 - **Immediate-mode rendering**: UI reflects Rust state changes without a serialization round-trip

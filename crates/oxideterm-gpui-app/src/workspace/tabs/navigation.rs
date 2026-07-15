@@ -920,8 +920,6 @@ impl WorkspaceApp {
         }
         for session_id in session_ids {
             self.serial_terminal_configs.remove(&session_id);
-            self.raw_tcp_terminal_configs.remove(&session_id);
-            self.raw_udp_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids {

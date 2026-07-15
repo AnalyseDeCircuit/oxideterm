@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Spazio di lavoro operativo nativo con IA per server remoti — app nativa in Rust puro</strong>
   <br>
-  Terminali SSH, Telnet, seriali, RDP/VNC, SFTP, inoltro porte, Raw TCP/UDP e modifica leggera in uno spazio di lavoro nativo.
+  Terminali SSH, Telnet, seriali, RDP/VNC, SFTP, inoltro porte e modifica leggera in uno spazio di lavoro nativo.
   <br>
   Rendering su GPU. Gratis. Nessun account necessario.
   <br>
@@ -38,11 +38,11 @@
 
 ## Cos’è OxideTerm
 
-OxideTerm è uno spazio di lavoro open source per SSH e operazioni remote. Terminali, file, port forwarding, strumenti host, socket Raw e desktop remoti restano in un unico spazio.
+OxideTerm è uno spazio di lavoro open source per SSH e operazioni remote. Terminali, file, port forwarding, strumenti host e desktop remoti restano in un unico spazio.
 
 **Cosa puoi fare:**
 
-- Gestire SSH, Telnet, seriale, RDP/VNC, SFTP, port forwarding, socket Raw TCP/UDP, shell locali e modifica leggera in un unico spazio di lavoro
+- Gestire SSH, Telnet, seriale, RDP/VNC, SFTP, port forwarding, shell locali e modifica leggera in un unico spazio di lavoro
 - Mantenere attivo il lavoro remoto durante brevi interruzioni di rete con la riconnessione Grace Period
 - Chiedere a OxideSens di esaminare le sessioni attive ed eseguire azioni approvate tramite il tuo provider AI
 
@@ -86,7 +86,7 @@ OxideTerm mantiene connessioni, file, forwarding, strumenti host, automazione e 
 
 | Categoria | Funzioni |
 |---|---|
-| **Terminale e connessioni** | Shell locali, SSH, Telnet, seriale, Raw TCP/UDP, pannelli, percorsi multi-hop e riconnessione stabile |
+| **Terminale e connessioni** | Shell locali, SSH, Telnet, seriale, pannelli, percorsi multi-hop e riconnessione stabile |
 | **File e modifica remota** | SFTP, code di trasferimento, preferiti, scritture sicure, alberi di progetto e modifica a schede |
 | **Forwarding e rete** | Forwarding locale, remoto e SOCKS5 dinamico, regole salvate e debug dei socket |
 | **Operazioni host e desktop remoto** | Monitoraggio, processi, servizi, log, porte, attività, dischi, pacchetti, container, tmux, RDP e VNC |
@@ -109,7 +109,7 @@ OxideTerm mantiene connessioni, file, forwarding, strumenti host, automazione e 
 
 ## Architettura
 
-OxideTerm rimuove il bridge WebView e mantiene terminale, SSH, Telnet, RDP, VNC, Raw TCP/UDP, SFTP, forwarding, IDE, AI, plugin e CLI in una architettura Rust-native. I dettagli completi sono conservati sotto.
+OxideTerm rimuove il bridge WebView e mantiene terminale, SSH, Telnet, RDP, VNC, SFTP, forwarding, IDE, AI, plugin e CLI in una architettura Rust-native. I dettagli completi sono conservati sotto.
 
 <details>
 <summary><strong>Architettura, internals SSH, shell GPUI, riconnessione, AI, plugin e altro</strong></summary>
@@ -172,7 +172,7 @@ OxideSens resta BYOK prima di tutto, con costruzione del contesto dentro il proc
 
 La UI è disegnata direttamente con GPUI, senza pipeline DOM/CSS/JavaScript:
 
-- Tipi di tab dello spazio di lavoro: terminali locali, SSH, Telnet, seriali, RDP, VNC e Raw TCP/UDP, SFTP, IDE, Forwards, Settings, plugin, Topology e altro
+- Tipi di tab dello spazio di lavoro: terminali locali, SSH, Telnet, seriali, RDP, VNC, SFTP, IDE, Forwards, Settings, plugin, Topology e altro
 - Binary pane tree con divider trascinabili, fino a quattro panes per tab terminale
 - Command palette, scorciatoie globali e sidebars costruite con primitive GPUI
 - Immediate-mode rendering reagisce allo stato Rust senza round-trip di serializzazione

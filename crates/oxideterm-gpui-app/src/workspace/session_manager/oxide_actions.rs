@@ -609,8 +609,6 @@ impl WorkspaceApp {
                 conflict_strategy: dialog.conflict_strategy,
                 import_forwards: dialog.import_forwards,
                 import_serial_profiles: dialog.import_serial_profiles,
-                import_raw_tcp_profiles: dialog.import_raw_tcp_profiles,
-                import_raw_udp_profiles: dialog.import_raw_udp_profiles,
                 import_portable_secrets: dialog.import_portable_secrets,
                 restore_managed_keys: dialog.restore_managed_keys,
                 restore_managed_key_passphrases: dialog.restore_managed_key_passphrases,
@@ -707,10 +705,6 @@ impl WorkspaceApp {
                                     dialog.import_quick_commands = preview.has_quick_commands;
                                     dialog.import_serial_profiles =
                                         preview.serial_profiles_count > 0;
-                                    dialog.import_raw_tcp_profiles =
-                                        preview.raw_tcp_profiles_count > 0;
-                                    dialog.import_raw_udp_profiles =
-                                        preview.raw_udp_profiles_count > 0;
                                     dialog.import_plugin_settings =
                                         preview.plugin_settings_count > 0;
                                     dialog.import_forwards = preview.total_forwards > 0;
@@ -901,10 +895,6 @@ impl WorkspaceApp {
             skipped_quick_commands: result.skipped_quick_commands,
             imported_serial_profiles: result.envelope.imported_serial_profiles,
             skipped_serial_profiles: result.envelope.skipped_serial_profiles,
-            imported_raw_tcp_profiles: result.envelope.imported_raw_tcp_profiles,
-            skipped_raw_tcp_profiles: result.envelope.skipped_raw_tcp_profiles,
-            imported_raw_udp_profiles: result.envelope.imported_raw_udp_profiles,
-            skipped_raw_udp_profiles: result.envelope.skipped_raw_udp_profiles,
             quick_commands_errors: result.quick_commands_errors.clone(),
             imported_plugin_settings: result.imported_plugin_settings,
             skipped_plugin_settings: result.skipped_plugin_settings,
@@ -932,26 +922,6 @@ impl WorkspaceApp {
                     .replace(
                         "{{count}}",
                         &result_view.imported_serial_profiles.to_string(),
-                    ),
-            );
-        }
-        if result_view.imported_raw_tcp_profiles > 0 {
-            parts.push(
-                self.i18n
-                    .t("modals.import.imported_raw_tcp_profiles")
-                    .replace(
-                        "{{count}}",
-                        &result_view.imported_raw_tcp_profiles.to_string(),
-                    ),
-            );
-        }
-        if result_view.imported_raw_udp_profiles > 0 {
-            parts.push(
-                self.i18n
-                    .t("modals.import.imported_raw_udp_profiles")
-                    .replace(
-                        "{{count}}",
-                        &result_view.imported_raw_udp_profiles.to_string(),
                     ),
             );
         }
@@ -1354,32 +1324,6 @@ impl WorkspaceApp {
         } else {
             None
         };
-        let raw_tcp_profiles_json = if dialog.include_raw_tcp_profiles {
-            Some(
-                serde_json::to_string_pretty(
-                    &self
-                        .connection_store
-                        .export_raw_tcp_profiles_snapshot()
-                        .map_err(|error| error.to_string())?,
-                )
-                .map_err(|error| error.to_string())?,
-            )
-        } else {
-            None
-        };
-        let raw_udp_profiles_json = if dialog.include_raw_udp_profiles {
-            Some(
-                serde_json::to_string_pretty(
-                    &self
-                        .connection_store
-                        .export_raw_udp_profiles_snapshot()
-                        .map_err(|error| error.to_string())?,
-                )
-                .map_err(|error| error.to_string())?,
-            )
-        } else {
-            None
-        };
         let plugin_settings = if dialog.include_plugin_settings {
             crate::workspace::plugin_settings_store::load_plugin_settings(
                 self.settings_store.path(),
@@ -1459,8 +1403,6 @@ impl WorkspaceApp {
             app_settings_json,
             quick_commands_json,
             serial_profiles_json,
-            raw_tcp_profiles_json,
-            raw_udp_profiles_json,
             plugin_settings,
             portable_secrets,
             forwards,

@@ -13,7 +13,6 @@
       "copy": "コピー",
       "copy_title": "コマンド出力をコピー",
       "copy_command": "コマンドをコピー",
-      "reconnect_transport": "再接続",
       "send_to_ai": "OxideSensに送信",
       "fill_command_bar": "コマンドバーに入力",
       "insert_selection_into_command": "選択範囲をここに挿入",

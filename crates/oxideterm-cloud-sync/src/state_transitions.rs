@@ -43,18 +43,6 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
-        raw_tcp_profiles: manifest
-            .sections
-            .raw_tcp_profiles
-            .as_ref()
-            .and_then(|entry| entry.record_count)
-            .unwrap_or(0),
-        raw_udp_profiles: manifest
-            .sections
-            .raw_udp_profiles
-            .as_ref()
-            .and_then(|entry| entry.record_count)
-            .unwrap_or(0),
         sensitive_credentials: manifest
             .sections
             .sensitive_credentials
@@ -110,8 +98,6 @@ pub fn structured_apply_covers_full_remote(
         && (manifest.sections.forwards.is_none() || selection.forwards)
         && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
         && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
-        && (manifest.sections.raw_tcp_profiles.is_none() || selection.raw_tcp_profiles)
-        && (manifest.sections.raw_udp_profiles.is_none() || selection.raw_udp_profiles)
         && (manifest.sections.sensitive_credentials.is_none() || selection.sensitive_credentials)
         && manifest
             .sections
@@ -143,12 +129,6 @@ pub fn merge_structured_remote_baseline(
     }
     if selection.serial_profiles {
         merged.serial_profiles = next.serial_profiles.clone();
-    }
-    if selection.raw_tcp_profiles {
-        merged.raw_tcp_profiles = next.raw_tcp_profiles.clone();
-    }
-    if selection.raw_udp_profiles {
-        merged.raw_udp_profiles = next.raw_udp_profiles.clone();
     }
     if selection.sensitive_credentials {
         merged.sensitive_credentials = next.sensitive_credentials.clone();
@@ -347,8 +327,6 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
-            raw_tcp_profiles: None,
-            raw_udp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([(
                 "appearance".to_string(),
@@ -372,8 +350,6 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
-            raw_tcp_profiles_record_count: 0,
-            raw_udp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         };
         let outcome = UploadOutcome {
@@ -446,8 +422,6 @@ mod tests {
             forwards: None,
             quick_commands: None,
             serial_profiles: None,
-            raw_tcp_profiles: None,
-            raw_udp_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([(
                 "appearance".to_string(),
@@ -468,8 +442,6 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
-            raw_tcp_profiles_record_count: 0,
-            raw_udp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         };
         let outcome = ApplyStructuredPreviewOutcome {
@@ -479,8 +451,6 @@ mod tests {
                 forwards: None,
                 quick_commands_applied: 0,
                 serial_profiles_applied: 0,
-                raw_tcp_profiles_applied: 0,
-                raw_udp_profiles_applied: 0,
                 app_settings_applied: 0,
                 plugin_settings_applied: 0,
             },
@@ -493,8 +463,6 @@ mod tests {
                 forwards: false,
                 quick_commands: false,
                 serial_profiles: false,
-                raw_tcp_profiles: false,
-                raw_udp_profiles: false,
                 sensitive_credentials: false,
                 app_settings_sections: Vec::new(),
                 plugin_ids: Vec::new(),
@@ -545,15 +513,11 @@ mod tests {
         };
         manifest.sections.quick_commands = Some(entry("quick-remote"));
         manifest.sections.serial_profiles = Some(entry("serial-remote"));
-        manifest.sections.raw_tcp_profiles = Some(entry("raw-tcp-remote"));
-        manifest.sections.raw_udp_profiles = Some(entry("raw-udp-remote"));
         manifest.sections.sensitive_credentials = Some(entry("sensitive-remote"));
 
         let partial_selection = StructuredApplySelection {
             quick_commands: true,
             serial_profiles: true,
-            raw_tcp_profiles: true,
-            raw_udp_profiles: true,
             sensitive_credentials: false,
             ..StructuredApplySelection::default()
         };
@@ -578,8 +542,6 @@ mod tests {
         let next_sections = StructuredSectionRevisions {
             quick_commands: Some("quick-remote".to_string()),
             serial_profiles: Some("serial-remote".to_string()),
-            raw_tcp_profiles: Some("raw-tcp-remote".to_string()),
-            raw_udp_profiles: Some("raw-udp-remote".to_string()),
             sensitive_credentials: Some("sensitive-remote".to_string()),
             ..StructuredSectionRevisions::default()
         };
@@ -596,14 +558,6 @@ mod tests {
         assert_eq!(
             partial_baseline.serial_profiles.as_deref(),
             Some("serial-remote")
-        );
-        assert_eq!(
-            partial_baseline.raw_tcp_profiles.as_deref(),
-            Some("raw-tcp-remote")
-        );
-        assert_eq!(
-            partial_baseline.raw_udp_profiles.as_deref(),
-            Some("raw-udp-remote")
         );
         assert_eq!(
             partial_baseline.sensitive_credentials.as_deref(),
@@ -639,8 +593,6 @@ mod tests {
             forwards_record_count: 0,
             quick_commands_record_count: 0,
             serial_profiles_record_count: 0,
-            raw_tcp_profiles_record_count: 0,
-            raw_udp_profiles_record_count: 0,
             sensitive_credentials_record_count: 0,
         };
         let metadata = RemoteMetadata {

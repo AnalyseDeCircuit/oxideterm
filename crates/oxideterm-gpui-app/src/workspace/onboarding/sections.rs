@@ -524,7 +524,6 @@ impl WorkspaceApp {
             (LucideIcon::FileCode, "remote_ide", None, false),
             (LucideIcon::HardDrive, "local_file_manager", None, false),
             (LucideIcon::Network, "port_forwarding", None, false),
-            (LucideIcon::Radio, "raw_sockets", None, false),
             (LucideIcon::Cable, "serial_console", None, false),
             (LucideIcon::Monitor, "remote_desktop", None, false),
             (LucideIcon::Activity, "host_tools", None, false),

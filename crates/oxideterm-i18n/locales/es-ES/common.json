@@ -107,8 +107,6 @@
     "cmd_open_cloud_sync": "Abrir sincronización en la nube",
     "cmd_open_serial_terminal": "Abrir terminal serie",
     "cmd_open_telnet_terminal": "Abrir terminal Telnet",
-    "cmd_open_raw_tcp_terminal": "Abrir terminal Raw TCP",
-    "cmd_open_raw_udp_terminal": "Abrir terminal Raw UDP",
     "cmd_open_rdp_preview": "Abrir vista previa RDP",
     "cmd_open_vnc_preview": "Abrir vista previa VNC"
   },
@@ -333,8 +331,6 @@
         "sync_forwards": "Sincronizar reenvíos guardados",
         "sync_quick_commands": "Sincronizar comandos rápidos",
         "sync_serial_profiles": "Sincronizar perfiles serie",
-        "sync_raw_tcp_profiles": "Sincronizar perfiles Raw TCP",
-        "sync_raw_udp_profiles": "Sincronizar perfiles Raw UDP",
         "sync_app_settings": "Sincronizar ajustes de la aplicación",
         "include_local_terminal_env_vars": "Incluir variables de entorno del terminal local",
         "sync_plugin_settings": "Sincronizar ajustes de plugins",
@@ -375,8 +371,6 @@
         "forwards_detail": "Las reglas de reenvío guardadas se incluyen junto con los metadatos de su conexión propietaria.",
         "quick_commands_detail": "Se incluyen las definiciones de comandos rápidos.",
         "serial_profiles_detail": "Se incluyen los perfiles de conexión serie.",
-        "raw_tcp_profiles_detail": "Se incluyen los perfiles de conexión Raw TCP.",
-        "raw_udp_profiles_detail": "Se incluyen los perfiles de conexión Raw UDP.",
         "app_settings_sections_detail": "Secciones seleccionadas: {{sections}}",
         "app_settings_disabled_detail": "La configuración de la aplicación está excluida del alcance de sincronización actual.",
         "plugin_settings_all_detail": "Se incluyen todos los ajustes de plugins sincronizables.",
@@ -399,13 +393,13 @@
       },
       "backup": {
         "description": "Copia de respaldo de Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{rawTcpProfiles}} perfiles Raw TCP, {{rawUdpProfiles}} perfiles Raw UDP, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} credenciales sensibles"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{size}}, {{sensitiveCredentials}} credenciales sensibles"
       },
       "history": {
         "action_upload": "Subir",
         "action_pull": "Descargar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{rawTcpProfiles}} perfiles Raw TCP, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} credenciales sensibles"
+        "summary_line": "{{connections}} conexiones, {{forwards}} reenvíos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfiles serie, {{pluginSettingsCount}} ajustes de plugins, {{sensitiveCredentials}} credenciales sensibles"
       },
       "errors": {
         "operation_in_progress": "Ya se está ejecutando otra operación de Cloud Sync.",
@@ -546,8 +540,6 @@
         "total_forwards": "Reenvíos",
         "quick_commands_label": "Comandos rápidos",
         "serial_profiles_label": "Perfiles serie",
-        "raw_tcp_profiles_label": "Perfiles Raw TCP",
-        "raw_udp_profiles_label": "Perfiles Raw UDP",
         "will_import": "Se importará",
         "will_merge": "Se fusionará",
         "will_replace": "Se reemplazará",
@@ -566,8 +558,6 @@
         "toggle_forwards": "Importar reenvíos guardados ({{count}})",
         "toggle_quick_commands": "Importar comandos rápidos ({{count}})",
         "toggle_serial_profiles": "Importar perfiles serie ({{count}})",
-        "toggle_raw_tcp_profiles": "Importar perfiles Raw TCP ({{count}})",
-        "toggle_raw_udp_profiles": "Importar perfiles Raw UDP ({{count}})",
         "section_field_count": "{{count}} campos",
         "section_general": "General",
         "section_terminal_appearance": "Apariencia del terminal",
@@ -992,8 +982,6 @@
     "ai_tools_later_hint": "Todos los ajustes de AI y herramientas pueden configurarse más tarde en Ajustes. No se requieren claves API durante la configuración inicial.",
     "remote_ide": "Espacio IDE remoto",
     "remote_ide_desc": "Árbol de proyecto vía SFTP, edición con varias pestañas, seguimiento de cambios y guardado consciente de conflictos.",
-    "raw_sockets": "Herramientas Raw TCP/UDP",
-    "raw_sockets_desc": "Depura protocolos de texto o hexadecimales con flujos TCP sin procesar y datagramas UDP.",
     "serial_console": "Runtime de terminal serie",
     "serial_console_desc": "Abre dispositivos serie locales con controles de estado, política de saltos de línea, modo hexadecimal, Break, DTR y RTS.",
     "remote_desktop": "RDP y VNC",
@@ -1070,8 +1058,8 @@
     "features_eyebrow": "PÁGINA 5 · CAPACIDADES",
     "features_title": "Más protocolos y flujos de trabajo más sólidos",
     "features_description": "La versión 2.0 amplía los tipos de conexión y las operaciones del host, a la vez que reconstruye rutas sensibles al rendimiento como SFTP.",
-    "features_telnet_title": "Telnet, puerto serie, Raw TCP y Raw UDP",
-    "features_telnet_description": "Los nuevos tipos de sesión nativos permiten trabajar con sistemas antiguos, dispositivos y diagnósticos directos de sockets.",
+    "features_telnet_title": "Telnet, puerto serie",
+    "features_telnet_description": "Los nuevos tipos de sesión nativos permiten trabajar con sistemas antiguos y dispositivos serie.",
     "features_remote_title": "RDP y VNC integrados",
     "features_remote_description": "Las sesiones de escritorio remoto conviven ahora con los flujos de trabajo de terminal y archivos.",
     "features_host_tools_title": "Herramientas del host",

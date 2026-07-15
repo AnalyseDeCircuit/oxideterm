@@ -38,27 +38,6 @@ pub(super) fn base_form() -> NewConnectionForm {
     }
 }
 
-pub(super) fn raw_tcp_profile_fixture() -> RawTcpProfile {
-    let now = chrono::Utc::now();
-    RawTcpProfile {
-        id: "raw-tcp-1".to_string(),
-        name: "Lab console".to_string(),
-        group: Some("Lab".to_string()),
-        host: "device.local".to_string(),
-        port: 443,
-        line_ending: oxideterm_connections::RawTcpLineEnding::Lf,
-        display_mode: oxideterm_connections::RawTcpDisplayMode::Mixed,
-        send_mode: oxideterm_connections::RawTcpSendMode::Hex,
-        tls_mode: oxideterm_connections::RawTcpTlsMode::Enabled,
-        tls_verification: oxideterm_connections::RawTcpTlsVerification::AllowInvalidCertificates,
-        tls_server_name: Some("device-tls.local".to_string()),
-        connect_on_open: false,
-        created_at: now,
-        updated_at: now,
-        last_used_at: None,
-    }
-}
-
 pub(super) fn connection_info_fixture(icon: Option<&str>) -> ConnectionInfo {
     ConnectionInfo {
         id: "conn-1".to_string(),
@@ -138,17 +117,6 @@ pub(super) fn session_menu_dismissal_closes_all_manager_popovers() {
 }
 
 #[test]
-pub(super) fn raw_tcp_display_item_exposes_endpoint_and_tls_metadata() {
-    let item = SessionManagerDisplayItem::RawTcp(raw_tcp_profile_fixture());
-
-    assert_eq!(item.name(), "Lab console");
-    assert_eq!(item.host(), "device.local");
-    assert_eq!(item.port_sort_key(), 443);
-    assert_eq!(item.subtitle(), "device.local:443 · TLS");
-    assert!(matches!(item.icon(), LucideIcon::Cable));
-}
-
-#[test]
 pub(super) fn connection_display_item_uses_custom_icon_when_present() {
     let item = SessionManagerDisplayItem::Connection(connection_info_fixture(Some("cloud")));
 
@@ -171,72 +139,6 @@ pub(super) fn save_request_from_form_preserves_custom_icon() {
     let request = save_request_from_form(&form, Some("conn-1".to_string())).unwrap();
 
     assert_eq!(request.icon.as_deref(), Some("cloud"));
-}
-
-#[test]
-pub(super) fn raw_tcp_display_item_search_includes_host_port_group_and_tls_name() {
-    let item = SessionManagerDisplayItem::RawTcp(raw_tcp_profile_fixture());
-    let search_text = item.search_text().to_lowercase();
-
-    for expected in [
-        "lab console",
-        "device.local",
-        "443",
-        "lab",
-        "device-tls.local",
-        "tls",
-    ] {
-        assert!(
-            search_text.contains(expected),
-            "missing Raw TCP search token: {expected}"
-        );
-    }
-}
-
-#[test]
-pub(super) fn raw_tcp_open_action_config_preserves_profile_options() {
-    let profile = raw_tcp_profile_fixture();
-    let config = terminal_raw_tcp_config_from_profile(&profile);
-
-    assert_eq!(config.host, profile.host);
-    assert_eq!(config.port, profile.port);
-    assert_eq!(config.line_ending, oxideterm_terminal::RawTcpLineEnding::Lf);
-    assert_eq!(
-        config.display_mode,
-        oxideterm_terminal::RawTcpDisplayMode::Mixed
-    );
-    assert_eq!(config.send_mode, oxideterm_terminal::RawTcpSendMode::Hex);
-    assert!(config.tls.enabled);
-    assert_eq!(
-        config.tls.verification,
-        oxideterm_terminal::RawTcpTlsVerification::AllowInvalidCertificates
-    );
-    assert_eq!(config.tls.server_name.as_deref(), Some("device-tls.local"));
-}
-
-#[test]
-pub(super) fn raw_tcp_profile_delete_removes_saved_profile() {
-    let path = std::env::temp_dir().join(format!(
-        "oxideterm-session-manager-raw-tcp-delete-{}.json",
-        uuid::Uuid::new_v4()
-    ));
-    let mut store = ConnectionStore::load(&path).expect("store should load");
-    let profile = store
-        .upsert_raw_tcp_profile(oxideterm_connections::SaveRawTcpProfileRequest {
-            name: "Lab console".to_string(),
-            host: "device.local".to_string(),
-            port: 443,
-            ..oxideterm_connections::SaveRawTcpProfileRequest::default()
-        })
-        .expect("profile should save");
-
-    assert!(
-        store
-            .delete_raw_tcp_profile(&profile.id)
-            .expect("delete should succeed")
-    );
-    assert!(store.raw_tcp_profiles().is_empty());
-    let _ = std::fs::remove_file(path);
 }
 
 #[test]

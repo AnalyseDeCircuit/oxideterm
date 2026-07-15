@@ -47,10 +47,6 @@ pub struct CloudSyncHistorySummary {
     #[serde(default)]
     pub serial_profiles: usize,
     #[serde(default)]
-    pub raw_tcp_profiles: usize,
-    #[serde(default)]
-    pub raw_udp_profiles: usize,
-    #[serde(default)]
     pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub plugin_settings_count: usize,
@@ -81,10 +77,6 @@ pub struct CloudSyncRollbackBackupMetadata {
     pub quick_commands: usize,
     #[serde(default)]
     pub serial_profiles: usize,
-    #[serde(default)]
-    pub raw_tcp_profiles: usize,
-    #[serde(default)]
-    pub raw_udp_profiles: usize,
     #[serde(default)]
     pub sensitive_credentials: usize,
 }
@@ -443,11 +435,17 @@ mod tests {
     }
 
     #[test]
-    fn persisted_state_accepts_structured_state_before_optional_sections() {
+    fn persisted_state_ignores_removed_raw_profile_sections() {
         let state: CloudSyncPersistedState = serde_json::from_value(serde_json::json!({
+            "syncScope": {
+                "syncRawTcpProfiles": true,
+                "syncRawUdpProfiles": true
+            },
             "lastSyncedStructuredState": {
                 "connections": "conn-rev",
                 "forwards": "fwd-rev",
+                "rawTcpProfiles": "raw-tcp-rev",
+                "rawUdpProfiles": "raw-udp-rev",
                 "appSettings": {
                     "general": "general-rev"
                 },
@@ -456,6 +454,8 @@ mod tests {
             "lastSyncedRemoteSections": {
                 "connections": "conn-rev",
                 "forwards": "fwd-rev",
+                "rawTcpProfiles": "raw-tcp-rev",
+                "rawUdpProfiles": "raw-udp-rev",
                 "appSettings": {
                     "general": "general-rev"
                 },
@@ -464,13 +464,15 @@ mod tests {
             "localDirtySections": {
                 "connections": false,
                 "forwards": false,
+                "rawTcpProfiles": true,
+                "rawUdpProfiles": true,
                 "appSettings": {},
                 "pluginSettings": {}
             }
         }))
         .expect("old cloud sync state should deserialize");
 
-        let structured_state = state.last_synced_structured_state.expect("state");
+        let structured_state = state.last_synced_structured_state.as_ref().expect("state");
         assert_eq!(structured_state.connections.as_deref(), Some("conn-rev"));
         assert!(structured_state.quick_commands.is_none());
         assert!(structured_state.serial_profiles.is_none());
@@ -478,6 +480,7 @@ mod tests {
         assert!(
             state
                 .last_synced_remote_sections
+                .as_ref()
                 .expect("remote sections")
                 .quick_commands
                 .is_none()
@@ -485,9 +488,14 @@ mod tests {
         assert!(
             !state
                 .local_dirty_sections
+                .as_ref()
                 .expect("dirty sections")
                 .sensitive_credentials
         );
+        // Saving the migrated state naturally clears the removed legacy fields.
+        let encoded = serde_json::to_string(&state).expect("cloud sync state should serialize");
+        assert!(!encoded.contains("rawTcpProfiles"));
+        assert!(!encoded.contains("rawUdpProfiles"));
     }
 
     #[test]
