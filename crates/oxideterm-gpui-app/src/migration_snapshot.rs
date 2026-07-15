@@ -106,7 +106,7 @@ fn ensure_versioned_snapshot(
             .permissions();
         fs::set_permissions(&temp_snapshot, source_permissions)
             .context("failed to protect migration snapshot staging directory")?;
-        copy_directory_tree(data_dir, &temp_snapshot)?;
+        copy_directory_tree(data_dir, &temp_snapshot, &ignored_runtime_paths)?;
         sync_directory_tree(&temp_snapshot)?;
         fail_before_snapshot_commit_for_tests()?;
         commit_snapshot_directory(&temp_snapshot, &paths.snapshot)?;
@@ -221,12 +221,19 @@ fn create_temp_snapshot_path(snapshot_path: &Path) -> Result<PathBuf> {
     ))
 }
 
-fn copy_directory_tree(source: &Path, destination: &Path) -> Result<()> {
+fn copy_directory_tree(
+    source: &Path,
+    destination: &Path,
+    ignored_runtime_paths: &[PathBuf],
+) -> Result<()> {
     for entry in fs::read_dir(source)
         .with_context(|| format!("failed to read migration source {}", source.display()))?
     {
         let entry = entry.context("failed to read migration source entry")?;
         let source_path = entry.path();
+        if ignored_runtime_paths.contains(&source_path) {
+            continue;
+        }
         let destination_path = destination.join(entry.file_name());
         let metadata = fs::symlink_metadata(&source_path).with_context(|| {
             format!(
@@ -242,7 +249,7 @@ fn copy_directory_tree(source: &Path, destination: &Path) -> Result<()> {
                     destination_path.display()
                 )
             })?;
-            copy_directory_tree(&source_path, &destination_path)?;
+            copy_directory_tree(&source_path, &destination_path, ignored_runtime_paths)?;
             fs::set_permissions(&destination_path, metadata.permissions()).with_context(|| {
                 format!(
                     "failed to preserve migration snapshot permissions for {}",
@@ -612,6 +619,41 @@ mod tests {
         );
         let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
         assert!(!paths.snapshot.exists());
+    }
+
+    #[test]
+    fn snapshot_excludes_current_single_instance_files() {
+        let root = TestDirectory::new("snapshot-excludes-single-instance");
+        let data_dir = root.path().join("data");
+        let settings_path = data_dir.join("settings.json");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(&settings_path, b"legacy settings").unwrap();
+        for runtime_path in
+            crate::single_instance::single_instance_runtime_paths_for_data_dir(&data_dir)
+        {
+            fs::write(runtime_path, b"current runtime state").unwrap();
+        }
+
+        assert_eq!(
+            ensure_pre_2_0_migration_snapshot(&settings_path).unwrap(),
+            MigrationSnapshotOutcome::Created
+        );
+
+        let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
+        assert_eq!(
+            fs::read(paths.snapshot.join("settings.json")).unwrap(),
+            b"legacy settings"
+        );
+        for runtime_path in
+            crate::single_instance::single_instance_runtime_paths_for_data_dir(&data_dir)
+        {
+            assert!(
+                !paths
+                    .snapshot
+                    .join(runtime_path.file_name().unwrap())
+                    .exists()
+            );
+        }
     }
 
     #[test]
