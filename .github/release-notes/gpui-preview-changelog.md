@@ -53,7 +53,6 @@ This preview focuses on diagnostics, terminal workflow polish, settings cleanup,
 - Remote SSH directory, Git, and project detection is more resilient: repository identity is reported before slower status scans, and expensive status collection is bounded.
 - Terminal settings were reorganized so local-terminal options live under the Terminal page, with improved subpage navigation and localization.
 - Key and connection-related settings were consolidated to reduce duplicated configuration surfaces.
-- Raw UDP profiles received fuller GPUI support and localization coverage.
 - Port forwarding and terminal command handling received reliability fixes around host normalization and command construction.
 - Settings, session-management dialogs, i18n strings, and the GPUI welcome/visual polish pass received additional refinements.
 

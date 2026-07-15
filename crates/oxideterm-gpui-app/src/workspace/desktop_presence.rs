@@ -7,8 +7,8 @@ impl WorkspaceApp {
         }
         self.desktop_presence_polling = true;
         cx.spawn(async move |weak, cx| {
-            // Native tray/menu callbacks arrive outside GPUI's action system,
-            // so a small UI-task poll bridges them back onto the workspace.
+            // Windows tray callbacks arrive outside GPUI's action system, so
+            // a small UI-task poll bridges them back onto the workspace.
             loop {
                 Timer::after(Duration::from_millis(100)).await;
                 let keep_polling = weak

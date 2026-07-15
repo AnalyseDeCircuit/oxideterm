@@ -1,6 +1,5 @@
 use super::*;
 
-pub(in crate::workspace) const SETTINGS_NETWORK_MAX_WIDTH: f32 = 672.0; // Tauri max-w-2xl
 pub(in crate::workspace) const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0; // Desktop preference for normal proxy fields.
 pub(in crate::workspace) const SETTINGS_NETWORK_PORT_FIELD_WIDTH: f32 = 140.0; // Ports should stay compact instead of sharing a full row.
 
@@ -79,7 +78,6 @@ impl WorkspaceApp {
                     vec![
                         div()
                             .w_full()
-                            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
                             .min_w(px(0.0))
                             .flex()
                             .flex_col()
@@ -111,7 +109,7 @@ impl WorkspaceApp {
                                         ),
                                     ))
                                     .child(
-                                        self.network_responsive_field(
+                                        self.network_compact_field(
                                             SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                                             self.network_input_field(
                                                 "settings_view.network.port",
@@ -121,7 +119,6 @@ impl WorkspaceApp {
                                                     .map(|proxy| proxy.port.to_string())
                                                     .unwrap_or_else(|| "1080".to_string()),
                                                 "1080".to_string(),
-                                                SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                                                 proxy.is_some(),
                                                 cx,
                                             ),
@@ -192,7 +189,6 @@ impl WorkspaceApp {
 
         let mut section = div()
             .w_full()
-            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .flex()
             .flex_col()
@@ -201,7 +197,6 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
                     .min_w(px(0.0))
                     .flex()
                     .flex_wrap()
@@ -265,7 +260,6 @@ impl WorkspaceApp {
 
         let content = div()
             .w_full()
-            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .flex()
             .flex_col()
@@ -293,12 +287,11 @@ impl WorkspaceApp {
                             SettingsInput::NetworkProxyTestHost,
                             host_value,
                             "server.example.com".to_string(),
-                            SETTINGS_NETWORK_FIELD_WIDTH,
                             proxy_enabled,
                             cx,
                         ),
                     ))
-                    .child(self.network_responsive_field(
+                    .child(self.network_compact_field(
                         SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                         self.network_input_field(
                             "settings_view.network.test_port",
@@ -306,7 +299,6 @@ impl WorkspaceApp {
                             SettingsInput::NetworkProxyTestPort,
                             port_value,
                             "22".to_string(),
-                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                             proxy_enabled,
                             cx,
                         ),
@@ -373,8 +365,24 @@ impl WorkspaceApp {
         preferred_width: f32,
         field: AnyElement,
     ) -> AnyElement {
-        // Field slots own width. Controls fill the slot; the slot itself wraps
-        // or shrinks instead of growing into the right sidebar.
+        // Field slots grow with the card and wrap once their preferred width
+        // no longer fits, avoiding a fixed-width cluster on wide panes.
+        div()
+            .max_w_full()
+            .min_w(px(0.0))
+            .flex_1()
+            .flex_basis(px(preferred_width))
+            .child(field)
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn network_compact_field(
+        &self,
+        preferred_width: f32,
+        field: AnyElement,
+    ) -> AnyElement {
+        // Compact numeric fields keep their natural width while larger peers
+        // consume the remaining row; max-width still permits narrow panes.
         div()
             .w(px(preferred_width))
             .max_w_full()
@@ -406,7 +414,6 @@ impl WorkspaceApp {
         }
         div()
             .w_full()
-            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .flex()
             .flex_wrap()
@@ -466,7 +473,6 @@ impl WorkspaceApp {
         input: SettingsInput,
         value: String,
         placeholder: String,
-        control_width: f32,
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -478,7 +484,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .child(self.network_field_label(label_key, hint_key))
             .child(
-                self.settings_text_input_control(input, value, placeholder, control_width, cx)
+                self.settings_text_input_control_fill(input, value, placeholder, cx)
                     .into_any_element(),
             )
             .when(!enabled, |field| field.opacity(0.5))
@@ -497,7 +503,6 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w_full()
-            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
@@ -583,7 +588,6 @@ impl WorkspaceApp {
         let remove_disabled = !has_saved_password && current_value.is_empty();
         let mut row = div()
             .w_full()
-            .max_w(px(SETTINGS_NETWORK_MAX_WIDTH))
             .min_w(px(0.0))
             .grid()
             .gap(px(8.0))
@@ -608,7 +612,7 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .flex_1()
                             .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
-                            .child(self.settings_secret_text_input_control(
+                            .child(self.settings_secret_text_input_control_fill(
                                 password_input,
                                 String::new(),
                                 if has_saved_password {
@@ -617,7 +621,6 @@ impl WorkspaceApp {
                                 } else {
                                     String::new()
                                 },
-                                SETTINGS_NETWORK_FIELD_WIDTH,
                                 cx,
                             )),
                     )

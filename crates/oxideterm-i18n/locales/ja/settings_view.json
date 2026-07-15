@@ -141,8 +141,8 @@
       "window_behavior_hint": "メインウィンドウを閉じるときの動作を設定します。",
       "minimize_to_tray_on_close": "ウィンドウを閉じるときにトレイへ最小化",
       "minimize_to_tray_on_close_hint": "閉じるボタンを押したときも、OxideTerm をシステムトレイで実行し続けます。",
-      "keep_in_menu_bar_on_close": "ウィンドウを閉じるときにメニューバーに残す",
-      "keep_in_menu_bar_on_close_hint": "閉じるボタンを押したときも、OxideTerm を macOS メニューバーから実行し続けます。"
+      "keep_running_on_close": "ウィンドウを閉じた後も OxideTerm を実行し続ける",
+      "keep_running_on_close_hint": "ウィンドウを閉じても、OxideTerm はバックグラウンドで実行し続けます。"
     },
     "terminal": {
       "title": "ターミナル設定",

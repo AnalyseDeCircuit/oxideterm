@@ -141,8 +141,8 @@
       "window_behavior_hint": "Cấu hình cách đóng cửa sổ chính.",
       "minimize_to_tray_on_close": "Thu nhỏ xuống khay hệ thống khi đóng cửa sổ",
       "minimize_to_tray_on_close_hint": "Giữ OxideTerm chạy trong khay hệ thống khi nhấn nút đóng cửa sổ.",
-      "keep_in_menu_bar_on_close": "Giữ trên thanh menu khi đóng cửa sổ",
-      "keep_in_menu_bar_on_close_hint": "Giữ OxideTerm chạy từ thanh menu macOS khi nhấn nút đóng cửa sổ."
+      "keep_running_on_close": "Tiếp tục chạy OxideTerm sau khi đóng cửa sổ",
+      "keep_running_on_close_hint": "Sau khi đóng cửa sổ, OxideTerm sẽ tiếp tục chạy trong nền."
     },
     "terminal": {
       "title": "Cài đặt Terminal",

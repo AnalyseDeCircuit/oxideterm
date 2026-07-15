@@ -141,8 +141,8 @@
       "window_behavior_hint": "Configure como a janela principal fecha.",
       "minimize_to_tray_on_close": "Minimizar para a bandeja ao fechar a janela",
       "minimize_to_tray_on_close_hint": "Mantém o OxideTerm em execução na bandeja do sistema ao pressionar o botão de fechar.",
-      "keep_in_menu_bar_on_close": "Manter na barra de menus ao fechar a janela",
-      "keep_in_menu_bar_on_close_hint": "Mantém o OxideTerm em execução pela barra de menus do macOS ao pressionar o botão de fechar."
+      "keep_running_on_close": "Manter o OxideTerm em execução após fechar a janela",
+      "keep_running_on_close_hint": "Ao fechar a janela, o OxideTerm continuará em execução em segundo plano."
     },
     "terminal": {
       "title": "Configurações do terminal",

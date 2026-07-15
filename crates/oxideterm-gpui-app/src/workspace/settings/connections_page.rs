@@ -1,7 +1,12 @@
 use super::*;
 
-pub(in crate::workspace) const CONNECTION_IMPORT_PANEL_MAX_WIDTH: f32 = 896.0; // Tauri ConnectionImportPanel max-w-4xl.
 pub(in crate::workspace) const CONNECTION_IDLE_TIMEOUT_CONTROL_WIDTH: f32 = 320.0; // Keep the standalone idle-timeout select from expanding into side panels.
+pub(in crate::workspace) const CONNECTION_RESPONSIVE_FIELD_BASIS: f32 = 240.0; // Preferred field width before a settings row redistributes space.
+pub(in crate::workspace) const CONNECTION_IMPORT_SOURCE_BASIS: f32 = 220.0; // Match the desktop source column while allowing narrow panes to wrap.
+pub(in crate::workspace) const CONNECTION_IMPORT_PATH_BASIS: f32 = 420.0; // Give localized path actions room before they move below the source picker.
+pub(in crate::workspace) const CONNECTION_IMPORT_PREVIEW_ACTIONS_BASIS: f32 = 420.0; // Keep preview controls together until the toolbar wraps.
+pub(in crate::workspace) const CONNECTION_IMPORT_AUTH_WIDTH: f32 = 120.0; // Match the compact trailing authentication column from Tauri.
+pub(in crate::workspace) const SSH_KEY_HEADER_TEXT_BASIS: f32 = 320.0; // Let long localized descriptions wrap before key actions.
 pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_WIDTH: f32 = 720.0;
 pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_HEIGHT: f32 = 560.0;
 
@@ -41,7 +46,7 @@ impl WorkspaceApp {
         }
         let keys = list_available_ssh_keys();
         let managed_keys = self.connection_store.managed_ssh_keys();
-        let mut local_list = div().max_w(px(768.0)).flex().flex_col();
+        let mut local_list = div().w_full().min_w_0().flex().flex_col();
         if keys.is_empty() {
             local_list = local_list.child(self.ssh_keys_empty_state());
         } else {
@@ -54,7 +59,7 @@ impl WorkspaceApp {
             }
         }
         let managed_key_count = managed_keys.len();
-        let mut managed_list = div().max_w(px(960.0)).flex().flex_col();
+        let mut managed_list = div().w_full().min_w_0().flex().flex_col();
         for (index, key) in managed_keys.into_iter().enumerate() {
             managed_list = managed_list.child(self.managed_ssh_key_row(key, cx));
             if index + 1 < managed_key_count {
@@ -62,6 +67,8 @@ impl WorkspaceApp {
             }
         }
         let content = div()
+            .w_full()
+            .min_w_0()
             .flex()
             .flex_col()
             .gap(px(32.0))
@@ -99,9 +106,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .max_w(px(672.0))
-            .grid()
-            .grid_cols(2)
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_wrap()
             .gap(px(32.0))
             .child(self.connection_labeled_input(
                 "settings_view.connections.default_username",
@@ -129,7 +137,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .grid()
+            .min_w_0()
+            .max_w_full()
+            .flex_1()
+            .flex_basis(px(CONNECTION_RESPONSIVE_FIELD_BASIS))
+            .flex()
+            .flex_col()
             .gap(px(8.0))
             .child(
                 div()
@@ -138,13 +151,7 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(label_key)),
             )
-            .child(self.settings_text_input_control(
-                input,
-                value,
-                placeholder,
-                self.tokens.metrics.settings_select_width,
-                cx,
-            ))
+            .child(self.settings_text_input_control_fill(input, value, placeholder, cx))
             .into_any_element()
     }
 
@@ -164,26 +171,12 @@ impl WorkspaceApp {
             cx,
         );
 
-        div()
-            .w_full()
-            .max_w(px(CONNECTION_IDLE_TIMEOUT_CONTROL_WIDTH))
-            .grid()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("settings_view.connections.idle_timeout.label")),
-            )
-            .child(control)
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.connections.idle_timeout.hint")),
-            )
-            .into_any_element()
+        self.setting_row(
+            "settings_view.connections.idle_timeout.label",
+            "settings_view.connections.idle_timeout.hint",
+            control,
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn ssh_config_import_section(
@@ -689,11 +682,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut rows = vec![
-            self.connection_import_source_picker(cx),
-            self.connection_import_path_toolbar(cx),
-            self.connection_import_path_summary(),
-        ];
+        let mut rows = vec![self.connection_import_input_row(cx)];
 
         if let Some(preview) = self.settings_connection_import_preview.clone() {
             rows.push(self.connection_import_preview_toolbar(&preview, cx));
@@ -710,6 +699,46 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn connection_import_input_row(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w_full()
+                    .flex_1()
+                    .flex_basis(px(CONNECTION_IMPORT_SOURCE_BASIS))
+                    .child(self.connection_import_source_picker(cx)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w_full()
+                    .flex_1()
+                    .flex_basis(px(CONNECTION_IMPORT_PATH_BASIS))
+                    .grid()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("settings_view.connections.importers.paths")),
+                    )
+                    .child(self.connection_import_path_toolbar(cx))
+                    .child(self.connection_import_path_summary()),
+            )
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn connection_import_source_picker(
         &self,
         cx: &mut Context<Self>,
@@ -718,7 +747,7 @@ impl WorkspaceApp {
             connection_import_source_label(self.settings_connection_import_source, &self.i18n);
         div()
             .w_full()
-            .max_w(px(220.0))
+            .min_w_0()
             .grid()
             .gap(px(8.0))
             .child(
@@ -745,7 +774,7 @@ impl WorkspaceApp {
         let has_paths = !self.settings_connection_import_paths.is_empty();
         div()
             .w_full()
-            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
+            .min_w_0()
             .flex()
             .flex_row()
             .flex_wrap()
@@ -863,7 +892,8 @@ impl WorkspaceApp {
             self.settings_connection_import_paths.join(" · ")
         };
         div()
-            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
+            .w_full()
+            .min_w_0()
             .truncate()
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
@@ -892,15 +922,20 @@ impl WorkspaceApp {
                 });
         div()
             .w_full()
-            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
+            .min_w_0()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(px(8.0))
             .child(self.connection_import_toggle_all_button(all_selected, importable, cx))
             .child(
                 div()
+                    .min_w_0()
+                    .max_w_full()
+                    .flex_1()
+                    .flex_basis(px(CONNECTION_IMPORT_PREVIEW_ACTIONS_BASIS))
                     .flex()
                     .flex_row()
                     .flex_wrap()
@@ -1029,7 +1064,6 @@ impl WorkspaceApp {
         if preview.drafts.is_empty() {
             return div()
                 .w_full()
-                .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
                 .h(px(288.0))
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
@@ -1047,7 +1081,6 @@ impl WorkspaceApp {
         let mut list = div()
             .id("settings-connection-import-scroll")
             .w_full()
-            .max_w(px(CONNECTION_IMPORT_PANEL_MAX_WIDTH))
             .h(px(288.0))
             .selectable_overflow_y_scroll(
                 &self.selectable_text_scroll_handle("settings-connection-import-scroll"),
@@ -1091,17 +1124,25 @@ impl WorkspaceApp {
             .join(" · ");
         let draft_id = draft.id.clone();
         div()
-            .grid()
-            .grid_cols(3)
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_start()
             .gap(px(8.0))
             .border_b_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
             .p(px(12.0))
             .opacity(if disabled { 0.5 } else { 1.0 })
-            .child(self.ssh_config_checkbox(checked))
+            .child(
+                div()
+                    .w(px(28.0))
+                    .flex_none()
+                    .child(self.ssh_config_checkbox(checked)),
+            )
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
                     .flex()
                     .flex_col()
                     .gap(px(3.0))
@@ -1150,6 +1191,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .w(px(CONNECTION_IMPORT_AUTH_WIDTH))
+                    .flex_none()
                     .text_align(gpui::TextAlign::Right)
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
@@ -1186,6 +1229,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .w_full()
+            .min_w_0()
             .flex()
             .flex_row()
             .items_center()
@@ -1196,6 +1240,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -1203,6 +1248,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .size(px(40.0))
+                            .flex_none()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -1217,6 +1263,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .min_w(px(0.0))
+                            .flex_1()
                             .flex()
                             .flex_col()
                             .gap(px(4.0))
@@ -1238,10 +1285,10 @@ impl WorkspaceApp {
                     ),
             )
             .when(key.has_passphrase, |row| {
-                row.child(self.text_badge(
+                row.child(div().flex_none().child(self.text_badge(
                     self.i18n.t("settings_view.ssh_keys.encrypted"),
                     theme.warning,
-                ))
+                )))
             })
             .into_any_element()
     }
@@ -1253,15 +1300,19 @@ impl WorkspaceApp {
         actions: Option<AnyElement>,
     ) -> AnyElement {
         div()
-            .max_w(px(960.0))
+            .w_full()
+            .min_w_0()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_start()
             .justify_between()
             .gap(px(12.0))
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
+                    .flex_basis(px(SSH_KEY_HEADER_TEXT_BASIS))
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
@@ -1288,9 +1339,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .max_w_full()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
+            .justify_end()
             .gap(px(8.0))
             .child(self.managed_key_action_button(
                 LucideIcon::FileLock,
@@ -1393,6 +1447,7 @@ impl WorkspaceApp {
         );
         div()
             .w_full()
+            .min_w_0()
             .flex()
             .flex_row()
             .items_center()
@@ -1403,6 +1458,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -1410,6 +1466,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .size(px(40.0))
+                            .flex_none()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -1424,6 +1481,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .min_w(px(0.0))
+                            .flex_1()
                             .flex()
                             .flex_col()
                             .gap(px(4.0))
@@ -1456,6 +1514,7 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .flex_none()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -1503,7 +1562,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn managed_ssh_keys_empty_state(&self) -> AnyElement {
         div()
             .w_full()
-            .max_w(px(960.0))
+            .min_w_0()
             .py(px(24.0))
             .text_align(gpui::TextAlign::Center)
             .text_size(px(self.tokens.metrics.ui_text_sm))

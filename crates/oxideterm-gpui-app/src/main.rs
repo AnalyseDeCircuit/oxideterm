@@ -256,7 +256,7 @@ fn open_main_workspace_window(
         let desktop_presence_rx =
             match oxideterm_desktop_presence::install_for_window(window, cx, desktop_presence_menu)
             {
-                Ok(rx) => Some(rx),
+                Ok(rx) => rx,
                 Err(error) => {
                     eprintln!(
                         "failed to install OxideTerm desktop presence integration: {error:#}"
@@ -316,13 +316,6 @@ fn quit(_: &Quit, cx: &mut App) {
 fn desktop_presence_menu(i18n: &I18n) -> oxideterm_desktop_presence::DesktopPresenceMenu {
     oxideterm_desktop_presence::DesktopPresenceMenu {
         app_name: i18n.t("menu.app"),
-        status_title: "Ox".to_string(),
-        status_icon: Some(oxideterm_desktop_presence::DesktopPresenceIcon {
-            // macOS menu bar extras use the alpha channel of a dedicated
-            // template image; the full-color app icon is not a good source.
-            template_png_bytes: include_bytes!("../resources/icons/menu-bar-template@2x.png"),
-            point_size: 18.0,
-        }),
         show_main_window: i18n.t("menu.show_main_window"),
         hide_main_window: i18n.t("menu.hide_main_window"),
         new_connection: i18n.t("layout.empty.new_connection"),

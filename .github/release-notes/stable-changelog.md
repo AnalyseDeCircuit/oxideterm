@@ -7,7 +7,7 @@ section as the detailed changelog attached to the corresponding GitHub Release.
 
 OxideTerm 2.0 is the largest release in the project's history. The desktop application has been rebuilt around Rust and GPUI, replacing the bundled WebView application shell with a GPU-rendered workspace while preserving OxideTerm's local-first approach to remote operations.
 
-This release brings terminals, saved connections, SFTP, remote editing, port forwarding, Host Tools, RDP/VNC, Raw TCP/UDP, serial devices, cloud sync, plugins, the `oxideterm` CLI, and OxideSens AI into one shared workspace and runtime model.
+This release brings terminals, saved connections, SFTP, remote editing, port forwarding, Host Tools, RDP/VNC, serial devices, cloud sync, plugins, the `oxideterm` CLI, and OxideSens AI into one shared workspace and runtime model.
 
 ### Highlights
 
@@ -126,15 +126,11 @@ This release brings terminals, saved connections, SFTP, remote editing, port for
 - Added X11 forwarding infrastructure with DISPLAY allocation, Xauthority management, and remote `xauth` setup.
 - Added update and SSH proxy settings without exposing proxy credentials in ordinary diagnostics.
 
-### Telnet, Serial, Raw TCP, and Raw UDP
+### Telnet and Serial
 
 - Added native Telnet sessions with option negotiation, binary mode, echo, terminal type, and window-size negotiation.
 - Added local serial terminals with device enumeration or manual device paths, configurable baud rate, data bits, stop bits, parity, and flow control.
 - Added saved, editable, importable, and exportable serial profiles with classified device, permission, busy-port, parameter, and disconnect errors.
-- Added Raw TCP terminals with text or hexadecimal display and send modes, configurable line endings, optional TLS, certificate policy, and server-name configuration.
-- Added Raw UDP terminals with remote endpoints, local bind address and port, text or hexadecimal modes, and per-datagram source and timestamp information.
-- Added control-sequence filtering for untrusted Raw TCP/UDP payloads so arbitrary network data cannot directly activate terminal OSC/DCS features.
-- Added `.oxide` import/export support for serial and Raw TCP/UDP profiles.
 
 ### Host Tools and Runtime Views
 
@@ -201,7 +197,7 @@ This release brings terminals, saved connections, SFTP, remote editing, port for
 - Moved cloud sync from an optional 1.x plugin into the built-in 2.0 workspace.
 - Added WebDAV, HTTP JSON, Dropbox, OneDrive, Google Drive, GitHub Gist, S3, and Git backends.
 - Added manual upload, remote inspection, pull preview, conflict handling, automatic upload, history, and rollback backups.
-- Added independent sync scopes for connections, forwards, Quick Commands, serial profiles, Raw TCP/UDP profiles, application settings, and plugin settings.
+- Added independent sync scopes for connections, forwards, Quick Commands, serial profiles, application settings, and plugin settings.
 - Sensitive credentials and local-terminal environment variables remain excluded by default and require explicit opt-in.
 - Added partition revisions, baselines, and tombstones for incremental updates and deletion tracking.
 - Added pre-apply checkpoints and best-effort whole-operation rollback when connection, setting, forwarding, or plugin-setting writes fail.
@@ -211,7 +207,7 @@ This release brings terminals, saved connections, SFTP, remote editing, port for
 
 ### Encrypted `.oxide` Bundles and Portable Workflows
 
-- Expanded and rebuilt `.oxide` import/export for connections, forwarding rules, application settings, Quick Commands, serial profiles, Raw TCP/UDP profiles, plugin settings, managed SSH keys, and optional portable secrets.
+- Expanded and rebuilt `.oxide` import/export for connections, forwarding rules, application settings, Quick Commands, serial profiles, plugin settings, managed SSH keys, and optional portable secrets.
 - Added content preview and per-resource selection before import.
 - Added rename, skip, replace, and merge conflict policies, with rename as the conservative default.
 - Added managed-key fingerprint reuse and explicit choices for restoring managed keys and passphrases.
@@ -238,7 +234,6 @@ This release brings terminals, saved connections, SFTP, remote editing, port for
 - Kept credential values out of connection diagnostics, plugin status, cloud-sync summaries, CLI reports, and structured logs.
 - Added standard-input and environment-based CLI secret input so scripts do not need to place secrets in process arguments.
 - Continued strict SSH host-key verification with rejection of unexpected key changes.
-- Added control-sequence filtering to Raw TCP/UDP terminals.
 - Added risk-aware AI tools and command-policy checks while keeping approval behavior user-configurable.
 
 ### Appearance, Settings, and Internationalization
@@ -336,7 +331,6 @@ This release brings terminals, saved connections, SFTP, remote editing, port for
 - Grace Period reconnect is best-effort and depends on the original SSH runtime recovering or supported consumers successfully acquiring a replacement transport; it is not a guarantee of lossless recovery for every network failure.
 - Unsaved editor buffers still require an explicit save, reload, or discard decision and should not be treated as remotely persisted state.
 - Port-forward restore can fail when local ports are occupied, privileges are insufficient, or the remote server rejects binding.
-- Raw TCP/UDP sessions do not provide SSH host identity. Raw TCP validates a server certificate only when TLS and certificate verification are enabled.
 - RDP and VNC support common interactive workflows but do not claim parity with every platform-specific enterprise client or extension.
 - VNC uses the server framebuffer and scales it into the local viewport; dynamic remote resolution behavior primarily applies to supported RDP sessions.
 - File preview supports selected text, code, Markdown, image, audio, video, hexadecimal, and font formats. PDF preview is not included in 2.0.

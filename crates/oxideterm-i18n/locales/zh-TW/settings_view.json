@@ -141,8 +141,8 @@
       "window_behavior_hint": "設定主視窗關閉時的行為。",
       "minimize_to_tray_on_close": "關閉視窗時最小化到系統匣",
       "minimize_to_tray_on_close_hint": "按下視窗關閉按鈕時，讓 OxideTerm 繼續在系統匣中執行。",
-      "keep_in_menu_bar_on_close": "關閉視窗時保留在選單列",
-      "keep_in_menu_bar_on_close_hint": "按下視窗關閉按鈕時，讓 OxideTerm 繼續在 macOS 選單列中執行。"
+      "keep_running_on_close": "關閉視窗後繼續執行 OxideTerm",
+      "keep_running_on_close_hint": "關閉視窗後，OxideTerm 將繼續在背景執行。"
     },
     "terminal": {
       "title": "終端機設定",

@@ -37,9 +37,8 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        if self.sidebar_collapsed {
-            self.set_sidebar_collapsed_with_motion(false, cx);
-        }
+        // Opening a workspace tab is independent from sidebar visibility, so
+        // preserve the user's collapsed or expanded state across navigation.
         if let Some(path) = initial_path {
             // Opening File Manager from a local terminal should start where the
             // user is already working, without turning cwd into global state.

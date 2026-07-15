@@ -1,6 +1,6 @@
 use gpui::{KeyBinding, Menu, MenuItem, SystemMenuType};
 pub use oxideterm_gpui_platform::window_options;
-use oxideterm_i18n::{I18n, Locale};
+use oxideterm_i18n::I18n;
 use oxideterm_settings::PersistedSettings;
 
 use crate::{
@@ -9,10 +9,7 @@ use crate::{
     PaletteAiSidebar, PaletteBroadcast, PaletteCancelReconnect, PaletteCleanupDead,
     PaletteDetachTerminal, PaletteDisconnectAll, PaletteEventLog, PaletteHealthCheck,
     PaletteReconnectAll, PaletteResetPanes, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts,
-    SplitHorizontal, SplitVertical, SwitchLocaleChinese, SwitchLocaleEnglish, SwitchLocaleFrench,
-    SwitchLocaleGerman, SwitchLocaleItalian, SwitchLocaleJapanese, SwitchLocaleKorean,
-    SwitchLocalePortugueseBrazil, SwitchLocaleSpanish, SwitchLocaleTraditionalChinese,
-    SwitchLocaleVietnamese, TerminalRecording, ToggleSidebar, ZenMode,
+    SplitHorizontal, SplitVertical, TerminalRecording, ToggleSidebar, ZenMode,
 };
 
 pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
@@ -124,28 +121,6 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
                 MenuItem::action(i18n.t("menu.previous_tab"), PrevTab),
             ],
         },
-        Menu {
-            name: i18n.t("menu.language").into(),
-            items: vec![
-                MenuItem::action(locale_label(i18n, Locale::En), SwitchLocaleEnglish),
-                MenuItem::action(locale_label(i18n, Locale::ZhCn), SwitchLocaleChinese),
-                MenuItem::action(
-                    locale_label(i18n, Locale::ZhTw),
-                    SwitchLocaleTraditionalChinese,
-                ),
-                MenuItem::action(locale_label(i18n, Locale::De), SwitchLocaleGerman),
-                MenuItem::action(locale_label(i18n, Locale::EsEs), SwitchLocaleSpanish),
-                MenuItem::action(locale_label(i18n, Locale::FrFr), SwitchLocaleFrench),
-                MenuItem::action(locale_label(i18n, Locale::It), SwitchLocaleItalian),
-                MenuItem::action(locale_label(i18n, Locale::Ja), SwitchLocaleJapanese),
-                MenuItem::action(locale_label(i18n, Locale::Ko), SwitchLocaleKorean),
-                MenuItem::action(
-                    locale_label(i18n, Locale::PtBr),
-                    SwitchLocalePortugueseBrazil,
-                ),
-                MenuItem::action(locale_label(i18n, Locale::Vi), SwitchLocaleVietnamese),
-            ],
-        },
     ]
 }
 
@@ -153,23 +128,21 @@ pub(crate) fn app_key_bindings(settings: &PersistedSettings) -> Vec<KeyBinding> 
     crate::keybindings::startup_key_bindings(&settings.keybindings.overrides)
 }
 
-fn locale_label(i18n: &I18n, locale: Locale) -> String {
-    let label = match locale {
-        Locale::En => i18n.t("language.english"),
-        Locale::ZhCn => i18n.t("language.simplified_chinese"),
-        Locale::ZhTw => i18n.t("language.traditional_chinese"),
-        Locale::De => i18n.t("language.german"),
-        Locale::EsEs => i18n.t("language.spanish"),
-        Locale::FrFr => i18n.t("language.french"),
-        Locale::It => i18n.t("language.italian"),
-        Locale::Ja => i18n.t("language.japanese"),
-        Locale::Ko => i18n.t("language.korean"),
-        Locale::PtBr => i18n.t("language.portuguese_brazil"),
-        Locale::Vi => i18n.t("language.vietnamese"),
-    };
-    if i18n.locale() == locale {
-        format!("✓ {label}")
-    } else {
-        label
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_menus_do_not_register_language_as_a_top_level_menu() {
+        let i18n = I18n::default();
+        let language_label = i18n.t("menu.language");
+
+        // Language selection remains available in Settings without occupying
+        // permanent native menu-bar space.
+        assert!(
+            app_menus(&i18n)
+                .iter()
+                .all(|menu| menu.name.as_ref() != language_label)
+        );
     }
 }

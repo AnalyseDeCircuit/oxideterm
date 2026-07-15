@@ -36,6 +36,7 @@ pub struct SettingsPageModel {
     pub ai_page: AiSettingsPage,
     pub previous_ai_page: AiSettingsPage,
     pub keybinding_scope_filter: SettingsKeybindingScopeFilter,
+    pub previous_keybinding_scope_filter: SettingsKeybindingScopeFilter,
     pub settings_reset_confirm_open: bool,
     pub ai_new_provider_type: String,
     pub ai_provider_settings_expanded: bool,
@@ -89,6 +90,7 @@ impl Default for SettingsPageModel {
             ai_page: AiSettingsPage::General,
             previous_ai_page: AiSettingsPage::General,
             keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
+            previous_keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             settings_reset_confirm_open: false,
             ai_new_provider_type: "openai_compatible".to_string(),
             ai_provider_settings_expanded: true,
@@ -159,6 +161,9 @@ impl SettingsPageModel {
 
     /// Selects the keybinding scope filter used by the keybindings page.
     pub fn set_keybinding_scope_filter(&mut self, filter: SettingsKeybindingScopeFilter) {
+        if self.keybinding_scope_filter != filter {
+            self.previous_keybinding_scope_filter = self.keybinding_scope_filter;
+        }
         self.keybinding_scope_filter = filter;
     }
 
@@ -786,6 +791,22 @@ mod tests {
         assert_eq!(model.previous_terminal_page, TerminalSettingsPage::Display);
         assert_eq!(
             model.keybinding_scope_filter,
+            SettingsKeybindingScopeFilter::Terminal
+        );
+        assert_eq!(
+            model.previous_keybinding_scope_filter,
+            SettingsKeybindingScopeFilter::All
+        );
+
+        model.set_keybinding_scope_filter(SettingsKeybindingScopeFilter::Terminal);
+        assert_eq!(
+            model.previous_keybinding_scope_filter,
+            SettingsKeybindingScopeFilter::All
+        );
+
+        model.set_keybinding_scope_filter(SettingsKeybindingScopeFilter::Split);
+        assert_eq!(
+            model.previous_keybinding_scope_filter,
             SettingsKeybindingScopeFilter::Terminal
         );
     }

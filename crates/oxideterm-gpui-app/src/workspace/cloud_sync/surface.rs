@@ -4,6 +4,7 @@
 use super::*;
 
 const CLOUD_SYNC_TAB_BAR_WIDTH: f32 = 396.0; // Three equal header tabs leave room for translated labels.
+const CLOUD_SYNC_BODY_LINE_HEIGHT: f32 = 20.0; // Compact body copy must not override page-header text metrics.
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_cloud_sync_tab(
@@ -95,7 +96,6 @@ impl WorkspaceApp {
                     .bg(cloud_sync_root_bg(theme.bg, has_background))
                     .text_color(rgb(theme.text))
                     .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .line_height(px(20.0))
                     .child(tauri_virtual_list(
                         state,
                         spec,
@@ -206,6 +206,9 @@ impl WorkspaceApp {
             .w_full()
             .min_w(px(0.0))
             .flex()
+            .when(section != CloudSyncSection::Header, |item| {
+                item.line_height(px(CLOUD_SYNC_BODY_LINE_HEIGHT))
+            })
             .child(content.child(self.render_cloud_sync_section(section, cx)))
             .into_any_element()
     }
@@ -476,7 +479,6 @@ impl WorkspaceApp {
                                 div()
                                     .max_w(px(680.0))
                                     .text_size(px(self.tokens.metrics.ui_text_base))
-                                    .line_height(px(22.0))
                                     .text_color(rgb(theme.text_muted))
                                     .child(self.render_display_text_with_role(
                                         SelectableTextRole::PlainDocument,

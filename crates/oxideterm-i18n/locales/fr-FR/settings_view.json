@@ -141,8 +141,8 @@
       "window_behavior_hint": "Configure la fermeture de la fenêtre principale.",
       "minimize_to_tray_on_close": "Réduire dans la zone de notification à la fermeture",
       "minimize_to_tray_on_close_hint": "Garde OxideTerm en cours d'exécution dans la zone de notification lorsque le bouton de fermeture est utilisé.",
-      "keep_in_menu_bar_on_close": "Conserver dans la barre des menus à la fermeture",
-      "keep_in_menu_bar_on_close_hint": "Garde OxideTerm en cours d'exécution depuis la barre des menus macOS lorsque le bouton de fermeture est utilisé."
+      "keep_running_on_close": "Continuer à exécuter OxideTerm après la fermeture de la fenêtre",
+      "keep_running_on_close_hint": "Après la fermeture de la fenêtre, OxideTerm continue de s’exécuter en arrière-plan."
     },
     "terminal": {
       "title": "Paramètres du terminal",

@@ -12,7 +12,7 @@ use std::sync::mpsc;
 
 use gpui::{App, Window};
 
-pub use config::{DesktopPresenceIcon, DesktopPresenceMenu};
+pub use config::DesktopPresenceMenu;
 pub use event::DesktopPresenceEvent;
 
 pub type DesktopPresenceReceiver = mpsc::Receiver<DesktopPresenceEvent>;
@@ -21,10 +21,12 @@ pub fn install_for_window(
     window: &mut Window,
     cx: &App,
     menu: DesktopPresenceMenu,
-) -> anyhow::Result<DesktopPresenceReceiver> {
+) -> anyhow::Result<Option<DesktopPresenceReceiver>> {
     let (tx, rx) = mpsc::channel();
     platform::install_for_window(window, cx, menu, tx)?;
-    Ok(rx)
+    // Only the Windows tray currently emits application events. macOS keeps
+    // its close-to-background behavior without registering a status item.
+    Ok(cfg!(target_os = "windows").then_some(rx))
 }
 
 pub fn set_keep_running_on_close(enabled: bool) {

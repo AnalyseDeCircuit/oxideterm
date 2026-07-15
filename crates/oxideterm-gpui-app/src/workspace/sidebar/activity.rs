@@ -259,22 +259,21 @@ impl WorkspaceApp {
             theme.bg
         };
 
-        // Tauri renders activity entries through the shared Button primitive:
-        // active rows use `variant="secondary"` and inactive rows use `ghost`.
-        // Keep native activity icons on the shared icon-button path so dynamic
-        // radius settings affect this surface the same way as browser buttons.
+        // Activity entries use the same static selected-card treatment as the
+        // settings navigation while retaining the shared icon-button states.
         let button = oxideterm_gpui_ui::button::icon_button(
             &self.tokens,
             Self::render_lucide_icon(
                 icon,
                 self.tokens.metrics.activity_icon_glyph_size,
-                rgb(theme.text),
+                rgb(if active { theme.accent } else { theme.text }),
             ),
             oxideterm_gpui_ui::button::IconButtonOptions {
                 size: self.tokens.metrics.activity_icon_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 has_background: active,
-                background: active.then(|| rgb(theme.bg_panel)),
+                background: active.then(|| self.settings_panel_background(theme.bg_panel)),
+                border: active.then(|| rgb(theme.border)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,
                 ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
@@ -282,23 +281,16 @@ impl WorkspaceApp {
                 )
             },
         );
+        let button = if active {
+            oxideterm_gpui_ui::theme_card_surface_shadow(button, &self.tokens)
+        } else {
+            button
+        };
 
         button
             .id(("activity-icon", section as u64))
             .relative()
             .mb(px(self.tokens.metrics.activity_icon_gap))
-            .when(active, |icon_el| {
-                icon_el.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top(px(self.tokens.metrics.activity_indicator_inset))
-                        .bottom(px(self.tokens.metrics.activity_indicator_inset))
-                        .w(px(self.tokens.metrics.activity_indicator_width))
-                        .rounded(px(self.tokens.radii.active_indicator))
-                        .bg(rgb(theme.accent)),
-                )
-            })
             .when(badge_count > 0, |icon_el| {
                 icon_el.child(
                     div()
@@ -450,13 +442,14 @@ impl WorkspaceApp {
             Self::render_lucide_icon(
                 icon,
                 self.tokens.metrics.activity_icon_glyph_size,
-                rgb(theme.text),
+                rgb(if active { theme.accent } else { theme.text }),
             ),
             oxideterm_gpui_ui::button::IconButtonOptions {
                 size: self.tokens.metrics.activity_icon_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 has_background: active,
-                background: active.then(|| rgb(theme.bg_panel)),
+                background: active.then(|| self.settings_panel_background(theme.bg_panel)),
+                border: active.then(|| rgb(theme.border)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,
                 ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
@@ -464,6 +457,11 @@ impl WorkspaceApp {
                 )
             },
         );
+        let button = if active {
+            oxideterm_gpui_ui::theme_card_surface_shadow(button, &self.tokens)
+        } else {
+            button
+        };
 
         button
             .id((
@@ -472,18 +470,6 @@ impl WorkspaceApp {
             ))
             .relative()
             .mb(px(self.tokens.metrics.activity_icon_gap))
-            .when(active, |icon_el| {
-                icon_el.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top(px(self.tokens.metrics.activity_indicator_inset))
-                        .bottom(px(self.tokens.metrics.activity_indicator_inset))
-                        .w(px(self.tokens.metrics.activity_indicator_width))
-                        .rounded(px(self.tokens.radii.active_indicator))
-                        .bg(rgb(theme.accent)),
-                )
-            })
             .on_mouse_move(cx.listener({
                 let tooltip = tooltip;
                 move |this, event: &MouseMoveEvent, _window, cx| {

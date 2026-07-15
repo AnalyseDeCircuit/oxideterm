@@ -141,8 +141,8 @@
       "window_behavior_hint": "Lege fest, wie das Hauptfenster geschlossen wird.",
       "minimize_to_tray_on_close": "Beim Schließen in den Infobereich minimieren",
       "minimize_to_tray_on_close_hint": "OxideTerm im Infobereich weiter ausführen, wenn die Schließen-Schaltfläche gedrückt wird.",
-      "keep_in_menu_bar_on_close": "Beim Schließen in der Menüleiste behalten",
-      "keep_in_menu_bar_on_close_hint": "OxideTerm über die macOS-Menüleiste weiter ausführen, wenn die Schließen-Schaltfläche gedrückt wird."
+      "keep_running_on_close": "OxideTerm nach dem Schließen des Fensters weiter ausführen",
+      "keep_running_on_close_hint": "Nach dem Schließen des Fensters wird OxideTerm im Hintergrund weiter ausgeführt."
     },
     "terminal": {
       "title": "Terminal-Einstellungen",

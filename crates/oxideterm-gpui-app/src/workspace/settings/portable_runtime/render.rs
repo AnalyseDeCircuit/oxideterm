@@ -76,17 +76,13 @@ impl WorkspaceApp {
         } else {
             "settings_view.general.portable_runtime_disabled_hint"
         };
-        let mut rows = vec![
-            self.portable_runtime_summary_row(portable_status, hint_key, cx),
-            self.card_separator(),
-        ];
+        let mut rows = vec![self.portable_runtime_summary_row(portable_status, hint_key, cx)];
 
         if let Some(status) = portable_status.filter(|status| status.is_portable) {
+            rows.push(self.card_separator());
             rows.push(self.portable_path_group(status, cx));
             rows.push(self.card_separator());
             rows.push(self.portable_security_group(status, cx));
-        } else {
-            rows.push(self.portable_disabled_notice(cx));
         }
 
         self.plain_settings_card(
@@ -124,32 +120,17 @@ impl WorkspaceApp {
             .items_start()
             .justify_between()
             .gap(px(16.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .w_full()
-                    .gap(px(4.0))
-                    .min_w(px(0.0))
-                    .child(self.portable_settings_text(
-                        "portable-runtime-summary-title",
-                        "title",
-                        self.i18n.t("settings_view.general.portable_runtime"),
-                        self.tokens.metrics.ui_text_sm,
-                        self.tokens.ui.text,
-                        Some(gpui::FontWeight::MEDIUM),
-                        cx,
-                    ))
-                    .child(self.portable_settings_text(
-                        "portable-runtime-summary-hint",
-                        hint_key,
-                        self.i18n.t(hint_key),
-                        self.tokens.metrics.ui_text_xs,
-                        self.tokens.ui.text_muted,
-                        None,
-                        cx,
-                    )),
-            )
+            .child(div().flex().flex_col().w_full().min_w(px(0.0)).child(
+                self.portable_settings_text(
+                    "portable-runtime-summary-hint",
+                    hint_key,
+                    self.i18n.t(hint_key),
+                    self.tokens.metrics.ui_text_xs,
+                    self.tokens.ui.text_muted,
+                    None,
+                    cx,
+                ),
+            ))
             .child(self.text_badge(badge_label, badge_color))
             .into_any_element()
     }
@@ -164,11 +145,6 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(PORTABLE_SETTINGS_PATH_CARD_GAP))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg))
-            .p(px(12.0))
             .child(self.portable_value_box(
                 "settings_view.general.portable_root_dir",
                 status.portable_root_dir.clone(),
@@ -258,11 +234,6 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(PORTABLE_SETTINGS_BUTTON_GAP))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg))
-            .p(px(12.0))
             .child(
                 div()
                     .flex()
@@ -330,34 +301,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn portable_disabled_notice(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg))
-            .px(px(12.0))
-            .py(px(12.0))
-            .child(
-                self.portable_settings_text(
-                    "portable-disabled-notice",
-                    "settings_view.general.portable_runtime_disabled_hint",
-                    self.i18n
-                        .t("settings_view.general.portable_runtime_disabled_hint"),
-                    self.tokens.metrics.ui_text_xs,
-                    self.tokens.ui.text_muted,
-                    None,
-                    cx,
-                ),
-            )
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn portable_migration_card(
         &self,
         cx: &mut Context<Self>,
@@ -381,16 +324,6 @@ impl WorkspaceApp {
             div()
                 .flex()
                 .flex_col()
-                .gap(px(4.0))
-                .child(self.portable_settings_text(
-                    "portable-migration-title",
-                    "settings_view.general.portable_migration",
-                    self.i18n.t("settings_view.general.portable_migration"),
-                    self.tokens.metrics.ui_text_sm,
-                    self.tokens.ui.text,
-                    Some(gpui::FontWeight::MEDIUM),
-                    cx,
-                ))
                 .child(self.portable_settings_text(
                     "portable-migration-hint",
                     if is_portable {
@@ -412,11 +345,6 @@ impl WorkspaceApp {
                 ))
                 .into_any_element(),
             div()
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(rgb(self.tokens.ui.border))
-                .bg(self.settings_panel_background(self.tokens.ui.bg))
-                .p(px(12.0))
                 .flex()
                 .flex_col()
                 .gap(px(PORTABLE_SETTINGS_PATH_CARD_GAP))

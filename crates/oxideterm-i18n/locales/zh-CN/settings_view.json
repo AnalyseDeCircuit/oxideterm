@@ -141,8 +141,8 @@
       "window_behavior_hint": "配置主窗口关闭时的行为。",
       "minimize_to_tray_on_close": "关闭窗口时最小化到托盘",
       "minimize_to_tray_on_close_hint": "点击窗口关闭按钮时，让 OxideTerm 继续在系统托盘中运行。",
-      "keep_in_menu_bar_on_close": "关闭窗口时保留在菜单栏",
-      "keep_in_menu_bar_on_close_hint": "点击窗口关闭按钮时，让 OxideTerm 继续在 macOS 菜单栏中运行。"
+      "keep_running_on_close": "关闭窗口后继续运行 OxideTerm",
+      "keep_running_on_close_hint": "关闭窗口后，OxideTerm 将继续在后台运行。"
     },
     "terminal": {
       "title": "终端设置",

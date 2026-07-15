@@ -141,8 +141,8 @@
       "window_behavior_hint": "Configure how the main app window closes.",
       "minimize_to_tray_on_close": "Minimize to tray when closing the window",
       "minimize_to_tray_on_close_hint": "Keep OxideTerm running in the system tray when the window close button is pressed.",
-      "keep_in_menu_bar_on_close": "Keep in menu bar when closing the window",
-      "keep_in_menu_bar_on_close_hint": "Keep OxideTerm running from the macOS menu bar when the window close button is pressed."
+      "keep_running_on_close": "Keep OxideTerm running after closing the window",
+      "keep_running_on_close_hint": "Closing the window keeps OxideTerm running in the background."
     },
     "terminal": {
       "title": "Terminal Settings",

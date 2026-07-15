@@ -200,12 +200,33 @@ impl WorkspaceApp {
         width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.settings_text_input_control_with_align(
+        self.settings_text_input_control_inner(
             input,
             value,
             placeholder,
-            width,
+            Some(width),
             TextInputContentAlign::Start,
+            false,
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn settings_text_input_control_fill(
+        &self,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Responsive form fields own their width at the parent flex layer.
+        // Filling that slot avoids fixed-width inputs inside growing columns.
+        self.settings_text_input_control_inner(
+            input,
+            value,
+            placeholder,
+            None,
+            TextInputContentAlign::Start,
+            false,
             cx,
         )
     }
@@ -222,7 +243,26 @@ impl WorkspaceApp {
             input,
             value,
             placeholder,
-            width,
+            Some(width),
+            TextInputContentAlign::Start,
+            true,
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn settings_secret_text_input_control_fill(
+        &self,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Secret controls use the same responsive slot contract as normal inputs.
+        self.settings_text_input_control_inner(
+            input,
+            value,
+            placeholder,
+            None,
             TextInputContentAlign::Start,
             true,
             cx,
@@ -238,7 +278,15 @@ impl WorkspaceApp {
         align: TextInputContentAlign,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.settings_text_input_control_inner(input, value, placeholder, width, align, false, cx)
+        self.settings_text_input_control_inner(
+            input,
+            value,
+            placeholder,
+            Some(width),
+            align,
+            false,
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn settings_text_input_control_inner(
@@ -246,7 +294,7 @@ impl WorkspaceApp {
         input: SettingsInput,
         value: String,
         placeholder: String,
-        width: f32,
+        width: Option<f32>,
         align: TextInputContentAlign,
         secret: bool,
         cx: &mut Context<Self>,
@@ -277,8 +325,8 @@ impl WorkspaceApp {
                 },
                 align,
             )
-            .w(px(width))
-            .max_w_full()
+            .when_some(width, |input, width| input.w(px(width)).max_w_full())
+            .when(width.is_none(), |input| input.w_full())
             .min_w(px(0.0))
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(

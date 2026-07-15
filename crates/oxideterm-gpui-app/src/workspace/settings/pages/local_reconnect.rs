@@ -188,11 +188,8 @@ impl WorkspaceApp {
             .unwrap_or_default();
         let scope_id = LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string();
         let summary = div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(rgba((theme.bg << 8) | 0x80))
-            .p(px(12.0))
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .items_center()
             .justify_between()
@@ -292,9 +289,10 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+                    .min_w_0()
                     .flex()
                     .flex_row()
+                    .flex_wrap()
                     .gap(px(32.0))
                     .child(self.reconnect_select_field(
                         "settings_view.reconnect.max_attempts",
@@ -311,15 +309,7 @@ impl WorkspaceApp {
                         reconnect_delay_label(settings.reconnect.base_delay_ms),
                         reconnect_enabled,
                         cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
-                    .flex()
-                    .flex_row()
-                    .gap(px(32.0))
+                    ))
                     .child(self.reconnect_select_field(
                         "settings_view.reconnect.max_delay",
                         "settings_view.reconnect.max_delay_hint",
@@ -331,7 +321,8 @@ impl WorkspaceApp {
             )
             .child(
                 div()
-                    .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+                    .w_full()
+                    .min_w_0()
                     .pt(px(4.0))
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
@@ -357,13 +348,17 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w_full()
-            .max_w(px(SETTINGS_RECONNECT_MAX_WIDTH))
+            .min_w_0()
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(px(16.0))
             .child(
                 div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex_basis(px(SETTINGS_RECONNECT_FIELD_BASIS))
                     .grid()
                     .gap(px(4.0))
                     .child(
@@ -381,17 +376,19 @@ impl WorkspaceApp {
                     ),
             )
             .child(
-                checkbox(&self.tokens, String::new(), checked)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.edit_settings(
-                                |settings| set_reconnect_enabled(settings, !checked),
-                                cx,
-                            );
-                        }),
-                    )
-                    .into_any_element(),
+                div().flex_none().child(
+                    checkbox(&self.tokens, String::new(), checked)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.edit_settings(
+                                    |settings| set_reconnect_enabled(settings, !checked),
+                                    cx,
+                                );
+                            }),
+                        )
+                        .into_any_element(),
+                ),
             )
             .into_any_element()
     }
@@ -408,8 +405,10 @@ impl WorkspaceApp {
         let control = self.settings_select_control(select_id, value, !enabled, None, cx);
 
         div()
-            .w(px(SETTINGS_RECONNECT_FIELD_WIDTH))
-            .min_w(px(0.0))
+            .min_w_0()
+            .max_w_full()
+            .flex_1()
+            .flex_basis(px(SETTINGS_RECONNECT_FIELD_BASIS))
             .grid()
             .gap(px(8.0))
             .child(

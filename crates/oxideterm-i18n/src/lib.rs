@@ -466,6 +466,45 @@ mod tests {
     }
 
     #[test]
+    fn close_background_strings_exist_in_every_locale() {
+        let locales = [
+            Locale::De,
+            Locale::En,
+            Locale::EsEs,
+            Locale::FrFr,
+            Locale::It,
+            Locale::Ja,
+            Locale::Ko,
+            Locale::PtBr,
+            Locale::Vi,
+            Locale::ZhCn,
+            Locale::ZhTw,
+        ];
+        let keys = [
+            "settings_view.general.keep_running_on_close",
+            "settings_view.general.keep_running_on_close_hint",
+        ];
+        let english = I18n::new(Locale::En);
+
+        // The macOS setting describes background lifetime now that no status
+        // item is registered, and every shipped locale must own that wording.
+        for locale in locales {
+            let i18n = I18n::new(locale);
+            for key in keys {
+                let translated = i18n.t(key);
+                assert_ne!(translated, key, "{locale:?} missing {key}");
+                if locale != Locale::En {
+                    assert_ne!(
+                        translated,
+                        english.t(key),
+                        "{locale:?} falls back for {key}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn preview_stable_upgrade_strings_exist_in_every_locale() {
         let locales = [
             Locale::De,

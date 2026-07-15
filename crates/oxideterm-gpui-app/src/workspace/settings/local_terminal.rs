@@ -112,13 +112,10 @@ impl WorkspaceApp {
 
         Some(
             div()
+                .w_full()
+                .min_w(px(0.0))
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .text_color(rgb(self.tokens.ui.text_muted))
-                .bg(rgba((self.tokens.ui.bg_panel << 8) | 0x4d))
-                .p(px(12.0))
-                .rounded(px(self.tokens.radii.sm))
-                .border_1()
-                .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
                 .child(
                     div()
                         .flex()

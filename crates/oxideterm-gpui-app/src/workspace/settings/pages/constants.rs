@@ -1,8 +1,4 @@
-// Tauri ReconnectTab uses `max-w-2xl` for the switch row, select grids, and hint card.
-pub(in crate::workspace) const SETTINGS_RECONNECT_MAX_WIDTH: f32 = 672.0;
-// Tauri's `grid-cols-2 gap-8 max-w-2xl` leaves 320px for each reconnect field.
-pub(in crate::workspace) const SETTINGS_RECONNECT_FIELD_WIDTH: f32 =
-    (SETTINGS_RECONNECT_MAX_WIDTH - 32.0) / 2.0;
+pub(in crate::workspace) const SETTINGS_RECONNECT_FIELD_BASIS: f32 = 240.0; // Preferred retry-field width before the row wraps.
 pub(in crate::workspace) const SETTINGS_RECONNECT_HINT_LINE_HEIGHT: f32 = 16.0; // Tauri text-xs default line height.
 pub(in crate::workspace) const KNOWLEDGE_DIALOG_WIDTH: f32 = 520.0;
 pub(in crate::workspace) const KNOWLEDGE_ACTION_BUTTON_HEIGHT: f32 = 28.0; // Tauri size="sm" outline action buttons.

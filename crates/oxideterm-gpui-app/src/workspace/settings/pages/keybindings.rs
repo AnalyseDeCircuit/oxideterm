@@ -7,8 +7,7 @@ pub(in crate::workspace) enum KeybindingToolbarAction {
     ResetAll,
 }
 
-pub(in crate::workspace) const KEYBINDING_SCOPE_FILTER_HEIGHT: f32 = 32.0; // Tauri KeybindingEditorSection scope Button h-8
-pub(in crate::workspace) const KEYBINDING_SCOPE_FILTER_PADDING_X: f32 = 12.0; // Tauri px-3
+pub(in crate::workspace) const KEYBINDING_SCOPE_FILTER_WIDTH: f32 = 300.0;
 pub(in crate::workspace) const KEYBINDING_BG_ACTIVE_ELEVATED_ALPHA: u32 = 0x73; // Tauri [data-bg-active] --color-theme-bg-elevated: 45%.
 pub(in crate::workspace) const KEYBINDING_BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] --color-theme-border: 75%.
 pub(in crate::workspace) const KEYBINDING_HEADER_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg-elevated/50.
@@ -265,47 +264,58 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut row = div().flex().items_center().gap(px(4.0));
-        for filter in SettingsKeybindingScopeFilter::all().iter().copied() {
+        let filters = SettingsKeybindingScopeFilter::all();
+        let active_index = filters
+            .iter()
+            .position(|filter| *filter == self.settings_page.keybinding_scope_filter)
+            .unwrap_or(0);
+        let previous_index = filters
+            .iter()
+            .position(|filter| *filter == self.settings_page.previous_keybinding_scope_filter)
+            .unwrap_or(active_index);
+        let mut items = Vec::with_capacity(filters.len());
+        for (filter_index, filter) in filters.iter().copied().enumerate() {
             let active = self.settings_page.keybinding_scope_filter == filter;
-            row = row.child(self.keybinding_scope_filter_button(filter, active, cx));
+            let item = oxideterm_gpui_ui::segmented_control_item(
+                &self.tokens,
+                self.i18n.t(filter.label_key()),
+                active,
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.settings_page.keybinding_scope_filter != filter {
+                        this.settings_page.set_keybinding_scope_filter(filter);
+                        this.begin_user_segmented_control_transition(
+                            selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
+                            filter_index,
+                            cx,
+                        );
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            );
+            items.push(item.into_any_element());
         }
-        row.into_any_element()
-    }
-
-    pub(in crate::workspace) fn keybinding_scope_filter_button(
-        &self,
-        filter: SettingsKeybindingScopeFilter,
-        active: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        // Tauri renders these as compact shadcn Buttons (`h-8 px-3 text-xs`).
-        // Route activation through the workspace wrapper so scope pills share
-        // the same disabled/loading click guard as every other settings Button.
-        self.workspace_toolbar_action_button(
-            self.i18n.t(filter.label_key()),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: if active {
-                        ButtonVariant::Secondary
-                    } else {
-                        ButtonVariant::Ghost
-                    },
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                height: Some(KEYBINDING_SCOPE_FILTER_HEIGHT),
-                padding_x: Some(KEYBINDING_SCOPE_FILTER_PADDING_X),
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(move |this, _event, _window, cx| {
-                this.settings_page.set_keybinding_scope_filter(filter);
-                cx.stop_propagation();
-                cx.notify();
-            }),
+        // The shared compact control owns both motion and image-aware glass chrome.
+        oxideterm_gpui_ui::segmented_control(
+            &self.tokens,
+            selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
+            oxideterm_gpui_ui::SegmentedControlOptions::new(
+                active_index,
+                previous_index,
+                filters.len(),
+            )
+            .user_transition_active(self.segmented_control_user_transition_active(
+                selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
+                active_index,
+            ))
+            .has_background_image(self.settings_background_active())
+            .compact(KEYBINDING_SCOPE_FILTER_WIDTH),
+            items,
         )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn keybinding_toolbar_button(

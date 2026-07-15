@@ -1678,8 +1678,8 @@ impl WorkspaceApp {
 pub(in crate::workspace) fn close_to_background_label_keys() -> (&'static str, &'static str) {
     if cfg!(target_os = "macos") {
         (
-            "settings_view.general.keep_in_menu_bar_on_close",
-            "settings_view.general.keep_in_menu_bar_on_close_hint",
+            "settings_view.general.keep_running_on_close",
+            "settings_view.general.keep_running_on_close_hint",
         )
     } else {
         (
