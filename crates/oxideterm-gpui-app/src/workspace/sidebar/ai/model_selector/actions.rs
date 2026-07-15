@@ -393,7 +393,7 @@ impl WorkspaceApp {
             self.edit_settings(
                 move |settings| {
                     settings.ai.active_backend = AiActiveBackend::Acp;
-                    settings.ai.active_acp_agent_id = Some(agent_id.clone());
+                    settings.ai.active_acp_agent_id = Some(agent_id);
                 },
                 cx,
             );
@@ -558,7 +558,7 @@ impl WorkspaceApp {
         self.edit_settings(
             move |settings| {
                 settings.ai.active_backend = AiActiveBackend::Acp;
-                settings.ai.active_acp_agent_id = Some(agent_id.clone());
+                settings.ai.active_acp_agent_id = Some(agent_id);
             },
             cx,
         );

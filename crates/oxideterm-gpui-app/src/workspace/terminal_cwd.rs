@@ -290,8 +290,7 @@ impl WorkspaceApp {
             // prompt-owned hook is installed, unknown remote cwd must degrade
             // instead of mutating the user's terminal input stream.
             self.terminal_cwd_picker.loading = false;
-            self.terminal_cwd_picker.error =
-                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
             self.terminal_cwd_picker.probe_scope = None;
             self.terminal_cwd_picker.probe_pane_id = None;
             cx.notify();
@@ -302,8 +301,7 @@ impl WorkspaceApp {
             self.spawn_terminal_cwd_report_poll(generation, cx);
         } else {
             self.terminal_cwd_picker.loading = false;
-            self.terminal_cwd_picker.error =
-                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
         }
         cx.notify();
     }
@@ -421,7 +419,7 @@ impl WorkspaceApp {
             return;
         }
         self.terminal_cwd_picker.loading = false;
-        self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+        self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
         cx.notify();
     }
 
@@ -563,20 +561,17 @@ impl WorkspaceApp {
             return;
         };
         let Some(pane_id) = self.active_pane_id() else {
-            self.terminal_cwd_picker.error =
-                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
             cx.notify();
             return;
         };
         let Some(pane) = self.panes.get(&pane_id).cloned() else {
-            self.terminal_cwd_picker.error =
-                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
             cx.notify();
             return;
         };
         if !pane.read(cx).can_switch_working_directory_from_chrome() {
-            self.terminal_cwd_picker.error =
-                Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
             cx.notify();
             return;
         }
@@ -834,14 +829,13 @@ impl WorkspaceApp {
             TerminalCwdListOutcome::Unavailable => {
                 self.terminal_cwd_picker.entries.clear();
                 self.terminal_cwd_picker.highlighted_path = None;
-                self.terminal_cwd_picker.error =
-                    Some(self.i18n.t("terminal.cwd.unavailable").to_string());
+                self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
             }
             TerminalCwdListOutcome::RemoteListFailed => {
                 self.terminal_cwd_picker.entries.clear();
                 self.terminal_cwd_picker.highlighted_path = None;
                 self.terminal_cwd_picker.error =
-                    Some(self.i18n.t("terminal.cwd.remote_list_failed").to_string());
+                    Some(self.i18n.t("terminal.cwd.remote_list_failed"));
             }
         }
         true

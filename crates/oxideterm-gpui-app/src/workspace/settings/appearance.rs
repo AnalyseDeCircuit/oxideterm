@@ -1591,7 +1591,7 @@ impl WorkspaceApp {
                             settings
                                 .custom_themes
                                 .insert(theme_id.clone(), value.clone());
-                            settings.terminal.theme = selected_theme_id.clone();
+                            settings.terminal.theme = selected_theme_id;
                         },
                         cx,
                     );

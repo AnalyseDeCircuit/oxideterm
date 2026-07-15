@@ -705,7 +705,7 @@ impl WorkspaceApp {
                 Ok::<u64, String>(item_count)
             }
             .await
-            .map_err(|error| error.to_string());
+            .map_err(|error| error);
 
             if is_directory {
                 match &result {
@@ -769,7 +769,7 @@ impl WorkspaceApp {
             SftpTransferState::Paused => {
                 self.sftp_transfer_manager.pause(&transfer_id);
                 let progress_store = self.sftp_progress_store.clone();
-                let transfer_id = transfer_id.clone();
+                let transfer_id = transfer_id;
                 self.forwarding_runtime.spawn(async move {
                     if let Ok(Some(mut progress)) = progress_store.load(&transfer_id).await {
                         progress.mark_paused();
@@ -780,7 +780,7 @@ impl WorkspaceApp {
             SftpTransferState::Pending | SftpTransferState::Active => {
                 self.sftp_transfer_manager.resume(&transfer_id);
                 let progress_store = self.sftp_progress_store.clone();
-                let transfer_id = transfer_id.clone();
+                let transfer_id = transfer_id;
                 self.forwarding_runtime.spawn(async move {
                     if let Ok(Some(mut progress)) = progress_store.load(&transfer_id).await {
                         progress.mark_active();

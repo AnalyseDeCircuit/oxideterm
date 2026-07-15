@@ -328,7 +328,7 @@ impl WorkspaceApp {
         }
 
         self.ssh_nodes
-            .entry(node_id.clone())
+            .entry(node_id)
             .and_modify(|node| {
                 attach_terminal_to_existing_ssh_node(
                     node,

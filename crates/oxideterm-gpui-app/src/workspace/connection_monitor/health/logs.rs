@@ -718,7 +718,7 @@ impl WorkspaceApp {
             self.push_host_log_toast(
                 self.i18n_replace(
                     "sidebar.host_logs.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -771,7 +771,7 @@ impl WorkspaceApp {
             self.push_host_log_toast(
                 self.i18n_replace(
                     "sidebar.host_logs.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );

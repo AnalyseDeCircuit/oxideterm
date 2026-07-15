@@ -358,7 +358,7 @@ pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password
 
     let request = save_request_from_form_with_existing_auth(
         &form,
-        Some(saved_connection.id.clone()),
+        Some(saved_connection.id),
         Some(&existing),
     )
     .unwrap();

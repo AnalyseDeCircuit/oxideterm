@@ -161,9 +161,9 @@ impl WorkspaceApp {
             SftpPane::Remote => self.sftp_view.remote_file_scroll.clone(),
         };
         let row_count = files.len();
-        let list_items = files.clone();
-        let row_selected = selected.clone();
-        let row_workspace = workspace.clone();
+        let list_items = files;
+        let row_selected = selected;
+        let row_workspace = workspace;
         let row_selectable_state = self.selectable_text_render_state(cx);
 
         list.child(tauri_virtual_uniform_list(

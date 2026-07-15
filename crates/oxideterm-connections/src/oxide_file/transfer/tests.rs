@@ -688,7 +688,7 @@ mod tests {
             .unwrap();
         let mut connection = saved_connection("conn-1", "Prod");
         connection.auth = SavedAuth::ManagedKey {
-            key_id: managed_key.id.clone(),
+            key_id: managed_key.id,
             passphrase_keychain_id: None,
             plaintext_passphrase: None,
         };

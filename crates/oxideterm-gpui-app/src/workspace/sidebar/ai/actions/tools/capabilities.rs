@@ -171,7 +171,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             let has_output = !stdout.trim().is_empty() || !stderr.trim().is_empty();
             let ok = output.status.success() || (exit_code.is_none() && has_output);
             let body = [
-                stdout.to_string(),
+                stdout,
                 (!stderr.trim().is_empty())
                     .then(|| format!("[stderr]\n{stderr}"))
                     .unwrap_or_default(),

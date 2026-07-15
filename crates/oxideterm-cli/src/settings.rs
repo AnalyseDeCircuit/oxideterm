@@ -190,7 +190,7 @@ fn apply_settings_edit(
 ) -> CliResult<i32> {
     let path = default_settings_path();
     let raw = read_settings_value(&path, write.json)?;
-    let before_sanitized = sanitize_settings_value(raw.clone())
+    let before_sanitized = sanitize_settings_value(raw)
         .map_err(|error| CliError::new("settings_parse_failed", error.to_string(), write.json))?;
     let before = json_query::value_at_path(&before_sanitized.settings.to_value(), key).cloned();
     let mut edited = before_sanitized.settings.to_value();
@@ -530,7 +530,7 @@ fn set_existing_json_path(
             json,
         ));
     }
-    parent.insert(leaf.to_string(), value);
+    parent.insert(leaf, value);
     Ok(())
 }
 

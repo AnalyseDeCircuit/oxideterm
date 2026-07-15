@@ -543,7 +543,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let distro_name = distro_name.clone();
+                    let distro_name = distro_name;
                     move |this, _event, _window, cx| {
                         this.launch_wsl(&distro_name, cx);
                     }
@@ -1246,7 +1246,7 @@ impl WorkspaceApp {
             )
             .on_mouse_move(cx.listener({
                 let app_path = app_path.clone();
-                let tooltip_name = tooltip_name.clone();
+                let tooltip_name = tooltip_name;
                 move |this, event: &MouseMoveEvent, _window, cx| {
                     let tooltip_id = format!("launcher-app-{app_path}");
                     let hover_changed =
@@ -1295,7 +1295,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let app_path = app_path.clone();
+                    let app_path = app_path;
                     move |this, _event, _window, cx| {
                         this.launcher.pressed_app_path = Some(app_path.clone());
                         this.launch_app(&app_path, cx);

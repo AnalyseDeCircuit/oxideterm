@@ -180,7 +180,7 @@ impl WorkspaceApp {
                 SelectableTextRole::PlainDocument,
                 "cloud-sync-rollback-backup",
                 (id.as_str(), "created-at"),
-                created_at.clone(),
+                created_at,
                 self.tokens.ui.text,
                 cx,
             ),

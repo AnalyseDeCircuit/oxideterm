@@ -1051,7 +1051,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Connection(connection) => {
                 let open_id = connection.id.clone();
                 let edit_id = connection.id.clone();
-                let menu_id = connection.id.clone();
+                let menu_id = connection.id;
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1103,7 +1103,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Serial(profile) => {
                 let open_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+                let menu_id = profile.id;
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1143,7 +1143,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Telnet(profile) => {
                 let open_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+                let menu_id = profile.id;
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1184,7 +1184,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::RawTcp(profile) => {
                 let open_id = profile.id.clone();
                 let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+                let menu_id = profile.id;
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1237,7 +1237,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::RawUdp(profile) => {
                 let open_id = profile.id.clone();
                 let edit_id = profile.id.clone();
-                let menu_id = profile.id.clone();
+                let menu_id = profile.id;
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()

@@ -220,7 +220,7 @@ fn bundled_remote_desktop_helper_candidates(command: &str) -> Vec<PathBuf> {
         exe_dir.join("resources"),
         exe_dir.join("..").join("Resources"),
     ];
-    roots.push(exe_dir.clone());
+    roots.push(exe_dir);
 
     let mut candidates = Vec::new();
     for root in roots {

@@ -232,7 +232,7 @@ impl TaffyLayoutEngine {
     }
 
     pub fn layout_bounds(&mut self, id: LayoutId, scale_factor: f32) -> Bounds<Pixels> {
-        if let Some(layout) = self.absolute_layout_bounds.get(&id).cloned() {
+        if let Some(layout) = self.absolute_layout_bounds.get(&id).copied() {
             return layout;
         }
 

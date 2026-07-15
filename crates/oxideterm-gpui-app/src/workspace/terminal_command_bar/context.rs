@@ -76,7 +76,7 @@ impl WorkspaceApp {
             .text_color(rgb(theme.text_muted))
             .id(tooltip_id)
             .on_mouse_move({
-                let title = target_label.clone();
+                let title = target_label;
                 cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
                     this.queue_workspace_tooltip(
                         tooltip_id,
@@ -362,7 +362,7 @@ impl WorkspaceApp {
                     LucideIcon::FolderOpen,
                     self.i18n.t("terminal.cwd.open_file_manager"),
                     {
-                        let path = path.clone();
+                        let path = path;
                         move |this, _event, window, cx| {
                             this.open_terminal_cwd_path_in_file_manager(path.clone(), window, cx);
                             cx.stop_propagation();
@@ -395,7 +395,7 @@ impl WorkspaceApp {
                     self.i18n.t("terminal.cwd.open_ide"),
                     {
                         let node_id = NodeId::new(node_id);
-                        let path = path.clone();
+                        let path = path;
                         move |this, _event, _window, cx| {
                             this.open_terminal_cwd_path_in_ide(node_id.clone(), path.clone(), cx);
                             cx.stop_propagation();
@@ -560,7 +560,7 @@ impl WorkspaceApp {
                     .hover(move |style| style.bg(rgba((theme.bg_hover << 8) | 0xb3)))
                     .on_mouse_move({
                         let tooltip_id = browse_tooltip_id.clone();
-                        let tooltip_label = browse_tooltip_label.clone();
+                        let tooltip_label = browse_tooltip_label;
                         cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
                             this.queue_workspace_tooltip(
                                 tooltip_id.clone(),
@@ -1103,7 +1103,7 @@ impl WorkspaceApp {
         let task_label = task.label().to_string();
         let task_command = task.command().to_string();
         let task_source = task.source().display_name();
-        let row_task = task.clone();
+        let row_task = task;
         entity_list_row(
             &self.tokens,
             EntityListRowOptions::new().active(active).compact(),
@@ -1146,7 +1146,7 @@ impl WorkspaceApp {
         )
         .cursor_pointer()
         .on_mouse_move(cx.listener({
-            let task_id = task_id.clone();
+            let task_id = task_id;
             move |this, _event: &MouseMoveEvent, _window, cx| {
                 if this.terminal_project_panel.highlighted_task_id.as_deref()
                     != Some(task_id.as_str())

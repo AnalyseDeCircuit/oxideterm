@@ -313,7 +313,7 @@ impl WorkspaceApp {
                 .into_any_element(),
         );
         if !metadata.connection_names.is_empty() {
-            let names = metadata.connection_names.clone();
+            let names = metadata.connection_names;
             self.sync_oxide_import_connection_preview_list_state(&names);
             let state = self.oxide_import_connection_preview_list_state.clone();
             let spec = self.oxide_import_connection_preview_list_spec();

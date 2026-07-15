@@ -897,7 +897,7 @@ impl WorkspaceApp {
             self.push_host_service_toast(
                 self.i18n_replace(
                     "sidebar.host_services.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -963,14 +963,14 @@ impl WorkspaceApp {
             self.push_host_service_toast(
                 self.i18n_replace(
                     "sidebar.host_services.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
         }
         let title = self.i18n_replace(
             "sidebar.host_services.follow_title",
-            &[("name", service_id.clone())],
+            &[("name", service_id)],
         );
         // Follow mode belongs in a visible terminal so Ctrl-C and tab lifecycle stop the stream.
         self.open_host_service_terminal_command(
@@ -1147,7 +1147,7 @@ impl WorkspaceApp {
             self.push_host_service_toast(
                 self.i18n_replace(
                     "sidebar.host_services.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -1505,9 +1505,9 @@ impl WorkspaceApp {
                                             "host-service-logs-follow",
                                             true,
                                             cx.listener({
-                                                let connection_id = follow_connection_id.clone();
-                                                let service_id = follow_service_id.clone();
-                                                let description = follow_description.clone();
+                                                let connection_id = follow_connection_id;
+                                                let service_id = follow_service_id;
+                                                let description = follow_description;
                                                 move |this, _event, window, cx| {
                                                     this.connection_monitor.host_service_logs_dialog =
                                                         None;

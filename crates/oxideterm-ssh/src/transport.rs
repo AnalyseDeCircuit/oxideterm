@@ -610,7 +610,7 @@ mod transport_lost_tests {
         );
         let connection_id = handle.connection_id().to_string();
 
-        let guard = RegistryConsumerGuard::new(registry.clone(), connection_id, consumer);
+        let guard = RegistryConsumerGuard::new(registry, connection_id, consumer);
         drop(guard);
 
         assert_eq!(handle.info().ref_count, 0);

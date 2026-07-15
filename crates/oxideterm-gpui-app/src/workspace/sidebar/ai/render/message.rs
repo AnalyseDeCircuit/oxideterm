@@ -1101,7 +1101,7 @@ impl WorkspaceApp {
             .contains(&condensed_key);
         if should_condense {
             let hidden_count = split_at;
-            let expanded_key = condensed_key.clone();
+            let expanded_key = condensed_key;
             let label = if show_condensed {
                 self.i18n.t("ai.tool_use.condensed_label")
             } else {

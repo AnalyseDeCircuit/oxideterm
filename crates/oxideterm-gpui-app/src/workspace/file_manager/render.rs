@@ -1261,10 +1261,10 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let selected = Arc::new(self.file_manager.selected.clone());
         let row_count = files.len();
-        let list_items = files.clone();
+        let list_items = files;
         let row_items = rows;
-        let row_selected = selected.clone();
-        let row_workspace = workspace.clone();
+        let row_selected = selected;
+        let row_workspace = workspace;
         list.child(
             tauri_virtual_uniform_list(
                 "file-manager-list-virtual",

@@ -327,9 +327,9 @@ impl WorkspaceApp {
         &self,
         state: &CloudSyncPersistedState,
     ) -> std::result::Result<CloudSyncLocalSnapshot, String> {
-        let key = self.cloud_sync_local_snapshot_cache_key(state);
+        let generation = self.cloud_sync.view.snapshot_cache_generation.get();
         if let Some(cache) = self.cloud_sync.view.local_snapshot_cache.borrow().as_ref() {
-            if cache.key == key {
+            if cache.generation == generation {
                 return cache.result.clone();
             }
         }
@@ -343,7 +343,7 @@ impl WorkspaceApp {
         .map_err(|error| error.to_string());
         *self.cloud_sync.view.local_snapshot_cache.borrow_mut() =
             Some(CloudSyncLocalSnapshotCache {
-                key,
+                generation,
                 result: result.clone(),
             });
         result
@@ -354,96 +354,36 @@ impl WorkspaceApp {
         snapshot: &CloudSyncLocalSnapshot,
         state: &CloudSyncPersistedState,
     ) -> Vec<CloudSyncSectionDiffItem> {
-        let key = self.cloud_sync_upload_diff_cache_key(state);
+        let generation = self.cloud_sync.view.snapshot_cache_generation.get();
         if let Some(cache) = self.cloud_sync.view.upload_diff_cache.borrow().as_ref() {
-            if cache.key == key {
+            if cache.generation == generation {
                 return cache.items.clone();
             }
         }
         let items = cloud_sync_upload_diff_items(snapshot, state);
         *self.cloud_sync.view.upload_diff_cache.borrow_mut() = Some(CloudSyncUploadDiffCache {
-            key,
+            generation,
             items: items.clone(),
         });
         items
     }
 
     pub(super) fn invalidate_cloud_sync_snapshot_caches(&self) {
+        // Source mutations advance one explicit generation so render-time cache
+        // hits never need to rescan stores or query filesystem metadata.
+        self.cloud_sync.view.snapshot_cache_generation.set(
+            self.cloud_sync
+                .view
+                .snapshot_cache_generation
+                .get()
+                .wrapping_add(1),
+        );
         self.cloud_sync
             .view
             .local_snapshot_cache
             .borrow_mut()
             .take();
         self.cloud_sync.view.upload_diff_cache.borrow_mut().take();
-    }
-
-    pub(super) fn cloud_sync_local_snapshot_cache_key(
-        &self,
-        state: &CloudSyncPersistedState,
-    ) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        state.revision_seq.hash(&mut hasher);
-        hash_raw_sync_scope(&state.sync_scope, &mut hasher);
-        hash_structured_local_state_option(
-            state.last_synced_structured_state.as_ref(),
-            &mut hasher,
-        );
-        self.settings_store.updated_at().hash(&mut hasher);
-
-        self.connection_store.connections().len().hash(&mut hasher);
-        for connection in self.connection_store.connections() {
-            connection.id.hash(&mut hasher);
-            connection
-                .updated_at
-                .unwrap_or(connection.created_at)
-                .to_rfc3339()
-                .hash(&mut hasher);
-        }
-        self.connection_store
-            .serial_profiles()
-            .len()
-            .hash(&mut hasher);
-        for profile in self.connection_store.serial_profiles() {
-            profile.id.hash(&mut hasher);
-            profile.updated_at.to_rfc3339().hash(&mut hasher);
-        }
-        self.connection_store
-            .raw_tcp_profiles()
-            .len()
-            .hash(&mut hasher);
-        for profile in self.connection_store.raw_tcp_profiles() {
-            profile.id.hash(&mut hasher);
-            profile.updated_at.to_rfc3339().hash(&mut hasher);
-        }
-        self.connection_store
-            .raw_udp_profiles()
-            .len()
-            .hash(&mut hasher);
-        for profile in self.connection_store.raw_udp_profiles() {
-            profile.id.hash(&mut hasher);
-            profile.updated_at.to_rfc3339().hash(&mut hasher);
-        }
-        let saved_forwards = self.forwarding_registry.list_all_saved_forwards();
-        saved_forwards.len().hash(&mut hasher);
-        for forward in saved_forwards {
-            forward.id.hash(&mut hasher);
-            forward.sync_updated_at().to_rfc3339().hash(&mut hasher);
-        }
-        hash_quick_commands_file_stamp(self.settings_store.path(), &mut hasher);
-        hasher.finish()
-    }
-
-    pub(super) fn cloud_sync_upload_diff_cache_key(&self, state: &CloudSyncPersistedState) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.cloud_sync_local_snapshot_cache_key(state)
-            .hash(&mut hasher);
-        state.remote_exists.hash(&mut hasher);
-        state.last_check_at.hash(&mut hasher);
-        hash_structured_section_revisions_option(
-            state.remote_section_revisions.as_ref(),
-            &mut hasher,
-        );
-        hasher.finish()
     }
 
     pub(super) fn cloud_sync_local_field_diff_snapshot(&self) -> CloudSyncLocalFieldDiffSnapshot {

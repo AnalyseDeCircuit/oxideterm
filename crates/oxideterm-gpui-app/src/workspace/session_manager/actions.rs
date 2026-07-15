@@ -701,7 +701,7 @@ impl WorkspaceApp {
             );
             return;
         };
-        self.start_ssh_test_flow(config, conn.name.clone(), cx);
+        self.start_ssh_test_flow(config, conn.name, cx);
         cx.notify();
     }
 

@@ -80,7 +80,7 @@ impl WorkspaceApp {
             return Ok(AiChatStreamConfig {
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,
-                acp_agent_id: Some(acp_agent_id.clone()),
+                acp_agent_id: Some(acp_agent_id),
                 acp_session_id: session_state.as_ref().map(|state| state.session_id.clone()),
                 acp_config_selection: session_state.and_then(|state| state.model_selection),
                 provider_type: "acp".to_string(),

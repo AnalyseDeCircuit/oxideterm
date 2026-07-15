@@ -1079,7 +1079,7 @@ impl WorkspaceApp {
             .to_ascii_lowercase();
         let lines = Arc::new(file_manager_preview_visual_lines(content));
         let row_count = lines.len();
-        let list_lines = lines.clone();
+        let list_lines = lines;
         let font_family = settings_mono_font_family(self.settings_store.settings());
         let font_size = self.settings_store.settings().terminal.font_size as f32;
         let row_height = font_size * 1.5;

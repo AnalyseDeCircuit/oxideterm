@@ -204,7 +204,7 @@ impl WorkspaceApp {
                                 SelectableTextRole::PlainDocument,
                                 "oxide-export-selection",
                                 "connection-count",
-                                select_connections_label.clone(),
+                                select_connections_label,
                                 theme.text,
                                 cx,
                             )),
@@ -395,7 +395,7 @@ impl WorkspaceApp {
                                 SelectableTextRole::NonSelectable,
                                 "oxide-export-connection-name",
                                 row_key.as_str(),
-                                connection.name.clone(),
+                                connection.name,
                                 theme.text,
                                 cx,
                             ))

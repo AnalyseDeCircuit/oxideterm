@@ -266,7 +266,7 @@ impl WorkspaceApp {
                 "conversationTurnId": assistant_id,
             }),
             Some(assistant_id.clone()),
-            Some(request_message_id.clone()),
+            Some(request_message_id),
             now,
         ));
         diagnostic_events.push(ai_diagnostic_event(

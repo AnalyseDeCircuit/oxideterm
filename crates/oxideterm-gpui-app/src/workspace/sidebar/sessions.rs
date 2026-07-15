@@ -1180,7 +1180,7 @@ impl WorkspaceApp {
                 ));
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let saved_connection_id = node.saved_connection_id.clone();
+                    let saved_connection_id = node.saved_connection_id;
                     move |this, _event, window, cx| {
                         if let Some(saved_connection_id) = saved_connection_id.as_deref() {
                             this.open_saved_connection_reconnect_editor(
@@ -1225,7 +1225,7 @@ impl WorkspaceApp {
                     let node_id = node_id.clone();
                     let config = node.config.clone();
                     let title = node.title.clone();
-                    let saved_connection_id = node.saved_connection_id.clone();
+                    let saved_connection_id = node.saved_connection_id;
                     move |this, _event, window, cx| {
                         let _ = this.queue_ssh_terminal_tab_for_node(
                             node_id.clone(),

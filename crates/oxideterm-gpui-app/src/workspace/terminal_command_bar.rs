@@ -407,7 +407,7 @@ fn terminal_cwd_chip_tooltip(
     i18n: &I18n,
 ) -> String {
     let Some(snapshot) = snapshot else {
-        return i18n.t("terminal.cwd.unavailable").to_string();
+        return i18n.t("terminal.cwd.unavailable");
     };
     let scope = match snapshot.scope() {
         CurrentDirectoryScope::Local => i18n.t("terminal.cwd.scope_local"),

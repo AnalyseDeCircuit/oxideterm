@@ -228,7 +228,7 @@ impl WorkspaceApp {
 
         let runtime = self.forwarding_runtime.clone();
         let cleanup_directory = self.native_update_download_directory();
-        let cleanup_version = download.package.version.clone();
+        let cleanup_version = download.package.version;
         cx.spawn(async move |_weak, _cx| {
             runtime.spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {

@@ -80,7 +80,7 @@ impl WorkspaceApp {
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         let title = format!("Telnet {}", config.endpoint_label());
-        let pane_config = config.clone();
+        let pane_config = config;
         let pane = cx.new(|cx| {
             TerminalPane::new_telnet_with_preferences(pane_config, preferences, window, cx)
                 .expect("failed to initialize Telnet terminal pane")

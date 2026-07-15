@@ -946,7 +946,7 @@ fn model_selector_display_and_filter_match_tauri() {
         "0123456789012345678901..."
     );
 
-    let groups = model_selector_visible_provider_groups(&[openai.clone(), disabled], "4o-mini");
+    let groups = model_selector_visible_provider_groups(&[openai, disabled], "4o-mini");
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].provider.id, "OpenAI");
     assert_eq!(groups[0].visible_models, vec!["gpt-4o-mini"]);

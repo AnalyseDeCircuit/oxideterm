@@ -468,7 +468,7 @@ impl WorkspaceApp {
                                 theme.text_muted,
                             )))
                             .font_family(mono_font.clone())
-                            .child(status.clone()),
+                            .child(status),
                     )
                     .child(
                         div()
@@ -478,7 +478,7 @@ impl WorkspaceApp {
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font.clone())
-                            .child(installed.clone()),
+                            .child(installed),
                     )
                     .child(
                         div()
@@ -488,7 +488,7 @@ impl WorkspaceApp {
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font.clone())
-                            .child(manager.clone()),
+                            .child(manager),
                     )
                     .when(show_context_columns, |row| {
                         row.child(

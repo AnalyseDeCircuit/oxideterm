@@ -499,8 +499,8 @@ impl WorkspaceApp {
         let table_row_state = self.forwards_table_row_list_state.clone();
         let table_row_spec = self.forwards_table_row_list_spec();
         let workspace = cx.entity();
-        let row_node_id = node_id.clone();
-        let row_manager = manager.clone();
+        let row_node_id = node_id;
+        let row_manager = manager;
         let row_forwards = forwards.clone();
         let row_has_background = has_background;
         div()

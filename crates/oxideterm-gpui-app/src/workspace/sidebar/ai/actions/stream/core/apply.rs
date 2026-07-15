@@ -499,7 +499,7 @@ impl WorkspaceApp {
                             conversation_id,
                             "tool_result_facts",
                             Some(message_id.to_string()),
-                            round_id_value.clone(),
+                            round_id_value,
                             now,
                             self.ai_diagnostic_base(serde_json::json!({
                                 "facts": facts.iter().map(ai_tool_result_fact_json).collect::<Vec<_>>(),

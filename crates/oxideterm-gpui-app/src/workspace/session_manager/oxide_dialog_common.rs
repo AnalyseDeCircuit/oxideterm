@@ -336,7 +336,7 @@ impl WorkspaceApp {
                     .child(self.render_selectable_text_scoped(
                         "oxide-tone-title",
                         (title.clone(), color),
-                        title.clone(),
+                        title,
                         color,
                         cx,
                     )),

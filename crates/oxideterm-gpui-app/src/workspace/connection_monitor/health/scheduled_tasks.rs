@@ -517,7 +517,7 @@ impl WorkspaceApp {
                                 theme.text_muted,
                             )))
                             .font_family(mono_font.clone())
-                            .child(active.clone()),
+                            .child(active),
                     )
                     .child(
                         div()
@@ -530,7 +530,7 @@ impl WorkspaceApp {
                                 theme.text_muted,
                             )))
                             .font_family(mono_font.clone())
-                            .child(enabled.clone()),
+                            .child(enabled),
                     )
                     .when(show_context_columns, |row| {
                         row.child(
@@ -1025,7 +1025,7 @@ impl WorkspaceApp {
             self.push_host_schedule_toast(
                 self.i18n_replace(
                     "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -1093,7 +1093,7 @@ impl WorkspaceApp {
             self.push_host_schedule_toast(
                 self.i18n_replace(
                     "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -1224,7 +1224,7 @@ impl WorkspaceApp {
             self.push_host_schedule_toast(
                 self.i18n_replace(
                     "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -1420,7 +1420,7 @@ impl WorkspaceApp {
             self.push_host_schedule_toast(
                 self.i18n_replace(
                     "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );
@@ -1924,8 +1924,8 @@ impl WorkspaceApp {
                                             "host-schedule-logs-follow",
                                             true,
                                             cx.listener({
-                                                let connection_id = follow_connection_id.clone();
-                                                let task = follow_task.clone();
+                                                let connection_id = follow_connection_id;
+                                                let task = follow_task;
                                                 move |this, _event, window, cx| {
                                                     this.connection_monitor.host_schedule_logs_dialog =
                                                         None;

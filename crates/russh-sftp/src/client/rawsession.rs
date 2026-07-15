@@ -252,12 +252,7 @@ impl RawSftpSession {
             version: None,
             requests: req_map.clone(),
         };
-        let transport = run_session(
-            stream,
-            inner,
-            req_map.clone(),
-            cfg.max_outbound_inflight_bytes,
-        );
+        let transport = run_session(stream, inner, req_map, cfg.max_outbound_inflight_bytes);
 
         Self {
             transport,
@@ -290,7 +285,7 @@ impl RawSftpSession {
             reader,
             writer,
             inner,
-            req_map.clone(),
+            req_map,
             cfg.max_outbound_inflight_bytes,
         );
 

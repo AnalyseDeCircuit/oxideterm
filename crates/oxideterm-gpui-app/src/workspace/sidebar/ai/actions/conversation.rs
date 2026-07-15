@@ -234,11 +234,11 @@ impl WorkspaceApp {
                     .or_insert_with(|| serde_json::json!(parsed_input.raw_text.clone()));
                 object.insert(
                     "providerId".to_string(),
-                    serde_json::json!(stream_config.provider_id.clone()),
+                    serde_json::json!(stream_config.provider_id),
                 );
                 object.insert(
                     "providerModel".to_string(),
-                    serde_json::json!(stream_config.model.clone()),
+                    serde_json::json!(stream_config.model),
                 );
                 if let Some(participant) = parsed_input.participants.first() {
                     object.insert(

@@ -35,9 +35,8 @@ impl WorkspaceApp {
         } else {
             self.terminal_command_bar_draft.clone()
         };
-        let input_range = selected_range
-            .clone()
-            .filter(|_| focused && !command_is_empty && marked_text.is_none());
+        let input_range =
+            selected_range.filter(|_| focused && !command_is_empty && marked_text.is_none());
         let selection_range = input_range.clone().filter(|range| range.start < range.end);
         let caret_offset = input_range
             .as_ref()
@@ -278,7 +277,7 @@ impl WorkspaceApp {
                                 )
                                 .id(input_toggle_tooltip_id)
                                 .on_mouse_move({
-                                    let title = input_toggle_title.clone();
+                                    let title = input_toggle_title;
                                     cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
                                         this.queue_workspace_tooltip(
                                             input_toggle_tooltip_id,

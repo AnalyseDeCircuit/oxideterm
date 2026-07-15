@@ -779,7 +779,7 @@ impl WorkspaceApp {
                             {
                                 proxy.auth = SettingsUpstreamProxyAuth::Password {
                                     username: username.clone(),
-                                    keychain_id: Some(keychain_id.clone()),
+                                    keychain_id: Some(keychain_id),
                                 };
                             }
                         }

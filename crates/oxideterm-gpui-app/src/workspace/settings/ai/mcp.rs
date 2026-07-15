@@ -61,7 +61,7 @@ impl WorkspaceApp {
             let spec = self.ai_mcp_server_list_spec();
             let workspace = cx.entity();
             let configs_for_rows = configs.clone();
-            let snapshots_for_rows = snapshots.clone();
+            let snapshots_for_rows = snapshots;
             div()
                 .h(px(
                     configs.len() as f32 * AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT
@@ -1203,7 +1203,7 @@ impl WorkspaceApp {
                         this.close_settings_select();
                         this.edit_settings(
                             move |settings| {
-                                settings.ai.mcp_servers.push(config.clone());
+                                settings.ai.mcp_servers.push(config);
                             },
                             cx,
                         );
@@ -1228,7 +1228,7 @@ impl WorkspaceApp {
         self.clear_standard_confirm_focus();
         self.edit_settings(
             move |settings| {
-                settings.ai.mcp_servers.push(config.clone());
+                settings.ai.mcp_servers.push(config);
             },
             cx,
         );

@@ -315,6 +315,10 @@ impl WorkspaceApp {
             selectable_text_layouts: HashMap::new(),
             selectable_text_fragments: HashMap::new(),
             selectable_text_generation: 0,
+            selectable_text_pending_updates: Rc::new(RefCell::new(
+                selectable_text::SelectableTextFrameUpdates::default(),
+            )),
+            selectable_text_flush_scheduled: Rc::new(Cell::new(false)),
             selectable_text_autoscroll_position: None,
             selectable_text_autoscroll_scheduled: false,
             selectable_text_scroll_handles: RefCell::new(HashMap::new()),
@@ -831,7 +835,7 @@ impl WorkspaceApp {
             command_marks_show_hover_actions: terminal.command_marks.show_hover_actions,
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
             show_performance_overlay: terminal.show_fps_overlay,
-            render_policy: self.render_policy.clone(),
+            render_policy: self.render_policy,
             background: self.terminal_background_preferences(background_key),
             transparent_background: self.window_background_preferences().is_some(),
             paste_labels: TerminalPasteLabels {

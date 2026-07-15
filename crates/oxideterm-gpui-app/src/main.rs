@@ -201,7 +201,7 @@ fn main() {
             cx,
             ssh_launch,
             desktop_presence_menu,
-            Some(single_instance_rx.clone()),
+            Some(single_instance_rx),
         ) {
             eprintln!(
                 "OxideTerm could not open a native GPUI window: {err:#}\n\

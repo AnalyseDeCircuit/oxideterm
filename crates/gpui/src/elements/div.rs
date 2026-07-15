@@ -2887,7 +2887,7 @@ impl GroupHitboxes {
             .0
             .get(name)
             .and_then(|bounds_stack| bounds_stack.last())
-            .cloned()
+            .copied()
     }
 
     pub fn push(name: SharedString, hitbox_id: HitboxId, cx: &mut App) {
@@ -3138,7 +3138,7 @@ impl ScrollHandle {
 
     /// Get the bounds for a specific child.
     pub fn bounds_for_item(&self, ix: usize) -> Option<Bounds<Pixels>> {
-        self.0.borrow().child_bounds.get(ix).cloned()
+        self.0.borrow().child_bounds.get(ix).copied()
     }
 
     /// Update [ScrollHandleState]'s active item for scrolling to in prepaint

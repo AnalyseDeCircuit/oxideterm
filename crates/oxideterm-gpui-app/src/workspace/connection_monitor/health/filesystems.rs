@@ -511,7 +511,7 @@ impl WorkspaceApp {
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font.clone())
-                            .child(kind.clone()),
+                            .child(kind),
                     )
                     .child(
                         div()
@@ -526,7 +526,7 @@ impl WorkspaceApp {
                                 theme.text_muted,
                             )))
                             .font_family(mono_font.clone())
-                            .child(usage.clone()),
+                            .child(usage),
                     )
                     .child(
                         div()
@@ -541,7 +541,7 @@ impl WorkspaceApp {
                                 theme.text_muted,
                             )))
                             .font_family(mono_font.clone())
-                            .child(inode.clone()),
+                            .child(inode),
                     )
                     .when(show_context_columns, |row| {
                         row.child(
@@ -953,7 +953,7 @@ impl WorkspaceApp {
             self.push_host_filesystem_toast(
                 self.i18n_replace(
                     "sidebar.host_filesystems.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );

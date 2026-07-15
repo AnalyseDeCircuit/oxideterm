@@ -1,8 +1,6 @@
 use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
+    cell::Cell,
     sync::mpsc::{self, TryRecvError},
-    time::UNIX_EPOCH,
 };
 
 use crate::workspace::ime::WorkspaceImeTarget;
@@ -11,8 +9,7 @@ use gpui::prelude::*;
 use gpui::{Div, FontWeight, Rgba, point};
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
-    OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, StructuredLocalState, StructuredSectionRevisions,
-    normalize_sync_scope,
+    OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, normalize_sync_scope,
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, UploadOptions,
         UploadOutcome,
@@ -104,13 +101,13 @@ mod surface;
 
 #[derive(Clone)]
 pub(super) struct CloudSyncLocalSnapshotCache {
-    key: u64,
+    generation: u64,
     result: std::result::Result<CloudSyncLocalSnapshot, String>,
 }
 
 #[derive(Clone)]
 pub(super) struct CloudSyncUploadDiffCache {
-    key: u64,
+    generation: u64,
     items: Vec<CloudSyncSectionDiffItem>,
 }
 
@@ -153,6 +150,7 @@ pub(super) struct CloudSyncViewState {
     pub(super) form: CloudSyncFormDraft,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) snapshot_cache_generation: Cell<u64>,
     pub(super) local_snapshot_cache: RefCell<Option<CloudSyncLocalSnapshotCache>>,
     pub(super) upload_diff_cache: RefCell<Option<CloudSyncUploadDiffCache>>,
     pub(super) rollback_backup_list_state: ListState,
@@ -218,6 +216,7 @@ impl CloudSyncViewState {
             form: CloudSyncFormDraft::from_settings(settings),
             section_list_state,
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            snapshot_cache_generation: Cell::new(0),
             local_snapshot_cache: RefCell::new(None),
             upload_diff_cache: RefCell::new(None),
             rollback_backup_list_state,
@@ -353,77 +352,6 @@ fn remote_diff_tone(status: CloudSyncRemoteDiffStatus) -> CloudSyncTone {
             CloudSyncTone::Muted
         }
         CloudSyncRemoteDiffStatus::Unknown => CloudSyncTone::Warning,
-    }
-}
-
-fn hash_raw_sync_scope(scope: &RawSyncScope, hasher: &mut DefaultHasher) {
-    scope.sync_connections.hash(hasher);
-    scope.sync_forwards.hash(hasher);
-    scope.sync_quick_commands.hash(hasher);
-    scope.sync_serial_profiles.hash(hasher);
-    scope.sync_raw_tcp_profiles.hash(hasher);
-    scope.sync_raw_udp_profiles.hash(hasher);
-    scope.sync_sensitive_credentials.hash(hasher);
-    scope.sync_app_settings.hash(hasher);
-    scope.app_settings_sections.hash(hasher);
-    scope.include_local_terminal_env_vars.hash(hasher);
-    scope.sync_plugin_settings.hash(hasher);
-    scope.plugin_ids.hash(hasher);
-}
-
-fn hash_structured_local_state_option(
-    state: Option<&StructuredLocalState>,
-    hasher: &mut DefaultHasher,
-) {
-    let Some(state) = state else {
-        false.hash(hasher);
-        return;
-    };
-    true.hash(hasher);
-    state.connections.hash(hasher);
-    state.forwards.hash(hasher);
-    state.quick_commands.hash(hasher);
-    state.serial_profiles.hash(hasher);
-    state.raw_tcp_profiles.hash(hasher);
-    state.raw_udp_profiles.hash(hasher);
-    state.sensitive_credentials.hash(hasher);
-    state.app_settings.hash(hasher);
-    state.plugin_settings.hash(hasher);
-}
-
-fn hash_structured_section_revisions_option(
-    revisions: Option<&StructuredSectionRevisions>,
-    hasher: &mut DefaultHasher,
-) {
-    let Some(revisions) = revisions else {
-        false.hash(hasher);
-        return;
-    };
-    true.hash(hasher);
-    revisions.connections.hash(hasher);
-    revisions.forwards.hash(hasher);
-    revisions.quick_commands.hash(hasher);
-    revisions.serial_profiles.hash(hasher);
-    revisions.raw_tcp_profiles.hash(hasher);
-    revisions.raw_udp_profiles.hash(hasher);
-    revisions.sensitive_credentials.hash(hasher);
-    revisions.app_settings.hash(hasher);
-    revisions.plugin_settings.hash(hasher);
-}
-
-fn hash_quick_commands_file_stamp(settings_path: &std::path::Path, hasher: &mut DefaultHasher) {
-    let path = oxideterm_quick_commands::quick_commands_path(settings_path);
-    let Ok(metadata) = std::fs::metadata(path) else {
-        0_u8.hash(hasher);
-        return;
-    };
-    metadata.len().hash(hasher);
-    if let Ok(modified) = metadata.modified() {
-        modified
-            .duration_since(UNIX_EPOCH)
-            .ok()
-            .map(|duration| duration.as_nanos())
-            .hash(hasher);
     }
 }
 

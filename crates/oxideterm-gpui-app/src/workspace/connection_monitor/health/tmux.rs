@@ -751,7 +751,7 @@ impl WorkspaceApp {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font)
                             .text_color(rgb(if window.active {
                                 theme.text
                             } else {

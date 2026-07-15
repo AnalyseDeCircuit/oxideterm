@@ -174,7 +174,7 @@ fn run_push(write: WriteArgs, force: bool) -> CliResult<()> {
         }
     };
     let revision = outcome.manifest.revision.clone();
-    let summary = summary_from_local(&outcome.local_snapshot, Some(revision.clone()));
+    let summary = summary_from_local(&outcome.local_snapshot, Some(revision));
     {
         let state = state_store.state_mut();
         state.secret_hints = provider.hints().clone();

@@ -326,11 +326,7 @@ impl WorkspaceApp {
                                     self.sftp_view.remote_load_retry_count += 1;
                                     let attempt = self.sftp_view.remote_load_retry_count;
                                     self.schedule_sftp_remote_load_retry(
-                                        tab_id,
-                                        node_id.clone(),
-                                        path.clone(),
-                                        attempt,
-                                        cx,
+                                        tab_id, node_id, path, attempt, cx,
                                     );
                                     self.sftp_view.remote_loading = true;
                                     self.sftp_view.init_error = None;
@@ -346,8 +342,7 @@ impl WorkspaceApp {
                                     } else if oxideterm_sftp::error_is_not_found(&error) {
                                         self.sftp_view.remote_path = "/".to_string();
                                         self.sftp_view.remote_path_input = "/".to_string();
-                                        self.sftp_path_memory
-                                            .insert(node_id.clone(), "/".to_string());
+                                        self.sftp_path_memory.insert(node_id, "/".to_string());
                                         if path != "/" {
                                             self.request_sftp_remote_load();
                                         }

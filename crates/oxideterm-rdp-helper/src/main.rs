@@ -234,7 +234,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             scale_factor: rdp_connector_scale_factor(scale_factor),
             read_only,
         },
-        writer.clone(),
+        writer,
         request_rx,
     );
 

@@ -477,7 +477,7 @@ impl WorkspaceApp {
             .is_some_and(|id| id == definition.id);
         let action_id = definition.id.to_string();
         let record_action_id = action_id.clone();
-        let reset_action_id = action_id.clone();
+        let reset_action_id = action_id;
         let conflicts = if recording {
             self.settings_page.keybinding_conflict_action_ids.as_slice()
         } else {

@@ -721,7 +721,7 @@ impl WorkspaceApp {
         if entry.file_type != LocalFileType::File {
             return;
         }
-        let path = entry.path.clone();
+        let path = entry.path;
         let (tx, rx) = std::sync::mpsc::channel();
         self.file_manager.properties_checksum = None;
         self.file_manager.properties_checksum_loading = true;

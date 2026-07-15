@@ -1465,9 +1465,9 @@ impl WorkspaceApp {
                                             "host-docker-logs-follow",
                                             true,
                                             cx.listener({
-                                                let connection_id = follow_connection_id.clone();
-                                                let container_id = follow_container_id.clone();
-                                                let container_name = follow_container_name.clone();
+                                                let connection_id = follow_connection_id;
+                                                let container_id = follow_container_id;
+                                                let container_name = follow_container_name;
                                                 move |this, _event, window, cx| {
                                                     this.connection_monitor.host_docker_logs_dialog =
                                                         None;

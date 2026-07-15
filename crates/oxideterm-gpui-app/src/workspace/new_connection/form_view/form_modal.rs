@@ -499,7 +499,7 @@ impl WorkspaceApp {
                                             self.render_connection_field(
                                                 key_label,
                                                 &form.key_path,
-                                                key_placeholder.clone(),
+                                                key_placeholder,
                                                 NewConnectionField::KeyPath,
                                                 false,
                                                 cx,

@@ -41,7 +41,7 @@ impl WorkspaceApp {
             }),
         );
 
-        if let Some(snapshot) = snapshot.clone() {
+        if let Some(snapshot) = snapshot {
             panel = panel.child(self.render_terminal_git_context_header(snapshot));
         }
         panel = panel.child(self.render_terminal_git_section_tabs(active_section, operation, cx));
@@ -262,18 +262,18 @@ impl WorkspaceApp {
                 section =
                     section.child(self.render_terminal_git_query_checkout_row(branch_name, cx));
             }
-            if let Some(branch_name) = query_create_candidate.clone() {
+            if let Some(branch_name) = query_create_candidate {
                 section = section.child(
                     self.render_terminal_git_query_create_branch_row(branch_name.clone(), cx),
                 );
                 section = section
                     .child(self.render_terminal_git_query_rename_branch_row(branch_name, cx));
             }
-            if let Some(branch_name) = query_remote_tracking_candidate.clone() {
+            if let Some(branch_name) = query_remote_tracking_candidate {
                 section =
                     section.child(self.render_terminal_git_query_track_remote_row(branch_name, cx));
             }
-            if let Some(branch_name) = query_rebase_candidate.clone() {
+            if let Some(branch_name) = query_rebase_candidate {
                 section = section.child(self.render_terminal_git_query_rebase_row(branch_name, cx));
             }
             if !has_visible_branches && query_checkout_candidate.is_none() {
@@ -880,7 +880,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let label = self.i18n_replace(label_key, &[("branch", branch_name.clone())]);
+        let label = self.i18n_replace(label_key, &[("branch", branch_name)]);
 
         div()
             .h(px(30.0))
@@ -1351,7 +1351,7 @@ impl WorkspaceApp {
             })
             .hover(move |style| style.bg(rgb(theme.bg_hover)))
             .on_mouse_move(cx.listener({
-                let branch_name = branch_name.clone();
+                let branch_name = branch_name;
                 move |this, _event: &MouseMoveEvent, _window, cx| {
                     if this
                         .terminal_git_branch_picker
@@ -1368,7 +1368,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let branch = branch.clone();
+                    let branch = branch;
                     move |this, _event, _window, cx| {
                         this.select_terminal_git_branch(branch.clone(), cx);
                         cx.stop_propagation();

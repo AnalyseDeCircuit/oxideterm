@@ -124,7 +124,7 @@ fn create_connection(args: ConnectionCreateArgs) -> CliResult<i32> {
     let connection_name = request.name.clone();
     let change = ConnectionsChange {
         action: "create",
-        target: connection_name.clone(),
+        target: connection_name,
         before: None,
         after: Some(format!(
             "{}@{}:{}",

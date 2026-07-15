@@ -573,7 +573,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font)
                             .child(format!("{status} · {}", process_display_command(&process))),
                     )
                     .child(self.render_host_process_inline_actions(connection_id, &process, cx)),
@@ -1131,7 +1131,7 @@ impl WorkspaceApp {
             self.push_host_process_toast(
                 self.i18n_replace(
                     "sidebar.host_processes.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );

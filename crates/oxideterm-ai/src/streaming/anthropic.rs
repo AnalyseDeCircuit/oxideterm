@@ -607,7 +607,7 @@ mod tests {
         };
 
         let (system_prompt, converted) =
-            anthropic_chat_messages(&[system.clone(), empty_system.clone(), tool]);
+            anthropic_chat_messages(&[system, empty_system.clone(), tool]);
         assert_eq!(system_prompt.as_deref(), Some("sys\n\n"));
         assert!(converted[0]["content"][0].get("tool_use_id").is_none());
 

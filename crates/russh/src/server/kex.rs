@@ -134,7 +134,7 @@ impl ServerKex {
                     let newkeys = compute_keys(
                         Vec::new(),
                         kex,
-                        names.clone(),
+                        names,
                         self.exchange.clone(),
                         self.cause.session_id(),
                     )?;
@@ -304,7 +304,7 @@ impl ServerKex {
                 let newkeys = compute_keys(
                     hash,
                     kex,
-                    names.clone(),
+                    names,
                     self.exchange.clone(),
                     self.cause.session_id(),
                 )?;

@@ -71,7 +71,7 @@ impl WorkspaceApp {
                     false,
                     has_background,
                     {
-                        let file = file.clone();
+                        let file = file;
                         move |this, _event, _window, _cx| {
                             this.set_file_manager_path(file.path.clone());
                         }
@@ -105,7 +105,7 @@ impl WorkspaceApp {
                         false,
                         has_background,
                         {
-                            let file = file.clone();
+                            let file = file;
                             move |this, _event, _window, cx| {
                                 this.open_file_manager_preview(file.clone(), cx);
                             }
@@ -1332,7 +1332,7 @@ impl WorkspaceApp {
             .child(self.render_selectable_display_text(
                 "file-manager-property-value",
                 (&label, mono),
-                value.clone(),
+                value,
                 self.tokens.ui.text,
                 cx,
             ));

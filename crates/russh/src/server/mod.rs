@@ -1123,7 +1123,7 @@ async fn reply<H: Handler + Send>(
         // Kex will consume the packet right away
     }
 
-    let is_kex_msg = pkt.buffer.first().cloned().map(is_kex_msg).unwrap_or(false);
+    let is_kex_msg = pkt.buffer.first().copied().map(is_kex_msg).unwrap_or(false);
 
     if is_kex_msg {
         if let SessionKexState::InProgress(kex) = session.kex.take() {

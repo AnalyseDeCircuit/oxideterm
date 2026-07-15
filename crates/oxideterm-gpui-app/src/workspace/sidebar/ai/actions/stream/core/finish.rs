@@ -89,8 +89,8 @@ impl WorkspaceApp {
         });
         let summary_ref = serde_json::json!({
             "kind": "compaction",
-            "roundId": summary_round_id.clone(),
-            "transcriptRef": summary_source_transcript_ref.clone(),
+            "roundId": summary_round_id,
+            "transcriptRef": summary_source_transcript_ref,
         });
         let anchor = AiChatMessage {
             id: anchor_id.clone(),
@@ -148,7 +148,7 @@ impl WorkspaceApp {
             &anchor_id,
             "compaction",
             &summary,
-            summary_round_id.clone(),
+            summary_round_id,
             Some(summary_source_transcript_ref),
             Some(total_compacted),
             compacted_until_entry_id,
@@ -249,8 +249,8 @@ impl WorkspaceApp {
         // later prompt compaction can ask the model to trust the visible summary.
         let summary_ref = serde_json::json!({
             "kind": "conversation",
-            "roundId": summary_round_id.clone(),
-            "transcriptRef": summary_source_transcript_ref.clone(),
+            "roundId": summary_round_id,
+            "transcriptRef": summary_source_transcript_ref,
         });
         conversation.messages = vec![AiChatMessage {
             id: summary_id.clone(),

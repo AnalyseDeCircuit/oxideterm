@@ -317,7 +317,7 @@ pub(crate) trait Select {
             .kex
             .iter()
             .filter(|k| !KEX_EXTENSION_NAMES.contains(k))
-            .cloned()
+            .copied()
             .collect::<Vec<_>>();
         let _remote_kexes_no_ext = kex_list
             .iter()

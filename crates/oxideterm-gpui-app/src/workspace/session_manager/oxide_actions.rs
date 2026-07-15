@@ -502,7 +502,7 @@ impl WorkspaceApp {
                 match result {
                     Ok((path, bytes)) => match OxideFile::from_bytes(&bytes) {
                         Ok(file) => {
-                            let metadata = file.metadata.clone();
+                            let metadata = file.metadata;
                             dialog.file_path = Some(path);
                             dialog.file_data = Some(bytes);
                             dialog.metadata_summary = Some(format!(

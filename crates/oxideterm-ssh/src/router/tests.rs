@@ -87,8 +87,8 @@ mod tests {
         );
         store
             .upsert_child_node_with_origin(
-                root.clone(),
-                child.clone(),
+                root,
+                child,
                 SshConfig::password("target", 22, "me", "pw"),
                 NodeOrigin::ManualPreset {
                     saved_connection_id: "saved-a".to_string(),
@@ -229,7 +229,7 @@ mod tests {
 
         assert!(matches!(
             store.expand_manual_preset_under_parent(
-                parent.clone(),
+                parent,
                 "saved-a",
                 Vec::new(),
                 SshConfig::password("target", 22, "me", "pw"),
@@ -501,7 +501,7 @@ mod tests {
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let rebound_router = router.clone();
-        let rebound_registry = registry.clone();
+        let rebound_registry = registry;
         let rebound_node = node.clone();
         runtime.spawn(async move {
             sleep(Duration::from_millis(50)).await;
@@ -718,7 +718,7 @@ mod tests {
         let old_child_connection_id = old_child.connection_id().to_string();
 
         let rebound_router = router.clone();
-        let rebound_registry = registry.clone();
+        let rebound_registry = registry;
         let rebound_child_id = child_id.clone();
         let parent_connection_id = parent.connection_id().to_string();
         runtime.spawn(async move {

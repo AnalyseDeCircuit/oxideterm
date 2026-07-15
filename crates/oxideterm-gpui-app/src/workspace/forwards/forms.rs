@@ -328,7 +328,7 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let forward_id = rule.id.clone();
-        let confirm_id = forward_id.clone();
+        let confirm_id = forward_id;
         confirm_dialog(
             &self.tokens,
             ConfirmDialogView {

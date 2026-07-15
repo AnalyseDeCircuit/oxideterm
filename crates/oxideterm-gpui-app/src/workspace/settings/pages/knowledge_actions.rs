@@ -328,7 +328,7 @@ impl WorkspaceApp {
         let partial_template = self
             .i18n
             .t("settings_view.knowledge.embedding_partial_failure");
-        let model = resolved.model.clone();
+        let model = resolved.model;
         cx.spawn(async move |weak, cx| {
             let api_key = if requires_api_key {
                 let key_lookup = key_lookup_runtime

@@ -820,7 +820,7 @@ impl WorkspaceApp {
             .child(self.render_selectable_text_scoped(
                 "settings-help-value",
                 label_key,
-                value.clone(),
+                value,
                 self.tokens.ui.text,
                 cx,
             ));

@@ -56,12 +56,13 @@ mod version_migration;
 mod virtual_list;
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
     io,
     path::{Path, PathBuf},
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -834,6 +835,8 @@ pub(crate) struct WorkspaceApp {
     selectable_text_layouts: HashMap<u64, TextLayout>,
     selectable_text_fragments: HashMap<u64, SelectableTextFragmentState>,
     selectable_text_generation: u64,
+    selectable_text_pending_updates: Rc<RefCell<selectable_text::SelectableTextFrameUpdates>>,
+    selectable_text_flush_scheduled: Rc<Cell<bool>>,
     selectable_text_autoscroll_position: Option<Point<Pixels>>,
     selectable_text_autoscroll_scheduled: bool,
     selectable_text_scroll_handles: RefCell<HashMap<String, ScrollHandle>>,

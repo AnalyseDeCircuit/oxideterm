@@ -2097,9 +2097,7 @@ impl WorkspaceApp {
         let has_query = !self.search.query.is_empty();
         let marked_text = self.marked_text_for_target(target);
         let selected_range = self.ime_selected_range_for_target(target);
-        let input_range = selected_range
-            .clone()
-            .filter(|_| has_query && marked_text.is_none());
+        let input_range = selected_range.filter(|_| has_query && marked_text.is_none());
         let selection_range = input_range.clone().filter(|range| range.start < range.end);
         let caret_offset = input_range
             .as_ref()

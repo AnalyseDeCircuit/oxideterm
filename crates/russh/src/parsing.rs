@@ -174,7 +174,7 @@ impl Decode for StreamLocalChannelInfo {
     type Error = ssh_encoding::Error;
 
     fn decode(r: &mut impl Reader) -> Result<Self, Self::Error> {
-        let socket_path = String::decode(r)?.to_owned();
+        let socket_path = String::decode(r)?;
         Ok(Self { socket_path })
     }
 }

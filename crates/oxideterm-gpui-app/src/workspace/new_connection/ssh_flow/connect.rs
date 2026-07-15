@@ -370,7 +370,7 @@ impl WorkspaceApp {
                 })
         });
         let expansion = NodeTreeExpansion {
-            target_node_id: target_node_id.clone(),
+            target_node_id: target_node_id,
             path_node_ids: nodes_to_connect,
             chain_depth: path_node_ids.len() as u32,
         };

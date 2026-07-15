@@ -375,7 +375,7 @@ impl WorkspaceApp {
             SftpTransferDirection::Upload => {
                 join_sftp_path(&self.sftp_view.remote_path, &target_name)
             }
-            SftpTransferDirection::Download => transfer.source.path.clone(),
+            SftpTransferDirection::Download => transfer.source.path,
         };
         self.sftp_view.transfers.push(SftpTransferItem {
             id,

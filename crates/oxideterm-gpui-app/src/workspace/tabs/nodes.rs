@@ -880,7 +880,7 @@ impl WorkspaceApp {
                     event_severity,
                     WorkspaceEventCategory::Connection,
                     Some(node_id.clone()),
-                    Some(connection_id.clone()),
+                    Some(connection_id),
                     match status.as_str() {
                         "link_down" => "event_log.events.link_down",
                         "disconnected" => "event_log.events.disconnected",
@@ -901,7 +901,7 @@ impl WorkspaceApp {
                         Some(if affected_children_count > 0 {
                             format!("{reason}; affected children: {affected_children_count}")
                         } else {
-                            reason.clone()
+                            reason
                         }),
                         WorkspaceNotificationScope::Node(node_id.0.clone()),
                         Some(format!("connection-lost:{}", node_id.0)),
@@ -1618,7 +1618,7 @@ impl WorkspaceApp {
         let tx = self.reconnect_worker_tx.clone();
         let timing = self.reconnect_orchestrator.timing();
         let runtime = self.forwarding_runtime.clone();
-        let reconnect_job_id = reconnect_job.job_id.clone();
+        let reconnect_job_id = reconnect_job.job_id;
         runtime.spawn(async move {
             let mut transfers_by_node = Vec::new();
             for (affected_node_id, old_connection_id) in affected_transfer_nodes {
@@ -2353,10 +2353,7 @@ impl WorkspaceApp {
         let _ = self
             .ssh_registry
             .mark_state(&connection_id, ConnectionState::Connecting);
-        if let Ok(event) = self
-            .node_router
-            .bind_connection(node_id, connection_id.clone())
-        {
+        if let Ok(event) = self.node_router.bind_connection(node_id, connection_id) {
             self.emit_node_event(event);
         }
         if let Some(node) = self.ssh_nodes.get_mut(node_id) {
@@ -2373,7 +2370,7 @@ impl WorkspaceApp {
             .filter(|job| job.ended_at.is_none())
             .map(|job| job.job_id);
         let node_id = node_id.clone();
-        let node_handle = handle.clone();
+        let node_handle = handle;
         let prompt_handler =
             std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
         let managed_key_resolver =

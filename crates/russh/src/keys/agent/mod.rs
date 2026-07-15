@@ -127,7 +127,7 @@ mod tests {
 
         let identity = AgentIdentity::PublicKey {
             key: key.clone(),
-            comment: comment.clone(),
+            comment: comment,
         };
 
         // Test public_key() returns borrowed reference
@@ -146,7 +146,7 @@ mod tests {
 
         let identity = AgentIdentity::Certificate {
             certificate: cert.clone(),
-            comment: comment.clone(),
+            comment: comment,
         };
 
         // Test public_key() returns owned value extracted from cert

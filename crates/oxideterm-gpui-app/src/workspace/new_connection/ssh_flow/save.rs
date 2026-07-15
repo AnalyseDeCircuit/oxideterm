@@ -1479,8 +1479,8 @@ impl WorkspaceApp {
         let host = config.host.clone();
         let port = config.port;
         let upstream_proxy = config.upstream_proxy.clone();
-        let worker_config = config.clone();
-        let worker_title = title.clone();
+        let worker_config = config;
+        let worker_title = title;
         std::thread::spawn(move || {
             let status = match tokio::runtime::Runtime::new() {
                 Ok(runtime) => runtime.block_on(check_host_key_with_upstream_proxy(

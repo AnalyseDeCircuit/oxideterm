@@ -74,8 +74,7 @@ pub(super) fn test_host_api_snapshot_with_connections() -> NativePluginHostApiSn
         connection.connection_id.clone(),
         native_plugin_connection_state(&connection.state),
     )]);
-    let node_connection_ids =
-        HashMap::from([("node-1".to_string(), connection.connection_id.clone())]);
+    let node_connection_ids = HashMap::from([("node-1".to_string(), connection.connection_id)]);
     NativePluginHostApiSnapshot {
         connections,
         connection_states,

@@ -56,8 +56,21 @@ pub(super) struct SelectableTextRenderState {
     accent: u32,
     active_group_selection: Option<(u64, Range<usize>)>,
     fragments: HashMap<u64, SelectableTextFragmentState>,
-    pending_fragment_updates: Rc<RefCell<Vec<SelectableTextFragmentUpdate>>>,
-    fragment_flush_scheduled: Rc<Cell<bool>>,
+    pending_updates: Rc<RefCell<SelectableTextFrameUpdates>>,
+    flush_scheduled: Rc<Cell<bool>>,
+}
+
+#[derive(Default)]
+pub(super) struct SelectableTextFrameUpdates {
+    anchors: Vec<SelectableTextAnchorUpdate>,
+    fragments: Vec<SelectableTextFragmentUpdate>,
+}
+
+struct SelectableTextAnchorUpdate {
+    id: u64,
+    value: String,
+    layout: TextLayout,
+    anchor: TextInputAnchor,
 }
 
 struct SelectableTextFragmentUpdate {
@@ -67,6 +80,32 @@ struct SelectableTextFragmentUpdate {
     text: String,
     layout: TextLayout,
     anchor: TextInputAnchor,
+}
+
+fn begin_selectable_text_frame_flush(flush_scheduled: &Cell<bool>) -> bool {
+    !flush_scheduled.replace(true)
+}
+
+fn schedule_selectable_text_frame_flush(
+    workspace: Entity<WorkspaceApp>,
+    pending_updates: Rc<RefCell<SelectableTextFrameUpdates>>,
+    flush_scheduled: Rc<Cell<bool>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !begin_selectable_text_frame_flush(&flush_scheduled) {
+        return;
+    }
+
+    // Prepaint must not re-enter WorkspaceApp. All regular and virtual-list
+    // anchors reported by this frame are committed in one deferred update.
+    window.defer(cx, move |_window, cx| {
+        flush_scheduled.set(false);
+        let updates = std::mem::take(&mut *pending_updates.borrow_mut());
+        let _ = workspace.update(cx, |this, cx| {
+            this.apply_selectable_text_frame_updates(updates, cx);
+        });
+    });
 }
 
 pub(super) fn selectable_text_id(scope: &str, key: impl Hash) -> u64 {
@@ -319,8 +358,8 @@ impl WorkspaceApp {
             accent: self.tokens.ui.accent,
             active_group_selection,
             fragments,
-            pending_fragment_updates: Rc::new(RefCell::new(Vec::new())),
-            fragment_flush_scheduled: Rc::new(Cell::new(false)),
+            pending_updates: self.selectable_text_pending_updates.clone(),
+            flush_scheduled: self.selectable_text_flush_scheduled.clone(),
         }
     }
 
@@ -452,11 +491,12 @@ impl WorkspaceApp {
                 .filter(|range| range.start < range.end)
         });
         let workspace = cx.entity();
+        let pending_updates = self.selectable_text_pending_updates.clone();
+        let flush_scheduled = self.selectable_text_flush_scheduled.clone();
         let value_for_anchor = value.clone();
         let value_for_mouse = value.clone();
         let run = self.selectable_plain_text_run(&value, color);
         let runs = selection_range
-            .clone()
             .map(|range| {
                 selected_text_runs(
                     &value,
@@ -493,20 +533,22 @@ impl WorkspaceApp {
                     }),
                 ),
             move |anchor, window: &mut Window, cx| {
-                // Read-only text anchors are render caches. Writing them from
-                // prepaint can re-enter WorkspaceApp while a menu/modal click is
-                // already updating it, so commit the cache after the frame.
-                window.defer(cx, move |_window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_selectable_text_anchor(
-                            id,
-                            value_for_anchor,
-                            layout,
-                            anchor,
-                            cx,
-                        );
+                pending_updates
+                    .borrow_mut()
+                    .anchors
+                    .push(SelectableTextAnchorUpdate {
+                        id,
+                        value: value_for_anchor,
+                        layout,
+                        anchor,
                     });
-                });
+                schedule_selectable_text_frame_flush(
+                    workspace,
+                    pending_updates,
+                    flush_scheduled,
+                    window,
+                    cx,
+                );
             },
         )
         .into_any_element()
@@ -593,8 +635,10 @@ impl WorkspaceApp {
             })
             .unwrap_or(runs);
         let workspace = cx.entity();
+        let pending_updates = self.selectable_text_pending_updates.clone();
+        let flush_scheduled = self.selectable_text_flush_scheduled.clone();
         let value_for_anchor = value.clone();
-        let value_for_mouse = value.clone();
+        let value_for_mouse = value;
         let styled_text = StyledText::new(text).with_runs(display_runs);
         let layout = styled_text.layout().clone();
 
@@ -635,22 +679,24 @@ impl WorkspaceApp {
                         ))
                 }),
             move |anchor, window: &mut Window, cx| {
-                // Read-only text anchors are render caches. Writing them from
-                // prepaint can re-enter WorkspaceApp while a menu/modal click is
-                // already updating it, so commit the cache after the frame.
-                window.defer(cx, move |_window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_selectable_text_group_fragment(
-                            group_id,
-                            fragment_id,
-                            order,
-                            value_for_anchor,
-                            layout,
-                            anchor,
-                            cx,
-                        );
+                pending_updates
+                    .borrow_mut()
+                    .fragments
+                    .push(SelectableTextFragmentUpdate {
+                        group_id,
+                        fragment_id,
+                        order,
+                        text: value_for_anchor,
+                        layout,
+                        anchor,
                     });
-                });
+                schedule_selectable_text_frame_flush(
+                    workspace,
+                    pending_updates,
+                    flush_scheduled,
+                    window,
+                    cx,
+                );
             },
         )
         .into_any_element()
@@ -675,37 +721,21 @@ impl WorkspaceApp {
         self.update_text_input_anchor(anchor, cx);
     }
 
-    fn update_selectable_text_group_fragment(
+    fn apply_selectable_text_frame_updates(
         &mut self,
-        group_id: u64,
-        fragment_id: u64,
-        order: usize,
-        text: String,
-        layout: TextLayout,
-        anchor: TextInputAnchor,
+        updates: SelectableTextFrameUpdates,
         cx: &mut Context<Self>,
     ) {
-        if group_id != selectable_document_group_id() && order == 0 {
-            self.selectable_text_fragments
-                .retain(|_, fragment| fragment.group_id != group_id);
+        for update in updates.anchors {
+            self.update_selectable_text_anchor(
+                update.id,
+                update.value,
+                update.layout,
+                update.anchor,
+                cx,
+            );
         }
-        self.selectable_text_fragments.insert(
-            fragment_id,
-            SelectableTextFragmentState {
-                group_id,
-                order,
-                generation: self.selectable_text_generation,
-                text,
-                layout,
-                anchor,
-            },
-        );
-        if self
-            .active_ime_target()
-            .is_some_and(|target| target == WorkspaceImeTarget::ReadOnlyText(group_id))
-        {
-            cx.notify();
-        }
+        self.update_selectable_text_group_fragments(updates.fragments, cx);
     }
 
     fn update_selectable_text_group_fragments(
@@ -975,8 +1005,8 @@ impl SelectableTextRenderState {
             .unwrap_or(runs);
         let workspace = self.workspace.clone();
         let workspace_for_mouse = self.workspace.clone();
-        let pending_fragment_updates = self.pending_fragment_updates.clone();
-        let fragment_flush_scheduled = self.fragment_flush_scheduled.clone();
+        let pending_updates = self.pending_updates.clone();
+        let flush_scheduled = self.flush_scheduled.clone();
         let value_for_anchor = value.clone();
         let styled_text = StyledText::new(text).with_runs(display_runs);
         let layout = styled_text.layout().clone();
@@ -1014,8 +1044,9 @@ impl SelectableTextRenderState {
                     },
                 ),
             move |anchor, window: &mut Window, cx| {
-                pending_fragment_updates
+                pending_updates
                     .borrow_mut()
+                    .fragments
                     .push(SelectableTextFragmentUpdate {
                         group_id,
                         fragment_id,
@@ -1024,21 +1055,13 @@ impl SelectableTextRenderState {
                         layout,
                         anchor,
                     });
-                if fragment_flush_scheduled.replace(true) {
-                    return;
-                }
-
-                // Prepaint must not re-enter WorkspaceApp. Flush every virtual-list frame in
-                // one deferred entity update instead of scheduling one update for every cell.
-                let pending_fragment_updates = pending_fragment_updates.clone();
-                let fragment_flush_scheduled = fragment_flush_scheduled.clone();
-                window.defer(cx, move |_window, cx| {
-                    fragment_flush_scheduled.set(false);
-                    let updates = std::mem::take(&mut *pending_fragment_updates.borrow_mut());
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_selectable_text_group_fragments(updates, cx);
-                    });
-                });
+                schedule_selectable_text_frame_flush(
+                    workspace,
+                    pending_updates,
+                    flush_scheduled,
+                    window,
+                    cx,
+                );
             },
         )
         .into_any_element()
@@ -1263,5 +1286,16 @@ mod tests {
         assert!(!selectable_text_should_stop_propagation(
             SelectableTextRole::NonSelectable,
         ));
+    }
+
+    #[test]
+    fn selectable_text_frame_flush_is_scheduled_once_until_commit() {
+        let flush_scheduled = Cell::new(false);
+
+        assert!(begin_selectable_text_frame_flush(&flush_scheduled));
+        assert!(!begin_selectable_text_frame_flush(&flush_scheduled));
+
+        flush_scheduled.set(false);
+        assert!(begin_selectable_text_frame_flush(&flush_scheduled));
     }
 }

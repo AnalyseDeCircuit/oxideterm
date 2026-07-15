@@ -108,7 +108,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(SFTP_TEXT_XS))
                             .text_color(rgb(theme.text_muted))
-                            .child(font_family.clone()),
+                            .child(font_family),
                     ),
             )
             .child(
@@ -277,7 +277,7 @@ impl WorkspaceApp {
             .to_ascii_lowercase();
         let lines = std::sync::Arc::new(sftp_preview_visual_lines(source));
         let row_count = lines.len();
-        let list_lines = lines.clone();
+        let list_lines = lines;
         let font_family = settings_mono_font_family(self.settings_store.settings());
         let scroll = self.sftp_view.preview_code_scroll.clone();
         div()

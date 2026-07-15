@@ -1228,7 +1228,7 @@ impl WorkspaceApp {
         let row_count = rows.len();
         let rows_height = (row_count as f32 * COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT)
             .min(COMMAND_PALETTE_LIST_MAX_HEIGHT);
-        let virtual_rows = rows.clone();
+        let virtual_rows = rows;
         let entity = cx.entity();
 
         let panel = dialog_content(&self.tokens)
@@ -1606,7 +1606,7 @@ impl WorkspaceApp {
         let row_count = rows.len();
         let rows_height = (row_count as f32 * SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT)
             .min(SHORTCUTS_MODAL_LIST_MAX_HEIGHT);
-        let virtual_rows = rows.clone();
+        let virtual_rows = rows;
         let entity = cx.entity();
         dismissible_dialog_backdrop()
             .on_mouse_down(

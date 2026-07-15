@@ -119,6 +119,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn queue_cloud_sync_dirty_refresh(&mut self, cx: &mut Context<Self>) {
+        // Invalidate immediately at the mutation boundary; the debounced refresh
+        // may run later, but visible preview data must not reuse the old generation.
+        self.invalidate_cloud_sync_snapshot_caches();
         self.cloud_sync.controller.dirty_refresh_generation = self
             .cloud_sync
             .controller

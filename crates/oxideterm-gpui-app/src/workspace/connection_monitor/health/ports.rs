@@ -487,7 +487,7 @@ impl WorkspaceApp {
                                 theme.text
                             }))
                             .font_family(mono_font.clone())
-                            .child(local.clone()),
+                            .child(local),
                     )
                     .child(
                         div()
@@ -519,7 +519,7 @@ impl WorkspaceApp {
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
                             .font_family(mono_font.clone())
-                            .child(pid.clone()),
+                            .child(pid),
                     )
                     .when(show_context_columns, |row| {
                         row.child(
@@ -847,7 +847,7 @@ impl WorkspaceApp {
             self.push_host_port_toast(
                 self.i18n_replace(
                     "sidebar.host_ports.toast.partial_support",
-                    &[("os", os_type.clone())],
+                    &[("os", os_type)],
                 ),
                 TerminalNoticeVariant::Warning,
             );

@@ -1621,7 +1621,7 @@ impl WorkspaceApp {
             let state = self.sync_ai_reasoning_model_list_state(settings, &provider_id, &models);
             let spec = self.ai_provider_model_row_list_spec();
             let workspace = cx.entity();
-            let provider_id_for_rows = provider_id.clone();
+            let provider_id_for_rows = provider_id;
             let provider_index = panel.provider_index;
             let list_height = models.len() as f32 * AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT;
             Some(settings_ai_model_row_list_frame(
@@ -1837,7 +1837,7 @@ impl WorkspaceApp {
             let state = self.sync_ai_context_model_list_state(settings, &provider_id, &models);
             let spec = self.ai_provider_model_row_list_spec();
             let workspace = cx.entity();
-            let provider_id_for_rows = provider_id.clone();
+            let provider_id_for_rows = provider_id;
             let provider_index = panel.provider_index;
             let list_height = models.len() as f32 * AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT;
             Some(settings_ai_model_row_list_frame(

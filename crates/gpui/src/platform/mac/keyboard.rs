@@ -1496,5 +1496,5 @@ fn get_key_equivalents(layout_id: &str) -> Option<HashMap<char, char>> {
         _ => return None,
     };
 
-    Some(HashMap::from_iter(mappings.iter().cloned()))
+    Some(HashMap::from_iter(mappings.iter().copied()))
 }

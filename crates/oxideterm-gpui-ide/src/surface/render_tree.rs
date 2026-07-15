@@ -280,7 +280,7 @@ impl IdeSurface {
         let row_count = rows.len();
         let selected = self.workspace.file_tree().selected().cloned();
         let loading_paths = Arc::new(self.loading_paths.clone());
-        let tokens = self.tokens.clone();
+        let tokens = self.tokens;
         let entity = cx.entity();
 
         uniform_list(

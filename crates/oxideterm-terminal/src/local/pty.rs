@@ -110,7 +110,6 @@ impl LocalPtySession {
         )));
         let cwd = local_config
             .cwd
-            .clone()
             .filter(|path| !path.as_os_str().is_empty())
             .or_else(|| env::var_os("HOME").map(PathBuf::from))
             .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))

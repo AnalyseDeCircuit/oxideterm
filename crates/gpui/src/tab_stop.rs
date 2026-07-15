@@ -497,7 +497,7 @@ mod tests {
                 self.tab_map
                     .next(forward_found.last())
                     .map(|handle| handle.id),
-                expected.first().cloned()
+                expected.first().copied()
             );
 
             // Check previous order
@@ -510,7 +510,7 @@ mod tests {
                 self.tab_map
                     .prev(reversed_found.last())
                     .map(|handle| handle.id),
-                expected.first().cloned(),
+                expected.first().copied(),
             );
         }
     }

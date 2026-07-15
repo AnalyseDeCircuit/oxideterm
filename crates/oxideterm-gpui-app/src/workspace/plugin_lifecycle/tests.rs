@@ -511,7 +511,7 @@ fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation(
             request_id: "sync-validate-1".to_string(),
             namespace: "sync".to_string(),
             method: "validateOxide".to_string(),
-            args: serde_json::json!({ "fileData": exported_bytes.clone() }),
+            args: serde_json::json!({ "fileData": exported_bytes }),
         },
         &connection_store,
         &saved_connections,

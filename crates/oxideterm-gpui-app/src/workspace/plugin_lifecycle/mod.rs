@@ -1164,7 +1164,7 @@ impl WorkspaceApp {
             // over PluginEvent frames when the serialized projection changes.
             self.emit_native_plugin_event_to_subscribers(
                 super::plugin_host::NATIVE_PLUGIN_SESSION_TREE_CHANGED_EVENT,
-                tree.clone(),
+                tree,
                 cx,
             );
         }
@@ -1691,8 +1691,8 @@ impl WorkspaceApp {
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
         let (tx, rx) = mpsc::channel();
         self.forwarding_runtime.spawn({
-            let plugin_id = plugin_id.clone();
-            let command = command.clone();
+            let plugin_id = plugin_id;
+            let command = command;
             async move {
                 let mut host = host.lock().await;
                 host.set_host_api_resolver(host_api_resolver);
@@ -1919,7 +1919,7 @@ impl WorkspaceApp {
             payload,
         };
         self.forwarding_runtime.spawn({
-            let plugin_id = plugin_id.clone();
+            let plugin_id = plugin_id;
             async move {
                 let mut host = host.lock().await;
                 host.set_host_api_resolver(host_api_resolver);

@@ -880,7 +880,7 @@ impl WorkspaceApp {
             conversation_id: conversation.map(|conversation| conversation.id.clone()),
             conversation_fingerprint: ai_conversation_token_fingerprint(conversation),
             provider_id: provider_id.to_string(),
-            model: model.clone(),
+            model: model,
             max_tokens,
             system_prompt_fingerprint: ai_text_shape_fingerprint(system_prompt),
             tool_use_enabled: settings.ai.tool_use.enabled,

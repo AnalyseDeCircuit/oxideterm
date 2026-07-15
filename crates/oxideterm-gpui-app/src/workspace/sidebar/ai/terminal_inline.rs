@@ -317,7 +317,7 @@ impl WorkspaceApp {
                                                 ))
                                             },
                                         ),
-                                    Self::deferred_ai_text_input_anchor_update(workspace.clone()),
+                                    Self::deferred_ai_text_input_anchor_update(workspace),
                                 ),
                             )
                             .child(self.render_terminal_ai_inline_hints(cx))

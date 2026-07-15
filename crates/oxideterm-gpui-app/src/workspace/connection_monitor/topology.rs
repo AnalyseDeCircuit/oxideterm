@@ -459,7 +459,7 @@ impl WorkspaceApp {
                     |_, _, _| {},
                     move |bounds, _, window, _| {
                         if !has_background {
-                            window.paint_quad(fill(bounds.clone(), rgb(theme.bg)));
+                            window.paint_quad(fill(bounds, rgb(theme.bg)));
                         }
                         let mut y = 0.0;
                         while y <= f32::from(bounds.size.height) {
@@ -729,7 +729,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let node = node.clone();
+                    let node = node;
                     move |this, event: &MouseDownEvent, window, cx| {
                         if event.click_count >= 2 {
                             this.open_topology_node_menu(&node, window);
@@ -810,7 +810,7 @@ impl WorkspaceApp {
                     false,
                     false,
                     {
-                        let node_id = node_id.clone();
+                        let node_id = node_id;
                         move |this, _event, window, _cx| {
                             if let Some(node_id) = node_id.clone() {
                                 this.open_sftp_tab(node_id, window, _cx);

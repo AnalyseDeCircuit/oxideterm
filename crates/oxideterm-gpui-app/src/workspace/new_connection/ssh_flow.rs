@@ -395,10 +395,10 @@ impl WorkspaceApp {
         // materialize the saved target under the live parent, then let
         // NodeRouter connect through that ancestry.
         let expansion = match self.expand_saved_connection_tree_under_parent(
-            parent_node_id.clone(),
+            parent_node_id,
             &saved_connection_id,
             config,
-            connection.name.clone(),
+            connection.name,
         ) {
             Ok(expansion) => expansion,
             Err(error) => {
@@ -411,7 +411,7 @@ impl WorkspaceApp {
             }
         };
 
-        let target_node_id = expansion.target_node_id.clone();
+        let target_node_id = expansion.target_node_id;
         if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
             node.readiness = NodeReadiness::Connecting;
         }

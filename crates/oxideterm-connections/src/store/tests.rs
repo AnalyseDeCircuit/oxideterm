@@ -799,7 +799,7 @@ mod tests {
             store
                 .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
                 .unwrap(),
-            vec![credential.clone()]
+            vec![credential]
         );
         assert_eq!(
             store
@@ -828,7 +828,7 @@ mod tests {
                 require_click_to_send: true,
             })
             .unwrap();
-        let keychain_id = credential.keychain_id.clone();
+        let keychain_id = credential.keychain_id;
 
         let updated = store
             .save_privilege_credential(SavePrivilegeCredentialRequest {
@@ -890,7 +890,7 @@ mod tests {
                 require_click_to_send: true,
             })
             .unwrap();
-        let keychain_id = credential.keychain_id.clone().unwrap();
+        let keychain_id = credential.keychain_id.unwrap();
 
         assert!(store.delete("conn-1").unwrap());
         assert!(store.privilege_keychain.get(&keychain_id).is_err());
@@ -2372,7 +2372,7 @@ mod tests {
             .upsert(request(
                 "conn-1",
                 SavedAuth::ManagedKey {
-                    key_id: info.id.clone(),
+                    key_id: info.id,
                     passphrase_keychain_id: None,
                     plaintext_passphrase: None,
                 },
