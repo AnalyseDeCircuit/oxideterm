@@ -112,8 +112,30 @@ jobs:
       - name: Install Windows system dependencies
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          NSIS_VERSION: '3.12'
+          NSIS_ARCHIVE_SHA256: '56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f'
         run: |
-          choco install nsis -y --no-progress
+          # Download the official portable archive without relying on Chocolatey's OData feed.
+          $archiveName = "nsis-$env:NSIS_VERSION.zip"
+          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
+          $downloadUrl = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$env:NSIS_VERSION/$archiveName"
+          curl.exe --fail --location --retry 3 --retry-all-errors `
+            --output $archivePath $downloadUrl
+
+          $archiveHash = (Get-FileHash -Algorithm SHA256 -Path $archivePath).Hash.ToLowerInvariant()
+          if ($archiveHash -ne $env:NSIS_ARCHIVE_SHA256) {
+            throw "NSIS archive checksum mismatch: $archiveHash"
+          }
+
+          $extractRoot = Join-Path $env:RUNNER_TEMP "nsis-$env:NSIS_VERSION-portable"
+          Expand-Archive -Path $archivePath -DestinationPath $extractRoot -Force
+          $nsisBin = Join-Path $extractRoot "nsis-$env:NSIS_VERSION"
+          if (-not (Test-Path (Join-Path $nsisBin 'makensis.exe'))) {
+            throw 'makensis.exe is missing from the verified NSIS archive.'
+          }
+          $nsisBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
           # GitHub-hosted Windows runners include 7-Zip; avoid a redundant feed request.
           if (-not (Get-Command 7z -ErrorAction SilentlyContinue)) {
             throw '7-Zip is missing from the GitHub-hosted Windows runner.'
