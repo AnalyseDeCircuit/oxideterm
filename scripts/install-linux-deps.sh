@@ -10,7 +10,15 @@ set -euo pipefail
 
 echo "::group::Install Linux system dependencies"
 
-sudo apt-get update
+# GitHub ARM runners can advertise unreachable IPv6 mirrors. Prefer IPv4 and
+# let apt retry transient mirror failures before failing the job.
+readonly APT_RETRY_COUNT=3
+APT_GET_OPTIONS=(
+  -o "Acquire::Retries=${APT_RETRY_COUNT}"
+  -o Acquire::ForceIPv4=true
+)
+
+sudo apt-get "${APT_GET_OPTIONS[@]}" update
 
 # GitHub-hosted Ubuntu images may preinstall LLVM libunwind-*-dev packages
 # that conflict with libunwind-dev (required by GStreamer dev packages).
@@ -55,6 +63,6 @@ if [[ -n "${EXTRA_PACKAGES:-}" ]]; then
 fi
 
 echo "Installing packages: ${PACKAGES[*]}"
-sudo apt-get install -y "${PACKAGES[@]}"
+sudo apt-get "${APT_GET_OPTIONS[@]}" install -y "${PACKAGES[@]}"
 
 echo "::endgroup::"

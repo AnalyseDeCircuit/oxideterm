@@ -112,7 +112,12 @@ jobs:
       - name: Install Windows system dependencies
         if: runner.os == 'Windows'
         shell: pwsh
-        run: choco install nsis 7zip -y --no-progress
+        run: |
+          choco install nsis -y --no-progress
+          # GitHub-hosted Windows runners include 7-Zip; avoid a redundant feed request.
+          if (-not (Get-Command 7z -ErrorAction SilentlyContinue)) {
+            throw '7-Zip is missing from the GitHub-hosted Windows runner.'
+          }
 
       - name: Import Windows signing certificate
         if: runner.os == 'Windows'
