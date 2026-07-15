@@ -1287,9 +1287,11 @@ mod tests {
     #[test]
     fn settings_navigation_item_indices_include_group_separators() {
         assert_eq!(settings_nav_item_index(SettingsTab::General), Some(0));
-        assert_eq!(settings_nav_item_index(SettingsTab::Portable), Some(1));
-        assert_eq!(settings_nav_item_index(SettingsTab::Terminal), Some(3));
-        assert_eq!(settings_nav_item_index(SettingsTab::Connections), Some(6));
+        assert_eq!(settings_nav_item_index(SettingsTab::Keybindings), Some(2));
+        assert_eq!(settings_nav_item_index(SettingsTab::Terminal), Some(4));
+        assert_eq!(settings_nav_item_index(SettingsTab::Portable), Some(5));
+        assert_eq!(settings_nav_item_index(SettingsTab::Connections), Some(7));
+        assert_eq!(settings_nav_item_index(SettingsTab::Privilege), Some(10));
         assert_eq!(settings_nav_item_index(SettingsTab::Help), Some(16));
     }
 

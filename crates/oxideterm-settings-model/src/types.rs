@@ -289,17 +289,18 @@ impl SettingsKeybindingScopeFilter {
 
 impl SettingsTab {
     pub fn groups() -> &'static [&'static [Self]] {
+        // Keep navigation groups aligned with user tasks: application preferences,
+        // runtime behavior, remote access, productivity, then support.
         &[
-            &[Self::General, Self::Portable],
-            &[Self::Terminal, Self::Appearance],
-            &[Self::Connections, Self::Privilege, Self::Network],
+            &[Self::General, Self::Appearance, Self::Keybindings],
+            &[Self::Terminal, Self::Portable],
             &[
+                Self::Connections,
+                Self::Network,
                 Self::Sftp,
-                Self::Ide,
-                Self::Ai,
-                Self::Knowledge,
-                Self::Keybindings,
+                Self::Privilege,
             ],
+            &[Self::Ide, Self::Ai, Self::Knowledge],
             &[Self::Help],
         ]
     }
@@ -629,5 +630,28 @@ mod tests {
         assert!(SettingsInput::LocalPrivilegePromptPatterns.accepts_newline());
         assert!(!SettingsInput::TerminalFontSize.accepts_newline());
         assert_eq!(SettingsInput::AiMemoryContent.textarea_line_height(), 22.0);
+    }
+
+    #[test]
+    fn settings_tabs_are_grouped_by_user_task() {
+        assert_eq!(
+            SettingsTab::groups(),
+            &[
+                &[
+                    SettingsTab::General,
+                    SettingsTab::Appearance,
+                    SettingsTab::Keybindings,
+                ][..],
+                &[SettingsTab::Terminal, SettingsTab::Portable][..],
+                &[
+                    SettingsTab::Connections,
+                    SettingsTab::Network,
+                    SettingsTab::Sftp,
+                    SettingsTab::Privilege,
+                ][..],
+                &[SettingsTab::Ide, SettingsTab::Ai, SettingsTab::Knowledge][..],
+                &[SettingsTab::Help][..],
+            ]
+        );
     }
 }
