@@ -888,6 +888,8 @@
     "visual_background_title": "전체 창 이미지 배경",
     "visual_background_description": "이미지 배경을 활동 표시줄, 사이드바, 탭, 콘텐츠, 보조 패널 뒤까지 확장할 수 있습니다.",
     "visual_disable_hint": "프로필을 전환하면 즉시 미리 보고 적용할 수 있습니다. 나중에 설정 → 모양에서 변경할 수 있습니다.",
+    "visual_radius_hint": "슬라이더를 움직여 전체 모서리 반경을 즉시 미리 보고 적용할 수 있습니다. 나중에 설정 → 외관 → 레이아웃에서 변경할 수 있습니다.",
+    "visual_background_hint": "설정 → 외관 → 배경 이미지에서 이미지를 지정하세요. 전체 창을 선택하면 작업 공간 전체 뒤로 확장됩니다.",
     "features_eyebrow": "5페이지 · 기능",
     "features_title": "더 많은 프로토콜과 강화된 작업 흐름",
     "features_description": "2.0은 연결 유형과 호스트 작업을 확장하는 동시에 SFTP처럼 성능에 민감한 경로를 다시 구축했습니다.",

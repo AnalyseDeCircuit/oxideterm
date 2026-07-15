@@ -20,6 +20,14 @@ const HOST_TOOLS_TAB_SCROLLBAR_RADIUS: f32 = 2.0;
 const HOST_TOOLS_TAB_SCROLLBAR_ALPHA: u32 = 0x66;
 const HOST_TOOLS_TAB_SCROLLBAR_DRAG_HEIGHT: f32 = 12.0;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HostToolsTabSelectionGeometry {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
 #[derive(Clone, Copy)]
 struct HostToolsTabScrollbarGeometry {
     viewport_left: f32,
@@ -27,6 +35,64 @@ struct HostToolsTabScrollbarGeometry {
     thumb_width: f32,
     thumb_left: f32,
     max_scroll: f32,
+}
+
+fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
+    // Keep indices aligned with the stable render order in the scroll strip.
+    match tool {
+        ContextSidebarTool::Monitor => 0,
+        ContextSidebarTool::Processes => 1,
+        ContextSidebarTool::Services => 2,
+        ContextSidebarTool::Logs => 3,
+        ContextSidebarTool::Tmux => 4,
+        ContextSidebarTool::Docker => 5,
+        ContextSidebarTool::Ports => 6,
+        ContextSidebarTool::Schedules => 7,
+        ContextSidebarTool::Filesystems => 8,
+        ContextSidebarTool::Packages => 9,
+    }
+}
+
+fn host_tools_tab_selection_geometry_from_bounds(
+    viewport: Bounds<Pixels>,
+    scroll_offset: Point<Pixels>,
+    item: Bounds<Pixels>,
+) -> HostToolsTabSelectionGeometry {
+    HostToolsTabSelectionGeometry {
+        // The overlay is outside the scroll owner, so include its current
+        // offset when converting measured content bounds into viewport space.
+        left: f32::from(item.origin.x - viewport.origin.x + scroll_offset.x),
+        top: f32::from(item.origin.y - viewport.origin.y + scroll_offset.y),
+        width: f32::from(item.size.width),
+        height: f32::from(item.size.height),
+    }
+}
+
+fn host_tools_tab_selection_geometry(
+    scroll_handle: &ScrollHandle,
+    item_index: usize,
+) -> Option<HostToolsTabSelectionGeometry> {
+    let item = scroll_handle.bounds_for_item(item_index)?;
+    Some(host_tools_tab_selection_geometry_from_bounds(
+        scroll_handle.bounds(),
+        scroll_handle.offset(),
+        item,
+    ))
+}
+
+fn interpolate_host_tools_tab_selection_geometry(
+    source: HostToolsTabSelectionGeometry,
+    target: HostToolsTabSelectionGeometry,
+    progress: f32,
+) -> HostToolsTabSelectionGeometry {
+    HostToolsTabSelectionGeometry {
+        left: oxideterm_gpui_ui::motion::lerp(source.left, target.left, progress),
+        top: oxideterm_gpui_ui::motion::lerp(source.top, target.top, progress),
+        // Width is measured and interpolated independently because localized
+        // tab labels do not share a fixed cell width.
+        width: oxideterm_gpui_ui::motion::lerp(source.width, target.width, progress),
+        height: oxideterm_gpui_ui::motion::lerp(source.height, target.height, progress),
+    }
 }
 
 // Each Host Tools module owns its complete UI and request lifecycle.
@@ -161,6 +227,12 @@ impl WorkspaceApp {
     }
 
     fn render_host_tools_context_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        let active_index = host_tools_tab_index(self.active_context_sidebar_tool);
+        let selection_geometry =
+            host_tools_tab_selection_geometry(&self.host_tools_tab_scroll_handle, active_index);
+        let selection_indicator = selection_geometry
+            .map(|geometry| self.render_host_tools_tab_selection_indicator(geometry));
+        let selection_indicator_visible = selection_indicator.is_some();
         let mut tabs = div()
             .id("host-tools-tab-scroll-viewport")
             .size_full()
@@ -188,6 +260,7 @@ impl WorkspaceApp {
                 LucideIcon::Activity,
                 "sidebar.panels.host_monitor",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             // These entries reserve the host-tools IA before their backends land.
@@ -196,6 +269,7 @@ impl WorkspaceApp {
                 LucideIcon::ListChecks,
                 "sidebar.panels.processes",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -203,6 +277,7 @@ impl WorkspaceApp {
                 LucideIcon::Wrench,
                 "sidebar.panels.services",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -210,6 +285,7 @@ impl WorkspaceApp {
                 LucideIcon::FileText,
                 "sidebar.panels.logs",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -217,6 +293,7 @@ impl WorkspaceApp {
                 LucideIcon::Terminal,
                 "sidebar.panels.tmux",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -224,6 +301,7 @@ impl WorkspaceApp {
                 LucideIcon::Layers,
                 "sidebar.panels.docker",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -231,6 +309,7 @@ impl WorkspaceApp {
                 LucideIcon::Network,
                 "sidebar.panels.ports",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -238,6 +317,7 @@ impl WorkspaceApp {
                 LucideIcon::Clock,
                 "sidebar.panels.schedules",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -245,6 +325,7 @@ impl WorkspaceApp {
                 LucideIcon::HardDrive,
                 "sidebar.panels.filesystems",
                 true,
+                selection_indicator_visible,
                 cx,
             ))
             .child(self.render_host_tools_context_tab(
@@ -252,6 +333,7 @@ impl WorkspaceApp {
                 LucideIcon::Archive,
                 "sidebar.panels.packages",
                 true,
+                selection_indicator_visible,
                 cx,
             ));
 
@@ -262,10 +344,81 @@ impl WorkspaceApp {
             .h(px(HOST_TOOLS_TAB_STRIP_HEIGHT))
             .min_w_0()
             .relative()
+            .overflow_hidden()
             .border_b_1()
             .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+            // Keep the moving surface below every icon and label without
+            // changing the tracked scroll owner's direct-child indices.
+            .when_some(selection_indicator, |strip, indicator| {
+                strip.child(indicator)
+            })
             .child(tabs)
             .child(self.render_host_tools_tab_scrollbar(cx))
+            .into_any_element()
+    }
+
+    fn render_host_tools_tab_selection_indicator(
+        &self,
+        target: HostToolsTabSelectionGeometry,
+    ) -> AnyElement {
+        let surface = div()
+            .absolute()
+            .left(px(target.left))
+            .top(px(target.top))
+            .w(px(target.width))
+            .h(px(target.height))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_panel));
+        // Host Tools keeps its compact geometry but shares the selected-card
+        // chrome established by Settings navigation.
+        let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &self.tokens);
+        let active_index = host_tools_tab_index(self.active_context_sidebar_tool);
+        let Some((generation, _)) = self.segmented_control_user_transition(
+            selection_motion::HOST_TOOLS_SWITCHER_ID,
+            active_index,
+        ) else {
+            return surface.into_any_element();
+        };
+        let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) else {
+            return surface.into_any_element();
+        };
+        let animation_id = (
+            gpui::ElementId::from(selection_motion::HOST_TOOLS_SWITCHER_ID),
+            format!("selection-{generation}"),
+        );
+        let source_index =
+            host_tools_tab_index(self.connection_monitor.previous_context_sidebar_tool);
+        if motion.spatial
+            && let Some(source) =
+                host_tools_tab_selection_geometry(&self.host_tools_tab_scroll_handle, source_index)
+        {
+            return surface
+                .with_animation(
+                    animation_id,
+                    Animation::new(motion.duration)
+                        .with_easing(oxideterm_gpui_ui::motion::ease_in_out_cubic),
+                    move |surface, progress| {
+                        let geometry =
+                            interpolate_host_tools_tab_selection_geometry(source, target, progress);
+                        surface
+                            .left(px(geometry.left))
+                            .top(px(geometry.top))
+                            .w(px(geometry.width))
+                            .h(px(geometry.height))
+                    },
+                )
+                .into_any_element();
+        }
+
+        surface
+            .with_animation(
+                animation_id,
+                Animation::new(motion.duration)
+                    .with_easing(oxideterm_gpui_ui::motion::ease_out_cubic),
+                |surface, progress| surface.opacity(progress),
+            )
             .into_any_element()
     }
 
@@ -463,11 +616,12 @@ impl WorkspaceApp {
         icon: LucideIcon,
         label_key: &'static str,
         enabled: bool,
+        selection_indicator_visible: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active = self.active_context_sidebar_tool == tool;
-        div()
+        let tab = div()
             .h(px(28.0))
             .flex_none()
             .px_2()
@@ -481,131 +635,145 @@ impl WorkspaceApp {
                 CursorStyle::Arrow
             })
             .opacity(if enabled { 1.0 } else { 0.45 })
-            .bg(if active {
-                rgb(theme.bg_hover)
-            } else {
-                rgba(0x00000000)
-            })
+            .bg(rgba(0x00000000))
             .text_color(if active {
                 rgb(theme.text)
             } else {
                 rgb(theme.text_muted)
-            })
-            .hover(move |tab| {
-                if enabled {
-                    tab.bg(rgb(theme.bg_hover))
-                } else {
-                    tab
-                }
-            })
-            .child(Self::render_lucide_icon(
-                icon,
-                13.0,
-                if active {
-                    rgb(theme.accent)
-                } else {
-                    rgb(theme.text_muted)
-                },
-            ))
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .whitespace_nowrap()
-                    .truncate()
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "host-tools-tab",
-                        label_key,
-                        self.i18n.t(label_key),
-                        if active { theme.text } else { theme.text_muted },
-                        cx,
-                    )),
-            )
-            .when(enabled, |tab| {
-                tab.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if this.active_context_sidebar_tool != tool {
-                            this.active_context_sidebar_tool = tool;
-                            if tool != ContextSidebarTool::Processes {
-                                this.connection_monitor.host_process_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Docker {
-                                this.connection_monitor.host_docker_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Services {
-                                this.connection_monitor.host_service_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Logs {
-                                this.connection_monitor.host_log_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Tmux {
-                                this.connection_monitor.host_tmux_search_focused = false;
-                                this.connection_monitor.host_tmux_pending_confirm = None;
-                                this.connection_monitor.host_tmux_input_dialog = None;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Ports {
-                                this.connection_monitor.host_port_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Schedules {
-                                this.connection_monitor.host_schedule_search_focused = false;
-                                this.connection_monitor.host_schedule_pending_confirm = None;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Filesystems {
-                                this.connection_monitor.host_filesystem_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            if tool != ContextSidebarTool::Packages {
-                                this.connection_monitor.host_package_search_focused = false;
-                                this.clear_ime_selection();
-                                this.ime_marked_text = None;
-                            }
-                            // Switching Host Tools pages should eagerly attach
-                            // the selected connection profiler. Waiting for the
-                            // heartbeat made data appear only after another
-                            // layout event, such as entering fullscreen.
-                            this.refresh_connection_monitor_pool_stats();
-                            this.sync_connection_monitor_selection(cx);
-                            if tool == ContextSidebarTool::Logs {
-                                this.request_host_logs_snapshot_for_selected_connection(cx);
-                            }
-                            if tool == ContextSidebarTool::Tmux {
-                                this.request_host_tmux_snapshot_for_selected_connection(cx);
-                            }
-                            if tool == ContextSidebarTool::Ports {
-                                this.request_host_ports_snapshot_for_selected_connection(cx);
-                            }
-                            if tool == ContextSidebarTool::Schedules {
-                                this.request_host_schedules_snapshot_for_selected_connection(cx);
-                            }
-                            if tool == ContextSidebarTool::Filesystems {
-                                this.request_host_filesystems_snapshot_for_selected_connection(cx);
-                            }
-                            if tool == ContextSidebarTool::Packages {
-                                this.request_host_packages_snapshot_for_selected_connection(cx);
-                            }
-                            cx.notify();
+            });
+        // Before tracked bounds exist, paint the same selected card directly
+        // on the tab so the first frame does not fall back to older chrome.
+        let tab = if active && !selection_indicator_visible {
+            let tab = tab
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(self.settings_panel_background(theme.bg_panel));
+            oxideterm_gpui_ui::theme_card_surface_shadow(tab, &self.tokens)
+        } else {
+            tab
+        };
+        tab.hover(move |tab| {
+            if enabled && !active {
+                tab.bg(rgb(theme.bg_hover))
+            } else {
+                tab
+            }
+        })
+        .child(Self::render_lucide_icon(
+            icon,
+            13.0,
+            if active {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.text_muted)
+            },
+        ))
+        .child(
+            div()
+                .text_size(px(12.0))
+                .whitespace_nowrap()
+                .truncate()
+                .child(self.render_display_text_with_role(
+                    SelectableTextRole::NonSelectable,
+                    "host-tools-tab",
+                    label_key,
+                    self.i18n.t(label_key),
+                    if active { theme.text } else { theme.text_muted },
+                    cx,
+                )),
+        )
+        .when(enabled, |tab| {
+            tab.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if this.active_context_sidebar_tool != tool {
+                        this.connection_monitor.previous_context_sidebar_tool =
+                            this.active_context_sidebar_tool;
+                        this.active_context_sidebar_tool = tool;
+                        this.begin_user_segmented_control_transition(
+                            selection_motion::HOST_TOOLS_SWITCHER_ID,
+                            host_tools_tab_index(tool),
+                            cx,
+                        );
+                        if tool != ContextSidebarTool::Processes {
+                            this.connection_monitor.host_process_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
                         }
-                        cx.stop_propagation();
-                    }),
-                )
-            })
-            .into_any_element()
+                        if tool != ContextSidebarTool::Docker {
+                            this.connection_monitor.host_docker_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Services {
+                            this.connection_monitor.host_service_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Logs {
+                            this.connection_monitor.host_log_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Tmux {
+                            this.connection_monitor.host_tmux_search_focused = false;
+                            this.connection_monitor.host_tmux_pending_confirm = None;
+                            this.connection_monitor.host_tmux_input_dialog = None;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Ports {
+                            this.connection_monitor.host_port_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Schedules {
+                            this.connection_monitor.host_schedule_search_focused = false;
+                            this.connection_monitor.host_schedule_pending_confirm = None;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Filesystems {
+                            this.connection_monitor.host_filesystem_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        if tool != ContextSidebarTool::Packages {
+                            this.connection_monitor.host_package_search_focused = false;
+                            this.clear_ime_selection();
+                            this.ime_marked_text = None;
+                        }
+                        // Switching Host Tools pages should eagerly attach
+                        // the selected connection profiler. Waiting for the
+                        // heartbeat made data appear only after another
+                        // layout event, such as entering fullscreen.
+                        this.refresh_connection_monitor_pool_stats();
+                        this.sync_connection_monitor_selection(cx);
+                        if tool == ContextSidebarTool::Logs {
+                            this.request_host_logs_snapshot_for_selected_connection(cx);
+                        }
+                        if tool == ContextSidebarTool::Tmux {
+                            this.request_host_tmux_snapshot_for_selected_connection(cx);
+                        }
+                        if tool == ContextSidebarTool::Ports {
+                            this.request_host_ports_snapshot_for_selected_connection(cx);
+                        }
+                        if tool == ContextSidebarTool::Schedules {
+                            this.request_host_schedules_snapshot_for_selected_connection(cx);
+                        }
+                        if tool == ContextSidebarTool::Filesystems {
+                            this.request_host_filesystems_snapshot_for_selected_connection(cx);
+                        }
+                        if tool == ContextSidebarTool::Packages {
+                            this.request_host_packages_snapshot_for_selected_connection(cx);
+                        }
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+        })
+        .into_any_element()
     }
 
     fn render_connection_switcher_row(
@@ -1024,5 +1192,83 @@ impl WorkspaceApp {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::Size;
+
+    #[test]
+    fn host_tools_tab_indices_match_render_order() {
+        let tools = [
+            ContextSidebarTool::Monitor,
+            ContextSidebarTool::Processes,
+            ContextSidebarTool::Services,
+            ContextSidebarTool::Logs,
+            ContextSidebarTool::Tmux,
+            ContextSidebarTool::Docker,
+            ContextSidebarTool::Ports,
+            ContextSidebarTool::Schedules,
+            ContextSidebarTool::Filesystems,
+            ContextSidebarTool::Packages,
+        ];
+
+        for (expected_index, tool) in tools.into_iter().enumerate() {
+            assert_eq!(host_tools_tab_index(tool), expected_index);
+        }
+    }
+
+    #[test]
+    fn host_tools_tab_geometry_accounts_for_viewport_scroll() {
+        let viewport = Bounds {
+            origin: Point::new(px(100.0), px(20.0)),
+            size: Size::new(px(320.0), px(48.0)),
+        };
+        let item = Bounds {
+            origin: Point::new(px(148.0), px(28.0)),
+            size: Size::new(px(76.0), px(28.0)),
+        };
+
+        assert_eq!(
+            host_tools_tab_selection_geometry_from_bounds(
+                viewport,
+                Point::new(px(-36.0), px(0.0)),
+                item,
+            ),
+            HostToolsTabSelectionGeometry {
+                left: 12.0,
+                top: 8.0,
+                width: 76.0,
+                height: 28.0,
+            }
+        );
+    }
+
+    #[test]
+    fn host_tools_tab_geometry_interpolates_position_and_width() {
+        let source = HostToolsTabSelectionGeometry {
+            left: 12.0,
+            top: 8.0,
+            width: 100.0,
+            height: 28.0,
+        };
+        let target = HostToolsTabSelectionGeometry {
+            left: 124.0,
+            top: 8.0,
+            width: 76.0,
+            height: 28.0,
+        };
+
+        assert_eq!(
+            interpolate_host_tools_tab_selection_geometry(source, target, 0.5),
+            HostToolsTabSelectionGeometry {
+                left: 68.0,
+                top: 8.0,
+                width: 88.0,
+                height: 28.0,
+            }
+        );
     }
 }

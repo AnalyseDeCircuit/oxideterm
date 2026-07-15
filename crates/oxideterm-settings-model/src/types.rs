@@ -213,6 +213,7 @@ pub enum SettingsInput {
 pub enum SettingsSlider {
     TerminalFontSize,
     AppearanceBorderRadius,
+    VersionMigrationBorderRadius,
     AppearanceBackgroundOpacity,
     AppearanceBackgroundBlur,
 }

@@ -875,9 +875,10 @@ impl WorkspaceApp {
             SettingsSlider::TerminalFontSize => {
                 self.set_font_size_from_position(x, cx);
             }
-            SettingsSlider::AppearanceBorderRadius => {
+            SettingsSlider::AppearanceBorderRadius
+            | SettingsSlider::VersionMigrationBorderRadius => {
                 let Some(value) = self.settings_slider_value_from_position(
-                    SelectAnchorId::SettingsAppearanceBorderRadiusSlider,
+                    settings_slider_anchor_id(slider),
                     x,
                     APPEARANCE_BORDER_RADIUS_MIN,
                     APPEARANCE_BORDER_RADIUS_MAX,
@@ -1428,6 +1429,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
     matches!(
         anchor_id,
         SelectAnchorId::SettingsAppearanceBorderRadiusSlider
+            | SelectAnchorId::VersionMigrationBorderRadiusSlider
             | SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider
             | SelectAnchorId::SettingsAppearanceBackgroundBlurSlider
             | SelectAnchorId::SettingsTerminalFontSizeSlider

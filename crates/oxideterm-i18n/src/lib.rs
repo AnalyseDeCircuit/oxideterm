@@ -567,6 +567,8 @@ mod tests {
             "migration.gpui_memory_description",
             "migration.visual_title",
             "migration.visual_disable_hint",
+            "migration.visual_radius_hint",
+            "migration.visual_background_hint",
             "migration.features_title",
             "migration.features_sftp_description",
             "migration.internal_title",

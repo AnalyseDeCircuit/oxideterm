@@ -493,6 +493,9 @@ pub fn settings_slider_anchor_id(slider: SettingsSlider) -> SelectAnchorId {
         SettingsSlider::AppearanceBorderRadius => {
             SelectAnchorId::SettingsAppearanceBorderRadiusSlider
         }
+        SettingsSlider::VersionMigrationBorderRadius => {
+            SelectAnchorId::VersionMigrationBorderRadiusSlider
+        }
         SettingsSlider::AppearanceBackgroundOpacity => {
             SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider
         }
@@ -614,5 +617,23 @@ pub fn background_fit_label(fit: BackgroundFit, i18n: &I18n) -> String {
         BackgroundFit::Contain => i18n.t("settings_view.terminal.bg_fit_contain"),
         BackgroundFit::Fill => i18n.t("settings_view.terminal.bg_fit_fill"),
         BackgroundFit::Tile => i18n.t("settings_view.terminal.bg_fit_tile"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_border_radius_slider_has_a_dedicated_anchor() {
+        let settings_anchor = settings_slider_anchor_id(SettingsSlider::AppearanceBorderRadius);
+        let migration_anchor =
+            settings_slider_anchor_id(SettingsSlider::VersionMigrationBorderRadius);
+
+        assert_eq!(
+            migration_anchor,
+            SelectAnchorId::VersionMigrationBorderRadiusSlider
+        );
+        assert_ne!(migration_anchor, settings_anchor);
     }
 }

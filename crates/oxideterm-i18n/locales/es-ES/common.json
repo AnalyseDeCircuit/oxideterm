@@ -1055,6 +1055,8 @@
     "visual_background_title": "Fondos de imagen a ventana completa",
     "visual_background_description": "Los fondos de imagen pueden extenderse ahora detrás de la barra de actividad, las barras laterales, las pestañas, el contenido y los paneles complementarios.",
     "visual_disable_hint": "Cambie de perfil para previsualizarlo y aplicarlo al instante. Puede modificarlo después en Ajustes → Apariencia.",
+    "visual_radius_hint": "Arrastre el control para previsualizar y aplicar al instante el radio de esquina global. Puede cambiarlo después en Configuración → Apariencia → Disposición.",
+    "visual_background_hint": "Configure una imagen en Configuración → Apariencia → Imagen de fondo. Elija Ventana completa para extenderla detrás de todo el espacio de trabajo.",
     "features_eyebrow": "PÁGINA 5 · CAPACIDADES",
     "features_title": "Más protocolos y flujos de trabajo más sólidos",
     "features_description": "La versión 2.0 amplía los tipos de conexión y las operaciones del host, a la vez que reconstruye rutas sensibles al rendimiento como SFTP.",

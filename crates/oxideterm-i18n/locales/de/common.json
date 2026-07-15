@@ -888,6 +888,8 @@
     "visual_background_title": "Vollflächige Bildhintergründe",
     "visual_background_description": "Bildhintergründe können sich nun hinter Aktivitätsleiste, Seitenleisten, Tabs, Inhalt und Begleitbereiche erstrecken.",
     "visual_disable_hint": "Wechseln Sie das Profil, um es sofort in der Vorschau anzuzeigen und anzuwenden. Sie können es später unter Einstellungen → Darstellung ändern.",
+    "visual_radius_hint": "Ziehen Sie den Regler, um den globalen Eckenradius sofort in der Vorschau anzuzeigen und anzuwenden. Sie können ihn später unter Einstellungen → Erscheinungsbild → Layout ändern.",
+    "visual_background_hint": "Hintergrundbilder richten Sie unter Einstellungen → Erscheinungsbild → Hintergrundbild ein. Wählen Sie dort „Gesamtes Fenster“, damit das Bild hinter dem gesamten Arbeitsbereich erscheint.",
     "features_eyebrow": "SEITE 5 · FUNKTIONEN",
     "features_title": "Mehr Protokolle, leistungsfähigere Arbeitsabläufe",
     "features_description": "2.0 erweitert Verbindungstypen und Hostoperationen und überarbeitet zugleich leistungskritische Pfade wie SFTP.",

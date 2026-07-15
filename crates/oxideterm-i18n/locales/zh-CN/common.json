@@ -888,6 +888,8 @@
     "visual_background_title": "整窗图片背景",
     "visual_background_description": "图片背景现在可以延伸到活动栏、侧边栏、标签栏、内容区和辅助面板之后。",
     "visual_disable_hint": "切换档位即可即时预览并应用，稍后仍可在“设置 → 外观”中修改。",
+    "visual_radius_hint": "拖动滑块即可即时预览并应用全局圆角，稍后可在“设置 → 外观 → 布局”中修改。",
+    "visual_background_hint": "可在“设置 → 外观 → 背景图片”中选择图片；将范围设为“整个窗口”即可延伸到完整工作区背后。",
     "features_eyebrow": "第 5 页 · 功能能力",
     "features_title": "更多协议，更强工作流",
     "features_description": "2.0 扩展了连接类型与主机运维能力，并重构了 SFTP 等性能敏感链路。",

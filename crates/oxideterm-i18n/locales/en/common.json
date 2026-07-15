@@ -888,6 +888,8 @@
     "visual_background_title": "Full-window image backgrounds",
     "visual_background_description": "Image backgrounds can now extend behind the activity bar, sidebars, tabs, content, and companion panels.",
     "visual_disable_hint": "Switch profiles to preview and apply them immediately. You can change this later in Settings → Appearance.",
+    "visual_radius_hint": "Drag the slider to preview and apply the global corner radius immediately. You can change it later in Settings → Appearance → Layout.",
+    "visual_background_hint": "Set an image in Settings → Appearance → Background Image. Choose Entire Window there to extend it behind the whole workspace.",
     "features_eyebrow": "PAGE 5 · CAPABILITIES",
     "features_title": "More protocols, stronger workflows",
     "features_description": "2.0 expands connection types and host operations while rebuilding performance-sensitive paths such as SFTP.",

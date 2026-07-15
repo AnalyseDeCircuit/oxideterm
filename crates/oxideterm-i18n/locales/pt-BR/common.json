@@ -1055,6 +1055,8 @@
     "visual_background_title": "Planos de fundo com imagem em toda a janela",
     "visual_background_description": "Os planos de fundo com imagem agora podem se estender por trás da barra de atividades, barras laterais, abas, conteúdo e painéis complementares.",
     "visual_disable_hint": "Alterne entre os perfis para visualizar e aplicar imediatamente. Você poderá alterar isso depois em Configurações → Aparência.",
+    "visual_radius_hint": "Arraste o controle para visualizar e aplicar imediatamente o raio global dos cantos. Você poderá alterá-lo em Configurações → Aparência → Layout.",
+    "visual_background_hint": "Defina uma imagem em Configurações → Aparência → Imagem de fundo. Escolha Janela inteira para estendê-la por trás de todo o espaço de trabalho.",
     "features_eyebrow": "PÁGINA 5 · RECURSOS",
     "features_title": "Mais protocolos e fluxos de trabalho mais robustos",
     "features_description": "A versão 2.0 amplia os tipos de conexão e as operações de host, ao mesmo tempo que reconstrói caminhos sensíveis ao desempenho, como SFTP.",

@@ -53,6 +53,7 @@ pub enum SelectAnchorId {
     SettingsAppearanceTheme,
     SettingsAppearanceDensity,
     SettingsAppearanceBorderRadiusSlider,
+    VersionMigrationBorderRadiusSlider,
     SettingsAppearanceAnimation,
     SettingsAppearanceRenderProfile,
     SettingsAppearanceFrostedGlass,

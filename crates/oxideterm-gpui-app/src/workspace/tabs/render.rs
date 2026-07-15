@@ -1,4 +1,4 @@
-use super::helpers::shortcut_key;
+use super::helpers::effective_shortcut_label;
 use super::*;
 
 use gpui::StatefulInteractiveElement;
@@ -895,8 +895,10 @@ impl WorkspaceApp {
 
     fn render_welcome_actions(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
+            .w_full()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
             .justify_center()
             .gap(px(12.0))
@@ -932,6 +934,7 @@ impl WorkspaceApp {
             (rgba(0x00000000), rgb(theme.border))
         };
         div()
+            .flex_none()
             .h(px(self.tokens.metrics.ui_button_default_height))
             .px(px(self.tokens.metrics.ui_button_default_padding_x))
             .flex()
@@ -945,6 +948,7 @@ impl WorkspaceApp {
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(theme.text))
+            .whitespace_nowrap()
             .cursor_pointer()
             .hover(move |button| {
                 button
@@ -968,6 +972,14 @@ impl WorkspaceApp {
     }
 
     fn render_welcome_shortcuts(&self) -> AnyElement {
+        const WELCOME_SHORTCUTS: [(&str, &str); 4] = [
+            ("app.commandPalette", "command_palette.title"),
+            ("app.newConnection", "layout.empty.new_connection"),
+            ("app.newTerminal", "layout.empty.new_local_terminal"),
+            ("app.showShortcuts", "layout.empty.keyboard_shortcuts"),
+        ];
+
+        let overrides = &self.settings_store.settings().keybindings.overrides;
         div()
             .flex()
             .flex_row()
@@ -977,25 +989,32 @@ impl WorkspaceApp {
             .gap_x(px(20.0))
             .gap_y(px(8.0))
             .pt(px(4.0))
-            .child(self.render_welcome_shortcut(shortcut_key("K"), "command_palette.title"))
-            .child(self.render_welcome_shortcut(shortcut_key("N"), "layout.empty.new_connection"))
-            .child(
-                self.render_welcome_shortcut(shortcut_key("T"), "layout.empty.new_local_terminal"),
-            )
-            .child(
-                self.render_welcome_shortcut(shortcut_key("/"), "layout.empty.keyboard_shortcuts"),
+            // Invalid registry entries are omitted instead of showing a shortcut that cannot fire.
+            .children(
+                WELCOME_SHORTCUTS
+                    .into_iter()
+                    .filter_map(|(action_id, label_key)| {
+                        effective_shortcut_label(action_id, overrides)
+                            .map(|key| self.render_welcome_shortcut(key, label_key))
+                    }),
             )
             .into_any_element()
     }
 
     fn render_welcome_shortcut(&self, key: String, label_key: &str) -> AnyElement {
         let theme = self.tokens.ui;
+        // Window imagery needs the stronger semantic text color to remain legible.
+        let label_color = if self.window_background_preferences().is_some() {
+            theme.text
+        } else {
+            theme.text_muted
+        };
         div()
             .flex()
             .items_center()
             .gap(px(6.0))
             .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(theme.text_muted))
+            .text_color(rgb(label_color))
             .child(
                 div()
                     .px(px(6.0))

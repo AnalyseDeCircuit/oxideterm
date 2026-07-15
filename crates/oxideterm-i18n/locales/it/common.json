@@ -888,6 +888,8 @@
     "visual_background_title": "Sfondi immagine a finestra intera",
     "visual_background_description": "Gli sfondi immagine possono ora estendersi dietro barra attività, barre laterali, schede, contenuti e pannelli complementari.",
     "visual_disable_hint": "Cambia profilo per visualizzarlo in anteprima e applicarlo subito. Potrai modificarlo in seguito in Impostazioni → Aspetto.",
+    "visual_radius_hint": "Trascina il cursore per visualizzare in anteprima e applicare subito il raggio globale degli angoli. Potrai modificarlo in Impostazioni → Aspetto → Layout.",
+    "visual_background_hint": "Imposta un’immagine in Impostazioni → Aspetto → Immagine di sfondo. Scegli Intera finestra per estenderla dietro l’intera area di lavoro.",
     "features_eyebrow": "PAGINA 5 · FUNZIONALITÀ",
     "features_title": "Più protocolli, flussi di lavoro più potenti",
     "features_description": "La versione 2.0 amplia i tipi di connessione e le operazioni sugli host, ricostruendo al contempo i percorsi sensibili alle prestazioni come SFTP.",

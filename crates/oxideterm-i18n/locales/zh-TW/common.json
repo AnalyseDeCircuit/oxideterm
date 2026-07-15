@@ -888,6 +888,8 @@
     "visual_background_title": "全視窗圖片背景",
     "visual_background_description": "圖片背景現在可延伸至活動列、側邊欄、分頁、內容與輔助面板後方。",
     "visual_disable_hint": "切換檔位即可即時預覽並套用，稍後仍可在「設定 → 外觀」中修改。",
+    "visual_radius_hint": "拖動滑桿即可即時預覽並套用全域圓角，稍後可在「設定 → 外觀 → 版面配置」中修改。",
+    "visual_background_hint": "可在「設定 → 外觀 → 背景圖片」中選擇圖片；將範圍設為「整個視窗」即可延伸到完整工作區後方。",
     "features_eyebrow": "第 5 頁 · 功能",
     "features_title": "更多通訊協定，更強的工作流程",
     "features_description": "2.0 擴充連線類型與主機操作，並重新打造 SFTP 等效能敏感路徑。",

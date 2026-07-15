@@ -1055,6 +1055,8 @@
     "visual_background_title": "Hình nền toàn cửa sổ",
     "visual_background_description": "Hình nền giờ đây có thể mở rộng ra phía sau thanh hoạt động, thanh bên, tab, nội dung và các bảng bổ trợ.",
     "visual_disable_hint": "Chuyển đổi cấu hình để xem trước và áp dụng ngay. Bạn có thể thay đổi lại sau trong Cài đặt → Giao diện.",
+    "visual_radius_hint": "Kéo thanh trượt để xem trước và áp dụng ngay bán kính bo góc toàn cục. Bạn có thể đổi lại trong Cài đặt → Giao diện → Bố cục.",
+    "visual_background_hint": "Đặt ảnh trong Cài đặt → Giao diện → Hình nền. Chọn Toàn bộ cửa sổ để ảnh trải phía sau toàn bộ không gian làm việc.",
     "features_eyebrow": "TRANG 5 · KHẢ NĂNG",
     "features_title": "Nhiều giao thức hơn, quy trình mạnh mẽ hơn",
     "features_description": "Phiên bản 2.0 mở rộng các loại kết nối và thao tác máy chủ, đồng thời xây dựng lại những luồng nhạy cảm với hiệu năng như SFTP.",

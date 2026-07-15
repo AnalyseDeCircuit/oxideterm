@@ -2,8 +2,13 @@
 // Hallmark · macrostructure: Narrative Workflow · genre: modern-minimal · tone: technical and restrained · anchor: project theme accent
 
 use super::*;
-use crate::workspace::settings::{CLI_COMPANION_COMMAND_NAME, LEGACY_CLI_COMPANION_COMMAND_NAME};
-use oxideterm_gpui_settings_view::{animation_label, animation_options};
+use crate::workspace::settings::{
+    APPEARANCE_BORDER_RADIUS_MAX, APPEARANCE_BORDER_RADIUS_MIN, CLI_COMPANION_COMMAND_NAME,
+    LEGACY_CLI_COMPANION_COMMAND_NAME,
+};
+use oxideterm_gpui_settings_view::{
+    animation_label, animation_options, settings_appearance_radius_control,
+};
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
@@ -462,7 +467,13 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(14.0))
             .child(self.version_migration_feature_grid(&items, compact))
-            .child(self.version_migration_animation_control(cx));
+            .child(self.version_migration_animation_control(cx))
+            .child(self.version_migration_radius_control(cx))
+            .child(self.version_migration_notice(
+                LucideIcon::Image,
+                "migration.visual_background_hint",
+                self.tokens.ui.accent,
+            ));
         self.version_migration_page_shell(
             compact,
             "migration.visual_eyebrow",
@@ -559,6 +570,52 @@ impl WorkspaceApp {
                 )
                 .into_any_element(),
             )
+            .into_any_element()
+    }
+
+    fn version_migration_radius_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .pt(px(14.0))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("settings_view.appearance.border_radius")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(self.tokens.metrics.ui_text_xs + 5.0))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("migration.visual_radius_hint")),
+                    ),
+            )
+            // Reuse the settings presentation with a dedicated modal anchor so
+            // an Appearance page underneath cannot overwrite drag geometry.
+            .child(settings_appearance_radius_control(
+                &self.tokens,
+                self.settings_store.settings().appearance.border_radius,
+                self.appearance_slider_control(
+                    SettingsSlider::VersionMigrationBorderRadius,
+                    SelectAnchorId::VersionMigrationBorderRadiusSlider,
+                    APPEARANCE_BORDER_RADIUS_MIN,
+                    APPEARANCE_BORDER_RADIUS_MAX,
+                    self.settings_store.settings().appearance.border_radius as f32,
+                    cx,
+                ),
+            ))
             .into_any_element()
     }
 

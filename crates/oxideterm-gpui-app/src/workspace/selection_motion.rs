@@ -7,6 +7,7 @@ pub(in crate::workspace) const KEYBINDING_SCOPE_SWITCHER_ID: &str = "keybinding-
 pub(in crate::workspace) const CLOUD_SYNC_SWITCHER_ID: &str = "cloud-sync-tab-bar";
 pub(in crate::workspace) const PLUGIN_MANAGER_SWITCHER_ID: &str = "plugin-manager-tab-bar";
 pub(in crate::workspace) const CONNECTION_RUNTIME_SWITCHER_ID: &str = "connection-runtime-tab-bar";
+pub(in crate::workspace) const HOST_TOOLS_SWITCHER_ID: &str = "host-tools-tab-bar";
 pub(in crate::workspace) const NOTIFICATION_CENTER_SWITCHER_ID: &str =
     "notification-center-tab-bar";
 pub(in crate::workspace) const SETTINGS_NAVIGATION_ID: &str = "settings-navigation";

@@ -11,6 +11,15 @@ pub(in crate::workspace) struct ActiveSessionSidebarRow {
     has_children: bool,
 }
 
+fn session_status_can_remove_from_sidebar(status: ActiveSessionStatus) -> bool {
+    // Connected and connecting nodes still own live connection work. Callers
+    // also keep an active reconnect job out of this inactive-state action.
+    matches!(
+        status,
+        ActiveSessionStatus::Error | ActiveSessionStatus::Idle
+    )
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_active_sessions_sidebar_content(
         &mut self,
@@ -804,6 +813,25 @@ impl WorkspaceApp {
             );
         }
 
+        if selected
+            && !self.has_active_reconnect_job(&row.node_id)
+            && session_status_can_remove_from_sidebar(row.node_view.status())
+        {
+            let node_id = row.node_id.clone();
+            card = card.child(div().flex().flex_row().items_center().child(
+                self.render_active_session_focus_action_chip(
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessions.tree.actions.remove_session"),
+                    SessionActionVariant::Danger,
+                    cx.listener(move |this, _event, window, cx| {
+                        this.remove_inactive_session_tree_node(&node_id, window, cx);
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ),
+            ));
+        }
+
         card.into_any_element()
     }
 
@@ -907,6 +935,7 @@ impl WorkspaceApp {
             self.render_active_session_focus_action_chip(
                 LucideIcon::Plus,
                 self.i18n.t("sessions.tree.actions.new_terminal"),
+                SessionActionVariant::Primary,
                 cx.listener(move |this, _event, window, cx| {
                     let _ = this.queue_ssh_terminal_tab_for_node(
                         node_id.clone(),
@@ -925,6 +954,7 @@ impl WorkspaceApp {
                 self.render_active_session_focus_action_chip(
                     LucideIcon::FolderOpen,
                     self.i18n.t("sessions.tree.actions.sftp"),
+                    SessionActionVariant::Primary,
                     cx.listener(move |this, _event, window, cx| {
                         this.open_sftp_tab(node_id.clone(), window, cx);
                         cx.stop_propagation();
@@ -937,6 +967,7 @@ impl WorkspaceApp {
                 self.render_active_session_focus_action_chip(
                     LucideIcon::ArrowLeftRight,
                     self.i18n.t("sessions.tree.actions.port_forwarding"),
+                    SessionActionVariant::Primary,
                     cx.listener(move |this, _event, window, cx| {
                         this.open_forwards_tab(node_id.clone(), window, cx);
                         cx.stop_propagation();
@@ -951,10 +982,23 @@ impl WorkspaceApp {
         &self,
         icon: LucideIcon,
         label: String,
+        variant: SessionActionVariant,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
         _cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let (text_color, background, hover_background) = match variant {
+            SessionActionVariant::Primary => (
+                theme.accent,
+                rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_BG_ALPHA),
+                rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA),
+            ),
+            SessionActionVariant::Danger => (
+                theme.error,
+                rgba((theme.error << 8) | SESSION_FOCUS_ACTION_BG_ALPHA),
+                rgba((theme.error << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA),
+            ),
+        };
         div()
             .h(px(24.0))
             .max_w_full()
@@ -965,12 +1009,10 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.md))
             .px(px(7.0))
             .text_size(px(11.0))
-            .text_color(rgb(theme.accent))
-            .bg(rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_BG_ALPHA))
-            .hover(move |chip| {
-                chip.bg(rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA))
-            })
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.accent)))
+            .text_color(rgb(text_color))
+            .bg(background)
+            .hover(move |chip| chip.bg(hover_background))
+            .child(Self::render_lucide_icon(icon, 12.0, rgb(text_color)))
             .child(
                 // Long localized labels stay inside the chip at the narrowest
                 // supported sidebar widths.
@@ -1242,10 +1284,26 @@ impl WorkspaceApp {
                 });
                 children.push(self.render_session_action_item(
                     node_depth + 1,
-                    is_last,
+                    false,
                     LucideIcon::Power,
                     self.i18n.t("sessions.actions.connect"),
                     SessionActionVariant::Primary,
+                    listener,
+                    cx,
+                ));
+                let listener = cx.listener({
+                    let node_id = node_id.clone();
+                    move |this, _event, window, cx| {
+                        this.remove_inactive_session_tree_node(&node_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                });
+                children.push(self.render_session_action_item(
+                    node_depth + 1,
+                    is_last,
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessions.tree.actions.remove_session"),
+                    SessionActionVariant::Danger,
                     listener,
                     cx,
                 ));
@@ -1695,5 +1753,29 @@ impl WorkspaceApp {
                 ring: false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_inactive_session_statuses_expose_sidebar_removal() {
+        assert!(session_status_can_remove_from_sidebar(
+            ActiveSessionStatus::Error
+        ));
+        assert!(session_status_can_remove_from_sidebar(
+            ActiveSessionStatus::Idle
+        ));
+        assert!(!session_status_can_remove_from_sidebar(
+            ActiveSessionStatus::Connecting
+        ));
+        assert!(!session_status_can_remove_from_sidebar(
+            ActiveSessionStatus::Connected
+        ));
+        assert!(!session_status_can_remove_from_sidebar(
+            ActiveSessionStatus::Active
+        ));
     }
 }
