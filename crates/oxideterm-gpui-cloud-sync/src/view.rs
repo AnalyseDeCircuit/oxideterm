@@ -20,6 +20,7 @@ use oxideterm_gpui_ui::select::{
     select_inline_menu, select_inline_option_row, select_inline_trigger_chrome,
     select_option_action,
 };
+use oxideterm_gpui_ui::{SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface};
 use oxideterm_theme::ThemeTokens;
 
 // Panel padding is the horizontal gutter around every section inside the
@@ -48,19 +49,18 @@ pub const CLOUD_SYNC_ERROR_TINT_ALPHA: u32 = 0x14;
 ///
 /// Uses the standard settings card padding from the design tokens so cloud sync
 /// cards match the rest of the settings UI visually.
-pub fn cloud_sync_card(tokens: &ThemeTokens) -> Div {
-    let theme = tokens.ui;
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .rounded(px(tokens.radii.lg))
-        .border_1()
-        .border_color(rgb(theme.border))
-        .bg(rgb(theme.bg_card))
-        .p(px(tokens.metrics.settings_card_padding))
-        .flex()
-        .flex_col()
-        .gap(px(tokens.metrics.settings_card_gap))
+pub fn cloud_sync_card(tokens: &ThemeTokens, has_background_image: bool) -> Div {
+    semantic_surface(
+        tokens,
+        SurfaceOptions::new(SurfaceKind::Inspector)
+            .padding(SurfacePadding::Spacious)
+            .has_background_image(has_background_image),
+    )
+    .w_full()
+    .min_w(px(0.0))
+    .flex()
+    .flex_col()
+    .gap(px(tokens.metrics.settings_card_gap))
 }
 
 pub fn cloud_sync_section_item(
@@ -197,6 +197,7 @@ pub struct CloudSyncGuideExampleElements {
 /// Builds the Cloud Sync quick-start card while the app supplies localized text nodes.
 pub fn cloud_sync_guide_card(
     tokens: &ThemeTokens,
+    has_background_image: bool,
     title: AnyElement,
     heading: AnyElement,
     description: AnyElement,
@@ -207,7 +208,7 @@ pub fn cloud_sync_guide_card(
     mono_font_family: gpui::SharedString,
 ) -> AnyElement {
     let theme = tokens.ui;
-    let mut card = cloud_sync_card(tokens)
+    let mut card = cloud_sync_card(tokens, has_background_image)
         .child(title)
         .child(
             div()
@@ -540,6 +541,7 @@ pub fn cloud_sync_inline_button_options(tokens: &ThemeTokens) -> ToolbarButtonOp
 
 pub fn cloud_sync_status_card(
     tokens: &ThemeTokens,
+    has_background_image: bool,
     progress: Option<AnyElement>,
     error: Option<AnyElement>,
     facts: AnyElement,
@@ -547,7 +549,7 @@ pub fn cloud_sync_status_card(
 ) -> AnyElement {
     let theme = tokens.ui;
     // Status card with progress/error above, then stat grid, then metadata.
-    cloud_sync_card(tokens)
+    cloud_sync_card(tokens, has_background_image)
         .when_some(progress, |card, progress| card.child(progress))
         .when_some(error, |card, error| card.child(error))
         .child(facts)
@@ -700,6 +702,7 @@ pub fn cloud_sync_meta_line(content: AnyElement) -> AnyElement {
 
 pub fn cloud_sync_preview_card(
     tokens: &ThemeTokens,
+    has_background_image: bool,
     title: AnyElement,
     fact_rows: impl IntoIterator<Item = AnyElement>,
     warning: Option<String>,
@@ -708,13 +711,15 @@ pub fn cloud_sync_preview_card(
 ) -> AnyElement {
     let theme = tokens.ui;
     let card = fact_rows.into_iter().fold(
-        cloud_sync_card(tokens).gap(px(8.0)).child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(theme.text_heading))
-                .child(title),
-        ),
+        cloud_sync_card(tokens, has_background_image)
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(tokens.metrics.ui_text_sm))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text_heading))
+                    .child(title),
+            ),
         |card, row| card.child(row),
     );
     let card = warning.into_iter().fold(card, |card, warning| {
@@ -920,10 +925,11 @@ pub fn cloud_sync_rollback_backup_row(
 
 pub fn cloud_sync_history_card(
     tokens: &ThemeTokens,
+    has_background_image: bool,
     title: AnyElement,
     body: AnyElement,
 ) -> AnyElement {
-    cloud_sync_card(tokens)
+    cloud_sync_card(tokens, has_background_image)
         .gap(px(8.0))
         .child(
             div()
@@ -988,11 +994,12 @@ pub fn cloud_sync_history_entry(
 
 pub fn cloud_sync_notes_card(
     tokens: &ThemeTokens,
+    has_background_image: bool,
     title: AnyElement,
     body: impl Into<gpui::SharedString>,
 ) -> AnyElement {
     let theme = tokens.ui;
-    cloud_sync_card(tokens)
+    cloud_sync_card(tokens, has_background_image)
         .gap(px(8.0))
         .child(
             div()

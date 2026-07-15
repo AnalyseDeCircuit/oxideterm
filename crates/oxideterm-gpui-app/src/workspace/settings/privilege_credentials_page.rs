@@ -2,6 +2,7 @@ use super::*;
 
 pub(in crate::workspace) const PRIVILEGE_SCOPE_LIST_WIDTH: f32 = 280.0; // Match the current scope rail width on comfortable layouts.
 pub(in crate::workspace) const PRIVILEGE_DETAIL_MIN_WIDTH: f32 = 320.0; // Wrap the detail pane before fixed controls crush its labels.
+pub(in crate::workspace) const PRIVILEGE_FORM_FIELD_MIN_WIDTH: f32 = 260.0; // Keep paired fields readable before the form wraps to one column.
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) struct SettingsPrivilegeScopeRow {
@@ -76,7 +77,7 @@ impl WorkspaceApp {
             .list_privilege_credentials(&active_scope.id)
             .unwrap_or_default();
 
-        let mut scope_list = div().flex().flex_col().gap(px(8.0));
+        let mut scope_list = div().flex().flex_col().gap(px(2.0));
         for scope in scopes {
             let selected = scope.id == active_scope.id;
             let scope_id = scope.id.clone();
@@ -88,12 +89,12 @@ impl WorkspaceApp {
                     .border_color(if selected {
                         rgba((theme.accent << 8) | 0x99)
                     } else {
-                        rgba((theme.border << 8) | 0x66)
+                        rgba((theme.border << 8) | 0x00)
                     })
                     .bg(if selected {
                         rgba((theme.accent << 8) | 0x14)
                     } else {
-                        rgba((theme.bg_panel << 8) | 0x66)
+                        rgba((theme.bg_panel << 8) | 0x00)
                     })
                     .px(px(10.0))
                     .py(px(8.0))
@@ -145,16 +146,16 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .flex_none()
-                            .rounded_full()
-                            .px(px(8.0))
-                            .py(px(2.0))
+                            .min_w(px(20.0))
+                            .text_align(gpui::TextAlign::Right)
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .bg(rgba((theme.bg_hover << 8) | 0x99))
                             .child(scope.credential_count.to_string()),
                     ),
             );
         }
+
+        let editor_visible = credentials.is_empty() || self.settings_privilege_editor_open;
 
         let body = div()
             .w_full()
@@ -189,9 +190,19 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(12.0))
-                    .child(self.settings_privilege_active_header(&active_scope))
+                    .child(self.settings_privilege_active_header(
+                        &active_scope,
+                        !editor_visible,
+                        cx,
+                    ))
                     .child(self.settings_privilege_credential_list(&active_scope, &credentials, cx))
-                    .child(self.settings_privilege_credential_form(&active_scope, cx)),
+                    .when(editor_visible, |detail| {
+                        detail.child(self.settings_privilege_credential_form(
+                            &active_scope,
+                            !credentials.is_empty(),
+                            cx,
+                        ))
+                    }),
             );
 
         self.settings_card(
@@ -204,6 +215,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_privilege_active_header(
         &self,
         scope: &SettingsPrivilegeScopeRow,
+        show_new_action: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -232,20 +245,29 @@ impl WorkspaceApp {
                             .child(scope.subtitle.clone()),
                     ),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .rounded_full()
-                    .px(px(10.0))
-                    .py(px(3.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(theme.text_muted))
-                    .bg(rgba((theme.bg_hover << 8) | 0x99))
-                    .child(self.i18n_replace(
-                        "settings_view.privilege_credentials.credential_count",
-                        &[("count", scope.credential_count.to_string())],
-                    )),
-            )
+            .when(show_new_action, |header| {
+                header.child(
+                    self.workspace_toolbar_action_button(
+                        self.i18n.t("sessionManager.privilege_credentials.new"),
+                        Some(
+                            Self::render_lucide_icon(LucideIcon::Plus, 14.0, rgb(theme.text_muted))
+                                .into_any_element(),
+                        ),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Sm,
+                                ..ButtonOptions::default()
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.begin_new_settings_privilege_credential(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+            })
             .into_any_element()
     }
 
@@ -256,16 +278,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut list = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(8.0));
+        let mut list = div().w_full().min_w(px(0.0)).flex().flex_col();
         if credentials.is_empty() {
             return list
                 .child(
                     div()
-                        .rounded(px(self.tokens.radii.md))
-                        .border_1()
-                        .border_color(rgba((theme.border << 8) | 0x80))
-                        .px(px(12.0))
-                        .py(px(10.0))
+                        .py(px(4.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(theme.text_muted))
                         .child(self.i18n.t("sessionManager.privilege_credentials.empty")),
@@ -286,16 +304,14 @@ impl WorkspaceApp {
                     .flex_wrap()
                     .items_center()
                     .gap(px(8.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
+                    .border_b_1()
                     .border_color(rgba((theme.border << 8) | 0x80))
-                    .bg(rgba((theme.bg_panel << 8) | 0x66))
                     .px(px(8.0))
-                    .py(px(6.0))
+                    .py(px(8.0))
                     .child(Self::render_lucide_icon(
                         LucideIcon::KeyRound,
                         16.0,
-                        rgba(0xfde68aff),
+                        rgb(theme.warning),
                     ))
                     .child(
                         div()
@@ -374,57 +390,82 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_privilege_credential_form(
         &self,
         scope: &SettingsPrivilegeScopeRow,
+        show_cancel: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let editing = self.settings_local_privilege_draft.credential_id.is_some();
+        let field_slot = |field: AnyElement| {
+            div()
+                .min_w(px(0.0))
+                .flex_1()
+                .flex_basis(px(PRIVILEGE_FORM_FIELD_MIN_WIDTH))
+                .child(field)
+        };
         div()
             .w_full()
             .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
+            .border_t_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(rgba((theme.bg << 8) | 0x80))
-            .p(px(12.0))
+            .pt(px(14.0))
             .child(
-                self.settings_privilege_text_field(
-                    "sessionManager.privilege_credentials.label",
-                    SettingsInput::LocalPrivilegeLabel,
-                    self.settings_local_privilege_draft.label.clone(),
-                    self.i18n
-                        .t("sessionManager.privilege_credentials.label_placeholder"),
-                    false,
-                    cx,
-                ),
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text_heading))
+                    .child(self.i18n.t(if editing {
+                        "sessionManager.privilege_credentials.edit"
+                    } else {
+                        "sessionManager.privilege_credentials.new"
+                    })),
             )
-            // These settings cards can be shown in a constrained modal. Keep
-            // the credential form single-column so fixed-width inputs never
-            // overflow into the neighboring pane.
-            .child(self.settings_privilege_kind_field(cx))
-            .child(self.settings_privilege_text_field(
-                "sessionManager.privilege_credentials.username_hint",
-                SettingsInput::LocalPrivilegeUsernameHint,
-                self.settings_local_privilege_draft.username_hint.clone(),
-                scope.username_placeholder.clone(),
-                false,
-                cx,
-            ))
-            .child(self.settings_privilege_text_field(
-                "sessionManager.privilege_credentials.secret",
-                SettingsInput::LocalPrivilegeSecret,
-                self.settings_local_privilege_draft.secret.clone(),
-                if self.settings_local_privilege_draft.credential_id.is_some() {
-                    self.i18n
-                        .t("sessionManager.privilege_credentials.secret_keep_placeholder")
-                } else {
-                    self.i18n
-                        .t("sessionManager.privilege_credentials.secret_placeholder")
-                },
-                true,
-                cx,
-            ))
+            // The paired fields use flexible slots so wide settings surfaces do
+            // not leave an oversized empty panel while narrow ones wrap cleanly.
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(12.0))
+                    .child(field_slot(
+                        self.settings_privilege_text_field(
+                            "sessionManager.privilege_credentials.label",
+                            SettingsInput::LocalPrivilegeLabel,
+                            self.settings_local_privilege_draft.label.clone(),
+                            self.i18n
+                                .t("sessionManager.privilege_credentials.label_placeholder"),
+                            false,
+                            cx,
+                        ),
+                    ))
+                    .child(field_slot(self.settings_privilege_kind_field(cx)))
+                    .child(field_slot(self.settings_privilege_text_field(
+                        "sessionManager.privilege_credentials.username_hint",
+                        SettingsInput::LocalPrivilegeUsernameHint,
+                        self.settings_local_privilege_draft.username_hint.clone(),
+                        scope.username_placeholder.clone(),
+                        false,
+                        cx,
+                    )))
+                    .child(field_slot(self.settings_privilege_text_field(
+                        "sessionManager.privilege_credentials.secret",
+                        SettingsInput::LocalPrivilegeSecret,
+                        self.settings_local_privilege_draft.secret.clone(),
+                        if editing {
+                            self.i18n
+                                .t("sessionManager.privilege_credentials.secret_keep_placeholder")
+                        } else {
+                            self.i18n
+                                .t("sessionManager.privilege_credentials.secret_placeholder")
+                        },
+                        true,
+                        cx,
+                    ))),
+            )
             .child(self.settings_privilege_prompt_patterns_field(cx))
             .child(
                 self.settings_privilege_hint(
@@ -477,30 +518,27 @@ impl WorkspaceApp {
                     .flex_wrap()
                     .justify_end()
                     .gap(px(8.0))
-                    .when(
-                        self.settings_local_privilege_draft.credential_id.is_some(),
-                        |row| {
-                            row.child(
-                                self.workspace_toolbar_action_button(
-                                    self.i18n
-                                        .t("sessionManager.privilege_credentials.cancel_edit"),
-                                    None,
-                                    ToolbarButtonOptions {
-                                        button: ButtonOptions {
-                                            variant: ButtonVariant::Ghost,
-                                            size: ButtonSize::Sm,
-                                            ..ButtonOptions::default()
-                                        },
-                                        ..ToolbarButtonOptions::default()
+                    .when(show_cancel, |row| {
+                        row.child(
+                            self.workspace_toolbar_action_button(
+                                self.i18n
+                                    .t("sessionManager.privilege_credentials.cancel_edit"),
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Ghost,
+                                        size: ButtonSize::Sm,
+                                        ..ButtonOptions::default()
                                     },
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.reset_settings_privilege_credential_draft(cx);
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                            )
-                        },
-                    )
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.reset_settings_privilege_credential_draft(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                    })
                     .child(
                         self.workspace_toolbar_action_button(
                             self.i18n.t("sessionManager.privilege_credentials.save"),
@@ -548,21 +586,9 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t(label_key),
             if secret {
-                self.settings_secret_text_input_control(
-                    input,
-                    value,
-                    placeholder,
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                )
+                self.settings_secret_text_input_control_fill(input, value, placeholder, cx)
             } else {
-                self.settings_text_input_control(
-                    input,
-                    value,
-                    placeholder,
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                )
+                self.settings_text_input_control_fill(input, value, placeholder, cx)
             },
         )
     }
@@ -579,7 +605,7 @@ impl WorkspaceApp {
                 SettingsSelect::LocalPrivilegeKind,
                 self.settings_privilege_kind_label(self.settings_local_privilege_draft.kind),
                 false,
-                Some(self.tokens.metrics.settings_select_width),
+                None,
                 cx,
             ),
         )
@@ -758,6 +784,7 @@ impl WorkspaceApp {
         self.settings_input_draft.clear();
         self.close_settings_select();
         self.settings_page.privilege_scope_id = Some(scope_id);
+        self.settings_privilege_editor_open = false;
     }
 
     pub(in crate::workspace) fn select_settings_privilege_scope(
@@ -781,6 +808,23 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.settings_input_draft.clear();
         self.close_settings_select();
+        self.settings_privilege_editor_open = false;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn begin_new_settings_privilege_credential(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        // Starting a fresh editor must clear every secret-bearing draft value
+        // before the new form receives focus.
+        zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
+        self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
+        self.settings_local_privilege_error = None;
+        self.settings_privilege_editor_open = true;
+        self.focused_settings_input = Some(SettingsInput::LocalPrivilegeLabel);
+        self.settings_input_draft.clear();
+        self.close_settings_select();
         cx.notify();
     }
 
@@ -800,6 +844,7 @@ impl WorkspaceApp {
         self.settings_local_privilege_draft.secret.clear();
         self.settings_local_privilege_draft.enabled = credential.enabled;
         self.settings_local_privilege_error = None;
+        self.settings_privilege_editor_open = true;
         self.focused_settings_input = Some(SettingsInput::LocalPrivilegeLabel);
         self.settings_input_draft = self.settings_local_privilege_draft.label.clone();
         self.close_settings_select();
@@ -850,6 +895,7 @@ impl WorkspaceApp {
                 zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
                 self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
                 self.settings_local_privilege_error = None;
+                self.settings_privilege_editor_open = false;
                 self.focused_settings_input = None;
                 self.settings_input_draft.clear();
                 self.settings_page.privilege_scope_id = Some(scope_id);
@@ -879,6 +925,7 @@ impl WorkspaceApp {
                 {
                     zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
                     self.settings_local_privilege_draft = PrivilegeCredentialDraft::default();
+                    self.settings_privilege_editor_open = false;
                 }
                 self.settings_page.privilege_scope_id = Some(scope_id);
                 self.settings_local_privilege_error = None;

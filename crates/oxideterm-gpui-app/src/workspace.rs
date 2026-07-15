@@ -790,6 +790,8 @@ pub(crate) struct WorkspaceApp {
     settings_network_proxy_test_status: Option<String>,
     settings_local_privilege_draft: PrivilegeCredentialDraft,
     settings_local_privilege_error: Option<String>,
+    // The editor stays collapsed for populated scopes until the user starts an add or edit flow.
+    settings_privilege_editor_open: bool,
     quick_commands: QuickCommandsState,
     quick_command_list_state: ListState,
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,

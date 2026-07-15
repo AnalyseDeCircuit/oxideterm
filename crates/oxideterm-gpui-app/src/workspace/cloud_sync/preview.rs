@@ -80,6 +80,7 @@ impl WorkspaceApp {
         }
         cloud_sync_preview_card(
             &self.tokens,
+            self.cloud_sync_has_background(),
             title,
             fact_rows,
             warning,
@@ -198,6 +199,7 @@ impl WorkspaceApp {
         };
         cloud_sync_preview_card(
             &self.tokens,
+            self.cloud_sync_has_background(),
             title,
             fact_rows,
             None,

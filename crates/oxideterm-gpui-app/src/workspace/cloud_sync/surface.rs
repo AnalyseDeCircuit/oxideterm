@@ -944,6 +944,7 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         cloud_sync_guide_card(
             &self.tokens,
+            self.cloud_sync_has_background(),
             self.render_cloud_sync_section_title("plugin.cloud_sync.sections.quick_start", cx),
             self.render_selectable_text_scoped(
                 "cloud-sync-guide-title",

@@ -212,6 +212,7 @@ impl WorkspaceApp {
             settings_network_proxy_test_status: None,
             settings_local_privilege_draft: PrivilegeCredentialDraft::default(),
             settings_local_privilege_error: None,
+            settings_privilege_editor_open: false,
             quick_commands: QuickCommandsState::load(settings_store.path()),
             // Quick command popovers can contain user-sized command sets; keep
             // their rows on the same variable-height list path as migrated

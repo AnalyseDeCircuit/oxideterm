@@ -505,9 +505,15 @@ impl WorkspaceApp {
                     .map(|connection| connection.privilege_credentials.len())
                     .sum::<usize>()
                     .hash(&mut hasher);
+                self.connection_store
+                    .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
+                    .map(|credentials| credentials.len())
+                    .unwrap_or(0)
+                    .hash(&mut hasher);
                 self.settings_local_privilege_draft
                     .credential_id
                     .hash(&mut hasher);
+                self.settings_privilege_editor_open.hash(&mut hasher);
                 self.settings_local_privilege_error
                     .is_some()
                     .hash(&mut hasher);

@@ -6,6 +6,7 @@ use crate::workspace::settings::{CLI_COMPANION_COMMAND_NAME, LEGACY_CLI_COMPANIO
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
+use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
     StatusPillOptions, StatusTone, SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface,
@@ -67,6 +68,9 @@ impl WorkspaceApp {
             .py(px(12.0))
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
+            // GPUI's overflow mask is rectangular, so the painted edge child
+            // must own the dialog shell's inner top corners explicitly.
+            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
             .bg(rgb(self.tokens.ui.bg_panel));
 
         if !compact {
