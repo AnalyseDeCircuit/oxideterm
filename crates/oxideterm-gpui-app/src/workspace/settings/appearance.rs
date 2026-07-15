@@ -1029,9 +1029,7 @@ impl WorkspaceApp {
                 SettingsInput::CustomThemeName,
                 editor.name.clone(),
                 self.i18n.t("settings_view.custom_theme.name_placeholder"),
-                0.0,
-                false,
-                true,
+                ThemeEditorTextInputKind::Form,
                 cx,
             ),
             editor
@@ -1347,9 +1345,7 @@ impl WorkspaceApp {
                 input,
                 color,
                 "#RRGGBB".to_string(),
-                SETTINGS_THEME_EDITOR_HEX_INPUT_WIDTH,
-                true,
-                false,
+                ThemeEditorTextInputKind::InlineColor,
                 cx,
             )
         } else {
@@ -1382,9 +1378,7 @@ impl WorkspaceApp {
         input: SettingsInput,
         value: String,
         placeholder: String,
-        width: f32,
-        mono: bool,
-        fill: bool,
+        kind: ThemeEditorTextInputKind,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let focused = self.focused_settings_input == Some(input);
@@ -1407,9 +1401,7 @@ impl WorkspaceApp {
                 selected_range: self.ime_selected_range_for_target(target),
                 marked_text: self.marked_text_for_target(target),
             },
-            width,
-            mono,
-            fill,
+            kind,
             settings_mono_font_family(self.settings_store.settings()),
         )
         .on_mouse_down(
@@ -1423,6 +1415,13 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             }),
         )
+        .on_mouse_down_out(cx.listener(move |this, _event, _window, cx| {
+            // Settings inputs are manually focused rather than native controls.
+            // Release this editor when the next pointer press lands elsewhere.
+            if this.focused_settings_input == Some(input) {
+                this.blur_text_inputs(cx);
+            }
+        }))
         .on_mouse_move(
             cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
                 this.update_ime_selection_drag_from_mouse_move(event, window, cx);

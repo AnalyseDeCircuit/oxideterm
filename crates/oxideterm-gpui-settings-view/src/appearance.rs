@@ -22,10 +22,20 @@ const THEME_EDITOR_STATUS_DOT_SIZE: f32 = 8.0;
 const THEME_EDITOR_PREVIEW_CURSOR_WIDTH: f32 = 8.0;
 const THEME_EDITOR_PREVIEW_CURSOR_HEIGHT: f32 = 16.0;
 const THEME_EDITOR_SWATCH_LABEL_SIZE: f32 = 10.0;
+const THEME_EDITOR_INLINE_COLOR_INPUT_WIDTH: f32 = 60.0;
+const THEME_EDITOR_INLINE_COLOR_INPUT_HEIGHT: f32 = 20.0;
+const THEME_EDITOR_INLINE_COLOR_INPUT_PADDING_X: f32 = 4.0;
 const BACKGROUND_THUMBNAIL_ASPECT_RATIO: f32 = 16.0 / 9.0;
 const BACKGROUND_GALLERY_COLUMNS: f32 = 4.0;
-pub const SETTINGS_THEME_EDITOR_HEX_INPUT_WIDTH: f32 = 72.0;
 pub const SETTINGS_THEME_EDITOR_INPUT_HEIGHT: f32 = 32.0;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThemeEditorTextInputKind {
+    // The theme name participates in the normal settings form layout.
+    Form,
+    // Color values edit in place and should stay close to their read-only size.
+    InlineColor,
+}
 
 pub fn settings_appearance_card_shell(
     tokens: &ThemeTokens,
@@ -251,6 +261,9 @@ pub fn settings_theme_editor_preview(
     // The editor preview renders candidate colors directly from the draft
     // palette; save/delete/cancel behavior remains in the app modal wrapper.
     div()
+        // The scroll body may contain a much taller UI palette. Keep the
+        // preview at its intrinsic height instead of letting flexbox collapse it.
+        .flex_none()
         .rounded(px(tokens.radii.sm))
         .border_1()
         .border_color(rgb(tokens.ui.border))
@@ -449,25 +462,24 @@ pub fn settings_theme_editor_duplicate_row(label: AnyElement, select: AnyElement
 pub fn settings_theme_editor_text_input(
     tokens: &ThemeTokens,
     view: TextInputView,
-    width: f32,
-    mono: bool,
-    fill: bool,
+    kind: ThemeEditorTextInputKind,
     mono_font_family: SharedString,
 ) -> Div {
     // This builds only the visual text-input primitive. Mouse/IME handlers and
     // anchor probes are attached by the app around the returned control.
-    let mut control = text_input(tokens, view)
+    let control = text_input(tokens, view)
         .h(px(SETTINGS_THEME_EDITOR_INPUT_HEIGHT))
         .cursor(gpui::CursorStyle::IBeam);
-    control = if fill {
-        control.w_full()
-    } else {
-        control.w(px(width))
-    };
-    if mono {
-        control = control.font_family(mono_font_family);
+    match kind {
+        ThemeEditorTextInputKind::Form => control.w_full(),
+        ThemeEditorTextInputKind::InlineColor => control
+            .w(px(THEME_EDITOR_INLINE_COLOR_INPUT_WIDTH))
+            .h(px(THEME_EDITOR_INLINE_COLOR_INPUT_HEIGHT))
+            .px(px(THEME_EDITOR_INLINE_COLOR_INPUT_PADDING_X))
+            .rounded(px(tokens.radii.sm))
+            .text_size(px(THEME_EDITOR_SWATCH_LABEL_SIZE))
+            .font_family(mono_font_family),
     }
-    control
 }
 
 pub fn settings_theme_editor_color_grid(cells: Vec<AnyElement>) -> AnyElement {
