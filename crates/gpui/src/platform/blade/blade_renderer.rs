@@ -553,6 +553,7 @@ pub struct BladeRenderer {
     path_intermediate_msaa_texture_view: Option<gpu::TextureView>,
     backdrop_blur_textures: Option<BackdropBlurTextures>,
     backdrop_blur_cache_signature: Option<u64>,
+    polychrome_sprite_scratch: Vec<PolychromeSprite>,
     rendering_parameters: RenderingParameters,
 }
 
@@ -649,6 +650,7 @@ impl BladeRenderer {
             path_intermediate_msaa_texture_view,
             backdrop_blur_textures: None,
             backdrop_blur_cache_signature: None,
+            polychrome_sprite_scratch: Vec::new(),
             rendering_parameters,
         })
     }
@@ -1245,12 +1247,14 @@ impl BladeRenderer {
                     sprites,
                 } => {
                     let tex_info = self.atlas.get_texture_info(texture_id);
-                    let sprites = sprites
-                        .iter()
-                        .map(PolychromeSprite::from)
-                        .collect::<Vec<_>>();
-                    let instance_buf =
-                        unsafe { self.instance_belt.alloc_typed(&sprites, &self.gpu) };
+                    // The upload belt copies the POD slice immediately, so
+                    // reuse this CPU conversion buffer across image batches.
+                    self.polychrome_sprite_scratch.clear();
+                    self.polychrome_sprite_scratch
+                        .extend(sprites.iter().map(PolychromeSprite::from));
+                    let instance_buf = self
+                        .instance_belt
+                        .alloc_pod(&self.polychrome_sprite_scratch, &self.gpu);
                     let mut encoder = pass.with(&self.pipelines.poly_sprites);
                     encoder.bind(
                         0,
@@ -1261,7 +1265,7 @@ impl BladeRenderer {
                             b_poly_sprites: instance_buf,
                         },
                     );
-                    encoder.draw(0, 4, 0, sprites.len() as u32);
+                    encoder.draw(0, 4, 0, self.polychrome_sprite_scratch.len() as u32);
                 }
                 PrimitiveBatch::Surfaces(surfaces) => {
                     let mut _encoder = pass.with(&self.pipelines.surfaces);

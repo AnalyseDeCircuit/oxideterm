@@ -109,6 +109,9 @@ incompatible:
   - Convert scene `PolychromeSprite::grayscale` from Rust `bool` to an explicit
     POD `u32` before uploading it to WGSL. Equal structure sizes do not make a
     one-byte Rust boolean compatible with a four-byte WGSL integer.
+  - Reuse the renderer-owned `polychrome_sprite_scratch` buffer for that POD
+    conversion. `BufferBelt::alloc_pod(...)` copies the slice immediately, so
+    retaining capacity avoids a heap allocation for every image batch.
   - Maintain the headless buffer-contract test. It recursively enumerates every
     structure reachable from a uniform or storage binding and verifies names,
     field counts, field offsets, structure sizes, storage-array strides,
