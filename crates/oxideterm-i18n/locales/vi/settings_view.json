@@ -470,6 +470,8 @@
       "ui_font": "Phông chữ giao diện",
       "ui_font_hint": "Phông chữ tùy chỉnh cho giao diện ứng dụng. Để trống để dùng phông hệ thống.",
       "ui_font_placeholder": "Mặc định hệ thống (Inter)",
+      "ui_font_size": "Cỡ chữ giao diện",
+      "ui_font_size_hint": "Điều chỉnh cỡ chữ trên toàn bộ giao diện ứng dụng",
       "animation": "Tốc độ hoạt ảnh",
       "animation_hint": "Kiểm soát tốc độ chuyển đổi và hoạt ảnh",
       "animation_off": "Tắt",

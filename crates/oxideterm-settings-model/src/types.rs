@@ -215,6 +215,7 @@ pub enum SettingsInput {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SettingsSlider {
     TerminalFontSize,
+    AppearanceUiFontSize,
     AppearanceBorderRadius,
     VersionMigrationBorderRadius,
     AppearanceBackgroundOpacity,

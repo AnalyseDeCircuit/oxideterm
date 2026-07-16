@@ -1,5 +1,12 @@
 use super::super::*;
 
+const TERMINAL_FONT_SIZE_HUD_HORIZONTAL_PADDING: f32 = 20.0;
+const TERMINAL_FONT_SIZE_HUD_VERTICAL_PADDING: f32 = 12.0;
+const TERMINAL_FONT_SIZE_HUD_VALUE_TEXT_SIZE: f32 = 24.0;
+const TERMINAL_FONT_SIZE_HUD_UNIT_TEXT_SIZE: f32 = 16.0;
+const TERMINAL_FONT_SIZE_HUD_UNIT_GAP: f32 = 2.0;
+const TERMINAL_FONT_SIZE_HUD_BACKGROUND_ALPHA: u32 = 0xe6;
+
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -1089,6 +1096,9 @@ impl Render for WorkspaceApp {
                 |root| root.child(self.render_zen_mode_hint()),
             )
             .when_some(toast_layer, |root, layer| root.child(layer))
+            .when(self.terminal_font_size_hud.is_some(), |root| {
+                root.child(self.render_terminal_font_size_hud())
+            })
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),
@@ -1266,6 +1276,61 @@ impl WorkspaceApp {
                     .child(self.i18n.t(key)),
             )
             .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_terminal_font_size_hud(&self) -> AnyElement {
+        let Some(hud) = self.terminal_font_size_hud else {
+            return div().into_any_element();
+        };
+        let card = div()
+            .rounded(px(self.tokens.radii.sm))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgba(
+                (self.tokens.ui.bg_elevated << 8) | TERMINAL_FONT_SIZE_HUD_BACKGROUND_ALPHA,
+            ))
+            .px(px(TERMINAL_FONT_SIZE_HUD_HORIZONTAL_PADDING))
+            .py(px(TERMINAL_FONT_SIZE_HUD_VERTICAL_PADDING))
+            .flex()
+            .items_baseline()
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .shadow_lg()
+            .child(
+                div()
+                    .text_size(px(TERMINAL_FONT_SIZE_HUD_VALUE_TEXT_SIZE))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(hud.font_size.to_string()),
+            )
+            .child(
+                div()
+                    .ml(px(TERMINAL_FONT_SIZE_HUD_UNIT_GAP))
+                    .text_size(px(TERMINAL_FONT_SIZE_HUD_UNIT_TEXT_SIZE))
+                    .font_weight(gpui::FontWeight::NORMAL)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child("px"),
+            );
+        let overlay = div()
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .left_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(card);
+
+        // Tauri mounts the HUD at z-[9999], above ordinary dialogs and
+        // popovers. GPUI deferred priority provides the same window-wide layer.
+        deferred(oxideterm_gpui_ui::motion::fade_in(
+            &self.tokens,
+            "terminal-font-size-hud",
+            overlay,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        ))
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
+        .into_any_element()
     }
 }
 

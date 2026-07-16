@@ -644,6 +644,31 @@ impl ThemeTokens {
         apply_density_to_metrics(&mut self.metrics, scale);
     }
 
+    pub fn apply_ui_font_scale(&mut self, scale: f32) {
+        // Font scaling is independent from density so users can enlarge text
+        // without also changing control hitboxes or the application's spacing.
+        for value in [
+            &mut self.metrics.titlebar_label_font_size,
+            &mut self.metrics.tab_font_size,
+            &mut self.metrics.sidebar_title_font_size,
+            &mut self.metrics.searchbar_font_size,
+            &mut self.metrics.empty_sidebar_title_font_size,
+            &mut self.metrics.empty_sidebar_subtitle_font_size,
+            &mut self.metrics.form_label_font_size,
+            &mut self.metrics.form_text_font_size,
+            &mut self.metrics.modal_title_font_size,
+            &mut self.metrics.modal_description_font_size,
+            &mut self.metrics.ui_text_xs,
+            &mut self.metrics.ui_text_sm,
+            &mut self.metrics.ui_text_base,
+            &mut self.metrics.ui_text_2xl,
+            &mut self.metrics.ui_tooltip_shortcut_font_size,
+            &mut self.metrics.markdown_body_font_size,
+        ] {
+            *value = scaled_metric(*value, scale);
+        }
+    }
+
     pub fn apply_motion(&mut self, profile: UiMotionProfile) {
         self.motion = UiMotion::from_profile(profile);
     }
@@ -926,6 +951,21 @@ mod tests {
         assert!(compact.spacing.two < comfortable.spacing.two);
         assert_eq!(compact.metrics.ui_text_sm, comfortable.metrics.ui_text_sm);
         assert_eq!(compact.ui, comfortable.ui);
+    }
+
+    #[test]
+    fn ui_font_scale_changes_type_without_changing_spatial_metrics() {
+        let mut enlarged = default_tokens();
+        let default = default_tokens();
+        enlarged.apply_ui_font_scale(18.0 / 14.0);
+
+        assert_eq!(enlarged.metrics.ui_text_sm, 18.0);
+        assert!(enlarged.metrics.ui_text_xs > default.metrics.ui_text_xs);
+        assert_eq!(
+            enlarged.metrics.ui_control_height,
+            default.metrics.ui_control_height
+        );
+        assert_eq!(enlarged.spacing, default.spacing);
     }
 
     #[test]

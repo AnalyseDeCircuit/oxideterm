@@ -470,6 +470,8 @@
       "ui_font": "UI-Schriftart",
       "ui_font_hint": "Benutzerdefinierte Schriftart für die Anwendungsoberfläche. Leer lassen für Systemstandard.",
       "ui_font_placeholder": "Systemstandard (Inter)",
+      "ui_font_size": "UI-Schriftgröße",
+      "ui_font_size_hint": "Textgröße in der gesamten Anwendungsoberfläche anpassen",
       "animation": "Animationsgeschwindigkeit",
       "animation_hint": "Geschwindigkeit von Übergängen und Animationen steuern",
       "animation_off": "Aus",

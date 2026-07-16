@@ -1033,6 +1033,8 @@ pub(crate) struct WorkspaceApp {
     connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
     connection_trace_state: ConnectionTraceState,
     zen_hint_expires_at: Option<Instant>,
+    terminal_font_size_hud: Option<TerminalFontSizeHud>,
+    terminal_font_size_hud_generation: u64,
     workspace_tooltip: Option<WorkspaceTooltip>,
     workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
     workspace_tooltip_generation: u64,
@@ -1200,6 +1202,12 @@ struct WorkspaceToast {
     notice: TerminalNotice,
     expires_at: Instant,
     presence: oxideterm_gpui_ui::motion::ExitPresence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TerminalFontSizeHud {
+    font_size: i64,
+    generation: u64,
 }
 
 #[derive(Clone, Debug)]

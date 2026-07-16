@@ -470,6 +470,8 @@
       "ui_font": "Fuente de la interfaz",
       "ui_font_hint": "Fuente personalizada para la interfaz. Dejar vacío para la fuente del sistema.",
       "ui_font_placeholder": "Predeterminado del sistema (Inter)",
+      "ui_font_size": "Tamaño de fuente de la interfaz",
+      "ui_font_size_hint": "Ajusta el tamaño del texto en toda la interfaz de la aplicación",
       "animation": "Velocidad de animación",
       "animation_hint": "Controlar la velocidad de transiciones y animaciones",
       "animation_off": "Desactivado",

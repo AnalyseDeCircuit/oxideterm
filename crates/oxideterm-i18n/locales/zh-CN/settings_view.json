@@ -470,6 +470,8 @@
       "ui_font": "界面字体",
       "ui_font_hint": "自定义应用界面的字体。留空使用系统默认字体。",
       "ui_font_placeholder": "系统默认（Inter）",
+      "ui_font_size": "界面字号",
+      "ui_font_size_hint": "调整整个应用界面的文字大小",
       "animation": "动画速度",
       "animation_hint": "控制过渡和动画速度",
       "animation_off": "关闭",

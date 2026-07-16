@@ -99,6 +99,9 @@ pub(in crate::workspace) fn tokens_from_settings(settings: &PersistedSettings) -
         oxideterm_settings::UiDensity::Comfortable => UiDensityProfile::Comfortable,
         oxideterm_settings::UiDensity::Spacious => UiDensityProfile::Spacious,
     });
+    tokens.apply_ui_font_scale(
+        settings.appearance.ui_font_size as f32 / oxideterm_settings::DEFAULT_UI_FONT_SIZE as f32,
+    );
     tokens.apply_motion(match settings.appearance.animation_speed {
         oxideterm_settings::AnimationSpeed::Off => UiMotionProfile::Off,
         oxideterm_settings::AnimationSpeed::Reduced => UiMotionProfile::Reduced,

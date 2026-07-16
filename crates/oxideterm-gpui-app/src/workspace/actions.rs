@@ -7,6 +7,16 @@ use oxideterm_quick_commands::{
     QuickCommandRisk, classify_command_risk as classify_quick_command_risk,
 };
 
+const TERMINAL_FONT_SIZE_MIN: i64 = 8;
+const TERMINAL_FONT_SIZE_MAX: i64 = 32;
+const TERMINAL_FONT_SIZE_DEFAULT: i64 = 14;
+const TERMINAL_FONT_SIZE_HUD_DURATION: Duration = Duration::from_millis(1200);
+
+fn adjusted_terminal_font_size(current: i64, delta: i64) -> Option<i64> {
+    let next = (current + delta).clamp(TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX);
+    (next != current).then_some(next)
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum TerminalBroadcastMenuPlacement {
     Bottom(f32),
@@ -330,16 +340,46 @@ impl WorkspaceApp {
     }
 
     pub(super) fn adjust_terminal_font_size(&mut self, delta: i64, cx: &mut Context<Self>) {
-        self.edit_settings(
-            |settings| {
-                settings.terminal.font_size = (settings.terminal.font_size + delta).clamp(8, 32);
-            },
-            cx,
-        );
+        let current = self.settings_store.settings().terminal.font_size;
+        let Some(next) = adjusted_terminal_font_size(current, delta) else {
+            return;
+        };
+        self.edit_settings(|settings| settings.terminal.font_size = next, cx);
+        self.show_terminal_font_size_hud(next, cx);
     }
 
     pub(super) fn reset_terminal_font_size(&mut self, cx: &mut Context<Self>) {
-        self.edit_settings(|settings| settings.terminal.font_size = 14, cx);
+        self.edit_settings(
+            |settings| settings.terminal.font_size = TERMINAL_FONT_SIZE_DEFAULT,
+            cx,
+        );
+        self.show_terminal_font_size_hud(TERMINAL_FONT_SIZE_DEFAULT, cx);
+    }
+
+    fn show_terminal_font_size_hud(&mut self, font_size: i64, cx: &mut Context<Self>) {
+        self.terminal_font_size_hud_generation =
+            self.terminal_font_size_hud_generation.wrapping_add(1);
+        let generation = self.terminal_font_size_hud_generation;
+        self.terminal_font_size_hud = Some(TerminalFontSizeHud {
+            font_size,
+            generation,
+        });
+        // Each shortcut refreshes the same HUD. The generation prevents an
+        // earlier timer from hiding a newer value during rapid key repeats.
+        cx.spawn(async move |weak, cx| {
+            Timer::after(TERMINAL_FONT_SIZE_HUD_DURATION).await;
+            let _ = weak.update(cx, |workspace, cx| {
+                if workspace
+                    .terminal_font_size_hud
+                    .is_some_and(|hud| hud.generation == generation)
+                {
+                    workspace.terminal_font_size_hud = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     pub(super) fn dispatch_registered_keybinding(
@@ -2517,6 +2557,17 @@ mod terminal_command_bar_behavior_tests {
                 ..Default::default()
             }
         )));
+    }
+
+    #[test]
+    fn terminal_font_size_adjustment_matches_tauri_bounds() {
+        assert_eq!(adjusted_terminal_font_size(14, 1), Some(15));
+        assert_eq!(adjusted_terminal_font_size(14, -1), Some(13));
+        assert_eq!(adjusted_terminal_font_size(TERMINAL_FONT_SIZE_MAX, 1), None);
+        assert_eq!(
+            adjusted_terminal_font_size(TERMINAL_FONT_SIZE_MIN, -1),
+            None
+        );
     }
 
     #[test]

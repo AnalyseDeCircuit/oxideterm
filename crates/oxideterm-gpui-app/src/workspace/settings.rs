@@ -170,6 +170,8 @@ pub(in crate::workspace) fn settings_store_modified_time(
 
 pub(in crate::workspace) const APPEARANCE_BORDER_RADIUS_MIN: f32 = 0.0; // Tauri AppearanceTab Slider min={0}.
 pub(in crate::workspace) const APPEARANCE_BORDER_RADIUS_MAX: f32 = 16.0; // Tauri AppearanceTab Slider max={16} and settings normalization.
+pub(in crate::workspace) const APPEARANCE_UI_FONT_SIZE_MIN: f32 = 11.0;
+pub(in crate::workspace) const APPEARANCE_UI_FONT_SIZE_MAX: f32 = 20.0;
 
 mod ai_page;
 mod appearance;

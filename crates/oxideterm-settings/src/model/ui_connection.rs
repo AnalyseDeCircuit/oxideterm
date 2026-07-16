@@ -46,6 +46,8 @@ pub struct AppearanceSettings {
     pub sidebar_collapsed_default: bool,
     pub ui_density: UiDensity,
     pub border_radius: i64,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: i64,
     pub ui_font_family: String,
     pub animation_speed: AnimationSpeed,
     pub frosted_glass: FrostedGlassMode,
@@ -61,6 +63,7 @@ impl Default for AppearanceSettings {
             sidebar_collapsed_default: false,
             ui_density: UiDensity::Comfortable,
             border_radius: 6,
+            ui_font_size: default_ui_font_size(),
             ui_font_family: String::new(),
             animation_speed: AnimationSpeed::Normal,
             frosted_glass: FrostedGlassMode::Off,
@@ -68,6 +71,12 @@ impl Default for AppearanceSettings {
             extra: ExtraFields::new(),
         }
     }
+}
+
+pub const DEFAULT_UI_FONT_SIZE: i64 = 14;
+
+fn default_ui_font_size() -> i64 {
+    DEFAULT_UI_FONT_SIZE
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

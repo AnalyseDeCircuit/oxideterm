@@ -875,6 +875,20 @@ impl WorkspaceApp {
             SettingsSlider::TerminalFontSize => {
                 self.set_font_size_from_position(x, cx);
             }
+            SettingsSlider::AppearanceUiFontSize => {
+                let Some(value) = self.settings_slider_value_from_position(
+                    settings_slider_anchor_id(slider),
+                    x,
+                    APPEARANCE_UI_FONT_SIZE_MIN,
+                    APPEARANCE_UI_FONT_SIZE_MAX,
+                ) else {
+                    return;
+                };
+                let value = value.round() as i64;
+                if self.settings_store.settings().appearance.ui_font_size != value {
+                    self.edit_settings(|settings| settings.appearance.ui_font_size = value, cx);
+                }
+            }
             SettingsSlider::AppearanceBorderRadius
             | SettingsSlider::VersionMigrationBorderRadius => {
                 let Some(value) = self.settings_slider_value_from_position(
@@ -1438,7 +1452,8 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
     // can open or drag them.
     matches!(
         anchor_id,
-        SelectAnchorId::SettingsAppearanceBorderRadiusSlider
+        SelectAnchorId::SettingsAppearanceUiFontSizeSlider
+            | SelectAnchorId::SettingsAppearanceBorderRadiusSlider
             | SelectAnchorId::VersionMigrationBorderRadiusSlider
             | SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider
             | SelectAnchorId::SettingsAppearanceBackgroundBlurSlider

@@ -544,6 +544,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         ("terminal.fontSize", 14, 8, 32),
         ("terminal.backgroundBlur", 0, 0, 20),
         ("appearance.borderRadius", 6, 0, 16),
+        ("appearance.uiFontSize", DEFAULT_UI_FONT_SIZE, 11, 20),
         ("connectionDefaults.port", 22, 1, 65_535),
         ("sidebarUI.width", 300, 200, 600),
         ("sidebarUI.aiSidebarWidth", 340, 280, 500),
@@ -788,6 +789,30 @@ mod tests {
                 assert_eq!(sanitized.settings.terminal.background_blur, 20);
             }
         }
+    }
+
+    #[test]
+    fn ui_font_size_defaults_and_clamps_during_sanitization() {
+        let legacy = sanitize_settings_value(json!({
+            "appearance": {}
+        }))
+        .expect("sanitize settings without a UI font size");
+        assert_eq!(
+            legacy.settings.appearance.ui_font_size,
+            DEFAULT_UI_FONT_SIZE
+        );
+
+        let oversized = sanitize_settings_value(json!({
+            "appearance": { "uiFontSize": 100 }
+        }))
+        .expect("sanitize oversized UI font size");
+        assert_eq!(oversized.settings.appearance.ui_font_size, 20);
+        assert!(
+            oversized
+                .validation_warnings
+                .iter()
+                .any(|warning| warning.contains("appearance.uiFontSize"))
+        );
     }
 
     #[test]

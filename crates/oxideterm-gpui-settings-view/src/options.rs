@@ -484,6 +484,7 @@ pub fn set_terminal_background_enabled(settings: &mut PersistedSettings, value: 
 pub fn settings_slider_anchor_id(slider: SettingsSlider) -> SelectAnchorId {
     match slider {
         SettingsSlider::TerminalFontSize => SelectAnchorId::SettingsTerminalFontSizeSlider,
+        SettingsSlider::AppearanceUiFontSize => SelectAnchorId::SettingsAppearanceUiFontSizeSlider,
         SettingsSlider::AppearanceBorderRadius => {
             SelectAnchorId::SettingsAppearanceBorderRadiusSlider
         }

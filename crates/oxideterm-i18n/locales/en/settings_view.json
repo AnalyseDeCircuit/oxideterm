@@ -470,6 +470,8 @@
       "ui_font": "UI Font",
       "ui_font_hint": "Custom font for the application interface. Leave empty for system default.",
       "ui_font_placeholder": "System Default (Inter)",
+      "ui_font_size": "UI Font Size",
+      "ui_font_size_hint": "Adjust text size throughout the application interface",
       "animation": "Animation Speed",
       "animation_hint": "Control transition and animation speed",
       "animation_off": "Off",

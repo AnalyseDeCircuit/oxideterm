@@ -470,6 +470,8 @@
       "ui_font": "UI 글꼴",
       "ui_font_hint": "애플리케이션 인터페이스의 사용자 정의 글꼴. 비워두면 시스템 기본값 사용.",
       "ui_font_placeholder": "시스템 기본값 (Inter)",
+      "ui_font_size": "UI 글꼴 크기",
+      "ui_font_size_hint": "애플리케이션 인터페이스 전체의 글자 크기를 조정합니다",
       "animation": "애니메이션 속도",
       "animation_hint": "전환 및 애니메이션 속도 제어",
       "animation_off": "끄기",

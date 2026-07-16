@@ -567,6 +567,10 @@ mod tests {
         assert_eq!(settings.terminal.renderer, RendererType::default());
         assert_eq!(settings.buffer.max_lines, 8000);
         assert_eq!(settings.appearance.border_radius, 6);
+        assert_eq!(
+            settings.appearance.ui_font_size,
+            crate::DEFAULT_UI_FONT_SIZE
+        );
         assert_eq!(settings.appearance.render_profile, RenderProfile::Auto);
         assert_eq!(settings.connection_defaults.username, "root");
         assert_eq!(settings.sidebar_ui.width, 300);

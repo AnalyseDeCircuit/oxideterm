@@ -37,3 +37,4 @@ tasks/*
 docs/design/*
 audit-evidence-archive/
 .agents/skills/
+docs/remote-agent-terminal-awareness-design.md

@@ -659,6 +659,8 @@ impl WorkspaceApp {
             connection_trace_toasts: HashMap::new(),
             connection_trace_state: ConnectionTraceState::default(),
             zen_hint_expires_at: None,
+            terminal_font_size_hud: None,
+            terminal_font_size_hud_generation: 0,
             workspace_tooltip: None,
             workspace_tooltip_pending: None,
             workspace_tooltip_generation: 0,

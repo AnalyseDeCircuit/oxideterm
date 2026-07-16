@@ -121,6 +121,19 @@ impl WorkspaceApp {
                     ),
                 ),
                 self.appearance_row(
+                    "settings_view.appearance.ui_font_size",
+                    "settings_view.appearance.ui_font_size_hint",
+                    self.appearance_slider_value_control(
+                        SettingsSlider::AppearanceUiFontSize,
+                        SelectAnchorId::SettingsAppearanceUiFontSizeSlider,
+                        APPEARANCE_UI_FONT_SIZE_MIN,
+                        APPEARANCE_UI_FONT_SIZE_MAX,
+                        settings.appearance.ui_font_size as f32,
+                        "px",
+                        cx,
+                    ),
+                ),
+                self.appearance_row(
                     "settings_view.appearance.animation",
                     "settings_view.appearance.animation_hint",
                     self.appearance_select_control(
