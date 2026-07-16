@@ -14,6 +14,45 @@ fn attach_saved_owner_to_reused_ssh_node(
     true
 }
 
+fn saved_node_route_matches_config(
+    runtime_store: &NodeRuntimeStore,
+    node_id: &NodeId,
+    requested_config: &SshConfig,
+) -> bool {
+    let Ok(path) = runtime_store.path_to_node(node_id) else {
+        return false;
+    };
+    let proxy_hops = requested_config.proxy_chain.as_deref().unwrap_or_default();
+    if path.len() != proxy_hops.len() + 1 {
+        return false;
+    }
+
+    // A saved-connection index is reusable only while every routed endpoint
+    // still matches the current saved profile. Authentication and host-key
+    // overrides may change without changing which remote node the path owns.
+    path.iter().enumerate().all(|(index, node_id)| {
+        let Some(actual) = runtime_store
+            .snapshot(node_id)
+            .map(|snapshot| snapshot.config)
+        else {
+            return false;
+        };
+        let (expected_host, expected_port, expected_username) = proxy_hops
+            .get(index)
+            .map(|hop| (hop.host.as_str(), hop.port, hop.username.as_str()))
+            .unwrap_or((
+                requested_config.host.as_str(),
+                requested_config.port,
+                requested_config.username.as_str(),
+            ));
+        ssh_config_matches_endpoint(&actual, expected_host, expected_port, expected_username)
+    })
+}
+
+fn ssh_config_matches_endpoint(config: &SshConfig, host: &str, port: u16, username: &str) -> bool {
+    config.host == host && config.port == port && config.username == username
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn create_local_terminal_tab(
         &mut self,
@@ -158,7 +197,20 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
-        if let Some(node_id) = self.saved_ssh_nodes.get(&saved_connection_id).cloned() {
+        let indexed_node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
+        if let Some(node_id) = indexed_node_id.clone().filter(|node_id| {
+            saved_node_route_matches_config(&self.node_runtime_store, node_id, &config)
+                && self.ssh_nodes.get(node_id).is_some_and(|node| {
+                    // The UI node cache supplies the config used to open the
+                    // terminal, so validate it independently from the route store.
+                    ssh_config_matches_endpoint(
+                        &node.config,
+                        &config.host,
+                        config.port,
+                        &config.username,
+                    )
+                })
+        }) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
             if let Some(session_id) = self
                 .ssh_nodes
@@ -189,6 +241,11 @@ impl WorkspaceApp {
                 )?;
                 return Ok(());
             }
+        }
+        if indexed_node_id.is_some() {
+            // Keep an already-running historical node alive for its existing
+            // consumers, but never let a stale saved-profile index route a new tab.
+            self.saved_ssh_nodes.remove(&saved_connection_id);
         }
 
         if config
@@ -1149,5 +1206,67 @@ mod create_tests {
             "other-owner"
         ));
         assert_eq!(node.saved_connection_id.as_deref(), Some("existing-owner"));
+    }
+
+    #[test]
+    fn saved_node_route_rejects_a_stale_direct_target() {
+        let store = NodeRuntimeStore::default();
+        let node_id = NodeId::new("saved-node");
+        store.upsert_node(
+            node_id.clone(),
+            SshConfig::password("old.example.com", 22, "ops", "old-secret"),
+        );
+        let requested = SshConfig::password("new.example.com", 22, "ops", "new-secret");
+
+        assert!(!saved_node_route_matches_config(
+            &store, &node_id, &requested
+        ));
+    }
+
+    #[test]
+    fn saved_node_route_accepts_the_same_direct_target_with_new_auth() {
+        let store = NodeRuntimeStore::default();
+        let node_id = NodeId::new("saved-node");
+        store.upsert_node(
+            node_id.clone(),
+            SshConfig::password("target.example.com", 22, "ops", "old-secret"),
+        );
+        let requested = SshConfig::password("target.example.com", 22, "ops", "new-secret");
+
+        assert!(saved_node_route_matches_config(
+            &store, &node_id, &requested
+        ));
+    }
+
+    #[test]
+    fn saved_node_route_rejects_a_different_proxy_chain() {
+        let store = NodeRuntimeStore::default();
+        let expansion = store
+            .expand_manual_preset(
+                "saved-a",
+                vec![SshConfig::password("old-jump.example.com", 22, "ops", "pw")],
+                SshConfig::password("target.example.com", 22, "ops", "pw"),
+            )
+            .unwrap();
+        let requested = SshConfig {
+            proxy_chain: Some(vec![ProxyHopConfig {
+                host: "new-jump.example.com".to_string(),
+                port: 22,
+                username: "ops".to_string(),
+                auth: AuthMethod::password("pw"),
+                agent_forwarding: false,
+                legacy_ssh_compatibility: false,
+                strict_host_key_checking: true,
+                trust_host_key: None,
+                expected_host_key_fingerprint: None,
+            }]),
+            ..SshConfig::password("target.example.com", 22, "ops", "pw")
+        };
+
+        assert!(!saved_node_route_matches_config(
+            &store,
+            &expansion.target_node_id,
+            &requested,
+        ));
     }
 }
