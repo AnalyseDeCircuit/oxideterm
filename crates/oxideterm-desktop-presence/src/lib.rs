@@ -10,6 +10,9 @@ mod platform;
 
 use std::sync::mpsc;
 
+#[cfg(target_os = "windows")]
+use std::path::Path;
+
 use gpui::{App, Window};
 
 pub use config::DesktopPresenceMenu;
@@ -43,4 +46,9 @@ pub fn hide_main_window() {
 
 pub fn request_quit() {
     platform::request_quit();
+}
+
+#[cfg(target_os = "windows")]
+pub fn set_application_icon(icon_path: &Path) -> anyhow::Result<()> {
+    platform::set_application_icon(icon_path)
 }

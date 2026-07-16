@@ -1434,11 +1434,17 @@ impl WorkspaceApp {
             .text_color(rgb(GRAPHICS_AMBER_500))
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
+                    .gap(px(4.0))
                     .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(strong))
                     .when_some(detail, |line, detail| {
-                        line.child(div().ml(px(4.0)).child(detail))
+                        // WSL diagnostics can be longer than the settings
+                        // column, so allow the detail to wrap within the card.
+                        line.child(div().min_w(px(0.0)).child(detail))
                     }),
             )
             .into_any_element()

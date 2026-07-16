@@ -1,5 +1,7 @@
 use std::{
     mem::size_of,
+    os::windows::ffi::OsStrExt as _,
+    path::Path,
     sync::{
         Mutex, OnceLock,
         atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering},
@@ -17,19 +19,19 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::{
             Shell::{
-                NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_SETVERSION, NIN_SELECT,
-                NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+                NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+                NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
             },
             WindowsAndMessaging::{
                 AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
                 DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
-                GetMessageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, LoadImageW, MF_SEPARATOR,
-                MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-                RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow,
-                ShowWindowAsync, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+                GetMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE,
+                LR_SHARED, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
+                RegisterClassW, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SendMessageW,
+                SetForegroundWindow, ShowWindowAsync, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
                 TRACK_POPUP_MENU_FLAGS, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
                 WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-                WNDCLASSW, WS_OVERLAPPED,
+                WM_SETICON, WNDCLASSW, WS_OVERLAPPED,
             },
         },
     },
@@ -57,6 +59,7 @@ static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static KEEP_RUNNING_ON_CLOSE: AtomicBool = AtomicBool::new(true);
 static EVENT_TX: OnceLock<Mutex<Option<mpsc::Sender<DesktopPresenceEvent>>>> = OnceLock::new();
 static MENU: OnceLock<Mutex<DesktopPresenceMenu>> = OnceLock::new();
+static APP_ICON_HANDLES: OnceLock<Mutex<Vec<isize>>> = OnceLock::new();
 
 pub(crate) fn install_for_window(
     window: &mut Window,
@@ -66,6 +69,7 @@ pub(crate) fn install_for_window(
 ) -> anyhow::Result<()> {
     let hwnd = main_window_hwnd(window)?;
     MAIN_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+    apply_current_app_icon_to_window(hwnd);
     set_menu(menu);
     set_event_sender(tx);
     start_tray_thread_once()?;
@@ -115,6 +119,87 @@ pub(crate) fn request_quit() {
         unsafe {
             let _ = PostMessageW(Some(tray_hwnd), TRAY_SHUTDOWN_MESSAGE, WPARAM(0), LPARAM(0));
         }
+    }
+}
+
+pub(crate) fn set_application_icon(icon_path: &Path) -> anyhow::Result<()> {
+    let wide_path = icon_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        LoadImageW(
+            None,
+            PCWSTR(wide_path.as_ptr()),
+            IMAGE_ICON,
+            0,
+            0,
+            LR_DEFAULTSIZE | LR_LOADFROMFILE,
+        )
+        .with_context(|| format!("unable to load icon {}", icon_path.display()))?
+    };
+    let icon = windows::Win32::UI::WindowsAndMessaging::HICON(handle.0);
+
+    // Win32 windows and the notification area retain the HICON by handle, so
+    // keep every user-selected icon alive for the remainder of the process.
+    APP_ICON_HANDLES
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("application icon handle store poisoned")
+        .push(icon.0 as isize);
+
+    let main_hwnd = HWND(MAIN_HWND.load(Ordering::SeqCst) as _);
+    if !main_hwnd.is_invalid() {
+        apply_app_icon_to_window(main_hwnd, icon);
+    }
+
+    let tray_hwnd = HWND(TRAY_HWND.load(Ordering::SeqCst) as _);
+    if !tray_hwnd.is_invalid() {
+        let mut data = base_notify_icon_data(tray_hwnd);
+        data.uFlags = NIF_ICON;
+        data.hIcon = icon;
+        unsafe {
+            Shell_NotifyIconW(NIM_MODIFY, &data)
+                .as_bool()
+                .then_some(())
+                .ok_or_else(|| anyhow!("Shell_NotifyIconW(NIM_MODIFY) failed"))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn current_app_icon() -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    APP_ICON_HANDLES
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("application icon handle store poisoned")
+        .last()
+        .copied()
+        .map(|handle| windows::Win32::UI::WindowsAndMessaging::HICON(handle as _))
+}
+
+fn apply_current_app_icon_to_window(hwnd: HWND) {
+    if let Some(icon) = current_app_icon() {
+        apply_app_icon_to_window(hwnd, icon);
+    }
+}
+
+fn apply_app_icon_to_window(hwnd: HWND, icon: windows::Win32::UI::WindowsAndMessaging::HICON) {
+    unsafe {
+        let _ = SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_BIG as usize)),
+            Some(LPARAM(icon.0 as isize)),
+        );
+        let _ = SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_SMALL as usize)),
+            Some(LPARAM(icon.0 as isize)),
+        );
     }
 }
 
@@ -292,7 +377,9 @@ fn add_tray_icon(hwnd: HWND) -> anyhow::Result<()> {
     let mut data = base_notify_icon_data(hwnd);
     data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     data.uCallbackMessage = TRAY_CALLBACK_MESSAGE;
-    data.hIcon = load_app_icon().context("failed to load tray icon resource")?;
+    data.hIcon = current_app_icon()
+        .map(Ok)
+        .unwrap_or_else(|| load_app_icon().context("failed to load tray icon resource"))?;
     set_tip(&mut data, &current_menu().app_name);
 
     unsafe {

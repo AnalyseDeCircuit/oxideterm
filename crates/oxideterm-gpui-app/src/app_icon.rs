@@ -34,6 +34,10 @@ pub(crate) fn app_icon_variant_file_name(variant: AppIconVariant) -> &'static st
     }
 }
 
+fn app_icon_variant_ico_file_name(variant: AppIconVariant) -> String {
+    app_icon_variant_file_name(variant).replace(".png", ".ico")
+}
+
 pub(crate) fn app_icon_variant_resource_path(variant: AppIconVariant) -> PathBuf {
     let file_name = app_icon_variant_file_name(variant);
     for root in app_icon_resource_roots() {
@@ -105,6 +109,25 @@ fn app_icon_variant_png(variant: AppIconVariant) -> &'static [u8] {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn app_icon_variant_ico_resource_path(variant: AppIconVariant) -> PathBuf {
+    let file_name = app_icon_variant_ico_file_name(variant);
+    for root in app_icon_resource_roots() {
+        let candidate = root.join("variants").join(&file_name);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    // Keep cargo run behavior aligned with packaged Windows resources.
+    PathBuf::from("crates")
+        .join("oxideterm-gpui-app")
+        .join("resources")
+        .join("icons")
+        .join("variants")
+        .join(file_name)
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn install_runtime_app_icon(variant: AppIconVariant) {
     use objc2::{AnyThread, MainThreadMarker};
@@ -129,8 +152,46 @@ pub(crate) fn install_runtime_app_icon(variant: AppIconVariant) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub(crate) fn install_runtime_app_icon(variant: AppIconVariant) {
+    let icon_path = app_icon_variant_ico_resource_path(variant);
+    if let Err(error) = oxideterm_desktop_presence::set_application_icon(&icon_path) {
+        eprintln!("failed to apply Windows application icon: {error:#}");
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(crate) fn install_runtime_app_icon(_variant: AppIconVariant) {
-    // Windows and Linux receive their application icon through packaging
-    // metadata and desktop/installer resources rather than GPUI window options.
+    // Linux desktop shells resolve the installed icon through desktop metadata.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_app_icon_variant_has_a_windows_icon_resource() {
+        for variant in APP_ICON_VARIANTS {
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("icons")
+                .join("variants")
+                .join(app_icon_variant_ico_file_name(*variant));
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+
+            // ICO files begin with a reserved word, the icon type, and count.
+            assert_eq!(
+                &bytes[..4],
+                &[0, 0, 1, 0],
+                "invalid ICO: {}",
+                path.display()
+            );
+            assert!(
+                u16::from_le_bytes([bytes[4], bytes[5]]) >= 6,
+                "missing Windows icon sizes: {}",
+                path.display()
+            );
+        }
+    }
 }

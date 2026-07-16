@@ -19,6 +19,11 @@ impl WorkspaceApp {
                     || conn.username.to_lowercase().contains(&query)
             });
         }
+        let empty_label = if query.is_empty() {
+            self.i18n.t("sidebar.panels.no_saved_connections")
+        } else {
+            self.i18n.t("sessionManager.table.no_search_results")
+        };
         let row_count = connections.len();
         let virtual_connections = Arc::new(connections.clone());
         let workspace = cx.entity();
@@ -49,6 +54,19 @@ impl WorkspaceApp {
                     .min_h(px(0.0))
                     .overflow_hidden()
                     .px_1()
+                    // Tauri renders an empty quick-connect list immediately
+                    // below search instead of centering a page-level state.
+                    .when(connections.is_empty(), |scroll| {
+                        scroll.child(
+                            div()
+                                .px_2()
+                                .py_4()
+                                .text_center()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.text_muted))
+                                .child(empty_label),
+                        )
+                    })
                     .when(!connections.is_empty(), |scroll| {
                         scroll.child(tauri_virtual_uniform_list(
                             "saved-connections-sidebar-virtual",
@@ -73,35 +91,6 @@ impl WorkspaceApp {
                         ))
                     }),
             )
-            .when(self.connection_store.connections().is_empty(), |content| {
-                content.child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(8.0))
-                        .text_color(rgb(theme.text_muted))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Server,
-                            self.tokens.metrics.empty_sidebar_icon_size,
-                            rgba((theme.text_muted << 8) | 0x4d),
-                        ))
-                        .child(
-                            div()
-                                .text_center()
-                                .text_size(px(self.tokens.metrics.empty_sidebar_title_font_size))
-                                .child(self.render_selectable_display_text(
-                                    "saved-connections-sidebar-empty",
-                                    (),
-                                    self.i18n.t("sessionManager.table.no_connections"),
-                                    theme.text_muted,
-                                    cx,
-                                )),
-                        ),
-                )
-            })
             .into_any_element()
     }
 

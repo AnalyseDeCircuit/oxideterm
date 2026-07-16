@@ -121,6 +121,7 @@ impl WorkspaceApp {
                 gpui::WindowControlArea::Min,
                 titlebar_button_hover(titlebar_bg),
                 text_color,
+                text_color,
                 cx,
             ))
             .child(self.client_titlebar_button(
@@ -128,12 +129,14 @@ impl WorkspaceApp {
                 gpui::WindowControlArea::Max,
                 titlebar_button_hover(titlebar_bg),
                 text_color,
+                text_color,
                 cx,
             ))
             .child(self.client_titlebar_button(
                 "×",
                 gpui::WindowControlArea::Close,
                 0xc42b1c,
+                text_color,
                 0xffffff,
                 cx,
             ))
@@ -146,6 +149,7 @@ impl WorkspaceApp {
         control_area: gpui::WindowControlArea,
         hover_bg: u32,
         text_color: u32,
+        hover_text_color: u32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let use_native_caption_hit_test = cfg!(target_os = "windows");
@@ -159,7 +163,9 @@ impl WorkspaceApp {
             .justify_center()
             .text_size(px(13.0))
             .text_color(rgb(text_color))
-            .hover(move |button| button.bg(rgb(hover_bg)))
+            // The close glyph stays theme-readable at rest and turns white
+            // only against its destructive hover background.
+            .hover(move |button| button.bg(rgb(hover_bg)).text_color(rgb(hover_text_color)))
             // Windows owns caption buttons through non-client HT* hit testing;
             // stopping the GPUI mouse event would prevent minimize/restore.
             .when(use_native_caption_hit_test, |button| {
