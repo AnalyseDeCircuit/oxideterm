@@ -463,12 +463,17 @@ impl TerminalPane {
             / self.metrics.cell_width_f32())
         .floor()
         .max(0.0) as usize;
-        let row = ((f32::from(position.y - origin.y) - TERMINAL_CONTENT_PADDING)
-            / self.metrics.line_height_f32())
-        .floor()
-        .max(0.0) as usize;
-
-        let row = row.min(self.snapshot.rows.saturating_sub(1));
+        let smooth_scroll_y_offset = self
+            .settings
+            .smooth_scroll
+            .then(|| f32::from(self.scroll_remainder_px))
+            .unwrap_or_default();
+        let row = terminal_viewport_row_for_position(
+            f32::from(position.y - origin.y),
+            smooth_scroll_y_offset,
+            self.metrics.line_height_f32(),
+            self.snapshot.rows,
+        );
         let logical_col = self
             .snapshot
             .lines
@@ -1331,6 +1336,17 @@ fn is_smart_copy_shortcut(event: &KeyDownEvent) -> bool {
         && event.keystroke.key.eq_ignore_ascii_case("c")
 }
 
+fn terminal_viewport_row_for_position(
+    position_y_from_origin: f32,
+    smooth_scroll_y_offset: f32,
+    line_height: f32,
+    viewport_rows: usize,
+) -> usize {
+    // Mouse hit testing must follow the same fractional-row translation as the paint layer.
+    let translated_y = position_y_from_origin - TERMINAL_CONTENT_PADDING - smooth_scroll_y_offset;
+    ((translated_y / line_height).floor().max(0.0) as usize).min(viewport_rows.saturating_sub(1))
+}
+
 fn is_legacy_terminal_copy_shortcut(key: &str, modifiers: Modifiers) -> bool {
     key == "insert"
         && modifiers.control
@@ -2135,6 +2151,32 @@ mod tests {
         assert_eq!(
             terminal_selection_autoscroll_delta_rows(px(250.0), px(100.0), px(200.0), px(10.0)),
             -TERMINAL_SELECTION_AUTOSCROLL_MAX_ROWS
+        );
+    }
+
+    #[test]
+    fn terminal_row_hit_testing_tracks_fractional_smooth_scroll_offset() {
+        let line_height = 20.0;
+        let position_in_shifted_first_row = TERMINAL_CONTENT_PADDING + 25.0;
+        let position_in_shifted_second_row = TERMINAL_CONTENT_PADDING + 15.0;
+
+        assert_eq!(
+            terminal_viewport_row_for_position(
+                position_in_shifted_first_row,
+                10.0,
+                line_height,
+                10,
+            ),
+            0
+        );
+        assert_eq!(
+            terminal_viewport_row_for_position(
+                position_in_shifted_second_row,
+                -10.0,
+                line_height,
+                10,
+            ),
+            1
         );
     }
 
