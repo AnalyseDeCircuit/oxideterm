@@ -118,6 +118,7 @@ pub fn confirm_dialog_with_focus_motion(
                     offset: point(px(0.0), px(16.0)),
                     blur_radius: px(32.0),
                     spread_radius: px(0.0),
+                    inset: false,
                 }])
                 .flex()
                 .flex_col()

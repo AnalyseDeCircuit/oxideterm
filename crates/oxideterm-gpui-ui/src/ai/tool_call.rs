@@ -292,11 +292,11 @@ pub fn ai_tool_pre(
                 let delta = event.delta.pixel_delta(window.line_height());
                 let mut next_offset = old_offset;
 
-                if max_offset.width > px(0.0) {
-                    next_offset.x = (next_offset.x + delta.x).clamp(-max_offset.width, px(0.0));
+                if max_offset.x > px(0.0) {
+                    next_offset.x = (next_offset.x + delta.x).clamp(-max_offset.x, px(0.0));
                 }
-                if max_offset.height > px(0.0) {
-                    next_offset.y = (next_offset.y + delta.y).clamp(-max_offset.height, px(0.0));
+                if max_offset.y > px(0.0) {
+                    next_offset.y = (next_offset.y + delta.y).clamp(-max_offset.y, px(0.0));
                 }
 
                 // Stop chaining only while this payload actually consumes the

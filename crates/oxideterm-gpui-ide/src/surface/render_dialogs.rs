@@ -123,7 +123,7 @@ impl IdeSurface {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, window, cx| {
-                                    window.focus(&this.focus_handle);
+                                    window.focus(&this.focus_handle, cx);
                                     this.editor_search.replace_focused = false;
                                     cx.stop_propagation();
                                     cx.notify();
@@ -264,7 +264,7 @@ impl IdeSurface {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, window, cx| {
-                                    window.focus(&this.focus_handle);
+                                    window.focus(&this.focus_handle, cx);
                                     this.editor_search.replace_focused = true;
                                     cx.stop_propagation();
                                     cx.notify();
@@ -1239,7 +1239,7 @@ impl IdeSurface {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.folder_picker.path_input_focused = true;
                     cx.stop_propagation();
                     cx.notify();

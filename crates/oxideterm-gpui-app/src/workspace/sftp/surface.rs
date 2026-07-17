@@ -41,7 +41,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     if this.dismiss_sftp_context_menu() {
                         // Ordinary pane clicks already repaint through their
                         // own state changes; the root only owns context-menu
@@ -184,7 +184,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     if this.sftp_view.active_pane != pane {
                         this.sftp_view.active_pane = pane;
                         cx.notify();
@@ -849,7 +849,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     if let Some(pane) = pane {
                         this.sftp_view.active_pane = pane;
                     }

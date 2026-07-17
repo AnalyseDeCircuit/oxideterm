@@ -1001,7 +1001,7 @@ impl WorkspaceApp {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
@@ -1413,7 +1413,7 @@ impl WorkspaceApp {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
@@ -1458,7 +1458,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary();
         self.terminal_command_specs_editor_open = true;
         self.focus_settings_input(SettingsInput::TerminalCommandSpecsJson, value, cx);
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
@@ -1593,7 +1593,7 @@ impl WorkspaceApp {
                 let example =
                     super::terminal_command_bar::completion::terminal_command_specs_example_json();
                 self.focus_settings_input(input, example, cx);
-                window.focus(&self.focus_handle);
+                window.focus(&self.focus_handle, cx);
             }
             TerminalCommandSpecsAction::Format => {
                 let value = self.current_terminal_command_specs_editor_value();
@@ -1602,7 +1602,7 @@ impl WorkspaceApp {
                 ) {
                     Ok(pretty) => {
                         self.focus_settings_input(input, pretty, cx);
-                        window.focus(&self.focus_handle);
+                        window.focus(&self.focus_handle, cx);
                     }
                     Err(error) => self.push_ai_settings_toast(
                         format!(

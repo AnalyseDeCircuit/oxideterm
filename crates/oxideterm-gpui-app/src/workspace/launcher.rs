@@ -142,7 +142,7 @@ impl WorkspaceApp {
         if !launcher_requires_opt_in() || self.launcher.core.enabled {
             self.start_launcher_load_if_needed(false);
         }
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
         cx.notify();
     }
@@ -325,7 +325,7 @@ impl WorkspaceApp {
                             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                                 this.launcher.focused_input = Some(LauncherInput::Search);
                                 this.new_connection_caret_visible = true;
-                                window.focus(&this.focus_handle);
+                                window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             }),
                         )
@@ -855,7 +855,7 @@ impl WorkspaceApp {
                             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                                 this.launcher.focused_input = Some(LauncherInput::Search);
                                 this.new_connection_caret_visible = true;
-                                window.focus(&this.focus_handle);
+                                window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             }),
                         )
@@ -1227,6 +1227,7 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_center()
                     .shadow(vec![gpui::BoxShadow {
+                        inset: false,
                         color: rgba((0x000000 << 8) | 0x33).into(),
                         offset: gpui::point(px(0.0), px(2.0)),
                         blur_radius: px(4.0),

@@ -1,21 +1,21 @@
-# Third-Party Notices
+# Third-Party Notices (Native / Rust Workspace)
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-07-15T19:01:56.402193Z
+Generated: 2026-07-17T15:12:58.434206Z
 
 ## Summary
 
-- MIT: 1024
-- Apache-2.0: 811
+- MIT: 1040
+- Apache-2.0: 833
 - Apache-2.0 WITH LLVM-exception: 60
-- Zlib: 39
+- Zlib: 40
 - BSD-3-Clause: 21
 - Unicode-3.0: 19
 - MPL-2.0: 16
-- ISC: 12
+- ISC: 10
+- BSD-2-Clause: 9
 - Unlicense: 9
-- BSD-2-Clause: 8
 - CC0-1.0: 5
 - BSL-1.0: 3
 - LGPL-2.1-or-later: 2
@@ -46,6 +46,13 @@ This section is a review prompt for binary distribution; it does not replace leg
 |---|---:|---|---|
 | ab_glyph | 0.2.32 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ab_glyph_rasterizer | 0.1.10 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit | 0.24.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit_atspi_common | 0.19.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit_consumer | 0.35.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit_consumer | 0.38.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit_macos | 0.26.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit_unix | 0.22.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| accesskit_windows | 0.32.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | addchain | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | addr2line | 0.25.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | adler2 | 2.0.1 | 0BSD, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -84,34 +91,32 @@ This section is a review prompt for binary distribution; it does not replace leg
 | as-raw-xcb-connection | 1.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | as-slice | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ash | 0.38.0+1.3.281 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ash-window | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ashpd | 0.11.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ashpd | 0.12.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| ashpd | 0.13.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | asn1-rs | 0.7.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | asn1-rs-derive | 0.6.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | asn1-rs-impl | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | async-broadcast | 0.7.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async-channel | 1.9.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-channel | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-compression | 0.4.42 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | async-dnssd | 0.5.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-executor | 1.14.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-fs | 2.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-global-executor | 2.4.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-io | 2.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-lock | 3.4.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-net | 2.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-process | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-recursion | 1.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | async-signal | 0.2.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-std | 1.13.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-task | 4.7.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | async-trait | 0.1.89 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async_zip | 0.0.17 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| async_zip | 0.0.18 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | atomic | 0.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | atomic-polyfill | 1.0.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | atomic-waker | 1.1.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | atomic_refcell | 0.1.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| atspi | 0.29.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| atspi-common | 0.13.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| atspi-proxies | 0.13.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | autocfg | 1.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | av-scenechange | 0.14.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | av1-grain | 0.2.5 | BSD-2-Clause | registry+https://github.com/rust-lang/crates.io-index |
@@ -126,15 +131,14 @@ This section is a review prompt for binary distribution; it does not replace leg
 | bincode | 1.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bindgen | 0.71.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
 | bit-set | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| bit-set | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bit-vec | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| bit-vec | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bit_field | 0.10.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bitflags | 1.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | bitflags | 2.11.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | bitstream-io | 4.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | bitvec | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| blade-graphics | 0.7.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| blade-macros | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| blade-util | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | blake2 | 0.10.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | blake2 | 0.11.0-rc.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | block | 0.1.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -154,8 +158,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | byteorder | 1.5.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | byteorder-lite | 0.1.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | bytes | 1.11.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| calloop | 0.13.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| calloop-wayland-source | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| calloop | 0.14.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| calloop-wayland-source | 0.4.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cap-fs-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cap-net-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cap-primitives | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -187,11 +191,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | cmake | 0.1.58 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cmov | 0.5.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cobs | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cocoa | 0.25.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cocoa | 0.26.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cocoa-foundation | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cocoa-foundation | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| codespan-reporting | 0.12.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| codespan-reporting | 0.13.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | color_quant | 1.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | colorchoice | 1.0.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | combine | 4.6.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -204,20 +206,18 @@ This section is a review prompt for binary distribution; it does not replace leg
 | const-random | 0.1.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | const-random-macro | 0.1.16 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | convert_case | 0.10.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| convert_case | 0.4.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| convert_case | 0.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | core-foundation | 0.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-foundation | 0.9.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-foundation-sys | 0.8.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-graphics | 0.23.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-graphics | 0.24.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-graphics-types | 0.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-graphics-types | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-graphics2 | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| core-graphics2 | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core-text | 21.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-video | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| core-video | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | core_maths | 0.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | coreaudio-rs | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cosmic-text | 0.14.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| cosmic-text | 0.19.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cpal | 0.16.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cpubits | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cpufeatures | 0.2.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -250,8 +250,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | crypto-primes | 0.7.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cryptoki | 0.12.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | cryptoki-sys | 0.5.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ctor | 0.4.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ctor-proc-macro | 0.0.6 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| ctor | 1.0.9 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | ctr | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ctutils | 0.4.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | cursor-icon | 1.2.0 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
@@ -274,22 +273,20 @@ This section is a review prompt for binary distribution; it does not replace leg
 | der_derive | 0.7.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | deranged | 0.5.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | derive_arbitrary | 1.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| derive_more | 0.99.20 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | derive_more | 2.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | derive_more-impl | 2.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | des | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | digest | 0.10.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | digest | 0.11.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dirs | 4.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | dirs | 5.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dirs-sys | 0.3.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| dirs | 6.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | dirs-sys | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| dirs-sys | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | dispatch2 | 0.3.1 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | displaydoc | 0.2.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | dlib | 0.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| document-features | 0.2.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | downcast-rs | 1.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dtor | 0.0.6 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| dtor-proc-macro | 0.0.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | dunce | 1.0.5 | CC0-1.0, MIT-0, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | dwrote | 0.11.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | dyn-clone | 1.0.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -311,7 +308,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | errno | 0.3.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | etagere | 0.2.15 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | euclid | 0.22.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| event-listener | 2.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | event-listener | 5.4.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | event-listener-strategy | 0.5.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | eventsource-stream | 0.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -340,7 +336,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | foldhash | 0.2.0 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
 | font-types | 0.11.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | fontconfig-parser | 0.5.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fontdb | 0.16.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | fontdb | 0.23.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | foreign-types | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | foreign-types | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -374,35 +369,41 @@ This section is a review prompt for binary distribution; it does not replace leg
 | getrandom | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | getrandom | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ghash | 0.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| gif | 0.13.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gif | 0.14.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gimli | 0.32.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gimli | 0.33.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gio-sys | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| git2 | 0.20.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| gl_generator | 0.14.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | glib | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | glib-macros | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | glib-sys | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | glob | 0.3.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | globset | 0.4.18 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gloo-timers | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gloo-timers | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| glow | 0.16.0 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
+| glow | 0.17.0 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
+| glutin_wgl_sys | 0.6.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gobject-sys | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gpu-alloc | 0.6.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpu-alloc-ash | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpu-alloc-types | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui-macros | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_collections | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_derive_refineable | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_http_client | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_media | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_perf | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_refineable | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_semantic_version | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_sum_tree | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_util | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpui_util_macros | 0.2.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| grid | 0.18.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| gpu-allocator | 0.28.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| gpu-descriptor | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| gpu-descriptor-types | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| gpui | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_ce_util | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_collections | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_derive_refineable | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_linux | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_macos | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_macros | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_media | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_platform | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_refineable | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_scheduler | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_shared_string | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_sum_tree | 0.2.2 | Apache-2.0 | vendored in repository |
+| gpui_wgpu | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_windows | 0.1.0 | Apache-2.0 | vendored in repository |
+| gpui_zed_util | 0.2.2 | Apache-2.0 | vendored in repository |
+| grid | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | group | 0.14.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gstreamer | 0.24.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | gstreamer-base | 0.24.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -412,19 +413,21 @@ This section is a review prompt for binary distribution; it does not replace leg
 | gstreamer-video-sys | 0.24.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | h2 | 0.4.13 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | half | 2.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| harfrust | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | hash32 | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| hash32 | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hashbrown | 0.14.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hashbrown | 0.15.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hashbrown | 0.16.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hashbrown | 0.17.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | heapless | 0.7.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| heapless | 0.9.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | heck | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | heck | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hermit-abi | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hex | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hex-literal | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hexf-parse | 0.2.1 | CC0-1.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hidden-trait | 0.1.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | hkdf | 0.12.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hkdf | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | hmac | 0.12.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -505,9 +508,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | kem | 0.3.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | keyring | 3.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | khronos-egl | 6.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| khronos_api | 3.1.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | kstring | 2.0.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | kurbo | 0.11.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| kv-log-macro | 1.0.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | lazy_static | 1.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | leak | 0.1.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | leaky-cow | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -517,16 +520,19 @@ This section is a review prompt for binary distribution; it does not replace leg
 | libc | 0.2.186 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | libdbus-sys | 0.2.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | libfuzzer-sys | 0.4.12 | MIT, Apache-2.0, NCSA | registry+https://github.com/rust-lang/crates.io-index |
-| libgit2-sys | 0.18.3+1.9.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | libloading | 0.8.9 | ISC | registry+https://github.com/rust-lang/crates.io-index |
 | libm | 0.2.16 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | libredox | 0.1.16 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | libudev | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | libudev-sys | 0.1.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | libz-sys | 1.1.28 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| linebender_resource_handle | 0.1.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| link-section | 0.19.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| linktime-proc-macro | 0.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | litemap | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
+| litrs | 1.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | lock_api | 0.4.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | log | 0.4.29 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | loop9 | 0.1.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -538,6 +544,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | lyon_tessellation | 1.0.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mac | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mach2 | 0.4.3 | BSD-2-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| mach2 | 0.5.0 | BSD-2-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mach2 | 0.6.0 | BSD-2-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | malloc_buf | 0.0.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | matchers | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -552,20 +559,19 @@ This section is a review prompt for binary distribution; it does not replace leg
 | memfd | 0.6.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | memmap2 | 0.9.11 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | memoffset | 0.9.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| metal | 0.29.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| metal | 0.33.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mime | 0.3.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | mime_guess | 2.0.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | minimal-lexical | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | minisign-verify | 0.2.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | miniz_oxide | 0.8.9 | MIT, Zlib, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mint | 0.5.9 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | mio | 1.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | miow | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ml-kem | 0.3.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | module-lattice | 0.2.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | moxcms | 0.8.1 | BSD-3-Clause, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | muldiv | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| naga | 25.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| naga | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | nanorand | 0.7.0 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
 | native-tls | 0.2.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ndk | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -584,7 +590,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | num | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-bigint | 0.3.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-bigint | 0.4.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-bigint-dig | 0.8.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| num-bigint-dig | 0.9.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-complex | 0.4.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-conv | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num-derive | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -597,7 +603,10 @@ This section is a review prompt for binary distribution; it does not replace leg
 | num_enum_derive | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | num_threads | 0.1.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | objc | 0.2.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| objc-sys | 0.3.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| objc2 | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2 | 0.6.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| objc2-app-kit | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-app-kit | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-audio-toolbox | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-av-foundation | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -614,12 +623,12 @@ This section is a review prompt for binary distribution; it does not replace leg
 | objc2-core-text | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-core-video | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-encode | 4.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| objc2-foundation | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-foundation | 0.3.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-image-io | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-media-toolbox | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-metal | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | objc2-quartz-core | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-ui-kit | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | object | 0.37.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | object | 0.39.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | oid | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -627,7 +636,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | once_cell_polyfill | 1.70.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | onig | 6.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | onig_sys | 69.9.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| oo7 | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| oo7 | 0.6.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | opaque-debug | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | open | 5.3.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | openssl | 0.10.81 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -662,9 +671,13 @@ This section is a review prompt for binary distribution; it does not replace leg
 | pem-rfc7468 | 1.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | percent-encoding | 2.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | phf | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| phf | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | phf_generator | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| phf_generator | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | phf_macros | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| phf_macros | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | phf_shared | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| phf_shared | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | picky | 7.0.0-rc.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | picky-asn1 | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | picky-asn1-der | 0.5.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -686,23 +699,27 @@ This section is a review prompt for binary distribution; it does not replace leg
 | png | 0.18.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | polling | 3.11.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | pollster | 0.2.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| pollster | 0.4.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | poly1305 | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | poly1305 | 0.9.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | polyval | 0.7.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| portable-atomic | 1.13.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| portable-atomic-util | 0.2.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | postage | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | postcard | 1.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | potential_utf | 0.1.5 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | powerfmt | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ppv-lite86 | 0.2.21 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| presser | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | prettyplease | 0.2.37 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | primefield | 0.14.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | primeorder | 0.14.0-rc.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | proc-macro-crate | 3.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| proc-macro-error-attr2 | 2.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| proc-macro-error2 | 2.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | proc-macro2 | 1.0.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | profiling | 1.0.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | profiling-procmacros | 1.0.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| proptest | 1.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| proptest-macro | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | psm | 0.1.31 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | pulldown-cmark | 0.12.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | pulldown-cmark-escape | 0.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -711,6 +728,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | pxfm | 0.1.29 | BSD-3-Clause, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | qoi | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | quantette | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| quick-error | 1.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | quick-error | 2.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | quick-xml | 0.39.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | quote | 1.0.45 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -726,7 +744,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rand_core | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand_core | 0.6.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand_core | 0.9.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| rand_xorshift | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rand_xoshiro | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| range-alloc | 0.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rangemap | 1.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ratex-font | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | ratex-font-loader | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -740,15 +760,15 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rav1e | 0.8.1 | BSD-2-Clause | registry+https://github.com/rust-lang/crates.io-index |
 | ravif | 0.13.0 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
 | raw-window-handle | 0.6.2 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| raw-window-metal | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| raw-window-metal | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rayon | 1.12.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rayon-core | 1.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rc2 | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | read-fonts | 0.37.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | redb | 2.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| redox_syscall | 0.2.16 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | redox_syscall | 0.5.18 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | redox_users | 0.4.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| redox_users | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | ref-cast | 1.0.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ref-cast-impl | 1.0.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | regalloc2 | 0.15.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
@@ -756,6 +776,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | regex-automata | 0.4.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | regex-lite | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | regex-syntax | 0.8.10 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| renderdoc-sys | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | reqwest | 0.12.28 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | resvg | 0.45.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rfc6979 | 0.6.0-pre.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -766,7 +787,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rodio | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | roxmltree | 0.20.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rsa | 0.10.0-rc.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| russh | 0.61.2 | Apache-2.0 | path+file:///Users/dominical/Documents/OxideTerm/crates/russh |
+| russh | 0.61.2 | Apache-2.0 | vendored in repository |
 | russh-cryptovec | 0.61.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | russh-util | 0.52.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rust-embed | 8.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -786,12 +807,10 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rustix-linux-procfs | 0.1.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rustix-openpty | 0.2.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rustls | 0.23.40 | Apache-2.0, ISC, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustls-native-certs | 0.8.3 | Apache-2.0, ISC, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustls-pemfile | 2.2.0 | Apache-2.0, ISC, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | rustls-pki-types | 1.14.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rustls-webpki | 0.103.13 | ISC | registry+https://github.com/rust-lang/crates.io-index |
 | rustversion | 1.0.22 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustybuzz | 0.14.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| rusty-fork | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | rustybuzz | 0.20.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | ryu | 1.0.23 | Apache-2.0, BSL-1.0 | registry+https://github.com/rust-lang/crates.io-index |
 | safe_arch | 0.9.3 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -849,11 +868,12 @@ This section is a review prompt for binary distribution; it does not replace leg
 | slotmap | 1.1.1 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
 | smallvec | 1.15.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | smol | 2.0.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| smol_str | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| smol_str | 0.3.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | sntrup | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | socket2 | 0.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| spin | 0.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | spin | 0.9.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| spirv | 0.3.0+sdk-1.3.268.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | spki | 0.7.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | spki | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | sponge-cursor | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -863,16 +883,14 @@ This section is a review prompt for binary distribution; it does not replace leg
 | sspi | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | stable_deref_trait | 1.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | stacker | 0.1.24 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| stacksafe | 0.1.4 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| stacksafe-macro | 0.1.4 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| stacksafe | 1.0.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| stacksafe-macro | 1.0.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | static_assertions | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | streaming-iterator | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | strict-num | 0.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | strsim | 0.11.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| strum | 0.26.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | strum | 0.27.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | strum | 0.28.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| strum_macros | 0.26.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | strum_macros | 0.27.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | strum_macros | 0.28.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | subtle | 2.6.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
@@ -899,12 +917,11 @@ This section is a review prompt for binary distribution; it does not replace leg
 | syntect | 5.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | sys-locale | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | sysinfo | 0.33.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| system-configuration | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | system-configuration | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | system-configuration-sys | 0.6.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | system-deps | 7.0.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | system-fonts | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| taffy | 0.9.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| taffy | 0.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | take-until | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tap | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tar | 0.4.45 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -930,7 +947,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | tokio-macros | 2.7.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tokio-native-tls | 0.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tokio-rustls | 0.26.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tokio-socks | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | tokio-util | 0.7.18 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | toml | 0.8.23 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | toml | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -989,18 +1005,15 @@ This section is a review prompt for binary distribution; it does not replace leg
 | tree-sitter-zsh | 0.63.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | try-lock | 0.2.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | ts-parser-perl | 1.0.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ttf-parser | 0.20.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ttf-parser | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | ttf-parser | 0.25.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | typeid | 1.0.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | typenum | 1.20.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | uds_windows | 1.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| unarray | 0.1.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | unescaper | 0.1.8 | GPL-3.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | unicase | 2.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | unicode-bidi | 0.3.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-bidi-mirroring | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | unicode-bidi-mirroring | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-ccc | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | unicode-ccc | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | unicode-ident | 1.0.24 | MIT, Apache-2.0, Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | unicode-linebreak | 0.1.5 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -1030,6 +1043,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | vswhom | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | vswhom-sys | 0.1.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | vte | 0.15.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| wait-timeout | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | waker-fn | 1.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | walkdir | 2.5.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | want | 0.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -1063,14 +1077,23 @@ This section is a review prompt for binary distribution; it does not replace leg
 | wayland-backend | 0.3.15 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wayland-client | 0.31.14 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wayland-cursor | 0.31.14 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-protocols | 0.31.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wayland-protocols | 0.32.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-protocols-plasma | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| wayland-protocols-plasma | 0.3.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| wayland-protocols-wlr | 0.3.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wayland-scanner | 0.31.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wayland-sys | 0.31.11 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | web-sys | 0.3.99 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| web-time | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | webpki-roots | 1.0.7 | CDLA-Permissive-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | weezl | 0.1.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-core | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-core-deps-apple | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-core-deps-emscripten | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-core-deps-windows-linux-android | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-hal | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-naga-bridge | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| wgpu-types | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | which | 6.0.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | whoami | 1.6.1 | Apache-2.0, BSL-1.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | wide | 0.8.3 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -1102,13 +1125,11 @@ This section is a review prompt for binary distribution; it does not replace leg
 | windows-link | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-numerics | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-numerics | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-registry | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-registry | 0.5.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-registry | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-result | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-result | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-result | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-strings | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-strings | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-strings | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | windows-sys | 0.45.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
@@ -1172,13 +1193,13 @@ This section is a review prompt for binary distribution; it does not replace leg
 | x11rb-protocol | 0.13.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | x25519-dalek | 3.0.0-rc.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
 | x509-cert | 0.2.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xattr | 0.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | xattr | 1.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | xcursor | 0.3.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | xim-ctext | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | xim-parser | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | xkbcommon | 0.8.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | xkeysym | 0.2.1 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
+| xml-rs | 0.8.28 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | xmlwriter | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | y4m | 0.8.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | yazi | 0.2.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -1187,11 +1208,12 @@ This section is a review prompt for binary distribution; it does not replace leg
 | yoke-derive | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
 | yuv | 0.8.16 | BSD-3-Clause, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zbus | 5.15.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zbus-lockstep | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zbus-lockstep-macros | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zbus_macros | 5.15.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus_names | 4.3.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zed-async-tar | 0.5.0-zed | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| zbus_names | 4.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zbus_xml | 5.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zed-font-kit | 0.14.1-zed | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zed-reqwest | 0.12.15-zed | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zed-xim | 0.4.0-zed | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zeno | 0.3.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zerocopy | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
@@ -1209,12 +1231,20 @@ This section is a review prompt for binary distribution; it does not replace leg
 | zstd | 0.13.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
 | zstd-safe | 7.2.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
 | zstd-sys | 2.0.16+zstd.1.5.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| zune-core | 0.4.12 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
 | zune-core | 0.5.1 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
 | zune-inflate | 0.2.54 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
+| zune-jpeg | 0.4.21 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
 | zune-jpeg | 0.5.15 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant | 5.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant_derive | 5.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant_utils | 3.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zvariant | 5.13.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zvariant_derive | 5.13.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| zvariant_utils | 3.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+
+## Adapted Source
+
+| Component | Source Revision | License | License File |
+|---|---|---|---|
+| Microsoft Terminal text contrast and gamma correction | 1283c0f5b99a2961673249fa77c6b986efb5086c | MIT | MICROSOFT-TERMINAL-LICENSE-MIT |
 
 ## Bundled Fonts / Assets
 
@@ -1229,3 +1259,4 @@ This section is a review prompt for binary distribution; it does not replace leg
 - Multi-license policy: where a crate offers multiple licenses, OxideTerm uses the most permissive compatible option available.
 - License data is generated from crate metadata through cargo-deny and may include multiple licenses per crate.
 - This notice list is for attribution and compliance tracking. It does not replace upstream license texts.
+- GPUI-CE's complete Apache-2.0 text is shipped as `GPUI-CE-LICENSE-APACHE`.

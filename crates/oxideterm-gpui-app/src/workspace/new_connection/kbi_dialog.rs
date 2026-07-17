@@ -94,7 +94,7 @@ impl WorkspaceApp {
         self.schedule_keyboard_interactive_timer(self.keyboard_interactive_timer_generation, cx);
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
@@ -339,7 +339,7 @@ impl WorkspaceApp {
                             }
                             this.ime_marked_text = None;
                             this.new_connection_caret_visible = true;
-                            window.focus(&this.focus_handle);
+                            window.focus(&this.focus_handle, cx);
                             this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             cx.stop_propagation();
                         }),

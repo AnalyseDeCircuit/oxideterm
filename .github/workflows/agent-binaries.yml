@@ -41,7 +41,7 @@ jobs:
           cache-on-failure: false
 
       - name: Build bundled remote agents
-        run: ./scripts/build-agent.sh
+        run: ./scripts/build/build-agent.sh
 
       - name: Verify bundled artifacts
         shell: bash

@@ -465,7 +465,7 @@ impl WorkspaceApp {
     fn host_tools_tab_scrollbar_geometry(&self) -> Option<HostToolsTabScrollbarGeometry> {
         let viewport_bounds = self.host_tools_tab_scroll_handle.bounds();
         let viewport_width = f32::from(viewport_bounds.size.width);
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
         let track_width =
             (viewport_width - HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET * 2.0).max(0.0);
         if viewport_width <= 1.0 || max_scroll <= 1.0 || track_width <= 1.0 {
@@ -498,12 +498,12 @@ impl WorkspaceApp {
     }
 
     fn current_host_tools_tab_scroll_x(&self) -> f32 {
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
         f32::from(-self.host_tools_tab_scroll_handle.offset().x).clamp(0.0, max_scroll)
     }
 
     fn set_host_tools_tab_scroll_x(&mut self, scroll_x: f32, cx: &mut Context<Self>) {
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
         let next_scroll_x = scroll_x.clamp(0.0, max_scroll);
         let current_scroll_x = self.current_host_tools_tab_scroll_x();
         if (next_scroll_x - current_scroll_x).abs() < 0.01 {
@@ -580,7 +580,7 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().width);
+        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
         if max_scroll <= 1.0 {
             if self.host_tools_tab_scroll_handle.offset().x != px(0.0) {
                 self.host_tools_tab_scroll_handle

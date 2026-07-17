@@ -250,7 +250,7 @@ jobs:
         env:
           OXIDETERM_VERSION: ${{ steps.package_version.outputs.raw }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: python scripts/package_native.py ${{ matrix.target }}
+        run: python scripts/release/package_native.py ${{ matrix.target }}
 
       - name: Remove temporary signing material
         if: always()
@@ -263,7 +263,7 @@ jobs:
 
       - name: Verify native package contents
         run: >-
-          python scripts/verify_native_package.py
+          python scripts/release/verify_native_package.py
           --target ${{ matrix.target }}
           --version ${{ steps.package_version.outputs.raw }}
           --dist dist

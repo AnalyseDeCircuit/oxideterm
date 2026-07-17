@@ -638,6 +638,7 @@ impl WorkspaceApp {
         let top = topology_transform_y(node.y, transform) - (TOPOLOGY_NODE_HEIGHT * scale / 2.0);
         let connected_shadow = if node.view_status.is_connected() {
             vec![gpui::BoxShadow {
+                inset: false,
                 color: rgba((status_color << 8) | 0x30).into(),
                 offset: point(px(0.0), px(0.0)),
                 blur_radius: px(15.0),
@@ -669,6 +670,7 @@ impl WorkspaceApp {
                 style
                     .border_color(rgba((theme.accent << 8) | TOPOLOGY_PANEL_BORDER_ALPHA_50))
                     .shadow(vec![gpui::BoxShadow {
+                        inset: false,
                         color: rgba((theme.accent << 8) | 0x26).into(),
                         offset: point(px(0.0), px(0.0)),
                         blur_radius: px(20.0),
@@ -697,6 +699,7 @@ impl WorkspaceApp {
                                     .bg(rgb(status_color))
                                     .when(is_down || is_connecting, |dot| {
                                         dot.shadow(vec![gpui::BoxShadow {
+                                            inset: false,
                                             color: rgba((status_color << 8) | 0x66).into(),
                                             offset: point(px(0.0), px(0.0)),
                                             blur_radius: px(8.0),

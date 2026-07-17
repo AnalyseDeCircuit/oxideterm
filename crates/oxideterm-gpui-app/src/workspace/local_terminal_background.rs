@@ -190,7 +190,7 @@ impl WorkspaceApp {
         if self.detached_local_terminals.is_empty() {
             self.detached_local_terminals_popover_open = false;
         }
-        pane.read(cx).focus(window);
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window);
         self.push_command_palette_toast(
             self.i18n.t("local_shell.toast.attached"),

@@ -87,7 +87,7 @@ jobs:
 
       # CI builds the same bundled Linux agent binaries that release packages ship.
       - name: Build bundled remote agents
-        run: ./scripts/build-agent.sh
+        run: ./scripts/build/build-agent.sh
 
   i18n:
     name: i18n completeness
@@ -102,7 +102,7 @@ jobs:
           python-version: '3.12'
 
       - name: Audit native locale catalogs
-        run: python scripts/audit_i18n.py
+        run: python scripts/quality/audit_i18n.py
 
       - name: Test native packaging helpers
         run: python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package scripts.tests.test_compose_release_notes

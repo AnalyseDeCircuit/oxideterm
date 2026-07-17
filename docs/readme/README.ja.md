@@ -232,8 +232,8 @@ trzsz は引き続き terminal stream を使い、追加 port や remote agent �
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
-./scripts/build-cli.sh
-./scripts/build-agent.sh
+./scripts/build/build-cli.sh
+./scripts/build/build-agent.sh
 ```
 
 ## CLI

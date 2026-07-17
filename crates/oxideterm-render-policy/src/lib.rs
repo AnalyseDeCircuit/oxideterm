@@ -17,6 +17,8 @@ pub enum RenderProfile {
 pub enum GraphicsKind {
     HardwareGpu,
     IntegratedGpu,
+    /// A paravirtualized GPU should preserve acceleration while avoiding expensive effects.
+    VirtualGpu,
     SoftwareEmulated,
     UnknownHardware,
     Unsupported,
@@ -47,6 +49,19 @@ impl DetectedGraphics {
     ) -> Self {
         Self {
             kind: GraphicsKind::SoftwareEmulated,
+            device_name: device_name.into(),
+            driver_name: driver_name.into(),
+            driver_info: driver_info.into(),
+        }
+    }
+
+    pub fn virtual_gpu(
+        device_name: impl Into<String>,
+        driver_name: impl Into<String>,
+        driver_info: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: GraphicsKind::VirtualGpu,
             device_name: device_name.into(),
             driver_name: driver_name.into(),
             driver_info: driver_info.into(),
@@ -191,6 +206,7 @@ pub fn compute_render_policy(
             GraphicsKind::SoftwareEmulated | GraphicsKind::Unsupported => {
                 EffectiveRenderPolicy::compatibility()
             }
+            GraphicsKind::VirtualGpu => EffectiveRenderPolicy::low_power(),
             GraphicsKind::HardwareGpu
             | GraphicsKind::IntegratedGpu
             | GraphicsKind::UnknownHardware => EffectiveRenderPolicy::quality(),
@@ -231,6 +247,15 @@ mod tests {
             compute_render_policy(RenderProfile::Auto, &DetectedGraphics::unknown_hardware())
                 .profile,
             EffectiveRenderProfile::Quality
+        );
+    }
+
+    #[test]
+    fn auto_virtual_gpu_uses_low_power() {
+        let detected = DetectedGraphics::virtual_gpu("VMware SVGA 3D", "Mesa", "virtual");
+        assert_eq!(
+            compute_render_policy(RenderProfile::Auto, &detected).profile,
+            EffectiveRenderProfile::LowPower
         );
     }
 

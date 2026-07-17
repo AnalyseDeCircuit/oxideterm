@@ -208,7 +208,7 @@ impl WorkspaceApp {
             self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
             self.bind_terminal_location(tab_id, pane_id, session_id);
             self.needs_active_pane_focus = true;
-            pane.read(cx).focus(window);
+            pane.update(cx, |pane, cx| pane.focus(window, cx));
             cx.notify();
         } else {
             let _ = pane.update(cx, |pane, _cx| pane.shutdown());
@@ -454,7 +454,7 @@ impl WorkspaceApp {
                                     tab.active_pane_id = Some(pane_id);
                                 }
                                 if let Some(pane) = this.panes.get(&pane_id).cloned() {
-                                    pane.read(cx).focus(window);
+                                    pane.update(cx, |pane, cx| pane.focus(window, cx));
                                 }
                                 cx.notify();
                             }
@@ -475,6 +475,7 @@ impl WorkspaceApp {
                     .when(active && has_split_panes, |pane_frame| {
                         let accent = self.tokens.ui.accent;
                         let active_shadow = vec![gpui::BoxShadow {
+                            inset: false,
                             color: gpui::Hsla::from(rgba((accent << 8) | ACTIVE_PANE_SHADOW_ALPHA)),
                             offset: gpui::point(px(0.0), px(0.0)),
                             blur_radius: px(ACTIVE_PANE_SHADOW_BLUR),

@@ -296,7 +296,7 @@ impl WorkspaceApp {
                                                 }
                                                 this.terminal_command_bar_focused = false;
                                                 this.ime_marked_text = None;
-                                                window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
@@ -404,7 +404,7 @@ impl WorkspaceApp {
                                                                 this.terminal_command_bar_focused =
                                                                     false;
                                                                 this.ime_marked_text = None;
-                                                                window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                                                                 this.begin_ime_selection_from_mouse_down(search_target, event, window, cx);
                                                                 cx.stop_propagation();
                                                             },

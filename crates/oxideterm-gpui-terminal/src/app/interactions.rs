@@ -2,7 +2,7 @@ use std::{env, sync::Arc, time::Duration};
 
 use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, Modifiers, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, ScrollWheelEvent, Timer, TouchPhase, px,
+    MouseMoveEvent, MouseUpEvent, Pixels, ScrollWheelEvent, TouchPhase, px,
 };
 use oxideterm_terminal::{TermMode, TerminalRow, TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row;
@@ -412,7 +412,9 @@ impl TerminalPane {
         self.copy_on_select_generation = self.copy_on_select_generation.wrapping_add(1);
         let generation = self.copy_on_select_generation;
         cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(120)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(120))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.copy_on_select_generation != generation || !this.settings.copy_on_select {
                     return;
@@ -638,10 +640,11 @@ impl TerminalPane {
         // leaves the viewport; GPUI needs an explicit scroll tick for that.
         self.selection_autoscroll_scheduled = true;
         cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(
-                TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS,
-            ))
-            .await;
+            cx.background_executor()
+                .timer(Duration::from_millis(
+                    TERMINAL_SELECTION_AUTOSCROLL_INTERVAL_MS,
+                ))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 this.selection_autoscroll_scheduled = false;
                 this.run_selection_autoscroll_tick(cx);

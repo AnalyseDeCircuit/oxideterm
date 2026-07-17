@@ -9,6 +9,11 @@ use oxideterm_theme::UiMetrics;
 
 const OXIDETERM_APP_ID: &str = "com.oxideterm.app";
 
+/// Constructs the native GPUI application through the vendored platform boundary.
+pub fn application() -> gpui::Application {
+    gpui_platform::application()
+}
+
 pub fn window_options(bounds: Bounds<Pixels>) -> WindowOptions {
     let metrics = UiMetrics::tauri_default();
     WindowOptions {

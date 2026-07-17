@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, Rgba, SharedString, Window,
-    fill, point, px, rgb, rgba, size,
+    App, Bounds, Corners, PathBuilder, Pixels, Point, RenderImage, Rgba, SharedString, TextAlign,
+    Window, fill, point, px, rgb, rgba, size,
 };
 use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
 use unicode_width::UnicodeWidthChar;
@@ -363,7 +363,14 @@ pub(crate) fn paint_text_run(
             std::slice::from_ref(&run.style),
             Some(metrics.cell_width),
         )
-        .paint(position, metrics.line_height, window, cx);
+        .paint(
+            position,
+            metrics.line_height,
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -397,7 +404,14 @@ pub(crate) fn paint_ghost_text_run(
                 &[style],
                 Some(px(segment.cell_stride as f32 * metrics.cell_width_f32())),
             )
-            .paint(position, metrics.line_height, window, cx);
+            .paint(
+                position,
+                metrics.line_height,
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
     }
 }
 

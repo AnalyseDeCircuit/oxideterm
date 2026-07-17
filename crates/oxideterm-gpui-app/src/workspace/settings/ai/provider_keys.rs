@@ -216,7 +216,7 @@ impl WorkspaceApp {
                         this.focus_settings_input(input, String::new(), cx);
                     }
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),

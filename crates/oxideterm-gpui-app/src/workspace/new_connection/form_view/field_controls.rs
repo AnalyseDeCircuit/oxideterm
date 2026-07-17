@@ -368,7 +368,7 @@ impl WorkspaceApp {
                     }
                     this.ime_marked_text = None;
                     this.open_new_connection_select_from_pointer(NewConnectionSelect::Group, cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -444,7 +444,7 @@ impl WorkspaceApp {
                     }
                     this.ime_marked_text = None;
                     this.open_new_connection_select_from_pointer(select_id, cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -503,7 +503,7 @@ impl WorkspaceApp {
                         NewConnectionSelect::JumpSavedConnection,
                         cx,
                     );
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -788,7 +788,7 @@ impl WorkspaceApp {
                     this.close_new_connection_select();
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
@@ -1077,7 +1077,7 @@ impl WorkspaceApp {
                     }
                     this.ime_marked_text = None;
                     this.open_new_connection_select_from_pointer(select_id, cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -2058,7 +2058,7 @@ impl WorkspaceApp {
                         }
                         this.ime_marked_text = None;
                         this.open_new_connection_select_from_pointer(select_id, cx);
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),

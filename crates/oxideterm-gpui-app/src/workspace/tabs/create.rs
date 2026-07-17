@@ -102,7 +102,7 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
-        pane.read(cx).focus(window);
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window);
         cx.notify();
         Ok(())
@@ -142,7 +142,7 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
-        pane.read(cx).focus(window);
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window);
         cx.notify();
         Ok(session_id)
@@ -183,7 +183,7 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
-        pane.read(cx).focus(window);
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window);
         cx.notify();
         Ok(session_id)
@@ -650,7 +650,7 @@ impl WorkspaceApp {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
         self.needs_active_pane_focus = true;
-        pane.read(cx).focus(window);
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window);
         self.persist_session_tree_snapshot();
         // The policy check starts only after the visible terminal has been

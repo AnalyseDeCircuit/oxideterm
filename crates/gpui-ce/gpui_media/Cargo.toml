@@ -1,0 +1,27 @@
+# Modified by OxideTerm to prevent publishing the vendored workspace crate.
+[package]
+name = "gpui_media"
+version = "0.2.2"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "macOS CoreMedia/CoreVideo bindings for gpui-ce (vendored from Zed)."
+
+[lib]
+name = "media"
+path = "src/media.rs"
+doctest = false
+
+[dependencies]
+anyhow = "1.0.86"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "=0.10.0"
+ctor = "1.0.6"
+foreign-types = "0.5"
+metal = "0.33"
+core-video = { version = "0.5.2", features = ["metal"] }
+objc = "0.2"
+
+[build-dependencies]
+bindgen = "0.71"

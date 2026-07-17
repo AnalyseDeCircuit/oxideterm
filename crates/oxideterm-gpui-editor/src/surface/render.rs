@@ -4,7 +4,7 @@
 use std::{collections::BTreeMap, ops::Range};
 
 use gpui::{
-    AnchoredPositionMode, App, Context, Corner, Div, InteractiveElement, IntoElement, MouseButton,
+    Anchor, AnchoredPositionMode, App, Context, Div, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent,
     SharedString, Styled, Window, anchored, deferred, div, prelude::FluentBuilder, px, rgb, rgba,
 };
@@ -89,7 +89,7 @@ impl Render for TextEditorView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.open_context_menu(event.position, cx);
                     cx.stop_propagation();
                 }),
@@ -137,7 +137,7 @@ impl Render for TextEditorView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     if this.context_menu.take().is_some() {
                         cx.notify();
                     }
@@ -255,7 +255,7 @@ impl TextEditorView {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     this.context_menu = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     if let Some(offset) = this.offset_for_window_point(event.position) {
                         if (event.modifiers.secondary() || event.modifiers.control)
                             && !event.modifiers.alt
@@ -286,7 +286,7 @@ impl TextEditorView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     // Match browser editor behavior: opening the context menu
                     // over a selection must not collapse that selection first.
                     this.open_context_menu(event.position, cx);
@@ -563,7 +563,7 @@ impl TextEditorView {
             .child(
                 deferred(
                     anchored()
-                        .anchor(Corner::TopLeft)
+                        .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(popup),

@@ -497,7 +497,7 @@ impl WorkspaceApp {
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 

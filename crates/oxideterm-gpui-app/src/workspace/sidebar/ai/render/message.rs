@@ -458,7 +458,7 @@ impl WorkspaceApp {
                                     edit_content.clone(),
                                     cx,
                                 );
-                                window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                                 cx.stop_propagation();
                             }),
                         ),
@@ -1462,7 +1462,7 @@ impl WorkspaceApp {
                 this.ai.chat.input_focused = false;
                 this.ai.models.selector_search_focused = false;
                 this.ime_marked_text = None;
-                window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                 cx.stop_propagation();
             }),
@@ -1688,7 +1688,7 @@ impl WorkspaceApp {
                             let next_open = !this.ai.chat.menu_open;
                             this.close_ai_sidebar_popovers();
                             this.ai.chat.menu_open = next_open;
-                            window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                             cx.notify();
                         }
                         None => {}

@@ -85,7 +85,7 @@ impl WorkspaceApp {
         self.ai.chat.inline_panel.has_selection = !sanitized_selection.trim().is_empty();
         self.ai.chat.inline_panel.selection_context = sanitized_selection;
 
-        window.focus(&self.focus_handle);
+window.focus(&self.focus_handle, cx);
         self.refresh_terminal_ai_inline_key_status(cx);
         cx.notify();
     }
@@ -270,7 +270,7 @@ impl WorkspaceApp {
                                                 this.ai.chat.inline_panel.prompt_focused = true;
                                                 this.ai.models.selector_search_focused = false;
                                                 this.ime_marked_text = None;
-                                                window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                                                 cx.stop_propagation();
                                             }),

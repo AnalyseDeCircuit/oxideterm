@@ -176,7 +176,7 @@ impl Render for WorkspaceApp {
             self.needs_active_pane_focus = false;
             self.clear_ai_sidebar_keyboard_focus();
             window.on_next_frame(move |window, cx| {
-                pane.read(cx).focus(window);
+                pane.update(cx, |pane, cx| pane.focus(window, cx));
             });
         }
 

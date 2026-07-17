@@ -9,8 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-# Import the release helpers from the parent scripts directory.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Import the release helpers from their responsibility-specific directory.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
 
 import package_native
 
@@ -133,7 +133,9 @@ class ReleaseDocumentTests(unittest.TestCase):
             self.assertEqual(
                 {path.name for path in destination.iterdir()},
                 {
+                    "GPUI-CE-LICENSE-APACHE",
                     "LICENSE",
+                    "MICROSOFT-TERMINAL-LICENSE-MIT",
                     "NOTICE",
                     "README.md",
                     "THIRD_PARTY_NOTICES.md",
@@ -153,7 +155,7 @@ class ReleaseVersionTests(unittest.TestCase):
         package_native.validate_release_version(f"gpui-v{workspace_version}", workspace_version)
 
         mismatched_version = f"{workspace_version}.mismatch"
-        with self.assertRaisesRegex(RuntimeError, "scripts/bump_version.py"):
+        with self.assertRaisesRegex(RuntimeError, "scripts/release/bump_version.py"):
             package_native.validate_release_version(
                 f"v{mismatched_version}", mismatched_version
             )
@@ -295,6 +297,18 @@ class PlatformSigningTests(unittest.TestCase):
 
 
 class LinuxPackagingTests(unittest.TestCase):
+    def test_dynamic_graphics_loaders_are_declared_as_recommendations(self) -> None:
+        # Vulkan and EGL are loaded with dlopen, so ELF dependency discovery
+        # cannot add these runtime packages automatically.
+        self.assertEqual(
+            package_native.linux_deb_graphics_recommends(),
+            "libegl1, libvulkan1",
+        )
+        self.assertEqual(
+            package_native.linux_rpm_graphics_recommends(),
+            "Recommends: libglvnd-egl\nRecommends: vulkan-loader",
+        )
+
     def test_rpm_arch_and_prerelease_version_are_normalized(self) -> None:
         self.assertEqual(
             package_native.linux_rpm_arch("aarch64-unknown-linux-gnu"),
@@ -359,7 +373,9 @@ class LinuxPackagingTests(unittest.TestCase):
 
             release_documents = []
             for name in (
+                "GPUI-CE-LICENSE-APACHE",
                 "LICENSE",
+                "MICROSOFT-TERMINAL-LICENSE-MIT",
                 "NOTICE",
                 "README.md",
                 "THIRD_PARTY_NOTICES.md",
@@ -403,6 +419,12 @@ class LinuxPackagingTests(unittest.TestCase):
                 "/opt/oxideterm/resources/agents/aarch64-unknown-linux-musl/oxideterm-agent",
                 package_listing,
             )
+            recommendations = subprocess.check_output(
+                ["rpm", "-qp", "--recommends", str(artifact)],
+                text=True,
+            )
+            for package_name in package_native.LINUX_RPM_GRAPHICS_RECOMMENDS:
+                self.assertIn(package_name, recommendations)
 
     def test_dpkg_shlibdeps_output_requires_dependency_expression(self) -> None:
         dependencies = package_native.parse_dpkg_shlibdeps_output(

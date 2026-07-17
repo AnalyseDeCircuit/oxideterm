@@ -8,8 +8,8 @@ import tempfile
 import unittest
 import zipfile
 
-# Import the release helpers from the parent scripts directory.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Import the release helpers from their responsibility-specific directory.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
 
 import verify_native_package
 
@@ -109,6 +109,23 @@ class PortableArchiveTests(unittest.TestCase):
                     path, "x86_64-pc-windows-msvc", "2.0.0"
                 )
 
+
+class LinuxMetadataTests(unittest.TestCase):
+    def test_dynamic_graphics_loader_recommendations_are_required(self) -> None:
+        verify_native_package.require_metadata_values(
+            "libegl1, libvulkan1",
+            verify_native_package.LINUX_DEB_GRAPHICS_RECOMMENDS,
+            Path("OxideTerm.deb"),
+            "Recommends field",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "libvulkan1"):
+            verify_native_package.require_metadata_values(
+                "libegl1, notlibvulkan1",
+                verify_native_package.LINUX_DEB_GRAPHICS_RECOMMENDS,
+                Path("OxideTerm.deb"),
+                "Recommends field",
+            )
 
 if __name__ == "__main__":
     unittest.main()

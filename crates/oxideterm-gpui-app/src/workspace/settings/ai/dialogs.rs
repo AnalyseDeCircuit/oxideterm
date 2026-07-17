@@ -199,7 +199,7 @@ impl WorkspaceApp {
         let focus_handle = editor.read(cx).focus_handle(cx);
         self.ai_text_editor_dialog = Some(dialog);
         self.ai_text_editor = Some(editor);
-        window.focus(&focus_handle);
+        window.focus(&focus_handle, cx);
         cx.notify();
     }
 

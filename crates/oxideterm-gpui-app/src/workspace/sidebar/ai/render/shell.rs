@@ -599,7 +599,7 @@ impl WorkspaceApp {
                     this.ai.chat.draft = prompt.clone();
                     this.ai.chat.input_focused = true;
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),

@@ -484,7 +484,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.ime_marked_text = None;
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
@@ -1027,7 +1027,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.ime_marked_text = None;
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
