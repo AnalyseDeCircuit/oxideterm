@@ -41,7 +41,7 @@ impl WorkspaceApp {
             self.ai.chat.input_focused = false;
             self.ai.chat.inline_panel.prompt_focused = false;
             self.refresh_ai_model_selector_provider_statuses(cx);
-            window.focus(&self.focus_handle);
+window.focus(&self.focus_handle, cx);
         } else {
             self.close_ai_model_selector();
         }

@@ -873,7 +873,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
                         this.file_manager.focused_dialog_footer_action = None;
                         this.ime_marked_text = None;
@@ -942,7 +942,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.file_manager.focused_input = Some(FileManagerInput::DialogValue);
                         this.ime_marked_text = None;
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);

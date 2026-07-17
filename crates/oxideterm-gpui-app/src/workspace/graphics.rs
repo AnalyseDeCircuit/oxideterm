@@ -203,7 +203,7 @@ impl WorkspaceApp {
         self.needs_active_pane_focus = false;
         self.start_graphics_load_if_needed(false);
         self.load_graphics_sessions();
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
         cx.notify();
     }
@@ -943,7 +943,7 @@ impl WorkspaceApp {
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         this.graphics.focused_input = Some(GraphicsInput::AppCommand);
                         this.new_connection_caret_visible = true;
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     }),
                 )

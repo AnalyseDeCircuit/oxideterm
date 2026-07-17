@@ -137,7 +137,7 @@ impl WorkspaceApp {
             cx.notify();
         });
         let focus_handle = editor.read(cx).focus_handle(cx);
-        window.focus(&focus_handle);
+        window.focus(&focus_handle, cx);
 
         self.sftp_view.preview_editor = Some(editor);
         self.sftp_view.preview_editor_observer = Some(observer);

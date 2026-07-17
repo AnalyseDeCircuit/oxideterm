@@ -47,7 +47,7 @@ impl WorkspaceApp {
                 self.terminal_command_bar_draft = command;
                 self.terminal_command_bar_focused = true;
                 self.ime_marked_text = None;
-                window.focus(&self.focus_handle);
+                window.focus(&self.focus_handle, cx);
                 cx.notify();
                 true
             }

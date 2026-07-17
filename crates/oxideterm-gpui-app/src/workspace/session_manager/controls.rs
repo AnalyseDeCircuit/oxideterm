@@ -249,7 +249,7 @@ impl WorkspaceApp {
                         this.session_manager.focused_input = Some(target);
                         this.ime_marked_text = None;
                         this.needs_active_pane_focus = false;
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.begin_ime_selection_from_mouse_down(
                             WorkspaceImeTarget::SessionManager(target),
                             event,

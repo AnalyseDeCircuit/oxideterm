@@ -175,7 +175,7 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
         self.persist_sidebar_settings();
         cx.notify();
@@ -1144,7 +1144,7 @@ impl WorkspaceApp {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),

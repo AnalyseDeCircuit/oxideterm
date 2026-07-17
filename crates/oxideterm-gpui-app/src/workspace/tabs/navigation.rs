@@ -282,7 +282,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &App) {
+    pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
         self.clear_ai_sidebar_keyboard_focus();
         if self.terminal_command_bar_focused {
             // Focusing the pane must also release Workspace's synthetic command
@@ -294,9 +294,9 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
         }
         if let Some(pane) = self.active_pane() {
-            pane.read(cx).focus(window);
+            pane.update(cx, |pane, cx| pane.focus(window, cx));
         } else {
-            window.focus(&self.focus_handle);
+            window.focus(&self.focus_handle, cx);
         }
     }
 
@@ -1175,7 +1175,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn tabbar_max_scroll(&self, window: &Window) -> f32 {
         let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
         if measured_width > 1.0 {
-            return f32::from(self.main_window_tabs.scroll_handle.max_offset().width);
+            return f32::from(self.main_window_tabs.scroll_handle.max_offset().x);
         }
         (self.tabbar_content_width() - self.tabbar_scroll_viewport_width(window)).max(0.0)
     }

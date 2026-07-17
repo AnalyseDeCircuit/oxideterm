@@ -1,0 +1,116 @@
+schema_version = 2
+upstream_repository = "https://github.com/gpui-ce/gpui-ce.git"
+upstream_commit = "6c799b8e994266233014cea66d7769675ec1967c"
+upstream_license = "Apache-2.0"
+upstream_root_license = "crates/gpui-ce/gpui/GPUI_CE_ROOT_LICENSE.md"
+packaged_license = "licenses/third-party/GPUI-CE-LICENSE-APACHE"
+imported_on = "2026-07-17"
+oxideterm_baseline_commit = "7c2c5046c93ae4d54a132d40c33d0c622274354a"
+oxideterm_cargo_lock_sha256 = "1ef7aae94815e974fe39d4ac7d5ea5025b7588fa2002e7992a9f50af634eb6fa"
+oxideterm_rust_toolchain = "1.94.1"
+oxideterm_cargo_resolver = "2"
+local_patch_ledger = "crates/gpui-ce/gpui/OXIDETERM_PATCHES.md"
+
+[[crates]]
+name = "gpui"
+upstream_path = "crates/gpui"
+local_path = "crates/gpui-ce/gpui"
+upstream_tree = "1afc44f32dc650bb7d013894b52ae1dbe49d3eed"
+
+[[crates]]
+name = "gpui_ce_util"
+upstream_path = "crates/gpui_ce_util"
+local_path = "crates/gpui-ce/gpui_ce_util"
+upstream_tree = "3675425365546cfbd0b089a93fe2de7267e85c77"
+
+[[crates]]
+name = "gpui_collections"
+upstream_path = "crates/gpui_collections"
+local_path = "crates/gpui-ce/gpui_collections"
+upstream_tree = "ef8637ab096b5955715ca3b0a45d2a1db3501fbe"
+
+[[crates]]
+name = "gpui_derive_refineable"
+upstream_path = "crates/gpui_derive_refineable"
+local_path = "crates/gpui-ce/gpui_derive_refineable"
+upstream_tree = "5c82e7afb96ed53f6806aef26957547096f4f290"
+
+[[crates]]
+name = "gpui_linux"
+upstream_path = "crates/gpui_linux"
+local_path = "crates/gpui-ce/gpui_linux"
+upstream_tree = "c380dc0b71aeb80cfe1593aaf01ff8de26b752b0"
+
+[[crates]]
+name = "gpui_macos"
+upstream_path = "crates/gpui_macos"
+local_path = "crates/gpui-ce/gpui_macos"
+upstream_tree = "e1870c5d8b8fd2fc98997a337a01e94fd45ae885"
+
+[[crates]]
+name = "gpui_macros"
+upstream_path = "crates/gpui_macros"
+local_path = "crates/gpui-ce/gpui_macros"
+upstream_tree = "0e1cfd79ef7a4d9c7adc53564d4ef985f1836df3"
+
+[[crates]]
+name = "gpui_media"
+upstream_path = "crates/gpui_media"
+local_path = "crates/gpui-ce/gpui_media"
+upstream_tree = "5507916c525ab624e3377bf0df729743cd755a81"
+
+[[crates]]
+name = "gpui_platform"
+upstream_path = "crates/gpui_platform"
+local_path = "crates/gpui-ce/gpui_platform"
+upstream_tree = "169597cd560a13f9548d5799e5eb4f4df998571c"
+
+[[crates]]
+name = "gpui_refineable"
+upstream_path = "crates/gpui_refineable"
+local_path = "crates/gpui-ce/gpui_refineable"
+upstream_tree = "0f208d2ca4c89c184e0ddab416575d9c1b5d0409"
+
+[[crates]]
+name = "gpui_scheduler"
+upstream_path = "crates/gpui_scheduler"
+local_path = "crates/gpui-ce/gpui_scheduler"
+upstream_tree = "7082f4dfcf398b9ab6566c68308a78e34b8172d6"
+
+[[crates]]
+name = "gpui_shared_string"
+upstream_path = "crates/gpui_shared_string"
+local_path = "crates/gpui-ce/gpui_shared_string"
+upstream_tree = "1d7d7f6ff518cb00d8d2313563aaf312f96860b5"
+
+[[crates]]
+name = "gpui_sum_tree"
+upstream_path = "crates/gpui_sum_tree"
+local_path = "crates/gpui-ce/gpui_sum_tree"
+upstream_tree = "013dea39b60df5a6dce0a85d58d18468f1e49b2b"
+
+[[crates]]
+name = "gpui_wgpu"
+upstream_path = "crates/gpui_wgpu"
+local_path = "crates/gpui-ce/gpui_wgpu"
+upstream_tree = "2a9625d5baaebc7b2423ea346634221689dc8035"
+
+[[crates]]
+name = "gpui_windows"
+upstream_path = "crates/gpui_windows"
+local_path = "crates/gpui-ce/gpui_windows"
+upstream_tree = "4a45c2e350600759d3897cf3458448d84e7dfb68"
+
+[[crates]]
+name = "gpui_zed_util"
+upstream_path = "crates/gpui_zed_util"
+local_path = "crates/gpui-ce/gpui_zed_util"
+upstream_tree = "f62661a0b62cc99fae522de27c4570883c721645"
+
+[excluded]
+paths = [
+  "crates/gpui_elements",
+  "crates/gpui_tokio",
+  "crates/gpui_web",
+  "tooling/perf",
+]

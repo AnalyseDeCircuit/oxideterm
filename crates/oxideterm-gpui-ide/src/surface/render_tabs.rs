@@ -274,7 +274,7 @@ impl IdeSurface {
             .child(
                 deferred(
                     anchored()
-                        .anchor(Corner::TopLeft)
+                        .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(popup),
@@ -541,7 +541,7 @@ impl IdeSurface {
             .child(
                 deferred(
                     anchored()
-                        .anchor(Corner::TopLeft)
+                        .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(popup),

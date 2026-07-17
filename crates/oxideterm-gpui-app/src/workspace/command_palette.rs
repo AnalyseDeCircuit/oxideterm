@@ -392,7 +392,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
                     }),
@@ -783,7 +783,7 @@ impl WorkspaceApp {
         self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
@@ -808,7 +808,7 @@ impl WorkspaceApp {
                     self.close_new_connection_select();
                     self.new_connection_caret_visible = true;
                     self.needs_active_pane_focus = false;
-                    window.focus(&self.focus_handle);
+                    window.focus(&self.focus_handle, cx);
                 }
                 Err(error) => self.command_palette.error = Some(error.to_string()),
             },
@@ -1339,7 +1339,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     this.close_command_palette(cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -1347,7 +1347,7 @@ impl WorkspaceApp {
                 MouseButton::Right,
                 cx.listener(|this, _event, window, cx| {
                     this.close_command_palette(cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -1605,7 +1605,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     this.close_shortcuts_modal(cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -1613,7 +1613,7 @@ impl WorkspaceApp {
                 MouseButton::Right,
                 cx.listener(|this, _event, window, cx| {
                     this.close_shortcuts_modal(cx);
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                 }),
             )

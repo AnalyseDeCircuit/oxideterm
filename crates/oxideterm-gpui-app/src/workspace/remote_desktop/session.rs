@@ -162,7 +162,7 @@ impl WorkspaceApp {
         if let Some(tab_id) = self.active_remote_desktop_tab_id() {
             self.sync_remote_desktop_lock_keys(tab_id, window.capslock());
         }
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         if changed {
             cx.notify();
         }

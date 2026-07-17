@@ -168,6 +168,7 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     })
                     .shadow(vec![gpui::BoxShadow {
+                        inset: false,
                         color: gpui::Hsla::from(rgba(SFTP_DIALOG_SHADOW_ALPHA)),
                         offset: gpui::point(px(0.0), px(16.0)),
                         blur_radius: px(32.0),

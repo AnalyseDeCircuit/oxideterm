@@ -224,8 +224,8 @@ fn paint_remote_desktop_surface(
     let mut upload_bytes = 0usize;
     let mut upload_pixels = 0u64;
     let mut largest_upload_pixels = 0u64;
-    let mut uploaded_sequence_ids = Vec::new();
-    for update in surface.pending_texture_uploads() {
+    let renderer_resource_generation = window.renderer_resource_generation();
+    for update in surface.pending_texture_uploads(renderer_resource_generation) {
         let rect_pixels =
             u64::from(update.rect.width).saturating_mul(u64::from(update.rect.height));
         let rect_bytes = update.bytes.len();
@@ -247,11 +247,8 @@ fn paint_remote_desktop_surface(
             upload_bytes = upload_bytes.saturating_add(rect_bytes);
             upload_pixels = upload_pixels.saturating_add(rect_pixels);
             largest_upload_pixels = largest_upload_pixels.max(rect_pixels);
-            uploaded_sequence_ids.extend(update.sequence_ids);
+            surface.acknowledge_texture_upload(&update);
         }
-    }
-    if !uploaded_sequence_ids.is_empty() {
-        surface.acknowledge_texture_uploads(uploaded_sequence_ids);
     }
     if let Some(upload_started_at) = upload_started_at
         && upload_count > 0

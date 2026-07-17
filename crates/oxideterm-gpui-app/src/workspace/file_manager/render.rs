@@ -37,7 +37,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.dismiss_file_manager_context_menu();
                     if this.file_manager.dialog.is_none() {
                         this.blur_file_manager_inline_inputs();
@@ -850,8 +850,8 @@ impl WorkspaceApp {
             ))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, window, _cx| {
-                    window.focus(&this.focus_handle);
+                cx.listener(|this, _event, window, cx| {
+                    window.focus(&this.focus_handle, cx);
                 }),
             )
             .into_any_element()
@@ -922,7 +922,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     if editing || event.click_count >= 2 {
                         this.start_file_manager_path_edit();
                     } else {
@@ -1070,7 +1070,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.file_manager.focused_input = Some(input);
                     this.dismiss_file_manager_context_menu();
                     this.ime_marked_text = None;
@@ -1246,7 +1246,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.file_manager.focused_input = Some(FileManagerInput::Filter);
                         this.dismiss_file_manager_context_menu();
                         this.ime_marked_text = None;
@@ -1456,7 +1456,7 @@ impl WorkspaceApp {
                                     let visible = list_items.clone();
                                     move |event: &MouseDownEvent, window, cx| {
                                         let _ = workspace.update(cx, |this, cx| {
-                                            window.focus(&this.focus_handle);
+                                            window.focus(&this.focus_handle, cx);
                                             this.dismiss_file_manager_context_menu();
                                             this.blur_file_manager_inline_inputs();
                                             if event.click_count >= 2 {
@@ -1481,7 +1481,7 @@ impl WorkspaceApp {
                                     let visible = list_items.clone();
                                     move |event: &MouseDownEvent, window, cx| {
                                         let _ = workspace.update(cx, |this, cx| {
-                                            window.focus(&this.focus_handle);
+                                            window.focus(&this.focus_handle, cx);
                                             this.open_file_manager_context_menu(
                                                 Some(visible[index].clone()),
                                                 f32::from(event.position.x),
@@ -1516,7 +1516,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.dismiss_file_manager_context_menu();
                     this.blur_file_manager_inline_inputs();
                     this.clear_file_manager_selection();
@@ -1526,7 +1526,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.open_file_manager_context_menu(
                         None,
                         f32::from(event.position.x),

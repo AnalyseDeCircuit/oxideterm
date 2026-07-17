@@ -13,8 +13,8 @@ use std::{
 use anyhow::Result;
 use chrono::Timelike;
 use gpui::{
-    Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, PathPromptOptions, Pixels, Point,
-    SharedString, Subscription, Timer, Window, px,
+    App, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, PathPromptOptions, Pixels,
+    Point, SharedString, Subscription, Window, px,
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
@@ -534,7 +534,7 @@ impl TerminalPane {
         );
         let focus_handle = cx.focus_handle();
         let metrics = TerminalMetrics::measure_with_preferences(window, &preferences);
-        window.focus(&focus_handle);
+        window.focus(&focus_handle, cx);
         terminal.lock().set_focused(true)?;
         let trzsz_owner_id = format!(
             "gpui-terminal-{}",
@@ -551,7 +551,7 @@ impl TerminalPane {
         cx.spawn(async move |weak, cx| {
             let mut poll_interval = ACTIVE_TERMINAL_POLL_INTERVAL;
             loop {
-                Timer::after(poll_interval).await;
+                cx.background_executor().timer(poll_interval).await;
                 let Ok(next_poll_interval) = weak.update(cx, |this, cx| {
                     this.tick(cx);
                     this.next_poll_interval()
@@ -940,8 +940,8 @@ impl TerminalPane {
         cx.notify();
     }
 
-    pub fn focus(&self, window: &mut Window) {
-        window.focus(&self.focus_handle);
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus_handle, cx);
     }
 
     pub fn shutdown(&mut self) {
@@ -1659,7 +1659,9 @@ impl TerminalPane {
             TerminalEvent::Bell => {
                 self.bell_flash = true;
                 cx.spawn(async move |weak, cx| {
-                    Timer::after(Duration::from_millis(180)).await;
+                    cx.background_executor()
+                        .timer(Duration::from_millis(180))
+                        .await;
                     let _ = weak.update(cx, |this, cx| {
                         this.bell_flash = false;
                         cx.notify();
@@ -2095,7 +2097,7 @@ impl TerminalPane {
         self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
         let generation = self.pty_resize_generation;
         cx.spawn(async move |weak, cx| {
-            Timer::after(PTY_RESIZE_DEBOUNCE).await;
+            cx.background_executor().timer(PTY_RESIZE_DEBOUNCE).await;
             let _ = weak.update(cx, |view, cx| {
                 view.flush_pending_pty_resize(generation, cx);
             });

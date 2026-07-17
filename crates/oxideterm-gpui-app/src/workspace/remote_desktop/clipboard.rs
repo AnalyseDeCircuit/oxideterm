@@ -42,6 +42,8 @@ pub(super) fn remote_desktop_clipboard_format_from_gpui(
         ImageFormat::Svg => RemoteDesktopClipboardFormat::ImageSvg,
         ImageFormat::Bmp => RemoteDesktopClipboardFormat::ImageBmp,
         ImageFormat::Tiff => RemoteDesktopClipboardFormat::ImageTiff,
+        // The remote-desktop protocol model does not currently advertise ICO or Netpbm.
+        ImageFormat::Ico | ImageFormat::Pnm => return None,
     })
 }
 

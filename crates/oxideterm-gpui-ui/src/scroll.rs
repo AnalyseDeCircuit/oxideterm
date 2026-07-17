@@ -69,13 +69,13 @@ impl ScrollbarDragState {
         let (viewport_length, maximum, pointer_position, track_start) = match self.axis {
             ScrollbarAxis::Vertical => (
                 f32::from(bounds.size.height),
-                f32::from(max_offset.height),
+                f32::from(max_offset.y),
                 f32::from(pointer.y),
                 f32::from(bounds.top()),
             ),
             ScrollbarAxis::Horizontal => (
                 f32::from(bounds.size.width),
-                f32::from(max_offset.width),
+                f32::from(max_offset.x),
                 f32::from(pointer.x),
                 f32::from(bounds.left()),
             ),
@@ -325,7 +325,7 @@ fn render_vertical_scrollbar(
 ) -> AnyElement {
     let bounds = scroll_handle.bounds();
     let viewport_height = f32::from(bounds.size.height);
-    let max_offset_y = f32::from(scroll_handle.max_offset().height);
+    let max_offset_y = f32::from(scroll_handle.max_offset().y);
     let scroll_position =
         scroll_position_from_handle_offset(f32::from(scroll_handle.offset().y), max_offset_y);
     let Some(geometry) = scrollbar_geometry(viewport_height, max_offset_y, scroll_position) else {
@@ -375,7 +375,7 @@ fn render_horizontal_scrollbar(
 ) -> AnyElement {
     let bounds = scroll_handle.bounds();
     let viewport_width = f32::from(bounds.size.width);
-    let max_offset_x = f32::from(scroll_handle.max_offset().width);
+    let max_offset_x = f32::from(scroll_handle.max_offset().x);
     let scroll_position =
         scroll_position_from_handle_offset(f32::from(scroll_handle.offset().x), max_offset_x);
     let Some(geometry) = scrollbar_geometry(viewport_width, max_offset_x, scroll_position) else {

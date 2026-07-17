@@ -221,7 +221,7 @@ impl WorkspaceApp {
     ) -> bool {
         let bounds = handle.bounds();
         let max_offset = handle.max_offset();
-        if max_offset.height <= px(0.0)
+        if max_offset.y <= px(0.0)
             || bounds.size.height <= px(1.0)
             || bounds.size.width <= px(1.0)
             || position.x < bounds.left()
@@ -236,7 +236,7 @@ impl WorkspaceApp {
             return false;
         };
         let offset = handle.offset();
-        let next_y = (offset.y - px(step)).clamp(-max_offset.height, px(0.0));
+        let next_y = (offset.y - px(step)).clamp(-max_offset.y, px(0.0));
         if next_y == offset.y {
             return false;
         }
@@ -422,7 +422,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.blur_text_inputs(cx);
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.begin_ime_selection_from_mouse_down(
             WorkspaceImeTarget::ReadOnlyText(group_id),
             event,
@@ -522,7 +522,7 @@ impl WorkspaceApp {
                         this.selectable_text_values
                             .insert(id, value_for_mouse.clone());
                         this.blur_text_inputs(cx);
-                        window.focus(&this.focus_handle);
+                        window.focus(&this.focus_handle, cx);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();
                     }),
@@ -665,7 +665,7 @@ impl WorkspaceApp {
                                     .entry(fragment_id)
                                     .and_modify(|fragment| fragment.text = value_for_mouse.clone());
                                 this.blur_text_inputs(cx);
-                                window.focus(&this.focus_handle);
+                                window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                                 if selectable_text_should_stop_propagation(role) {
                                     cx.stop_propagation();

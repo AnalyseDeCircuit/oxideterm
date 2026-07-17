@@ -170,7 +170,7 @@ impl WorkspaceApp {
     ) {
         let current = self.app_lock_input_value(input).to_string();
         self.focus_settings_input(input, current, cx);
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
     }
 
     pub(in crate::workspace) fn app_lock_input_value(&self, input: SettingsInput) -> &str {

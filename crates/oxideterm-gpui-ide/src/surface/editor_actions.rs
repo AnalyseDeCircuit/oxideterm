@@ -388,7 +388,9 @@ impl IdeSurface {
     fn schedule_agent_watch_retry(&mut self, cx: &mut Context<Self>) {
         let generation = self.agent_watch_generation;
         cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_secs(IDE_AGENT_WATCH_RETRY_SECS)).await;
+            cx.background_executor()
+                .timer(Duration::from_secs(IDE_AGENT_WATCH_RETRY_SECS))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.agent_watch_generation == generation {
                     this.watched_root_path = None;
@@ -445,7 +447,9 @@ impl IdeSurface {
         self.search.generation = self.search.generation.wrapping_add(1);
         let generation = self.search.generation;
         cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(IDE_SEARCH_DEBOUNCE_MS)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(IDE_SEARCH_DEBOUNCE_MS))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.search.generation == generation && this.search.query == query {
                     this.run_project_search(cx);

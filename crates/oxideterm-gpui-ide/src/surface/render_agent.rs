@@ -259,7 +259,7 @@ impl IdeSurface {
             .child(
                 deferred(
                     anchored()
-                        .anchor(Corner::TopLeft)
+                        .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(popup),
@@ -840,7 +840,7 @@ impl IdeSurface {
         let generation = self.agent_poll_generation;
         let delay = self.agent_poll_delay();
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |this, cx| {
                 if this.agent_poll_generation != generation {
                     return;

@@ -19,7 +19,7 @@ impl Render for IdeSurface {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     let closed_tab_menu = this.tab_context_menu.take().is_some();
                     let closed_tree_menu = this.tree_context_menu.take().is_some();
                     let closed_agent_menu = this.agent_status_menu.take().is_some();

@@ -6,6 +6,8 @@ version.workspace = true
 
 [dependencies]
 gpui.workspace = true
+# GPUI-CE otherwise installs a no-op text system on macOS.
+gpui_platform = { workspace = true, features = ["font-kit"] }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 

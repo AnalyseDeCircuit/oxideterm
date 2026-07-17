@@ -268,10 +268,10 @@ OXIDETERM_RENDER_PROFILE=compatibility cargo run
 
 ```sh
 # Build the headless CLI companion
-./scripts/build-cli.sh
+./scripts/build/build-cli.sh
 
 # Build the optional Linux remote agent
-./scripts/build-agent.sh
+./scripts/build/build-agent.sh
 ```
 
 CLI artifacts land in `crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm`.

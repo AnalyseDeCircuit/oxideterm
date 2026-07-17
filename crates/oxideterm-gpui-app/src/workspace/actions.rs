@@ -238,7 +238,7 @@ impl WorkspaceApp {
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
         self.close_terminal_quick_commands_popover();
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         if let Some(pane) = self.active_pane() {
             let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
             let selected_match = query
@@ -2256,7 +2256,7 @@ impl WorkspaceApp {
                                 cx.listener(|this, event, window, cx| {
                                     this.terminal_command_bar_focused = false;
                                     this.ime_marked_text = None;
-                                    window.focus(&this.focus_handle);
+                                    window.focus(&this.focus_handle, cx);
                                     this.begin_ime_selection_from_mouse_down(
                                         WorkspaceImeTarget::Search,
                                         event,

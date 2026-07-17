@@ -365,12 +365,14 @@ fn shadows_with_alpha(
             offset: point(px(0.0), px(1.0)),
             blur_radius: px(near_blur),
             spread_radius: px(0.0),
+            inset: false,
         },
         BoxShadow {
             color: Hsla::from(rgba(far_alpha)),
             offset: point(px(0.0), px(4.0)),
             blur_radius: px(far_blur),
             spread_radius: px(0.0),
+            inset: false,
         },
     ]
 }

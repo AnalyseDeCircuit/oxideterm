@@ -15,7 +15,7 @@ mod workspace;
 
 use std::path::PathBuf;
 
-use gpui::{App, AppContext, Application, Bounds, actions, px, size};
+use gpui::{App, AppContext, Bounds, actions, px, size};
 use oxideterm_i18n::I18n;
 use oxideterm_settings::SettingsStore;
 
@@ -152,7 +152,7 @@ fn main() {
         }
     };
 
-    let application = Application::new().with_assets(NativeAssets);
+    let application = oxideterm_gpui_platform::application().with_assets(NativeAssets);
     let reopen_single_instance_rx = single_instance_rx.clone();
     application.on_reopen(move |cx| {
         if !cx.windows().is_empty() {

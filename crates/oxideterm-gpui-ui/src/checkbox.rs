@@ -103,12 +103,14 @@ fn checkbox_focus_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {
             offset: zero,
             blur_radius: px(0.0),
             spread_radius: px(CHECKBOX_FOCUS_RING_OFFSET),
+            inset: false,
         },
         BoxShadow {
             color: gpui::Hsla::from(rgba((tokens.ui.accent << 8) | CHECKBOX_FOCUS_RING_ALPHA)),
             offset: zero,
             blur_radius: px(0.0),
             spread_radius: px(CHECKBOX_FOCUS_RING_OFFSET + CHECKBOX_FOCUS_RING_WIDTH),
+            inset: false,
         },
     ]
 }

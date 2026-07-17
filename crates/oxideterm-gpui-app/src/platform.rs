@@ -15,6 +15,7 @@ use crate::{
 pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
     vec![
         Menu {
+            disabled: false,
             name: i18n.t("menu.app").into(),
             items: vec![
                 MenuItem::os_submenu(i18n.t("menu.services"), SystemMenuType::Services),
@@ -27,6 +28,7 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             ],
         },
         Menu {
+            disabled: false,
             name: i18n.t("menu.edit").into(),
             items: vec![
                 MenuItem::action(i18n.t("menu.copy"), Copy),
@@ -38,6 +40,7 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             ],
         },
         Menu {
+            disabled: false,
             name: i18n.t("menu.terminal").into(),
             items: vec![
                 MenuItem::action(i18n.t("command_palette.cmd_new_terminal"), NewTerminal),
@@ -69,6 +72,7 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             ],
         },
         Menu {
+            disabled: false,
             name: i18n.t("menu.view").into(),
             items: vec![
                 MenuItem::action(i18n.t("command_palette.title"), CommandPalette),
@@ -87,6 +91,7 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             ],
         },
         Menu {
+            disabled: false,
             name: i18n.t("command_palette.cmd_sidebar_connections").into(),
             items: vec![
                 MenuItem::action(
@@ -109,6 +114,7 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             ],
         },
         Menu {
+            disabled: false,
             name: i18n.t("menu.window").into(),
             items: vec![
                 MenuItem::action(i18n.t("menu.close_tab"), CloseTab),

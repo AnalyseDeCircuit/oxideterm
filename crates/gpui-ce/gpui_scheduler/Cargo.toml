@@ -1,0 +1,26 @@
+# Modified by OxideTerm to prevent publishing the vendored workspace crate.
+[package]
+name = "gpui_scheduler"
+version = "0.2.2"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Async task scheduler/executor for gpui-ce (vendored from Zed)."
+
+[lib]
+name = "scheduler"
+path = "src/scheduler.rs"
+doctest = false
+
+[features]
+test-support = []
+
+[dependencies]
+async-task = "4.7"
+backtrace = "0.3.76"
+chrono = { version = "0.4.42", features = ["serde"] }
+flume = "0.11"
+futures = "0.3.32"
+parking_lot = "0.12.5"
+rand = "0.9.4"
+web-time = "1.1.0"

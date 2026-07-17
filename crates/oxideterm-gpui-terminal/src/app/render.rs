@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use gpui::Timer;
 use gpui::{
-    AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, Corner, FocusHandle, Focusable,
+    Anchor, AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, FocusHandle, Focusable,
     FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Render,
     RenderImage, SharedString, StyledImage, Window, anchored, deferred, div, point, prelude::*, px,
     rgb, rgba,
@@ -222,7 +221,7 @@ impl Render for TerminalPane {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.handle_mouse_down(event, cx);
                 }),
             )
@@ -235,7 +234,7 @@ impl Render for TerminalPane {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     let mode = this.terminal.lock().mode();
                     if mouse_mode(mode, event.modifiers.shift) {
                         this.handle_mouse_down(event, cx);
@@ -1047,7 +1046,7 @@ impl TerminalPane {
                 )
                 .child(
                     anchored()
-                        .anchor(Corner::TopLeft)
+                        .anchor(Anchor::TopLeft)
                         .position(point(px(left), px(top)))
                         .position_mode(AnchoredPositionMode::Window)
                         .child(oxideterm_gpui_ui::motion::fade(
@@ -1061,7 +1060,7 @@ impl TerminalPane {
                 .when_some(modem_submenu, |backdrop, submenu| {
                     backdrop.child(
                         anchored()
-                            .anchor(Corner::TopLeft)
+                            .anchor(Anchor::TopLeft)
                             .position(point(px(submenu_left), px(submenu_top)))
                             .position_mode(AnchoredPositionMode::Window)
                             .child(overlay_content_boundary(submenu)),
@@ -1334,7 +1333,7 @@ impl TerminalPane {
             oxideterm_gpui_ui::motion::MotionDuration::Micro,
         );
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |this, cx| {
                 if this.context_menu_presence.finish_exit(generation) {
                     this.context_menu = None;

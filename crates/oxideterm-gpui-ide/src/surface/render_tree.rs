@@ -301,7 +301,7 @@ impl IdeSurface {
                     .collect::<Vec<_>>()
             },
         )
-        .track_scroll(self.tree_scroll_handle.clone())
+        .track_scroll(&self.tree_scroll_handle)
         .size_full()
         .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .into_any_element()

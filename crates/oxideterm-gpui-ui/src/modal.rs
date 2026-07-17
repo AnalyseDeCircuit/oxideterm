@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Div, InteractiveElement, IntoElement, MouseButton, PaintBackdropBlur,
-    ParentElement, Rgba, Styled, canvas, div, px, rgb, rgba,
+    AnyElement, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Rgba, Styled,
+    div, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -165,24 +165,7 @@ fn modal_backdrop_for_policy(policy: OverlayDismissPolicy) -> Div {
 }
 
 fn modal_backdrop_with_effect(backdrop: Rgba, blur_px: f32) -> Div {
-    modal_backdrop(rgba(0x00000000)).child(
-        canvas(
-            |_bounds, _window, _cx| {},
-            move |bounds, (), window, _cx| {
-                window.paint_backdrop_blur(PaintBackdropBlur {
-                    bounds,
-                    corner_radii: px(0.0).into(),
-                    blur_radius: px(blur_px),
-                    overlay_color: backdrop.into(),
-                });
-            },
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .bottom_0(),
-    )
+    modal_backdrop(backdrop).backdrop_blur(px(blur_px))
 }
 
 fn dismissible_modal_backdrop(policy: OverlayDismissPolicy) -> Div {

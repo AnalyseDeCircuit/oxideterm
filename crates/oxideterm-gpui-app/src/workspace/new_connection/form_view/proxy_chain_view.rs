@@ -873,7 +873,7 @@ impl WorkspaceApp {
                 this.jump_server_form_presence.reopen();
                 this.close_new_connection_select();
                 this.new_connection_caret_visible = true;
-                window.focus(&this.focus_handle);
+                window.focus(&this.focus_handle, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),

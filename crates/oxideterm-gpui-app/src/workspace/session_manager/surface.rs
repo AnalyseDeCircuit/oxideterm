@@ -342,7 +342,7 @@ impl WorkspaceApp {
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
         self.persist_sidebar_settings();
         cx.notify();

@@ -1156,7 +1156,7 @@ impl WorkspaceApp {
             // transient popovers. Native tracks most triggers as workspace
             // state, so returning focus to the Workspace root keeps keyboard
             // routing alive while leaving feature focus flags unchanged.
-            window.focus(&self.focus_handle);
+            window.focus(&self.focus_handle, cx);
             cx.notify();
         }
         changed
@@ -1172,7 +1172,7 @@ impl WorkspaceApp {
             return false;
         }
         if self.dismiss_transient_workspace_overlays() {
-            window.focus(&self.focus_handle);
+            window.focus(&self.focus_handle, cx);
             cx.notify();
             return true;
         }

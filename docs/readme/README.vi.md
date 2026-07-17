@@ -233,8 +233,8 @@ trzsz tiếp tục dùng terminal stream, không cần port phụ hoặc remote 
 ```sh
 cargo run
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
-./scripts/build-cli.sh
-./scripts/build-agent.sh
+./scripts/build/build-cli.sh
+./scripts/build/build-agent.sh
 ```
 
 ## CLI

@@ -781,7 +781,7 @@ impl WorkspaceApp {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
@@ -1423,7 +1423,7 @@ impl WorkspaceApp {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -1448,7 +1448,7 @@ impl WorkspaceApp {
                     let current = this.current_settings_input_value(input);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -1498,7 +1498,7 @@ impl WorkspaceApp {
                 let current = this.current_settings_input_value(input);
                 this.focus_settings_input(input, current, cx);
                 this.ime_marked_text = None;
-                window.focus(&this.focus_handle);
+                window.focus(&this.focus_handle, cx);
                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                 cx.stop_propagation();
             }),

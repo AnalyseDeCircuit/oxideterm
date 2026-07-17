@@ -65,7 +65,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     let menu_changed = this.dismiss_sftp_context_menu();
                     let drag_changed = this.cancel_sftp_drag_capture();
                     let selection_changed = this.clear_sftp_selection(pane);
@@ -80,7 +80,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.open_sftp_context_menu(
                         pane,
                         None,
@@ -299,7 +299,7 @@ impl WorkspaceApp {
                                 let workspace = row_workspace.clone();
                                 move |event: &MouseDownEvent, window, cx| {
                                     let _ = workspace.update(cx, |this, cx| {
-                                        window.focus(&this.focus_handle);
+                                        window.focus(&this.focus_handle, cx);
                                         this.dismiss_sftp_context_menu();
                                         if event.click_count >= 2 {
                                             this.open_or_preview_sftp_file(pane, &row_file);
@@ -326,7 +326,7 @@ impl WorkspaceApp {
                                 let workspace = row_workspace.clone();
                                 move |event: &MouseDownEvent, window, cx| {
                                     let _ = workspace.update(cx, |this, cx| {
-                                        window.focus(&this.focus_handle);
+                                        window.focus(&this.focus_handle, cx);
                                         this.open_sftp_context_menu(
                                             pane,
                                             Some(context_file.clone()),

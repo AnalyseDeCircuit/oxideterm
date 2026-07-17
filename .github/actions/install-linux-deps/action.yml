@@ -21,4 +21,4 @@ runs:
       shell: bash
       env:
         EXTRA_PACKAGES: ${{ inputs.extra_packages }}
-      run: ${GITHUB_ACTION_PATH}/../../../scripts/install-linux-deps.sh
+      run: ${GITHUB_ACTION_PATH}/../../../scripts/ci/install-linux-deps.sh

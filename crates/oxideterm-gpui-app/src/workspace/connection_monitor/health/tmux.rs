@@ -127,7 +127,7 @@ impl WorkspaceApp {
                     this.connection_monitor.host_package_search_focused = false;
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle);
+                    window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
                 }),
@@ -1416,7 +1416,7 @@ impl WorkspaceApp {
         self.ime_marked_text = None;
         self.clear_ime_selection();
         self.new_connection_caret_visible = true;
-        window.focus(&self.focus_handle);
+        window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
@@ -2064,7 +2064,7 @@ impl WorkspaceApp {
                                         }
                                         this.ime_marked_text = None;
                                         this.new_connection_caret_visible = true;
-                                        window.focus(&this.focus_handle);
+                                        window.focus(&this.focus_handle, cx);
                                         this.begin_ime_selection_from_mouse_down(
                                             target, event, window, cx,
                                         );

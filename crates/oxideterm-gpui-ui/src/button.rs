@@ -24,6 +24,7 @@ pub fn tauri_focus_visible_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {
         offset: point(px(0.0), px(0.0)),
         blur_radius: px(0.0),
         spread_radius: px(BUTTON_FOCUS_RING_WIDTH),
+        inset: false,
     }]
 }
 

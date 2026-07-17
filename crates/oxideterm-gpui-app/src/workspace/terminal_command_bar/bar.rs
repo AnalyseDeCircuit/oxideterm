@@ -640,7 +640,7 @@ impl WorkspaceApp {
                                         move |this, event: &gpui::MouseDownEvent, window, cx| {
                                             this.terminal_command_bar_focused = true;
                                             this.ime_marked_text = None;
-                                            window.focus(&this.focus_handle);
+                                            window.focus(&this.focus_handle, cx);
                                             this.begin_ime_selection_from_mouse_down(
                                                 WorkspaceImeTarget::TerminalCommandBar,
                                                 event,

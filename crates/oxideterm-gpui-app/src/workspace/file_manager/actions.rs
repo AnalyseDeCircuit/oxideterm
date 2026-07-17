@@ -1613,7 +1613,7 @@ impl WorkspaceApp {
         self.main_window_tabs.active_tab_id = Some(tab_id);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
-        pane.read(cx).focus(window);
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window);
         self.push_file_manager_toast(
             self.i18n.t("fileManager.terminalOpened"),

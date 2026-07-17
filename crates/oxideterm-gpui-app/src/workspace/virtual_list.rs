@@ -65,7 +65,7 @@ where
     // Tauri list surfaces rely on the browser scroll container as the single owner.
     // Native GPUI call sites should get the same tracked scroll wiring through one helper.
     uniform_list(id, item_count, render_items)
-        .track_scroll(scroll_handle)
+        .track_scroll(&scroll_handle)
         .size_full()
 }
 
@@ -171,10 +171,10 @@ pub(crate) fn tauri_virtual_list_is_near_bottom(
     // lists instead of reimplementing per sidebar or log view.
     let base_handle = handle.0.borrow().base_handle.clone();
     let max_offset = base_handle.max_offset();
-    if max_offset.height <= px(0.0) {
+    if max_offset.y <= px(0.0) {
         return true;
     }
-    let remaining_to_bottom = max_offset.height + base_handle.offset().y;
+    let remaining_to_bottom = max_offset.y + base_handle.offset().y;
     remaining_to_bottom <= threshold
 }
 
@@ -189,7 +189,7 @@ pub(crate) fn uniform_list_edge_autoscroll(
     let base_handle = handle.0.borrow().base_handle.clone();
     let bounds = base_handle.bounds();
     let max_offset = base_handle.max_offset();
-    if max_offset.height <= px(0.0)
+    if max_offset.y <= px(0.0)
         || bounds.size.height <= px(1.0)
         || bounds.size.width <= px(1.0)
         || position.x < bounds.left()
@@ -203,7 +203,7 @@ pub(crate) fn uniform_list_edge_autoscroll(
         return false;
     };
     let offset = base_handle.offset();
-    let next_y = (offset.y - px(step)).clamp(-max_offset.height, px(0.0));
+    let next_y = (offset.y - px(step)).clamp(-max_offset.y, px(0.0));
     if next_y == offset.y {
         return false;
     }
