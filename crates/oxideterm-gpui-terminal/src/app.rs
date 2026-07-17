@@ -860,9 +860,8 @@ impl TerminalPane {
     }
 
     fn terminal_ghost_text(&self) -> Option<String> {
-        self.privilege_prompt_inline_hint
-            .clone()
-            .or_else(|| self.autosuggest_ghost_text())
+        // Keep the terminal grid shell-owned; OxideTerm suggestions belong to the command bar.
+        self.privilege_prompt_inline_hint.clone()
     }
 
     pub fn privilege_prompt_snapshot(&self) -> Option<PrivilegePromptSnapshot> {
