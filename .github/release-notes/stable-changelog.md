@@ -3,6 +3,27 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.6
+
+OxideTerm 2.0.6 improves terminal input and command-mark reliability, adds
+customizable settings navigation, and expands Linux window-manager integration.
+
+### Highlights
+
+- Added drag-and-drop settings navigation so pages and groups can be reordered, regrouped, saved, or restored to the default layout.
+- Added a Linux-only option to hide the application titlebar for tiling compositors while leaving macOS and Windows behavior unchanged.
+
+### Fixes
+
+- Prevented the terminal command bar from crashing when IME composition creates overflow inside its compact input surface.
+- Restored the blinking caret before the placeholder when an empty terminal command bar is focused.
+- Reset visual command marks when saved history is cleared or terminal resizing reflows the grid, while preserving completed command facts.
+- Improved Fish Shell command capture and command-line placement when shell integration events arrive without the usual prompt-start event.
+
+### Release Maintenance
+
+- Refreshed the terminal, SFTP, port-forwarding, and Mini IDE documentation screenshots.
+
 ## 2.0.5
 
 OxideTerm 2.0.5 restores several native interface details and improves terminal

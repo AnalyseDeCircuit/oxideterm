@@ -80,6 +80,16 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .overflow_hidden()
+                    .when(
+                        terminal_command_placeholder_caret_visible(
+                            focused,
+                            showing_placeholder,
+                            index,
+                        ),
+                        |line| {
+                            line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                        },
+                    )
                     .child(if showing_placeholder {
                         div().child(line.text.to_string()).into_any_element()
                     } else {

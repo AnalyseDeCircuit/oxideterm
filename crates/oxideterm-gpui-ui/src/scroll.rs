@@ -42,8 +42,11 @@ fn scrollbar_geometry(
         return None;
     }
     let content_length = viewport_length + max_offset;
+    // Compact scroll surfaces can be shorter than the preferred thumb size.
+    // Cap the minimum first so `clamp` always receives an ordered range.
+    let minimum_thumb_length = SCROLLBAR_MIN_THUMB_LENGTH.min(viewport_length);
     let thumb_length = (viewport_length / content_length * viewport_length)
-        .clamp(SCROLLBAR_MIN_THUMB_LENGTH, viewport_length);
+        .clamp(minimum_thumb_length, viewport_length);
     let thumb_travel = (viewport_length - thumb_length).max(0.0);
     let thumb_start = scroll_position.clamp(0.0, max_offset) / max_offset * thumb_travel;
     Some(ScrollbarGeometry {
@@ -460,5 +463,14 @@ mod tests {
             scroll_position_for_thumb_start(thumb_travel, geometry),
             geometry.max_offset
         );
+    }
+
+    #[test]
+    fn scrollbar_thumb_fits_viewports_shorter_than_preferred_minimum() {
+        let geometry = scrollbar_geometry(24.0, 24.0, 0.0).expect("short scrollbar geometry");
+
+        assert_eq!(geometry.thumb_length, 24.0);
+        assert_eq!(geometry.thumb_start, 0.0);
+        assert_eq!(scroll_position_for_thumb_start(0.0, geometry), 0.0);
     }
 }

@@ -12,7 +12,7 @@
 
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.5-blue" alt="Versão">
+  <img src="https://img.shields.io/badge/version-2.0.6-blue" alt="Versão">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plataforma">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licença">
   <img src="https://img.shields.io/badge/rust-2024%20edition-orange" alt="Rust 2024">

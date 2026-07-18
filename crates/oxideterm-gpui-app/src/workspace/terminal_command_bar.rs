@@ -150,6 +150,15 @@ fn terminal_command_line_caret(
         })
 }
 
+fn terminal_command_placeholder_caret_visible(
+    focused: bool,
+    showing_placeholder: bool,
+    line_index: usize,
+) -> bool {
+    // An empty textarea still owns a caret at its first visual position.
+    focused && showing_placeholder && line_index == 0
+}
+
 fn terminal_git_section_icon(section: TerminalGitPanelSection) -> LucideIcon {
     match section {
         TerminalGitPanelSection::Branches => LucideIcon::GitFork,
@@ -585,6 +594,18 @@ mod terminal_broadcast_menu_tests {
     #[test]
     fn broadcast_menu_keeps_left_viewport_margin_when_trigger_is_narrow() {
         assert_eq!(terminal_broadcast_menu_left_for_trigger_right(120.0), 12.0);
+    }
+}
+
+#[cfg(test)]
+mod terminal_command_input_tests {
+    use super::*;
+
+    #[test]
+    fn focused_empty_command_input_shows_caret_before_placeholder() {
+        assert!(terminal_command_placeholder_caret_visible(true, true, 0));
+        assert!(!terminal_command_placeholder_caret_visible(false, true, 0));
+        assert!(!terminal_command_placeholder_caret_visible(true, false, 0));
     }
 }
 
