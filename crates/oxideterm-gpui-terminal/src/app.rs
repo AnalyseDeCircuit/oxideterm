@@ -1379,7 +1379,7 @@ impl TerminalPane {
         self.selection = None;
         self.search_query = None;
         self.selected_search_match = None;
-        self.mark_open_command_marks_stale_for_terminal_reset();
+        self.reset_command_marks_for_terminal_reset();
         cx.notify();
     }
 
@@ -1749,9 +1749,7 @@ impl TerminalPane {
                     self.observe_terminal_cwd_action_from_closed_command_mark(mark, cx);
                 }
                 if !self.settings.command_marks_enabled {
-                    self.command_marks.clear();
-                    self.selected_command_mark_id = None;
-                    self.hovered_command_mark_id = None;
+                    self.clear_visual_command_marks();
                 } else {
                     match event {
                         TerminalCommandMarkEvent::Created(mut mark) => {
@@ -1797,6 +1795,9 @@ impl TerminalPane {
                             } else {
                                 self.command_marks.push(mark);
                             }
+                        }
+                        TerminalCommandMarkEvent::Reset => {
+                            self.clear_visual_command_marks();
                         }
                     }
                     if let Some(selected_id) = &self.selected_command_mark_id
@@ -2117,6 +2118,7 @@ impl TerminalPane {
         if self.last_pty_resize == Some(resize) {
             return;
         }
+        let grid_changed = self.snapshot.cols != cols || self.snapshot.rows != rows;
 
         let next_snapshot = {
             let mut terminal = self.terminal.lock();
@@ -2133,6 +2135,11 @@ impl TerminalPane {
             self.clear_smooth_scroll_remainder();
             self.snapshot = self.stamp_snapshot(snapshot);
             self.mark_terminal_content_changed();
+            if grid_changed {
+                // The backend also resets its shell-integration state. Clear
+                // immediately so stale hit regions cannot survive one UI frame.
+                self.reset_command_marks_while_awaiting_backend_reset();
+            }
             cx.notify();
         }
     }

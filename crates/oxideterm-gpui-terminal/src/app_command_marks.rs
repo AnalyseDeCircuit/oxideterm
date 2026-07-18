@@ -336,16 +336,27 @@ impl TerminalPane {
         }
     }
 
-    pub(crate) fn mark_open_command_marks_stale_for_terminal_reset(&mut self) {
+    pub(crate) fn reset_command_marks_for_terminal_reset(&mut self) {
+        self.close_open_command_marks_for_terminal_reset();
+        self.clear_visual_command_marks();
+    }
+
+    pub(crate) fn reset_command_marks_while_awaiting_backend_reset(&mut self) {
+        self.close_open_command_marks_for_terminal_reset();
+        // Preserve shell-to-frontend aliases until the backend's ordered
+        // Closed -> Reset events finish updating the durable fact ledger.
+        self.clear_visual_command_mark_ranges();
+    }
+
+    fn close_open_command_marks_for_terminal_reset(&mut self) {
         let now = now_millis();
         let fallback_end_line = self.absolute_cursor_line();
         for mark in &mut self.command_marks {
             if mark.is_closed {
                 continue;
             }
-            // Tauri marks only open command facts stale on clear_buffer. Native
-            // mirrors that by closing open visual command marks as terminal
-            // resets while preserving already closed command history.
+            // Preserve the durable command fact while closing any command that
+            // was active when its visual terminal coordinates were reset.
             mark.is_closed = true;
             mark.closed_by = Some(TerminalCommandMarkClosedBy::TerminalReset);
             mark.output_confidence = TerminalCommandMarkConfidence::Unknown;
@@ -355,6 +366,18 @@ impl TerminalPane {
             mark.stale = true;
             self.command_fact_ledger.close_from_mark(mark);
         }
+    }
+
+    pub(crate) fn clear_visual_command_marks(&mut self) {
+        // Saved-history clear starts a new terminal line-coordinate epoch.
+        self.clear_visual_command_mark_ranges();
+        self.command_mark_id_aliases.clear();
+    }
+
+    fn clear_visual_command_mark_ranges(&mut self) {
+        self.command_marks.clear();
+        self.selected_command_mark_id = None;
+        self.hovered_command_mark_id = None;
     }
 
     fn shell_integration_dedup_candidate(
@@ -371,14 +394,6 @@ impl TerminalPane {
                 if candidate.detection_source
                     == TerminalCommandMarkDetectionSource::ShellIntegration
                 {
-                    return None;
-                }
-                if !matches!(
-                    candidate.detection_source,
-                    TerminalCommandMarkDetectionSource::CommandBar
-                        | TerminalCommandMarkDetectionSource::Ai
-                        | TerminalCommandMarkDetectionSource::Broadcast
-                ) {
                     return None;
                 }
                 if normalized_command(candidate.command.as_deref()?)? != command {

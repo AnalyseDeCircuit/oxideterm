@@ -805,6 +805,11 @@ impl TerminalSessionBackend for SerialSession {
     }
 
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()> {
+        let grid_changed = self.resize.cols != resize.cols || self.resize.rows != resize.rows;
+        if grid_changed {
+            self.shell_integration
+                .reset_command_marks_for_grid_reflow(|event| self.pending_events.push(event));
+        }
         self.resize = resize;
         let size = TerminalSize {
             cols: resize.cols,

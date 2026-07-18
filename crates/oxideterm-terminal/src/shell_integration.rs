@@ -102,6 +102,8 @@ pub struct TerminalCommandMark {
 pub enum TerminalCommandMarkEvent {
     Created(TerminalCommandMark),
     Closed(TerminalCommandMark),
+    /// The terminal cleared saved history, so existing visual line coordinates are invalid.
+    Reset,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,12 +157,68 @@ struct OscCapture {
     payload: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CsiScanState {
+    #[default]
+    Ground,
+    Escape,
+    Csi,
+    SavedHistoryParameter,
+}
+
+#[derive(Default)]
+struct SavedHistoryClearDetector {
+    state: CsiScanState,
+}
+
+impl SavedHistoryClearDetector {
+    fn advance(&mut self, bytes: &[u8]) -> usize {
+        let mut clear_count = 0;
+        for &byte in bytes {
+            match self.state {
+                CsiScanState::Ground => match byte {
+                    0x1b => self.state = CsiScanState::Escape,
+                    0x9b => self.state = CsiScanState::Csi,
+                    _ => {}
+                },
+                CsiScanState::Escape => match byte {
+                    b'[' => self.state = CsiScanState::Csi,
+                    0x1b => {}
+                    0x9b => self.state = CsiScanState::Csi,
+                    _ => self.state = CsiScanState::Ground,
+                },
+                CsiScanState::Csi => match byte {
+                    b'3' => self.state = CsiScanState::SavedHistoryParameter,
+                    0x1b => self.state = CsiScanState::Escape,
+                    0x9b => {}
+                    _ => self.state = CsiScanState::Ground,
+                },
+                CsiScanState::SavedHistoryParameter => match byte {
+                    b'J' => {
+                        clear_count += 1;
+                        self.state = CsiScanState::Ground;
+                    }
+                    0x1b => self.state = CsiScanState::Escape,
+                    0x9b => self.state = CsiScanState::Csi,
+                    _ => self.state = CsiScanState::Ground,
+                },
+            }
+        }
+        clear_count
+    }
+
+    fn reset(&mut self) {
+        self.state = CsiScanState::Ground;
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct TerminalShellIntegration {
     state: ShellIntegrationState,
     marks: Vec<TerminalCommandMark>,
     pending_osc: Option<OscCapture>,
     next_command_sequence: u64,
+    saved_history_clear_detector: SavedHistoryClearDetector,
 }
 
 impl TerminalShellIntegration {
@@ -178,7 +236,12 @@ impl TerminalShellIntegration {
         while index < bytes.len() {
             if self.pending_osc.is_some() {
                 if normal_start < index {
-                    parser.advance(term, &bytes[normal_start..index]);
+                    self.advance_terminal_bytes(
+                        parser,
+                        term,
+                        &bytes[normal_start..index],
+                        &mut emit,
+                    );
                 }
                 let consumed = self.continue_osc_capture(term, parser, &bytes[index..], &mut emit);
                 changed = true;
@@ -189,8 +252,15 @@ impl TerminalShellIntegration {
 
             if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b']') {
                 if normal_start < index {
-                    parser.advance(term, &bytes[normal_start..index]);
+                    self.advance_terminal_bytes(
+                        parser,
+                        term,
+                        &bytes[normal_start..index],
+                        &mut emit,
+                    );
                 }
+                // OSC payload bytes are opaque metadata, not terminal CSI.
+                self.saved_history_clear_detector.reset();
                 self.pending_osc = Some(OscCapture {
                     raw: vec![0x1b, b']'],
                     payload: Vec::new(),
@@ -205,10 +275,85 @@ impl TerminalShellIntegration {
         }
 
         if normal_start < bytes.len() {
-            parser.advance(term, &bytes[normal_start..]);
+            self.advance_terminal_bytes(parser, term, &bytes[normal_start..], &mut emit);
         }
 
         changed
+    }
+
+    fn advance_terminal_bytes<T: EventListener>(
+        &mut self,
+        parser: &mut Processor,
+        term: &mut Term<T>,
+        bytes: &[u8],
+        emit: &mut impl FnMut(crate::TerminalEvent),
+    ) {
+        let saved_history_clear_count = self.saved_history_clear_detector.advance(bytes);
+        parser.advance(term, bytes);
+        for _ in 0..saved_history_clear_count {
+            self.reset_command_marks_for_saved_history_clear(emit);
+        }
+    }
+
+    fn reset_command_marks_for_saved_history_clear(
+        &mut self,
+        emit: &mut impl FnMut(crate::TerminalEvent),
+    ) {
+        self.reset_command_marks_for_coordinate_epoch(emit);
+    }
+
+    pub(crate) fn reset_command_marks_for_grid_reflow(
+        &mut self,
+        mut emit: impl FnMut(crate::TerminalEvent),
+    ) {
+        // Column and row changes can reflow grid content, invalidating every
+        // absolute line coordinate retained by command marks.
+        self.reset_command_marks_for_coordinate_epoch(&mut emit);
+    }
+
+    fn reset_command_marks_for_coordinate_epoch(
+        &mut self,
+        emit: &mut impl FnMut(crate::TerminalEvent),
+    ) {
+        let now = now_millis();
+        let closed_mark = self
+            .state
+            .active_command_id
+            .take()
+            .and_then(|command_id| {
+                self.marks
+                    .iter_mut()
+                    .find(|mark| mark.command_id == command_id && !mark.is_closed)
+            })
+            .map(|mark| {
+                mark.is_closed = true;
+                mark.closed_by = Some(TerminalCommandMarkClosedBy::TerminalReset);
+                mark.output_confidence = TerminalCommandMarkConfidence::Unknown;
+                mark.end_line = Some(mark.start_line);
+                mark.finished_at = Some(now);
+                mark.duration_ms = Some(now.saturating_sub(mark.started_at));
+                mark.stale = true;
+                mark.clone()
+            });
+
+        if let Some(mark) = closed_mark {
+            // Close the durable command fact before clearing visual coordinates.
+            emit(crate::TerminalEvent::CommandMark(
+                TerminalCommandMarkEvent::Closed(mark),
+            ));
+        }
+
+        self.marks.clear();
+        self.state.lifecycle = ShellIntegrationLifecycleState::Closed;
+        self.state.prompt_start = None;
+        self.state.command_start = None;
+        self.state.pending_command_text = None;
+        self.state.pending_command_text_from_protocol = false;
+        self.state.active_start_line = None;
+        self.state.started_at = None;
+        emit(crate::TerminalEvent::CommandMark(
+            TerminalCommandMarkEvent::Reset,
+        ));
     }
 
     #[cfg(test)]
@@ -410,7 +555,10 @@ impl TerminalShellIntegration {
                             .as_ref()
                             .map(|position| position.line)
                     })
-                    .unwrap_or(event.line);
+                    // Fish may emit C without B, including after a resize
+                    // redraw that did not repeat A. C arrives after Enter, so
+                    // the submitted command occupies the preceding grid row.
+                    .unwrap_or_else(|| event.line.saturating_sub(1));
                 let command_line = self
                     .state
                     .command_start
@@ -576,9 +724,18 @@ fn parse_shell_integration_event(
         (ShellIntegrationSource::Osc633, "D") => ShellIntegrationEventKind::CommandEnd,
         _ => return None,
     };
-    let command = (source == ShellIntegrationSource::Osc633 && sequence == "E")
-        .then(|| sanitize_shell_integration_command_text(&args.join(";")))
-        .flatten();
+    let command = match (source, sequence.as_str()) {
+        // Fish exposes the submitted command as a percent-encoded C property.
+        (ShellIntegrationSource::Osc133, "C") => args
+            .iter()
+            .find_map(|arg| arg.strip_prefix("cmdline_url="))
+            .and_then(sanitize_shell_integration_command_text),
+        // OSC 633 E carries the submitted command directly in its arguments.
+        (ShellIntegrationSource::Osc633, "E") => {
+            sanitize_shell_integration_command_text(&args.join(";"))
+        }
+        _ => None,
+    };
     let exit_code = (kind == ShellIntegrationEventKind::CommandEnd)
         .then(|| parse_exit_code(&args))
         .flatten();

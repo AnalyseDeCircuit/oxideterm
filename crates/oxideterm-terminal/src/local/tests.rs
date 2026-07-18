@@ -80,6 +80,34 @@ mod tests {
     }
 
     #[test]
+    fn ssh_resize_resets_command_mark_coordinates_only_when_grid_changes() {
+        let mut session = SshPtySession::new(
+            SshSessionConfig::new("127.0.0.1", 9, "nobody"),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            1000,
+        );
+
+        session
+            .resize_with_cell_size(TerminalResize::new(80, 24, 8, 16))
+            .expect("cell-only resize should succeed");
+        assert!(!session.take_events().iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+        )));
+
+        session
+            .resize_with_cell_size(TerminalResize::new(100, 24, 8, 16))
+            .expect("grid resize should succeed");
+        assert!(session.take_events().iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+        )));
+    }
+
+    #[test]
     fn process_group_parser_ignores_zombies_and_picks_latest_pid() {
         let ps_output = "\
           100   42 S\n\
@@ -816,6 +844,139 @@ wait
             .join("\n");
         assert!(!visible_text.contains("633;"));
         assert!(!visible_text.contains("echo%20hi"));
+    }
+
+    #[test]
+    fn shell_integration_osc133_clear_saved_history_resets_command_mark_coordinates() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A;click_events=1\x07$ ls\r\n\x1b]133;C;cmdline_url=ls\x07file\r\n\x1b]133;D;0\x07",
+            |event| events.push(event),
+        );
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A;click_events=1\x07$ clear\r\n\x1b]133;C;cmdline_url=clear\x07\x1b[H\x1b[2J\x1b[3",
+            |event| events.push(event),
+        );
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"J\x1b]133;D;0\x07\x1b]133;A\x07$ ",
+            |event| events.push(event),
+        );
+
+        assert!(integration.command_marks().is_empty());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(mark))
+                if mark.closed_by == Some(TerminalCommandMarkClosedBy::TerminalReset)
+                    && mark.command.as_deref() == Some("clear")
+                    && mark.stale
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+        )));
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"pwd\r\n\x1b]133;C;cmdline_url=pwd\x07/tmp\r\n\x1b]133;D;0\x07",
+            |event| events.push(event),
+        );
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].command.as_deref(), Some("pwd"));
+        assert!(marks[0].is_closed);
+    }
+
+    #[test]
+    fn shell_integration_grid_reflow_closes_and_clears_active_command_mark() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A;click_events=1\x07$ long-command\r\n\x1b]133;C;cmdline_url=long-command\x07output",
+            |event| events.push(event),
+        );
+        assert_eq!(integration.command_marks().len(), 1);
+
+        integration.reset_command_marks_for_grid_reflow(|event| events.push(event));
+
+        assert!(integration.command_marks().is_empty());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(mark))
+                if mark.command.as_deref() == Some("long-command")
+                    && mark.closed_by == Some(TerminalCommandMarkClosedBy::TerminalReset)
+                    && mark.stale
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+        )));
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\r\n$ next-command\r\n\x1b]133;C;cmdline_url=next-command\x07done\r\n\x1b]133;D;0\x07",
+            |event| events.push(event),
+        );
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].command.as_deref(), Some("next-command"));
+        assert_eq!(marks[0].command_line, marks[0].start_line);
+        assert!(marks[0].is_closed);
+    }
+
+    #[test]
+    fn shell_integration_osc633_clear_saved_history_uses_shared_reset_path() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]633;A\x07PS> \x1b]633;B\x07Clear-Host\r\n\x1b]633;E;Clear-Host\x07\x1b[2J\x1b[3J",
+            |event| events.push(event),
+        );
+
+        assert!(integration.command_marks().is_empty());
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+        )));
     }
 
     #[test]

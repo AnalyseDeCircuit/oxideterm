@@ -299,12 +299,21 @@ where
             match msg {
                 LocalGraphicsMsg::Input(input) => state.write_list.push_back(input),
                 LocalGraphicsMsg::Resize(window_size) => {
+                    let grid_changed = self.size.cols != window_size.num_cols as usize
+                        || self.size.rows != window_size.num_lines as usize;
                     self.size = TerminalSize {
                         cols: window_size.num_cols as usize,
                         rows: window_size.num_lines as usize,
                         cell_width: window_size.cell_width,
                         cell_height: window_size.cell_height,
                     };
+                    if grid_changed {
+                        state
+                            .shell_integration
+                            .reset_command_marks_for_grid_reflow(|event| {
+                                let _ = self.event_tx.send(event);
+                            });
+                    }
                     self.pty.on_resize(window_size);
                 }
                 LocalGraphicsMsg::SetEncoding(encoding) => {
