@@ -181,6 +181,11 @@ fn main() {
         oxideterm_desktop_presence::set_keep_running_on_close(
             startup_settings.general.minimize_to_tray_on_close,
         );
+        #[cfg(target_os = "windows")]
+        {
+            // Keep Windows on the proven grayscale path until GPUI-CE subpixel repainting is stable.
+            cx.set_text_rendering_mode(gpui::TextRenderingMode::Grayscale);
+        }
         app_icon::install_runtime_app_icon(startup_settings.appearance.app_icon);
         if let Err(error) =
             bundled_fonts::load_terminal_font_open_critical(&startup_settings, &cx.text_system())
