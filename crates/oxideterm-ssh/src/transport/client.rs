@@ -384,17 +384,29 @@ impl SshTransportClient {
             target_port = config.port,
             timeout_secs = config.timeout_secs,
             upstream_proxy = config.upstream_proxy.is_some(),
+            proxy_command = config.proxy_command.is_some(),
             legacy_ssh_compatibility = config.legacy_ssh_compatibility,
             "SSH direct connection starting"
         );
-        log_upstream_proxy_path(&config.host, config.port, config.upstream_proxy.as_ref());
-        let stream = dial_initial_tcp(
-            &config.host,
-            config.port,
-            config.timeout_secs,
-            config.upstream_proxy.as_ref(),
-        )
-        .await?;
+        let stream: BoxedSshForwardStream = if let Some(proxy_command) = &config.proxy_command {
+            if config.upstream_proxy.is_some() {
+                return Err(SshTransportError::ConnectionFailed(
+                    "ProxyCommand cannot be combined with an upstream proxy".to_string(),
+                ));
+            }
+            Box::new(dial_proxy_command(proxy_command).await?)
+        } else {
+            log_upstream_proxy_path(&config.host, config.port, config.upstream_proxy.as_ref());
+            Box::new(
+                dial_initial_tcp(
+                    &config.host,
+                    config.port,
+                    config.timeout_secs,
+                    config.upstream_proxy.as_ref(),
+                )
+                .await?,
+            )
+        };
         tracing::debug!(
             target_host = config.host.as_str(),
             target_port = config.port,

@@ -13,11 +13,7 @@ impl WorkspaceApp {
             .to_lowercase();
         let mut connections = self.connection_store.connection_infos();
         if !query.is_empty() {
-            connections.retain(|conn| {
-                conn.name.to_lowercase().contains(&query)
-                    || conn.host.to_lowercase().contains(&query)
-                    || conn.username.to_lowercase().contains(&query)
-            });
+            connections.retain(|conn| conn.matches_search_query(&query));
         }
         let empty_label = if query.is_empty() {
             self.i18n.t("sidebar.panels.no_saved_connections")

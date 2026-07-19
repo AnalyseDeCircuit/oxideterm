@@ -67,6 +67,7 @@
       "connection_deleted": "Đã xóa kết nối",
       "connections_deleted": "Đã xóa {{count}} kết nối",
       "connection_duplicated": "Đã nhân bản kết nối",
+      "connection_not_found": "Không tìm thấy kết nối đã lưu",
       "group_created": "Đã tạo nhóm",
       "create_group_failed": "Tạo nhóm thất bại",
       "connections_moved": "Đã chuyển {{count}} kết nối sang \"{{group}}\"",

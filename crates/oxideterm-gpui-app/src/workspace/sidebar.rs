@@ -156,7 +156,7 @@ impl SidebarSection {
 }
 
 impl WorkspaceApp {
-    fn effective_sidebar_panel_section(&self) -> SidebarSection {
+    pub(in crate::workspace) fn effective_sidebar_panel_section(&self) -> SidebarSection {
         match self.active_sidebar_section {
             SidebarSection::Sessions
             | SidebarSection::Connections

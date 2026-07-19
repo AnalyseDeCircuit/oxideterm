@@ -67,6 +67,7 @@
       "connection_deleted": "连接已删除",
       "connections_deleted": "已删除 {{count}} 个连接",
       "connection_duplicated": "连接已复制",
+      "connection_not_found": "未找到该已保存连接",
       "group_created": "分组已创建",
       "create_group_failed": "创建分组失败",
       "connections_moved": "{{count}} 个连接已移至 \"{{group}}\"",

@@ -5,6 +5,7 @@ mod keychain;
 pub mod oxide_file;
 mod secret;
 mod ssh_config;
+mod ssh_config_sync;
 mod ssh_keys;
 mod ssh_paths;
 mod store;
@@ -21,14 +22,18 @@ pub use connection_transport::{
 };
 pub use draft::{
     ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, IMPORTED_GROUP, ProxyHopDraft,
-    SSH_CONFIG_TAG, first_available_default_key_path, save_request_from_draft,
-    saved_auth_from_draft, saved_connection_from_ssh_host,
+    SSH_CONFIG_TAG, SSH_PROXY_COMMAND_TAG, first_available_default_key_path,
+    save_request_from_draft, saved_auth_from_draft, saved_connection_from_ssh_host,
 };
 pub use secret::SecretString;
 pub use ssh_config::{
     SshBatchImportResult, SshConfigHost, SshConfigImportError, SshConfigProxyHop,
     canonical_ssh_config_alias, default_ssh_config_path, import_ssh_config_alias,
-    is_literal_ssh_config_alias_query, list_ssh_config_hosts, resolve_ssh_config_alias,
+    is_literal_ssh_config_alias_query, list_ssh_config_hosts, list_ssh_config_hosts_from_path,
+    resolve_ssh_config_alias,
+};
+pub use ssh_config_sync::{
+    SshConfigSyncOutcome, SshConfigSyncService, sync_ssh_config_path_into_store,
 };
 pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{

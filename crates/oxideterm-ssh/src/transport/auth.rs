@@ -579,21 +579,43 @@ fn sign_auth_payload_with_hash_alg(
     Ok(data)
 }
 
+struct AgentAuthenticationAttempt {
+    result: Option<client::AuthResult>,
+    offered_public_keys: HashSet<String>,
+    failure_reason: Option<String>,
+}
+
 async fn authenticate_agent(
     handle: &mut client::Handle<NativeClientHandler>,
     config: &SshConfig,
-) -> Result<client::AuthResult, SshTransportError> {
-    let mut agent = connect_agent_client()
-        .await
-        .map_err(SshTransportError::AuthenticationFailed)?;
-    let identities = agent
-        .request_identities()
-        .await
-        .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
+) -> AgentAuthenticationAttempt {
+    let mut offered_public_keys = HashSet::new();
+    let mut agent = match connect_agent_client().await {
+        Ok(agent) => agent,
+        Err(_) => {
+            return AgentAuthenticationAttempt {
+                result: None,
+                offered_public_keys,
+                failure_reason: Some("SSH agent is unavailable".to_string()),
+            };
+        }
+    };
+    let identities = match agent.request_identities().await {
+        Ok(identities) => identities,
+        Err(_) => {
+            return AgentAuthenticationAttempt {
+                result: None,
+                offered_public_keys,
+                failure_reason: Some("SSH agent identities could not be read".to_string()),
+            };
+        }
+    };
     if identities.is_empty() {
-        return Err(SshTransportError::AuthenticationFailed(
-            "SSH agent has no identities".to_string(),
-        ));
+        return AgentAuthenticationAttempt {
+            result: None,
+            offered_public_keys,
+            failure_reason: Some("SSH agent has no identities".to_string()),
+        };
     }
     tracing::debug!(
         identity_count = identities.len(),
@@ -601,10 +623,12 @@ async fn authenticate_agent(
     );
 
     let server_rsa_preference = resolve_server_rsa_preference(handle).await;
-    let mut last_error = None;
+    let mut last_result = None;
+    let mut failure_reason = None;
     let mut publickey_exhausted = false;
     for (identity_index, identity) in identities.into_iter().enumerate() {
         let public_key = identity.public_key().into_owned();
+        offered_public_keys.insert(public_key.public_key_base64());
         let algorithms = auth_algorithm_attempt_order(
             matches!(public_key.algorithm(), Algorithm::Rsa { .. }),
             server_rsa_preference,
@@ -625,18 +649,29 @@ async fn authenticate_agent(
                 )
                 .await
             {
-                Ok(result) if result.success() => return Ok(client::AuthResult::Success),
+                Ok(result) if result.success() => {
+                    return AgentAuthenticationAttempt {
+                        result: Some(client::AuthResult::Success),
+                        offered_public_keys,
+                        failure_reason: None,
+                    };
+                }
                 Ok(result) => {
                     if !server_allows_more_publickey_attempts(&result) {
                         publickey_exhausted = true;
+                    }
+                    last_result = Some(result);
+                    if publickey_exhausted {
                         break;
                     }
                 }
-                Err(AgentAuthError::Send(send)) => {
-                    return Err(SshTransportError::AuthenticationFailed(send.to_string()));
+                Err(AgentAuthError::Send(_)) => {
+                    failure_reason = Some("SSH agent communication failed".to_string());
+                    publickey_exhausted = true;
+                    break;
                 }
-                Err(AgentAuthError::Key(key_error)) => {
-                    last_error = Some(key_error.to_string());
+                Err(AgentAuthError::Key(_)) => {
+                    failure_reason = Some("SSH agent could not sign with an identity".to_string());
                 }
             }
         }
@@ -646,12 +681,12 @@ async fn authenticate_agent(
         }
     }
 
-    Err(SshTransportError::AuthenticationFailed(format!(
-        "No agent key was accepted by the server{}",
-        last_error
-            .map(|error| format!(". Last error: {error}"))
-            .unwrap_or_default()
-    )))
+    AgentAuthenticationAttempt {
+        result: last_result,
+        offered_public_keys,
+        failure_reason: failure_reason
+            .or_else(|| Some("No agent key was accepted by the server".to_string())),
+    }
 }
 
 async fn connect_agent_client() -> Result<NativeAgentClient, String> {

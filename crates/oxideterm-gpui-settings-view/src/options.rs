@@ -309,6 +309,14 @@ pub fn set_ssh_config_auto_load_hosts(settings: &mut PersistedSettings, value: b
     settings.ssh_config.auto_load_hosts = value;
 }
 
+pub fn set_ssh_config_auto_sync_hosts(settings: &mut PersistedSettings, value: bool) {
+    settings.ssh_config.auto_sync_hosts = value;
+}
+
+pub fn set_ssh_config_allow_proxy_command(settings: &mut PersistedSettings, value: bool) {
+    settings.ssh_config.allow_proxy_command = value;
+}
+
 pub fn sftp_concurrent_options() -> &'static [i64] {
     &[1, 2, 3, 4, 5, 6, 8, 10]
 }

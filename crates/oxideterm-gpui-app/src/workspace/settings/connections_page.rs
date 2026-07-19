@@ -184,6 +184,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
+        let auto_sync_hosts = self.settings_store.settings().ssh_config.auto_sync_hosts;
+        let allow_proxy_command = self
+            .settings_store
+            .settings()
+            .ssh_config
+            .allow_proxy_command;
         self.connection_section(
             "settings_view.connections.ssh_config.title",
             "settings_view.connections.ssh_config.description",
@@ -210,6 +216,46 @@ impl WorkspaceApp {
                         .into_any_element(),
                     cx,
                 ),
+                self.setting_row(
+                    "settings_view.connections.ssh_config.auto_sync",
+                    "settings_view.connections.ssh_config.auto_sync_hint",
+                    checkbox(&self.tokens, String::new(), auto_sync_hosts)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.edit_settings(
+                                    |settings| {
+                                        set_ssh_config_auto_sync_hosts(settings, !auto_sync_hosts)
+                                    },
+                                    cx,
+                                );
+                                this.sync_ssh_config_sync_service();
+                            }),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
+                self.setting_row(
+                    "settings_view.connections.ssh_config.allow_proxy_command",
+                    "settings_view.connections.ssh_config.allow_proxy_command_hint",
+                    checkbox(&self.tokens, String::new(), allow_proxy_command)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.edit_settings(
+                                    |settings| {
+                                        set_ssh_config_allow_proxy_command(
+                                            settings,
+                                            !allow_proxy_command,
+                                        )
+                                    },
+                                    cx,
+                                );
+                            }),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
                 div()
                     .flex()
                     .justify_start()
@@ -229,6 +275,20 @@ impl WorkspaceApp {
                     .into_any_element(),
             ],
         )
+    }
+
+    pub(in crate::workspace) fn sync_ssh_config_sync_service(&mut self) {
+        let enabled = self.settings_store.settings().ssh_config.auto_sync_hosts;
+        if enabled == self.ssh_config_sync_service.is_some() {
+            return;
+        }
+        self.ssh_config_sync_service = enabled.then(|| {
+            oxideterm_connections::SshConfigSyncService::start(
+                self.connection_store.path().to_path_buf(),
+                oxideterm_connections::default_ssh_config_path(),
+                Duration::from_secs(10),
+            )
+        });
     }
 
     pub(in crate::workspace) fn render_settings_ssh_config_import_dialog(

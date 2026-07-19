@@ -38,6 +38,36 @@ mod tests {
         ConnectionStore::load(temp_store_path(name)).expect("store should load")
     }
 
+    #[test]
+    fn connection_info_search_uses_the_same_non_secret_fields_on_every_surface() {
+        let mut request = request("conn-search", SavedAuth::Agent);
+        request.name = "Production".to_string();
+        request.group = Some("Cloud/Europe".to_string());
+        request.host = "db.example.com".to_string();
+        request.port = 2222;
+        request.username = "deploy".to_string();
+        request.tags = vec!["critical".to_string()];
+        let mut store = load_empty_store("connection-info-search");
+        store.upsert(request).unwrap();
+        let info = store
+            .connection_infos()
+            .into_iter()
+            .next()
+            .expect("saved connection info");
+
+        for query in [
+            "production",
+            "DB.EXAMPLE.COM",
+            "2222",
+            "deploy",
+            "europe",
+            "critical",
+        ] {
+            assert!(info.matches_search_query(query), "query should match: {query}");
+        }
+        assert!(!info.matches_search_query("missing"));
+    }
+
     fn generated_private_key_text(passphrase: Option<&str>) -> String {
         let key_path = temp_store_path("managed-key-source").with_extension("key");
         let mut rng = UnwrapErr(SysRng);

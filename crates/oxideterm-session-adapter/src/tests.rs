@@ -11,8 +11,9 @@ use oxideterm_settings::{
     PersistedSettings, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
     SettingsUpstreamProxyProtocol,
 };
-use oxideterm_ssh::{AuthMethod, UpstreamProxyAuth};
+use oxideterm_ssh::{AuthMethod, ProxyCommandConfig, UpstreamProxyAuth};
 
+use crate::ssh::proxy_command_runtime_policy;
 use crate::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
     sftp_runtime_settings_from_settings, terminal_encoding_from_settings,
@@ -79,6 +80,24 @@ fn runtime_settings_conversion_clamps_persisted_values() {
         terminal_encoding_from_settings(oxideterm_settings::TerminalEncoding::Gb18030),
         oxideterm_terminal::TerminalEncoding::Gb18030
     );
+}
+
+#[test]
+fn proxy_command_requires_authorization_before_runtime_hydration() {
+    let words = || {
+        Some(vec![
+            SecretString::new("helper-with-token"),
+            SecretString::new("credential-value"),
+        ])
+    };
+
+    let denied = proxy_command_runtime_policy(false, words()).unwrap();
+    assert_eq!(denied, ProxyCommandConfig::AuthorizationRequired);
+    assert!(!format!("{denied:?}").contains("credential-value"));
+
+    let authorized = proxy_command_runtime_policy(true, words()).unwrap();
+    assert!(matches!(authorized, ProxyCommandConfig::Direct { .. }));
+    assert!(!format!("{authorized:?}").contains("credential-value"));
 }
 
 #[test]

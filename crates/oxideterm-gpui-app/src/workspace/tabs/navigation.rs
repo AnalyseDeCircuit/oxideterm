@@ -284,6 +284,14 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
         self.clear_ai_sidebar_keyboard_focus();
+        if self.session_manager.focused_input
+            == Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
+        {
+            // An explicit pane focus handoff must prevent a previously clicked
+            // sidebar search field from continuing to own terminal keystrokes.
+            self.session_manager.focused_input = None;
+            self.ime_marked_text = None;
+        }
         if self.terminal_command_bar_focused {
             // Focusing the pane must also release Workspace's synthetic command
             // input owner; otherwise root key capture can keep swallowing Tab

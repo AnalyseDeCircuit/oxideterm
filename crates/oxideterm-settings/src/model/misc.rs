@@ -214,12 +214,18 @@ pub struct NewConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SshConfigSettings {
     pub auto_load_hosts: bool,
+    #[serde(default)]
+    pub auto_sync_hosts: bool,
+    #[serde(default)]
+    pub allow_proxy_command: bool,
 }
 
 impl Default for SshConfigSettings {
     fn default() -> Self {
         Self {
             auto_load_hosts: true,
+            auto_sync_hosts: false,
+            allow_proxy_command: false,
         }
     }
 }
@@ -396,5 +402,7 @@ mod misc_tests {
             serde_json::from_value(serialized).expect("legacy settings should deserialize");
 
         assert!(restored.ssh_config.auto_load_hosts);
+        assert!(!restored.ssh_config.auto_sync_hosts);
+        assert!(!restored.ssh_config.allow_proxy_command);
     }
 }

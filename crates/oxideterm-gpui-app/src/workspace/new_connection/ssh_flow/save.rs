@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use crate::workspace::{
+    WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
+};
 use gpui::Timer;
+use oxideterm_connections::{ConnectionStore, SavedConnection};
+use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
 impl WorkspaceApp {
     pub(super) fn report_saved_next_hop_error(&mut self, i18n_key: &str, cx: &mut Context<Self>) {
@@ -798,7 +803,21 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(conn) = self.connection_store.get(id).cloned() else {
+        let Some(conn) = saved_connection_for_open(&self.connection_store, id) else {
+            // Saved rows can outlive an external store update. Report the
+            // stale reference without exposing its identifier or connection data.
+            tracing::warn!("Saved connection lookup failed before opening");
+            let title = self.i18n.t("sessionManager.toast.connection_not_found");
+            self.push_command_palette_toast(title.clone(), None, TerminalNoticeVariant::Error);
+            self.push_notification_entry(
+                WorkspaceNotificationKind::Connection,
+                WorkspaceNotificationSeverity::Error,
+                title,
+                None,
+                WorkspaceNotificationScope::Global,
+                Some("saved-connection-not-found".to_string()),
+            );
+            cx.notify();
             return;
         };
         let Some(config) = ssh_config_from_saved_connection(
@@ -1165,5 +1184,25 @@ impl WorkspaceApp {
                 status,
             });
         });
+    }
+}
+
+fn saved_connection_for_open(store: &ConnectionStore, id: &str) -> Option<SavedConnection> {
+    store.get(id).cloned()
+}
+
+#[cfg(test)]
+mod saved_connection_open_tests {
+    use super::*;
+
+    #[test]
+    fn stale_saved_connection_id_is_detected_before_opening() {
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-stale-saved-connection-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let store = ConnectionStore::load(path).expect("empty connection store");
+
+        assert!(saved_connection_for_open(&store, "removed-connection").is_none());
     }
 }

@@ -1,9 +1,12 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use oxideterm_connections::{ConnectionStore, SavedConnection};
+use oxideterm_connections::{
+    ConnectionStore, SSH_CONFIG_TAG, SSH_PROXY_COMMAND_TAG, SavedConnection,
+    resolve_ssh_config_alias,
+};
 use oxideterm_settings::PersistedSettings;
-use oxideterm_ssh::{ProxyHopConfig, SshConfig};
+use oxideterm_ssh::{ProxyCommandConfig, ProxyHopConfig, SshConfig};
 
 use crate::{auth_method_from_saved_auth, upstream_proxy_config_from_saved_policy};
 
@@ -14,6 +17,7 @@ pub fn ssh_config_from_saved_connection(
 ) -> Option<SshConfig> {
     let auth = auth_method_from_saved_auth(store, &conn.auth)?;
     let proxy_chain = proxy_chain_config_from_saved_connection(store, conn)?;
+    let proxy_command = proxy_command_from_imported_ssh_config(settings, conn);
     Some(SshConfig {
         host: conn.host.clone(),
         port: conn.port,
@@ -25,12 +29,54 @@ pub fn ssh_config_from_saved_connection(
             settings,
             &conn.upstream_proxy,
         ),
+        proxy_command,
         agent_forwarding: conn.options.agent_forwarding,
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
     })
+}
+
+fn proxy_command_from_imported_ssh_config(
+    settings: &PersistedSettings,
+    connection: &SavedConnection,
+) -> Option<ProxyCommandConfig> {
+    if !connection.tags.iter().any(|tag| tag == SSH_CONFIG_TAG) {
+        return None;
+    }
+    if !connection
+        .tags
+        .iter()
+        .any(|tag| tag == SSH_PROXY_COMMAND_TAG)
+    {
+        return None;
+    }
+    let Some(host) = resolve_ssh_config_alias(&connection.name).ok().flatten() else {
+        return Some(ProxyCommandConfig::Unavailable);
+    };
+    if host.proxy_command.is_none() {
+        return Some(ProxyCommandConfig::Unavailable);
+    }
+    proxy_command_runtime_policy(settings.ssh_config.allow_proxy_command, host.proxy_command)
+}
+
+pub(crate) fn proxy_command_runtime_policy(
+    authorized: bool,
+    words: Option<Vec<oxideterm_connections::SecretString>>,
+) -> Option<ProxyCommandConfig> {
+    let words = words?;
+    if !authorized {
+        return Some(ProxyCommandConfig::AuthorizationRequired);
+    }
+    // ProxyCommand remains runtime-only and zeroized; it is never copied into the
+    // saved connection record or exposed through diagnostics.
+    ProxyCommandConfig::direct(
+        words
+            .into_iter()
+            .map(|word| word.into_zeroizing())
+            .collect(),
+    )
 }
 
 pub fn proxy_chain_config_from_saved_connection(

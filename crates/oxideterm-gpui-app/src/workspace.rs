@@ -138,6 +138,7 @@ use oxideterm_connection_monitor::{
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
     ConnectionStore, PrivilegeCredentialKind, SaveConnectionRequest, SavedPrivilegeCredential,
+    SshConfigSyncService,
 };
 use oxideterm_forwarding::{
     ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
@@ -1007,6 +1008,8 @@ pub(crate) struct WorkspaceApp {
     app_lock: app_lock::AppLockState,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
+    // The connection-layer worker owns SSH config parsing and persistence.
+    ssh_config_sync_service: Option<SshConfigSyncService>,
     settings_store_last_modified: Option<SystemTime>,
     connection_store_last_modified: Option<SystemTime>,
     native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState,

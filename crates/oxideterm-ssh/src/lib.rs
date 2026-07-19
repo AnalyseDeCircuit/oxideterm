@@ -25,7 +25,7 @@ pub use capability::{
     SshAlgorithmOffer, SshCapabilityLayer, SshCapabilityLimitation, SshCapabilityReport,
     SshCapabilityStatus, SshIntegrationCapabilities, ssh_capability_report,
 };
-pub use config::{AuthMethod, ProxyHopConfig, SshConfig};
+pub use config::{AuthMethod, ProxyCommandConfig, ProxyHopConfig, SshConfig};
 pub use connection_registry::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionPoolConfig,
     ConnectionPoolStats, ConnectionState, ConnectionTransportStatus, HEARTBEAT_FAIL_THRESHOLD,

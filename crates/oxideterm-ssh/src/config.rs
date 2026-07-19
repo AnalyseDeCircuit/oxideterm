@@ -4,12 +4,13 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::upstream_proxy::UpstreamProxyConfig;
 use oxideterm_x11_forwarding::X11SshRequest;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
     pub host: String,
     #[serde(default = "default_port")]
@@ -26,6 +27,8 @@ pub struct SshConfig {
     pub proxy_chain: Option<Vec<ProxyHopConfig>>,
     #[serde(default, skip)]
     pub upstream_proxy: Option<UpstreamProxyConfig>,
+    #[serde(default, skip)]
+    pub proxy_command: Option<ProxyCommandConfig>,
     #[serde(default)]
     pub strict_host_key_checking: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,6 +43,87 @@ pub struct SshConfig {
     pub x11_forwarding: Option<X11SshRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
+}
+
+impl fmt::Debug for SshConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SshConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("auth", &self.auth)
+            .field("timeout_secs", &self.timeout_secs)
+            .field("cols", &self.cols)
+            .field("rows", &self.rows)
+            .field("proxy_chain", &self.proxy_chain)
+            .field("upstream_proxy", &self.upstream_proxy)
+            .field("proxy_command", &self.proxy_command)
+            .field("strict_host_key_checking", &self.strict_host_key_checking)
+            .field("trust_host_key", &self.trust_host_key)
+            .field(
+                "expected_host_key_fingerprint",
+                &self.expected_host_key_fingerprint,
+            )
+            .field("agent_forwarding", &self.agent_forwarding)
+            .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
+            .field("x11_forwarding", &self.x11_forwarding)
+            .field("post_connect_command", &self.post_connect_command)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum ProxyCommandConfig {
+    AuthorizationRequired,
+    Unavailable,
+    Direct {
+        program: Zeroizing<String>,
+        args: Vec<Zeroizing<String>>,
+    },
+}
+
+impl ProxyCommandConfig {
+    pub fn direct(words: Vec<Zeroizing<String>>) -> Option<Self> {
+        let mut words = words.into_iter();
+        let program = words.next()?;
+        Some(Self::Direct {
+            program,
+            args: words.collect(),
+        })
+    }
+
+    fn connection_key_suffix(&self) -> String {
+        match self {
+            Self::AuthorizationRequired => "|proxy-command=authorization-required".to_string(),
+            Self::Unavailable => "|proxy-command=unavailable".to_string(),
+            Self::Direct { program, args } => {
+                // Pool identity uses a one-way digest so command text and embedded tokens
+                // never enter registry keys, diagnostics, or logs.
+                let mut hasher = Sha256::new();
+                hasher.update(program.as_bytes());
+                for argument in args {
+                    hasher.update([0]);
+                    hasher.update(argument.as_bytes());
+                }
+                format!("|proxy-command={:x}", hasher.finalize())
+            }
+        }
+    }
+}
+
+impl fmt::Debug for ProxyCommandConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AuthorizationRequired => formatter.write_str("AuthorizationRequired"),
+            Self::Unavailable => formatter.write_str("Unavailable"),
+            Self::Direct { args, .. } => formatter
+                .debug_struct("Direct")
+                .field("program", &"[redacted secret]")
+                .field("argument_count", &args.len())
+                .finish(),
+        }
+    }
 }
 
 impl SshConfig {
@@ -90,9 +174,19 @@ impl SshConfig {
                     proxy.protocol, proxy.host, proxy.port, proxy.remote_dns
                 )
             });
+        let proxy_command_key = self
+            .proxy_command
+            .as_ref()
+            .map_or_else(String::new, ProxyCommandConfig::connection_key_suffix);
         format!(
-            "{}@{}:{}|{}{}{}",
-            self.username, self.host, self.port, proxy_key, upstream_proxy_key, legacy_key
+            "{}@{}:{}|{}{}{}{}",
+            self.username,
+            self.host,
+            self.port,
+            proxy_key,
+            upstream_proxy_key,
+            legacy_key,
+            proxy_command_key
         )
     }
 
@@ -283,6 +377,7 @@ impl Default for SshConfig {
             rows: default_rows(),
             proxy_chain: None,
             upstream_proxy: None,
+            proxy_command: None,
             strict_host_key_checking: false,
             trust_host_key: None,
             expected_host_key_fingerprint: None,
@@ -322,6 +417,24 @@ mod tests {
     fn builds_stable_connection_key() {
         let config = SshConfig::password("192.168.1.10", 22, "root", "pw");
         assert_eq!(config.connection_key(), "root@192.168.1.10:22|");
+    }
+
+    #[test]
+    fn proxy_command_is_redacted_and_only_a_digest_enters_the_pool_key() {
+        let mut config = SshConfig::password("target", 22, "operator", "pw");
+        config.proxy_command = ProxyCommandConfig::direct(vec![
+            Zeroizing::new("helper-with-token".to_string()),
+            Zeroizing::new("credential-value".to_string()),
+        ]);
+
+        let debug = format!("{config:?}");
+        let pool_key = config.connection_key();
+
+        assert!(!debug.contains("helper-with-token"));
+        assert!(!debug.contains("credential-value"));
+        assert!(!pool_key.contains("helper-with-token"));
+        assert!(!pool_key.contains("credential-value"));
+        assert!(pool_key.contains("proxy-command="));
     }
 
     #[test]

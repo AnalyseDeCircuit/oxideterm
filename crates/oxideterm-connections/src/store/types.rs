@@ -350,6 +350,43 @@ pub struct ConnectionInfo {
     pub post_connect_command: Option<String>,
 }
 
+impl ConnectionInfo {
+    pub fn matches_search_query(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return true;
+        }
+
+        // Keep every saved-connection search surface on one non-secret field set.
+        self.name.to_lowercase().contains(&query)
+            || self.host.to_lowercase().contains(&query)
+            || self.port.to_string().contains(&query)
+            || self.username.to_lowercase().contains(&query)
+            || self
+                .group
+                .as_deref()
+                .is_some_and(|group| group.to_lowercase().contains(&query))
+            || self
+                .tags
+                .iter()
+                .any(|tag| tag.to_lowercase().contains(&query))
+    }
+
+    pub fn search_text(&self) -> String {
+        // Palette filtering consumes one normalized haystack while the other
+        // surfaces use matches_search_query directly.
+        format!(
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            self.name,
+            self.host,
+            self.port,
+            self.username,
+            self.group.as_deref().unwrap_or_default(),
+            self.tags.join(" ")
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct SavePrivilegeCredentialRequest {
     pub connection_id: String,

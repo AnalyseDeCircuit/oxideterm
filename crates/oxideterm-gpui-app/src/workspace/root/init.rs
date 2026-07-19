@@ -570,6 +570,7 @@ impl WorkspaceApp {
             app_lock,
             settings_store,
             connection_store,
+            ssh_config_sync_service: None,
             settings_store_last_modified,
             connection_store_last_modified,
             native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState::new(plugin_registry),
@@ -707,6 +708,7 @@ impl WorkspaceApp {
             workspace.refresh_cli_companion_status(cx);
         }
         workspace.bootstrap_cloud_sync_controller(cx);
+        workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         let window_handle = window.window_handle();
         cx.spawn(async move |weak, cx| {

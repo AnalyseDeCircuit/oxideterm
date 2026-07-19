@@ -486,9 +486,49 @@ async fn authenticate_with_options(
         }
         AuthMethod::Agent => {
             tracing::debug!("SSH agent authentication starting");
-            let result = authenticate_agent(handle, config).await?;
-            log_auth_result("agent", &result);
-            result
+            let agent_attempt = authenticate_agent(handle, config).await;
+            if let Some(result) = agent_attempt.result.as_ref() {
+                log_auth_result("agent", result);
+                if result.success() {
+                    return Ok(());
+                }
+            }
+
+            let server_allows_fallback = agent_attempt
+                .result
+                .as_ref()
+                .is_none_or(server_allows_more_publickey_attempts);
+            if server_allows_fallback {
+                let fallback_keys = load_agent_fallback_keys(
+                    preferred_default_key_paths(),
+                    &agent_attempt.offered_public_keys,
+                );
+                for key in fallback_keys {
+                    let result =
+                        authenticate_publickey_best_algo(handle, &config.username, key).await?;
+                    log_auth_result("default-publickey", &result);
+                    if result.success() || !server_allows_more_publickey_attempts(&result) {
+                        return if result.success() {
+                            Ok(())
+                        } else {
+                            Err(SshTransportError::AuthenticationFailed(
+                                authentication_failure_message(&result),
+                            ))
+                        };
+                    }
+                }
+            }
+
+            if let Some(result) = agent_attempt.result {
+                result
+            } else {
+                return Err(SshTransportError::AuthenticationFailed(format!(
+                    "{}. Add a key to the agent or configure an explicit IdentityFile",
+                    agent_attempt
+                        .failure_reason
+                        .unwrap_or_else(|| "SSH agent authentication failed".to_string())
+                )));
+            }
         }
         AuthMethod::ManagedKey { key_id, passphrase } => {
             let Some(resolve_managed_key) = managed_key_resolver else {

@@ -1089,6 +1089,7 @@ impl WorkspaceApp {
         let settings = next_settings.settings().clone();
         self.settings_store = next_settings;
         self.connection_store = next_connections;
+        self.sync_ssh_config_sync_service();
         self.settings_store_last_modified =
             settings_store_modified_time(self.settings_store.path());
         self.connection_store_last_modified =

@@ -67,6 +67,7 @@
       "connection_deleted": "連線已刪除",
       "connections_deleted": "已刪除 {{count}} 個連線",
       "connection_duplicated": "連線已複製",
+      "connection_not_found": "找不到已儲存的連線",
       "group_created": "群組已建立",
       "create_group_failed": "建立群組失敗",
       "connections_moved": "{{count}} 個連線已移至 \"{{group}}\"",

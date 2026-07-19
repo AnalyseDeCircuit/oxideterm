@@ -17,6 +17,7 @@ use crate::ssh_keys::default_private_key_paths_in_home;
 
 pub const IMPORTED_GROUP: &str = "Imported";
 pub const SSH_CONFIG_TAG: &str = "ssh-config";
+pub const SSH_PROXY_COMMAND_TAG: &str = "ssh-proxy-command";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectionAuthDraftKind {
@@ -104,6 +105,7 @@ pub struct ConnectionDraft {
 
 pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnection> {
     let now = Utc::now();
+    let has_proxy_command = host.proxy_command.is_some();
     let auth = saved_auth_from_ssh_paths(host.identity_file, host.certificate_file);
     let proxy_chain = host
         .proxy_chain
@@ -134,7 +136,14 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         updated_at: Some(now),
         color: None,
         icon: None,
-        tags: vec![SSH_CONFIG_TAG.to_string()],
+        tags: if has_proxy_command {
+            vec![
+                SSH_CONFIG_TAG.to_string(),
+                SSH_PROXY_COMMAND_TAG.to_string(),
+            ]
+        } else {
+            vec![SSH_CONFIG_TAG.to_string()]
+        },
         post_connect_command: None,
         privilege_credentials: Vec::new(),
     })
@@ -406,6 +415,30 @@ mod tests {
             connection.proxy_chain[0].auth,
             SavedAuth::Key { ref key_path, .. } if key_path == "/keys/jump"
         ));
+    }
+
+    #[test]
+    fn ssh_config_proxy_command_persists_only_a_non_secret_marker() {
+        let connection = saved_connection_from_ssh_host(SshConfigHost {
+            alias: "edge".to_string(),
+            proxy_command: Some(vec![
+                SecretString::new("helper-with-token"),
+                SecretString::new("credential-value"),
+            ]),
+            ..SshConfigHost::default()
+        })
+        .unwrap();
+        let serialized = serde_json::to_string(&connection).unwrap();
+
+        assert!(connection.tags.iter().any(|tag| tag == SSH_CONFIG_TAG));
+        assert!(
+            connection
+                .tags
+                .iter()
+                .any(|tag| tag == SSH_PROXY_COMMAND_TAG)
+        );
+        assert!(!serialized.contains("helper-with-token"));
+        assert!(!serialized.contains("credential-value"));
     }
 
     #[test]

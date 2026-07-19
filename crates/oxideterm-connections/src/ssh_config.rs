@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::ssh_paths::{default_ssh_dir, expand_home_path};
-use crate::{ConnectionStore, saved_connection_from_ssh_host};
+use crate::{ConnectionStore, SecretString, saved_connection_from_ssh_host};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SshConfigHost {
@@ -18,6 +18,7 @@ pub struct SshConfigHost {
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
     pub proxy_chain: Vec<SshConfigProxyHop>,
+    pub proxy_command: Option<Vec<SecretString>>,
     pub already_imported: bool,
 }
 
@@ -57,7 +58,10 @@ struct SshHostOptions {
     identity_file: Option<String>,
     certificate_file: Option<String>,
     proxy_jump: Option<String>,
+    proxy_command: Option<Vec<SecretString>>,
 }
+
+const MAX_PROXY_JUMP_DEPTH: usize = 16;
 
 pub fn default_ssh_config_path() -> PathBuf {
     default_ssh_dir().join("config")
@@ -65,10 +69,17 @@ pub fn default_ssh_config_path() -> PathBuf {
 
 pub fn list_ssh_config_hosts(existing_names: &HashSet<String>) -> Result<Vec<SshConfigHost>> {
     let path = default_ssh_config_path();
+    list_ssh_config_hosts_from_path(&path, existing_names)
+}
+
+pub fn list_ssh_config_hosts_from_path(
+    path: &Path,
+    existing_names: &HashSet<String>,
+) -> Result<Vec<SshConfigHost>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let blocks = parse_ssh_config_file(&path)?;
+    let blocks = parse_ssh_config_file(path)?;
     let existing_names = existing_names
         .iter()
         .map(|name| name.to_lowercase())
@@ -245,7 +256,18 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
         "certificatefile" if options.certificate_file.is_none() => {
             options.certificate_file = Some(value.clone())
         }
-        "proxyjump" if options.proxy_jump.is_none() => options.proxy_jump = Some(value.clone()),
+        "proxyjump" if options.proxy_jump.is_none() && options.proxy_command.is_none() => {
+            options.proxy_jump = Some(value.clone())
+        }
+        "proxycommand" if options.proxy_jump.is_none() && options.proxy_command.is_none() => {
+            // Keep command words secret-bearing and structured so runtime execution never
+            // needs to reinterpret the user's SSH config through a system shell.
+            options.proxy_command = Some(if value.eq_ignore_ascii_case("none") {
+                Vec::new()
+            } else {
+                values.iter().cloned().map(SecretString::new).collect()
+            })
+        }
         _ => {}
     }
 }
@@ -262,10 +284,10 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
         .certificate_file
         .clone()
         .or_else(|| update.certificate_file.clone());
-    base.proxy_jump = base
-        .proxy_jump
-        .clone()
-        .or_else(|| update.proxy_jump.clone());
+    if base.proxy_jump.is_none() && base.proxy_command.is_none() {
+        base.proxy_jump = update.proxy_jump.clone();
+        base.proxy_command = update.proxy_command.clone();
+    }
 }
 
 fn resolve_ssh_config_alias_from_blocks(
@@ -308,54 +330,36 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         ))
     });
     let mut proxy_chain = Vec::new();
-    if let Some(proxy_jump) = options.proxy_jump.as_deref()
-        && !proxy_jump.eq_ignore_ascii_case("none")
-    {
-        for jump in proxy_jump
-            .split(',')
-            .map(str::trim)
-            .filter(|jump| !jump.is_empty())
-        {
-            let jump = expand_connection_tokens(jump, alias, options.user.as_deref(), options.port);
-            let target = parse_proxy_jump_target(&jump)?;
-            let jump_options = resolve_options(&target.host, blocks);
-            let jump_hostname = jump_options
-                .hostname
-                .as_deref()
-                .map(|value| {
-                    expand_connection_tokens(
-                        value,
-                        &target.host,
-                        jump_options.user.as_deref(),
-                        jump_options.port,
-                    )
+    let mut active_aliases = HashSet::from([alias.to_ascii_lowercase()]);
+    let mut emitted_aliases = HashSet::new();
+    append_proxy_jump_chain(
+        alias,
+        &options,
+        blocks,
+        &mut active_aliases,
+        &mut emitted_aliases,
+        &mut proxy_chain,
+        0,
+    )?;
+    let resolved_hostname = hostname.as_deref().unwrap_or(alias);
+    let proxy_command = options
+        .proxy_command
+        .as_ref()
+        .filter(|words| !words.is_empty())
+        .map(|words| {
+            words
+                .iter()
+                .map(|word| {
+                    SecretString::new(expand_proxy_command_tokens(
+                        word.expose_secret(),
+                        alias,
+                        resolved_hostname,
+                        options.user.as_deref(),
+                        options.port,
+                    ))
                 })
-                .unwrap_or_else(|| target.host.clone());
-            let jump_identity = jump_options.identity_file.as_deref().map(|value| {
-                expand_home(&expand_connection_tokens(
-                    value,
-                    &target.host,
-                    jump_options.user.as_deref(),
-                    jump_options.port,
-                ))
-            });
-            let jump_certificate = jump_options.certificate_file.as_deref().map(|value| {
-                expand_home(&expand_connection_tokens(
-                    value,
-                    &target.host,
-                    jump_options.user.as_deref(),
-                    jump_options.port,
-                ))
-            });
-            proxy_chain.push(SshConfigProxyHop {
-                host: jump_hostname,
-                user: target.user.or(jump_options.user),
-                port: target.port.or(jump_options.port),
-                identity_file: jump_identity,
-                certificate_file: jump_certificate,
-            });
-        }
-    }
+                .collect()
+        });
 
     Ok(SshConfigHost {
         alias: alias.to_string(),
@@ -365,8 +369,103 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         identity_file,
         certificate_file,
         proxy_chain,
+        proxy_command,
         already_imported: false,
     })
+}
+
+fn append_proxy_jump_chain(
+    alias: &str,
+    options: &SshHostOptions,
+    blocks: &[SshHostBlock],
+    active_aliases: &mut HashSet<String>,
+    emitted_aliases: &mut HashSet<String>,
+    proxy_chain: &mut Vec<SshConfigProxyHop>,
+    depth: usize,
+) -> Result<()> {
+    let Some(proxy_jump) = options
+        .proxy_jump
+        .as_deref()
+        .filter(|value| !value.eq_ignore_ascii_case("none"))
+    else {
+        return Ok(());
+    };
+    if depth >= MAX_PROXY_JUMP_DEPTH {
+        bail!("ProxyJump chain exceeds {MAX_PROXY_JUMP_DEPTH} hops");
+    }
+
+    for jump in proxy_jump
+        .split(',')
+        .map(str::trim)
+        .filter(|jump| !jump.is_empty())
+    {
+        let jump = expand_connection_tokens(jump, alias, options.user.as_deref(), options.port);
+        let target = parse_proxy_jump_target(&jump)?;
+        let target_key = target.host.to_ascii_lowercase();
+        if !active_aliases.insert(target_key.clone()) {
+            bail!("recursive ProxyJump alias detected");
+        }
+        let jump_options = resolve_options(&target.host, blocks);
+        append_proxy_jump_chain(
+            &target.host,
+            &jump_options,
+            blocks,
+            active_aliases,
+            emitted_aliases,
+            proxy_chain,
+            depth + 1,
+        )?;
+        active_aliases.remove(&target_key);
+
+        // An explicit multi-hop list can name a hop that an alias has already
+        // expanded. Emit each logical alias once while preserving route order.
+        if !emitted_aliases.insert(target_key) {
+            continue;
+        }
+        proxy_chain.push(resolved_proxy_jump_hop(target, jump_options));
+    }
+    Ok(())
+}
+
+fn resolved_proxy_jump_hop(
+    target: ProxyJumpTarget,
+    jump_options: SshHostOptions,
+) -> SshConfigProxyHop {
+    let jump_hostname = jump_options
+        .hostname
+        .as_deref()
+        .map(|value| {
+            expand_connection_tokens(
+                value,
+                &target.host,
+                jump_options.user.as_deref(),
+                jump_options.port,
+            )
+        })
+        .unwrap_or_else(|| target.host.clone());
+    let jump_identity = jump_options.identity_file.as_deref().map(|value| {
+        expand_home(&expand_connection_tokens(
+            value,
+            &target.host,
+            jump_options.user.as_deref(),
+            jump_options.port,
+        ))
+    });
+    let jump_certificate = jump_options.certificate_file.as_deref().map(|value| {
+        expand_home(&expand_connection_tokens(
+            value,
+            &target.host,
+            jump_options.user.as_deref(),
+            jump_options.port,
+        ))
+    });
+    SshConfigProxyHop {
+        host: jump_hostname,
+        user: target.user.or(jump_options.user),
+        port: target.port.or(jump_options.port),
+        identity_file: jump_identity,
+        certificate_file: jump_certificate,
+    }
 }
 
 fn resolve_options(alias: &str, blocks: &[SshHostBlock]) -> SshHostOptions {
@@ -484,6 +583,36 @@ fn expand_connection_tokens(
         match characters.next() {
             Some('%') => expanded.push('%'),
             Some('h' | 'n') => expanded.push_str(alias),
+            Some('r') => expanded.push_str(user.unwrap_or_default()),
+            Some('p') => expanded.push_str(&port.unwrap_or(22).to_string()),
+            Some(token) => {
+                expanded.push('%');
+                expanded.push(token);
+            }
+            None => expanded.push('%'),
+        }
+    }
+    expanded
+}
+
+fn expand_proxy_command_tokens(
+    value: &str,
+    alias: &str,
+    hostname: &str,
+    user: Option<&str>,
+    port: Option<u16>,
+) -> String {
+    let mut expanded = String::with_capacity(value.len());
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character != '%' {
+            expanded.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('%') => expanded.push('%'),
+            Some('h') => expanded.push_str(hostname),
+            Some('n') => expanded.push_str(alias),
             Some('r') => expanded.push_str(user.unwrap_or_default()),
             Some('p') => expanded.push_str(&port.unwrap_or(22).to_string()),
             Some(token) => {
@@ -627,6 +756,83 @@ mod tests {
     }
 
     #[test]
+    fn proxy_command_is_tokenized_before_connection_values_are_expanded() {
+        let blocks = vec![block(
+            &["edge"],
+            SshHostOptions {
+                hostname: Some("target host.example.com".to_string()),
+                user: Some("operator".to_string()),
+                port: Some(2200),
+                proxy_command: Some(vec![
+                    SecretString::new("cloudflared"),
+                    SecretString::new("access"),
+                    SecretString::new("ssh"),
+                    SecretString::new("--hostname"),
+                    SecretString::new("%h"),
+                    SecretString::new("--original=%n"),
+                ]),
+                ..SshHostOptions::default()
+            },
+        )];
+
+        let host = resolve_ssh_config_host("edge", &blocks).unwrap();
+        let words = host
+            .proxy_command
+            .unwrap()
+            .into_iter()
+            .map(|word| word.expose_secret().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            words,
+            [
+                "cloudflared",
+                "access",
+                "ssh",
+                "--hostname",
+                "target host.example.com",
+                "--original=edge",
+            ]
+        );
+    }
+
+    #[test]
+    fn first_proxy_route_option_wins_between_jump_and_command() {
+        let blocks = vec![
+            block(
+                &["edge"],
+                SshHostOptions {
+                    proxy_jump: Some("gateway".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["*"],
+                SshHostOptions {
+                    proxy_command: Some(vec![SecretString::new("nc")]),
+                    ..SshHostOptions::default()
+                },
+            ),
+        ];
+
+        let options = resolve_options("edge", &blocks);
+
+        assert_eq!(options.proxy_jump.as_deref(), Some("gateway"));
+        assert!(options.proxy_command.is_none());
+    }
+
+    #[test]
+    fn proxy_command_none_disables_later_proxy_routes_without_creating_a_command() {
+        let mut options = SshHostOptions::default();
+        apply_option(&mut options, "proxycommand", &["none".to_string()]);
+        apply_option(&mut options, "proxyjump", &["gateway".to_string()]);
+        let host = resolve_ssh_config_host("edge", &[block(&["edge"], options)]).unwrap();
+
+        assert!(host.proxy_command.is_none());
+        assert!(host.proxy_chain.is_empty());
+    }
+
+    #[test]
     fn alias_query_returns_the_canonical_config_spelling() {
         let hosts = vec![SshConfigHost {
             alias: "Production-DB".to_string(),
@@ -721,6 +927,66 @@ mod tests {
                 port: Some(2222),
             }
         );
+    }
+
+    #[test]
+    fn proxy_jump_aliases_expand_recursively_into_route_order() {
+        let blocks = vec![
+            block(
+                &["production"],
+                SshHostOptions {
+                    proxy_jump: Some("edge".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["edge"],
+                SshHostOptions {
+                    hostname: Some("edge.example.com".to_string()),
+                    user: Some("edge-user".to_string()),
+                    proxy_jump: Some("gateway".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["gateway"],
+                SshHostOptions {
+                    hostname: Some("gateway.example.com".to_string()),
+                    user: Some("gateway-user".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+        ];
+
+        let host = resolve_ssh_config_host("production", &blocks).unwrap();
+
+        assert_eq!(host.proxy_chain.len(), 2);
+        assert_eq!(host.proxy_chain[0].host, "gateway.example.com");
+        assert_eq!(host.proxy_chain[1].host, "edge.example.com");
+    }
+
+    #[test]
+    fn recursive_proxy_jump_aliases_are_rejected() {
+        let blocks = vec![
+            block(
+                &["production"],
+                SshHostOptions {
+                    proxy_jump: Some("edge".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["edge"],
+                SshHostOptions {
+                    proxy_jump: Some("production".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+        ];
+
+        let error = resolve_ssh_config_host("production", &blocks).unwrap_err();
+
+        assert!(error.to_string().contains("recursive ProxyJump"));
     }
 
     #[test]

@@ -110,15 +110,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn search_text(&self) -> String {
         match self {
-            Self::Connection(connection) => format!(
-                "{}\n{}\n{}\n{}\n{}\n{}",
-                connection.name,
-                connection.host,
-                connection.port,
-                connection.username,
-                connection.group.as_deref().unwrap_or_default(),
-                connection.tags.join(" ")
-            ),
+            Self::Connection(connection) => connection.search_text(),
             Self::SshConfig(host) => format!(
                 "{}\n{}\n{}\n{}\nssh config",
                 host.alias,

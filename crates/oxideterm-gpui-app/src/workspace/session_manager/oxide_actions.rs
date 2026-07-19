@@ -180,9 +180,14 @@ impl WorkspaceApp {
         let session_manager_tab_active = self
             .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager);
+        let settings = self.settings_store.settings();
+        let saved_connections_sidebar_active = !self.sidebar_collapsed
+            && !settings.sidebar_ui.zen_mode
+            && self.effective_sidebar_panel_section() == SidebarSection::Connections;
         session_manager_input_is_active(
             input,
             session_manager_tab_active,
+            saved_connections_sidebar_active,
             self.session_manager.oxide_import_dialog.as_ref(),
             self.session_manager.oxide_export_dialog.as_ref(),
         )
@@ -193,6 +198,7 @@ impl WorkspaceApp {
         let input = self.session_manager.focused_input?;
         session_manager_input_is_active(
             input,
+            false,
             false,
             self.session_manager.oxide_import_dialog.as_ref(),
             self.session_manager.oxide_export_dialog.as_ref(),

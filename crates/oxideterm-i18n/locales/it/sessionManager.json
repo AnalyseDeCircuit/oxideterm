@@ -67,6 +67,7 @@
       "connection_deleted": "Connessione eliminata",
       "connections_deleted": "{{count}} connessioni eliminate",
       "connection_duplicated": "Connessione duplicata",
+      "connection_not_found": "Connessione salvata non trovata",
       "group_created": "Gruppo creato",
       "create_group_failed": "Creazione del gruppo non riuscita",
       "connections_moved": "{{count}} connessioni spostate in \"{{group}}\"",

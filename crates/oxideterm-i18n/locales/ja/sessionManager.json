@@ -67,6 +67,7 @@
       "connection_deleted": "接続を削除しました",
       "connections_deleted": "{{count}} 件の接続を削除しました",
       "connection_duplicated": "接続を複製しました",
+      "connection_not_found": "保存済み接続が見つかりません",
       "group_created": "グループを作成しました",
       "create_group_failed": "グループの作成に失敗しました",
       "connections_moved": "{{count}} 件の接続を \"{{group}}\" に移動しました",

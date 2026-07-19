@@ -1070,8 +1070,8 @@ impl WorkspaceApp {
 
     fn command_palette_connection_items(&self) -> Vec<PaletteItem> {
         self.connection_store
-            .connections()
-            .iter()
+            .connection_infos()
+            .into_iter()
             .map(|conn| {
                 let label =
                     command_palette_connection_label(&conn.name, &conn.username, &conn.host);
@@ -1088,7 +1088,7 @@ impl WorkspaceApp {
                     icon: LucideIcon::Server,
                     detail: Some(detail.clone()),
                     shortcut: None,
-                    value: format!("{label} {detail}"),
+                    value: conn.search_text(),
                     action: PaletteAction::OpenSavedConnection(conn.id.clone()),
                     disabled: false,
                 }

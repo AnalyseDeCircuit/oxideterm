@@ -1,7 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet, future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration,
+};
 
 use oxideterm_sftp::{SftpChannelOpener, SftpError, SftpExecChannelOpener};
 use oxideterm_x11_forwarding::{X11RemoteDisplayAllocator, X11RemoteXauthUpdate, X11SshRequest};
@@ -9,7 +11,7 @@ use parking_lot::RwLock;
 use russh::{
     AgentAuthError, Channel, ChannelMsg, MethodKind, Pty, Signer as RusshSigner, client,
     keys::{
-        Algorithm, Certificate, HashAlg, PrivateKey, PrivateKeyWithHashAlg,
+        Algorithm, Certificate, HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKeyBase64,
         agent::{
             AgentIdentity,
             client::{AgentClient, AgentStream},
@@ -614,6 +616,7 @@ include!("transport/client.rs");
 include!("transport/handler.rs");
 include!("transport/auth.rs");
 include!("transport/paths.rs");
+include!("transport/proxy_command.rs");
 
 #[cfg(test)]
 mod transport_lost_tests {

@@ -67,6 +67,7 @@
       "connection_deleted": "연결이 삭제되었습니다",
       "connections_deleted": "{{count}}개 연결이 삭제되었습니다",
       "connection_duplicated": "연결이 복제되었습니다",
+      "connection_not_found": "저장된 연결을 찾을 수 없습니다",
       "group_created": "그룹이 생성되었습니다",
       "create_group_failed": "그룹 생성에 실패했습니다",
       "connections_moved": "{{count}}개 연결이 \"{{group}}\"(으)로 이동되었습니다",

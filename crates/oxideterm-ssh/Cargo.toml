@@ -17,6 +17,7 @@ oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding" }
 parking_lot.workspace = true
 russh = { path = "../russh" }
 serde.workspace = true
+sha2.workspace = true
 signature.workspace = true
 ssh-encoding.workspace = true
 thiserror.workspace = true

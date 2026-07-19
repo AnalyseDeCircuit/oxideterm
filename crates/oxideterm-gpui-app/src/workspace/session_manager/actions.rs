@@ -6,21 +6,7 @@ impl WorkspaceApp {
         let mut rows = self.connection_store.connection_infos();
         rows.retain(|conn| self.connection_matches_filter(conn));
         if !query.is_empty() {
-            rows.retain(|conn| {
-                conn.name.to_lowercase().contains(&query)
-                    || conn.host.to_lowercase().contains(&query)
-                    || conn.username.to_lowercase().contains(&query)
-                    || conn
-                        .group
-                        .as_deref()
-                        .unwrap_or_default()
-                        .to_lowercase()
-                        .contains(&query)
-                    || conn
-                        .tags
-                        .iter()
-                        .any(|tag| tag.to_lowercase().contains(&query))
-            });
+            rows.retain(|conn| conn.matches_search_query(&query));
         }
         // The new grid/list/tree display model owns presentation sorting. This
         // helper is only used to retain valid checkbox selections after filters.

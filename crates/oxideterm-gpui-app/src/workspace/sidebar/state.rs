@@ -33,6 +33,13 @@ impl WorkspaceApp {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
+        if collapsed && self.session_manager.focused_input == Some(SessionManagerInput::SavedSearch)
+        {
+            // A closing sidebar must release its synthetic IME owner before
+            // the visual exit animation finishes, or it can swallow terminal keys.
+            self.session_manager.focused_input = None;
+            self.ime_marked_text = None;
+        }
         self.sidebar_collapsed = collapsed;
         self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
         let generation = self.sidebar_motion_generation;
@@ -133,6 +140,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.clear_ai_sidebar_keyboard_focus();
+        if section != SidebarSection::Connections
+            && self.session_manager.focused_input == Some(SessionManagerInput::SavedSearch)
+        {
+            // Switching the sidebar body transfers keyboard ownership away
+            // from the saved-connections search field.
+            self.session_manager.focused_input = None;
+            self.ime_marked_text = None;
+        }
         self.active_sidebar_section = section;
         if section == SidebarSection::Extensions {
             self.bootstrap_native_plugin_runtime(cx);
