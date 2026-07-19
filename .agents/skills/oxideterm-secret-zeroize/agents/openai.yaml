@@ -1,0 +1,4 @@
+interface:
+  display_name: "OxideTerm Secret Zeroize"
+  short_description: "Review secret lifetimes and redaction boundaries"
+  default_prompt: "Use $oxideterm-secret-zeroize to review this credential-handling change for safe lifetime, storage, zeroization, and redaction."

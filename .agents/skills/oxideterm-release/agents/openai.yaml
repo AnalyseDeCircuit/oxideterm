@@ -1,0 +1,4 @@
+interface:
+  display_name: "OxideTerm Release"
+  short_description: "Prepare, publish, and recover OxideTerm releases"
+  default_prompt: "Use $oxideterm-release to prepare, publish, or recover an OxideTerm release."

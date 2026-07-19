@@ -1,0 +1,4 @@
+interface:
+  display_name: "OxideTerm Node Session Ownership"
+  short_description: "Review SSH node and task ownership safely"
+  default_prompt: "Use $oxideterm-node-session-ownership to review this SSH runtime change for correct node, consumer, and task ownership."
