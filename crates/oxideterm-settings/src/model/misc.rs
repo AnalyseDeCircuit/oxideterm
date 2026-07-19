@@ -210,6 +210,20 @@ pub struct NewConnectionSettings {
     pub save_connection: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfigSettings {
+    pub auto_load_hosts: bool,
+}
+
+impl Default for SshConfigSettings {
+    fn default() -> Self {
+        Self {
+            auto_load_hosts: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsSettings {
@@ -254,6 +268,8 @@ pub struct PersistedSettings {
     #[serde(default)]
     pub new_connection: NewConnectionSettings,
     #[serde(default)]
+    pub ssh_config: SshConfigSettings,
+    #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
     #[serde(flatten)]
     pub extra: ExtraFields,
@@ -286,6 +302,7 @@ impl Default for PersistedSettings {
             launcher: LauncherSettings::default(),
             agent_roles: None,
             new_connection: NewConnectionSettings::default(),
+            ssh_config: SshConfigSettings::default(),
             diagnostics: DiagnosticsSettings::default(),
             extra: ExtraFields::new(),
         }
@@ -365,5 +382,19 @@ mod misc_tests {
             serde_json::from_value(serialized).expect("legacy settings should deserialize");
 
         assert!(restored.appearance.show_window_titlebar);
+    }
+
+    #[test]
+    fn legacy_settings_default_to_automatic_ssh_config_discovery() {
+        let mut serialized = PersistedSettings::default().to_value();
+        serialized
+            .as_object_mut()
+            .expect("settings should be an object")
+            .remove("sshConfig");
+
+        let restored: PersistedSettings =
+            serde_json::from_value(serialized).expect("legacy settings should deserialize");
+
+        assert!(restored.ssh_config.auto_load_hosts);
     }
 }

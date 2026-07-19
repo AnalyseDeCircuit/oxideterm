@@ -602,6 +602,9 @@
       "ssh_config": {
         "title": "从 SSH 配置导入",
         "description": "扫描 ~/.ssh/config 中的主机。",
+        "auto_load": "自动显示 SSH 配置主机",
+        "auto_load_hint": "无需导入，直接在命令面板和会话管理器中显示 ~/.ssh/config 的主机。",
+        "load_failed": "读取 SSH 配置失败：{{error}}",
         "no_hosts": "在 ~/.ssh/config 中未找到主机",
         "import": "导入",
         "select_all": "全选",

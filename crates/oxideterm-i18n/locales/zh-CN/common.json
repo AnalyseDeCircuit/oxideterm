@@ -103,6 +103,7 @@
     "cmd_reload_window": "重新加载窗口",
     "quick_connect_alias_not_found": "未找到名为 {{alias}} 的 SSH config alias",
     "quick_connect_resolve_failed": "解析 SSH config alias {{alias}} 失败",
+    "ssh_config_source": "SSH 配置主机",
     "footer_hint": "按 Esc 关闭",
     "session_ssh_terminal": "SSH 终端",
     "cmd_open_serial_terminal": "打开串口终端",

@@ -602,6 +602,9 @@
       "ssh_config": {
         "title": "Nhập từ SSH Config",
         "description": "Quét ~/.ssh/config để tìm host.",
+        "auto_load": "Tự động hiển thị host từ cấu hình SSH",
+        "auto_load_hint": "Hiển thị host từ ~/.ssh/config trong bảng lệnh và trình quản lý phiên mà không cần nhập.",
+        "load_failed": "Không thể đọc cấu hình SSH: {{error}}",
         "no_hosts": "Không tìm thấy host trong ~/.ssh/config",
         "import": "Nhập",
         "select_all": "Chọn tất cả",

@@ -16,7 +16,7 @@ use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
     SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SavedUpstreamProxyProtocol, SecretString, SerialProfile, TelnetProfile,
+    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, TelnetProfile,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -339,6 +339,7 @@ pub(super) struct SessionManagerState {
     pub(super) oxide_import_dialog: Option<OxideImportDialogState>,
     pub(super) oxide_export_dialog: Option<OxideExportDialogState>,
     pub(super) status: Option<String>,
+    pub(super) ssh_config_hosts: Vec<SshConfigHost>,
     pub(super) saved_sidebar_scroll_handle: UniformListScrollHandle,
 }
 
@@ -365,6 +366,7 @@ impl Default for SessionManagerState {
             oxide_import_dialog: None,
             oxide_export_dialog: None,
             status: None,
+            ssh_config_hosts: Vec::new(),
             saved_sidebar_scroll_handle: UniformListScrollHandle::new(),
         }
     }

@@ -602,6 +602,9 @@
       "ssh_config": {
         "title": "SSH設定からインポート",
         "description": "~/.ssh/configのホストをスキャンします。",
+        "auto_load": "SSH設定のホストを自動表示",
+        "auto_load_hint": "~/.ssh/configのホストをインポートせずにコマンドパレットとセッションマネージャーに表示します。",
+        "load_failed": "SSH設定を読み込めませんでした: {{error}}",
         "no_hosts": "~/.ssh/configにホストが見つかりません",
         "import": "インポート",
         "select_all": "すべて選択",

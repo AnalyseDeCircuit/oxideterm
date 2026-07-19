@@ -602,6 +602,9 @@
       "ssh_config": {
         "title": "從 SSH Config 匯入",
         "description": "掃描 ~/.ssh/config 中的主機。",
+        "auto_load": "自動顯示 SSH 設定主機",
+        "auto_load_hint": "無需匯入，直接在命令面板和工作階段管理器中顯示 ~/.ssh/config 的主機。",
+        "load_failed": "讀取 SSH 設定失敗：{{error}}",
         "no_hosts": "在 ~/.ssh/config 中找不到主機",
         "import": "匯入",
         "select_all": "全選",

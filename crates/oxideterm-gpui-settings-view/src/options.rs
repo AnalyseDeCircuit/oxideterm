@@ -305,6 +305,10 @@ pub fn set_connection_idle_timeout(settings: &mut PersistedSettings, value: i64)
     settings.connection_pool.idle_timeout_secs = value;
 }
 
+pub fn set_ssh_config_auto_load_hosts(settings: &mut PersistedSettings, value: bool) {
+    settings.ssh_config.auto_load_hosts = value;
+}
+
 pub fn sftp_concurrent_options() -> &'static [i64] {
     &[1, 2, 3, 4, 5, 6, 8, 10]
 }

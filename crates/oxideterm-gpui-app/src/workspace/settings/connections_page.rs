@@ -183,10 +183,33 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
         self.connection_section(
             "settings_view.connections.ssh_config.title",
             "settings_view.connections.ssh_config.description",
             vec![
+                self.setting_row(
+                    "settings_view.connections.ssh_config.auto_load",
+                    "settings_view.connections.ssh_config.auto_load_hint",
+                    checkbox(&self.tokens, String::new(), auto_load_hosts)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.edit_settings(
+                                    |settings| {
+                                        set_ssh_config_auto_load_hosts(settings, !auto_load_hosts)
+                                    },
+                                    cx,
+                                );
+                                this.refresh_session_manager_ssh_config_hosts(cx);
+                                if this.command_palette.open {
+                                    this.load_command_palette_ssh_config_hosts(cx);
+                                }
+                            }),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
                 div()
                     .flex()
                     .justify_start()

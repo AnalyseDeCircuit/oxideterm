@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone)]
 pub(super) enum SessionManagerDisplayItem {
     Connection(ConnectionInfo),
+    SshConfig(SshConfigHost),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
 }
@@ -11,6 +12,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn id(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.id,
+            Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
         }
@@ -19,6 +21,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn name(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.name,
+            Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
         }
@@ -27,6 +30,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn group(&self) -> Option<&str> {
         match self {
             Self::Connection(connection) => connection.group.as_deref(),
+            Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
         }
@@ -35,6 +39,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn last_used(&self) -> Option<String> {
         match self {
             Self::Connection(connection) => connection.last_used_at.clone(),
+            Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
         }
@@ -43,6 +48,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn host(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.host,
+            Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
         }
@@ -51,6 +57,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn port_sort_key(&self) -> u32 {
         match self {
             Self::Connection(connection) => u32::from(connection.port),
+            Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
         }
@@ -59,6 +66,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn username(&self) -> &str {
         match self {
             Self::Connection(connection) => &connection.username,
+            Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
             Self::Serial(_) | Self::Telnet(_) => "",
         }
     }
@@ -66,6 +74,7 @@ impl SessionManagerDisplayItem {
     pub(super) fn auth_sort_key(&self) -> String {
         match self {
             Self::Connection(connection) => auth_label(connection.auth_type).to_lowercase(),
+            Self::SshConfig(_) => "ssh config".to_string(),
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
         }
@@ -79,6 +88,21 @@ impl SessionManagerDisplayItem {
                     connection.username, connection.host, connection.port
                 )
             }
+            Self::SshConfig(host) => match host.user.as_deref() {
+                Some(user) if !user.is_empty() => {
+                    format!(
+                        "{}@{}:{}",
+                        user,
+                        host.hostname.as_deref().unwrap_or(&host.alias),
+                        host.port.unwrap_or(22)
+                    )
+                }
+                _ => format!(
+                    "{}:{}",
+                    host.hostname.as_deref().unwrap_or(&host.alias),
+                    host.port.unwrap_or(22)
+                ),
+            },
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Telnet(profile) => format!("{}:{}", profile.host, profile.port),
         }
@@ -94,6 +118,13 @@ impl SessionManagerDisplayItem {
                 connection.username,
                 connection.group.as_deref().unwrap_or_default(),
                 connection.tags.join(" ")
+            ),
+            Self::SshConfig(host) => format!(
+                "{}\n{}\n{}\n{}\nssh config",
+                host.alias,
+                host.hostname.as_deref().unwrap_or(&host.alias),
+                host.port.unwrap_or(22),
+                host.user.as_deref().unwrap_or_default()
             ),
             Self::Serial(profile) => format!(
                 "{}\n{}\n{}\n{}",
@@ -118,6 +149,7 @@ impl SessionManagerDisplayItem {
                 session_icons::session_icon_from_id(connection.icon.as_deref())
                     .unwrap_or(LucideIcon::Server)
             }
+            Self::SshConfig(_) => LucideIcon::FileTerminal,
             Self::Serial(_) => LucideIcon::Radio,
             Self::Telnet(_) => LucideIcon::Terminal,
         }
@@ -157,6 +189,14 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::Telnet),
+            )
+            .chain(
+                self.session_manager
+                    .ssh_config_hosts
+                    .iter()
+                    .filter(|host| !host.already_imported)
+                    .cloned()
+                    .map(SessionManagerDisplayItem::SshConfig),
             )
             .filter(|item| {
                 query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
@@ -460,6 +500,15 @@ impl WorkspaceApp {
     ) -> Div {
         let theme = self.tokens.ui;
         let open_item = item.clone();
+        let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
+            format!(
+                "{} · {}",
+                item.subtitle(),
+                self.i18n.t("command_palette.ssh_config_source")
+            )
+        } else {
+            item.subtitle()
+        };
         // Keep the selected connection name aligned with the checkbox's accent treatment.
         let is_selected = matches!(item, SessionManagerDisplayItem::Connection(_))
             && self.session_manager.selected_ids.contains(item.id());
@@ -518,7 +567,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .child(item.subtitle()),
+                            .child(subtitle),
                     ),
             )
             .child(self.render_session_manager_display_item_actions(item, has_background, cx))
@@ -844,6 +893,15 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let open_item = item.clone();
         let last_used = item.last_used();
+        let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
+            format!(
+                "{} · {}",
+                item.subtitle(),
+                self.i18n.t("command_palette.ssh_config_source")
+            )
+        } else {
+            item.subtitle()
+        };
         // List rows mirror the card view so selection feedback is consistent.
         let is_selected = matches!(item, SessionManagerDisplayItem::Connection(_))
             && self.session_manager.selected_ids.contains(item.id());
@@ -908,7 +966,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .child(item.subtitle()),
+                            .child(subtitle),
                     ),
             )
             .child(
@@ -934,6 +992,7 @@ impl WorkspaceApp {
                 .and_then(parse_hex_color)
                 .map(|color| rgba((color << 8) | 0x33))
                 .unwrap_or_else(|| rgba(0x0ea5e933)),
+            SessionManagerDisplayItem::SshConfig(_) => rgba(0x8b5cf633),
             SessionManagerDisplayItem::Serial(_) => rgba(0xf59e0b33),
             SessionManagerDisplayItem::Telnet(_) => rgba(0x22c55e33),
         };
@@ -944,6 +1003,7 @@ impl WorkspaceApp {
                 .and_then(parse_hex_color)
                 .map(rgb)
                 .unwrap_or_else(|| rgb(0x7dd3fc)),
+            SessionManagerDisplayItem::SshConfig(_) => rgb(0xc4b5fd),
             SessionManagerDisplayItem::Serial(_) => rgb(0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => rgb(0x86efac),
         };
@@ -1018,6 +1078,41 @@ impl WorkspaceApp {
                                 f32::from(event.position.y),
                                 cx,
                             );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
+            SessionManagerDisplayItem::SshConfig(host) => {
+                let open_alias = host.alias.clone();
+                let import_alias = host.alias;
+                div()
+                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(MANAGER_ROW_ACTION_GAP))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.accent),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_ssh_config_alias_from_palette(open_alias.clone(), window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Download,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _event, _window, cx| {
+                            this.import_session_manager_ssh_config_host(import_alias.clone(), cx);
                             cx.stop_propagation();
                         },
                         cx,
@@ -1294,6 +1389,9 @@ impl WorkspaceApp {
         match item {
             SessionManagerDisplayItem::Connection(connection) => {
                 self.open_saved_connection(&connection.id, window, cx)
+            }
+            SessionManagerDisplayItem::SshConfig(host) => {
+                self.open_ssh_config_alias_from_palette(host.alias, window, cx)
             }
             SessionManagerDisplayItem::Serial(profile) => {
                 self.open_saved_serial_profile(&profile.id, window, cx)

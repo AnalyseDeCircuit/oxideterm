@@ -102,6 +102,7 @@
     "cmd_reload_window": "Ricarica finestra",
     "quick_connect_alias_not_found": "Alias config SSH '{{alias}}' non trovato",
     "quick_connect_resolve_failed": "Errore durante la risoluzione dell'alias '{{alias}}'",
+    "ssh_config_source": "Host della configurazione SSH",
     "footer_hint": "Premi Esc per chiudere",
     "session_ssh_terminal": "Terminale SSH",
     "cmd_open_cloud_sync": "Apri sincronizzazione cloud",

@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::ssh_paths::{default_ssh_dir, expand_home_path};
 use crate::{ConnectionStore, saved_connection_from_ssh_host};
@@ -17,7 +17,17 @@ pub struct SshConfigHost {
     pub port: Option<u16>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
+    pub proxy_chain: Vec<SshConfigProxyHop>,
     pub already_imported: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SshConfigProxyHop {
+    pub host: String,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<String>,
+    pub certificate_file: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -35,7 +45,7 @@ pub struct SshConfigImportError {
 
 #[derive(Clone, Debug, Default)]
 struct SshHostBlock {
-    aliases: Vec<String>,
+    patterns: Vec<String>,
     options: SshHostOptions,
 }
 
@@ -46,6 +56,7 @@ struct SshHostOptions {
     port: Option<u16>,
     identity_file: Option<String>,
     certificate_file: Option<String>,
+    proxy_jump: Option<String>,
 }
 
 pub fn default_ssh_config_path() -> PathBuf {
@@ -57,26 +68,27 @@ pub fn list_ssh_config_hosts(existing_names: &HashSet<String>) -> Result<Vec<Ssh
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let blocks = parse_ssh_config_file(&path, &mut HashSet::new())?;
+    let blocks = parse_ssh_config_file(&path)?;
+    let existing_names = existing_names
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<HashSet<_>>();
     let mut hosts = Vec::new();
     let mut seen_aliases = HashSet::new();
-    for block in blocks {
-        for alias in block.aliases {
-            if !seen_aliases.insert(alias.clone()) {
+    for block in &blocks {
+        for alias in &block.patterns {
+            let alias = alias.trim_start_matches('!');
+            if !seen_aliases.insert(alias.to_lowercase()) {
                 continue;
             }
             if alias_contains_pattern(&alias) {
                 continue;
             }
-            hosts.push(SshConfigHost {
-                already_imported: existing_names.contains(&alias),
-                alias,
-                hostname: block.options.hostname.clone(),
-                user: block.options.user.clone(),
-                port: block.options.port,
-                identity_file: block.options.identity_file.clone(),
-                certificate_file: block.options.certificate_file.clone(),
-            });
+            let Some(mut host) = resolve_ssh_config_alias_from_blocks(alias, &blocks)? else {
+                continue;
+            };
+            host.already_imported = existing_names.contains(&alias.to_lowercase());
+            hosts.push(host);
         }
     }
     Ok(hosts)
@@ -87,24 +99,8 @@ pub fn resolve_ssh_config_alias(alias: &str) -> Result<Option<SshConfigHost>> {
     if !path.exists() {
         return Ok(None);
     }
-    let blocks = parse_ssh_config_file(&path, &mut HashSet::new())?;
-    let mut resolved = SshHostOptions::default();
-    let mut matched = false;
-    for block in blocks {
-        if block.aliases.iter().any(|candidate| candidate == alias) {
-            matched = true;
-            merge_options(&mut resolved, &block.options);
-        }
-    }
-    Ok(matched.then(|| SshConfigHost {
-        alias: alias.to_string(),
-        hostname: resolved.hostname,
-        user: resolved.user,
-        port: resolved.port,
-        identity_file: resolved.identity_file,
-        certificate_file: resolved.certificate_file,
-        already_imported: false,
-    }))
+    let blocks = parse_ssh_config_file(&path)?;
+    resolve_ssh_config_alias_from_blocks(alias, &blocks)
 }
 
 /// Resolves and imports one literal SSH config alias as one store transaction.
@@ -112,7 +108,7 @@ pub fn import_ssh_config_alias(store: &mut ConnectionStore, alias: &str) -> Resu
     if store
         .connections()
         .iter()
-        .any(|connection| connection.name == alias)
+        .any(|connection| connection.name.eq_ignore_ascii_case(alias))
     {
         return Ok(false);
     }
@@ -129,7 +125,7 @@ fn import_resolved_ssh_config_host(
     if store
         .connections()
         .iter()
-        .any(|connection| connection.name == host.alias)
+        .any(|connection| connection.name.eq_ignore_ascii_case(&host.alias))
     {
         return Ok(false);
     }
@@ -157,67 +153,81 @@ pub fn canonical_ssh_config_alias<'a>(hosts: &'a [SshConfigHost], query: &str) -
         .map(|host| host.alias.as_str())
 }
 
-fn parse_ssh_config_file(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Vec<SshHostBlock>> {
+fn parse_ssh_config_file(path: &Path) -> Result<Vec<SshHostBlock>> {
+    // Includes are parsed in place because an included Host block changes the
+    // active context for the lines that follow it, just as textual inclusion does.
+    let mut blocks = vec![SshHostBlock::default()];
+    let mut active_files = HashSet::new();
+    let mut current_block = 0;
+    parse_ssh_config_file_into(path, &mut active_files, &mut blocks, &mut current_block)?;
+    Ok(blocks)
+}
+
+fn parse_ssh_config_file_into(
+    path: &Path,
+    active_files: &mut HashSet<PathBuf>,
+    blocks: &mut Vec<SshHostBlock>,
+    current_block: &mut usize,
+) -> Result<()> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if !seen.insert(path.clone()) {
-        return Ok(Vec::new());
+    if !active_files.insert(path.clone()) {
+        bail!(
+            "recursive SSH config Include detected at {}",
+            path.display()
+        );
     }
     let source =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut blocks = Vec::new();
-    let mut current: Option<SshHostBlock> = None;
-    let mut globals = SshHostOptions::default();
 
     for raw_line in source.lines() {
         let line = strip_comment(raw_line).trim();
         if line.is_empty() {
             continue;
         }
-        let words = split_ssh_words(line);
-        let Some((keyword, values)) = words.split_first() else {
+        let mut words = split_ssh_words(line);
+        let Some(keyword) = words.first().cloned() else {
             continue;
         };
+        // OpenSSH accepts both `Keyword value` and `Keyword=value` forms.
+        if words.len() == 1
+            && let Some((key, value)) = keyword.split_once('=')
+        {
+            words = vec![key.to_string(), value.to_string()];
+        }
+        let (keyword, values) = words.split_first().expect("words is known to be non-empty");
         let key = keyword.to_ascii_lowercase();
         if key == "include" {
-            flush_block(&mut blocks, &mut current);
             for pattern in values {
                 for include_path in expand_include_path(base_dir, pattern) {
-                    blocks.extend(parse_ssh_config_file(&include_path, seen)?);
+                    parse_ssh_config_file_into(&include_path, active_files, blocks, current_block)?;
                 }
             }
             continue;
         }
         if key == "host" {
-            flush_block(&mut blocks, &mut current);
-            let aliases = values
-                .iter()
-                .filter(|alias| !alias.starts_with('!'))
-                .cloned()
-                .collect::<Vec<_>>();
-            current = Some(SshHostBlock {
-                aliases,
-                options: globals.clone(),
+            blocks.push(SshHostBlock {
+                patterns: values.to_vec(),
+                options: SshHostOptions::default(),
             });
+            *current_block = blocks.len() - 1;
+            continue;
+        }
+        if key == "match" {
+            // Match supports runtime predicates such as exec and canonical host.
+            // Do not leak its conditional options into the preceding Host block.
+            blocks.push(SshHostBlock {
+                patterns: vec!["!__oxideterm_unsupported_match__".to_string()],
+                options: SshHostOptions::default(),
+            });
+            *current_block = blocks.len() - 1;
             continue;
         }
 
-        let target = current
-            .as_mut()
-            .map(|block| &mut block.options)
-            .unwrap_or(&mut globals);
-        apply_option(target, &key, values);
+        apply_option(&mut blocks[*current_block].options, &key, values);
     }
-    flush_block(&mut blocks, &mut current);
-    Ok(blocks)
-}
-
-fn flush_block(blocks: &mut Vec<SshHostBlock>, current: &mut Option<SshHostBlock>) {
-    if let Some(block) = current.take()
-        && !block.aliases.is_empty()
-    {
-        blocks.push(block);
-    }
+    active_files.remove(&path);
+    Ok(())
 }
 
 fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
@@ -225,31 +235,265 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
         return;
     };
     match key {
-        "hostname" => options.hostname = Some(expand_home(value)),
-        "user" => options.user = Some(value.clone()),
-        "port" => options.port = value.parse::<u16>().ok(),
-        "identityfile" => options.identity_file = Some(expand_home(value)),
-        "certificatefile" => options.certificate_file = Some(expand_home(value)),
+        // OpenSSH keeps the first obtained value for these scalar options.
+        "hostname" if options.hostname.is_none() => options.hostname = Some(value.clone()),
+        "user" if options.user.is_none() => options.user = Some(value.clone()),
+        "port" if options.port.is_none() => options.port = value.parse::<u16>().ok(),
+        "identityfile" if options.identity_file.is_none() => {
+            options.identity_file = Some(value.clone())
+        }
+        "certificatefile" if options.certificate_file.is_none() => {
+            options.certificate_file = Some(value.clone())
+        }
+        "proxyjump" if options.proxy_jump.is_none() => options.proxy_jump = Some(value.clone()),
         _ => {}
     }
 }
 
-fn merge_options(base: &mut SshHostOptions, update: &SshHostOptions) {
-    if update.hostname.is_some() {
-        base.hostname = update.hostname.clone();
+fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
+    base.hostname = base.hostname.clone().or_else(|| update.hostname.clone());
+    base.user = base.user.clone().or_else(|| update.user.clone());
+    base.port = base.port.or(update.port);
+    base.identity_file = base
+        .identity_file
+        .clone()
+        .or_else(|| update.identity_file.clone());
+    base.certificate_file = base
+        .certificate_file
+        .clone()
+        .or_else(|| update.certificate_file.clone());
+    base.proxy_jump = base
+        .proxy_jump
+        .clone()
+        .or_else(|| update.proxy_jump.clone());
+}
+
+fn resolve_ssh_config_alias_from_blocks(
+    alias: &str,
+    blocks: &[SshHostBlock],
+) -> Result<Option<SshConfigHost>> {
+    let literal_alias_exists = blocks.iter().any(|block| {
+        block
+            .patterns
+            .iter()
+            .any(|pattern| !pattern.starts_with('!') && pattern.eq_ignore_ascii_case(alias))
+    });
+    if !literal_alias_exists {
+        return Ok(None);
     }
-    if update.user.is_some() {
-        base.user = update.user.clone();
+
+    resolve_ssh_config_host(alias, blocks).map(Some)
+}
+
+fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshConfigHost> {
+    let options = resolve_options(alias, blocks);
+    let hostname = options
+        .hostname
+        .as_deref()
+        .map(|value| expand_connection_tokens(value, alias, options.user.as_deref(), options.port));
+    let identity_file = options.identity_file.as_deref().map(|value| {
+        expand_home(&expand_connection_tokens(
+            value,
+            alias,
+            options.user.as_deref(),
+            options.port,
+        ))
+    });
+    let certificate_file = options.certificate_file.as_deref().map(|value| {
+        expand_home(&expand_connection_tokens(
+            value,
+            alias,
+            options.user.as_deref(),
+            options.port,
+        ))
+    });
+    let mut proxy_chain = Vec::new();
+    if let Some(proxy_jump) = options.proxy_jump.as_deref()
+        && !proxy_jump.eq_ignore_ascii_case("none")
+    {
+        for jump in proxy_jump
+            .split(',')
+            .map(str::trim)
+            .filter(|jump| !jump.is_empty())
+        {
+            let jump = expand_connection_tokens(jump, alias, options.user.as_deref(), options.port);
+            let target = parse_proxy_jump_target(&jump)?;
+            let jump_options = resolve_options(&target.host, blocks);
+            let jump_hostname = jump_options
+                .hostname
+                .as_deref()
+                .map(|value| {
+                    expand_connection_tokens(
+                        value,
+                        &target.host,
+                        jump_options.user.as_deref(),
+                        jump_options.port,
+                    )
+                })
+                .unwrap_or_else(|| target.host.clone());
+            let jump_identity = jump_options.identity_file.as_deref().map(|value| {
+                expand_home(&expand_connection_tokens(
+                    value,
+                    &target.host,
+                    jump_options.user.as_deref(),
+                    jump_options.port,
+                ))
+            });
+            let jump_certificate = jump_options.certificate_file.as_deref().map(|value| {
+                expand_home(&expand_connection_tokens(
+                    value,
+                    &target.host,
+                    jump_options.user.as_deref(),
+                    jump_options.port,
+                ))
+            });
+            proxy_chain.push(SshConfigProxyHop {
+                host: jump_hostname,
+                user: target.user.or(jump_options.user),
+                port: target.port.or(jump_options.port),
+                identity_file: jump_identity,
+                certificate_file: jump_certificate,
+            });
+        }
     }
-    if update.port.is_some() {
-        base.port = update.port;
+
+    Ok(SshConfigHost {
+        alias: alias.to_string(),
+        hostname,
+        user: options.user,
+        port: options.port,
+        identity_file,
+        certificate_file,
+        proxy_chain,
+        already_imported: false,
+    })
+}
+
+fn resolve_options(alias: &str, blocks: &[SshHostBlock]) -> SshHostOptions {
+    let mut resolved = SshHostOptions::default();
+    for block in blocks {
+        if block.patterns.is_empty() || host_patterns_match(&block.patterns, alias) {
+            merge_first_options(&mut resolved, &block.options);
+        }
     }
-    if update.identity_file.is_some() {
-        base.identity_file = update.identity_file.clone();
+    resolved
+}
+
+fn host_patterns_match(patterns: &[String], alias: &str) -> bool {
+    let mut positive_match = false;
+    for pattern in patterns {
+        let (negated, pattern) = pattern
+            .strip_prefix('!')
+            .map(|pattern| (true, pattern))
+            .unwrap_or((false, pattern.as_str()));
+        if wildcard_match(pattern, alias) {
+            if negated {
+                return false;
+            }
+            positive_match = true;
+        }
     }
-    if update.certificate_file.is_some() {
-        base.certificate_file = update.certificate_file.clone();
+    positive_match
+}
+
+fn wildcard_match(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.to_ascii_lowercase().into_bytes();
+    let value = value.to_ascii_lowercase().into_bytes();
+    let mut pattern_index = 0;
+    let mut value_index = 0;
+    let mut star_index = None;
+    let mut star_value_index = 0;
+
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == value[value_index])
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            pattern_index += 1;
+            star_value_index = value_index;
+        } else if let Some(star) = star_index {
+            pattern_index = star + 1;
+            star_value_index += 1;
+            value_index = star_value_index;
+        } else {
+            return false;
+        }
     }
+    pattern[pattern_index..].iter().all(|byte| *byte == b'*')
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProxyJumpTarget {
+    host: String,
+    user: Option<String>,
+    port: Option<u16>,
+}
+
+fn parse_proxy_jump_target(value: &str) -> Result<ProxyJumpTarget> {
+    let (user, host_port) = value
+        .rsplit_once('@')
+        .map(|(user, host)| (Some(user.to_string()), host))
+        .unwrap_or((None, value));
+    if host_port.is_empty() {
+        bail!("empty ProxyJump host");
+    }
+
+    let (host, port) = if let Some(bracketed) = host_port.strip_prefix('[') {
+        let (host, suffix) = bracketed
+            .split_once(']')
+            .ok_or_else(|| anyhow!("invalid bracketed ProxyJump host: {value}"))?;
+        let port = suffix
+            .strip_prefix(':')
+            .filter(|value| !value.is_empty())
+            .map(str::parse::<u16>)
+            .transpose()
+            .with_context(|| format!("invalid ProxyJump port in {value}"))?;
+        (host.to_string(), port)
+    } else if host_port.matches(':').count() == 1 {
+        let (host, port) = host_port.rsplit_once(':').unwrap_or((host_port, ""));
+        let port = (!port.is_empty())
+            .then(|| port.parse::<u16>())
+            .transpose()
+            .with_context(|| format!("invalid ProxyJump port in {value}"))?;
+        (host.to_string(), port)
+    } else {
+        (host_port.to_string(), None)
+    };
+    if host.is_empty() {
+        bail!("empty ProxyJump host");
+    }
+    Ok(ProxyJumpTarget { host, user, port })
+}
+
+fn expand_connection_tokens(
+    value: &str,
+    alias: &str,
+    user: Option<&str>,
+    port: Option<u16>,
+) -> String {
+    let mut expanded = String::with_capacity(value.len());
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character != '%' {
+            expanded.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('%') => expanded.push('%'),
+            Some('h' | 'n') => expanded.push_str(alias),
+            Some('r') => expanded.push_str(user.unwrap_or_default()),
+            Some('p') => expanded.push_str(&port.unwrap_or(22).to_string()),
+            Some(token) => {
+                expanded.push('%');
+                expanded.push(token);
+            }
+            None => expanded.push('%'),
+        }
+    }
+    expanded
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -340,12 +584,46 @@ fn alias_contains_pattern(alias: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn block(patterns: &[&str], options: SshHostOptions) -> SshHostBlock {
+        SshHostBlock {
+            patterns: patterns
+                .iter()
+                .map(|pattern| (*pattern).to_string())
+                .collect(),
+            options,
+        }
+    }
+
     #[test]
     fn ssh_words_keep_quoted_values() {
         assert_eq!(
             split_ssh_words(strip_comment("HostName \"dev box\" # comment")),
             vec!["HostName", "dev box"]
         );
+    }
+
+    #[test]
+    fn parser_accepts_equals_separated_options() {
+        let directory = std::env::temp_dir().join(format!(
+            "oxideterm-ssh-config-equals-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("config"),
+            "Host=production\nHostName=prod.example.com\nPort=2200\n",
+        )
+        .unwrap();
+
+        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
+        let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
+        assert_eq!(host.port, Some(2200));
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
@@ -383,5 +661,95 @@ mod tests {
         assert_eq!(store.connections().len(), 1);
         assert_eq!(store.connections()[0].host, "prod.example.com");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn effective_options_use_first_matching_value_and_wildcard_defaults() {
+        let blocks = vec![
+            block(
+                &["production-*"],
+                SshHostOptions {
+                    user: Some("deployer".to_string()),
+                    port: Some(2200),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["*", "!production-admin"],
+                SshHostOptions {
+                    user: Some("fallback".to_string()),
+                    identity_file: Some("~/.ssh/id_default".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["production-db"],
+                SshHostOptions {
+                    user: Some("late-value".to_string()),
+                    port: Some(22),
+                    ..SshHostOptions::default()
+                },
+            ),
+        ];
+
+        let resolved = resolve_options("production-db", &blocks);
+
+        assert_eq!(resolved.user.as_deref(), Some("deployer"));
+        assert_eq!(resolved.port, Some(2200));
+        assert_eq!(resolved.identity_file.as_deref(), Some("~/.ssh/id_default"));
+        assert!(!host_patterns_match(
+            &["*".to_string(), "!production-admin".to_string()],
+            "production-admin"
+        ));
+    }
+
+    #[test]
+    fn proxy_jump_target_supports_user_port_and_ipv6() {
+        assert_eq!(
+            parse_proxy_jump_target("ops@jump.example.com:2200").unwrap(),
+            ProxyJumpTarget {
+                host: "jump.example.com".to_string(),
+                user: Some("ops".to_string()),
+                port: Some(2200),
+            }
+        );
+        assert_eq!(
+            parse_proxy_jump_target("[2001:db8::1]:2222").unwrap(),
+            ProxyJumpTarget {
+                host: "2001:db8::1".to_string(),
+                user: None,
+                port: Some(2222),
+            }
+        );
+    }
+
+    #[test]
+    fn include_is_parsed_in_the_active_host_context() {
+        let directory = std::env::temp_dir().join(format!(
+            "oxideterm-ssh-config-include-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("included.conf"), "Port 2201\n").unwrap();
+        fs::write(
+            directory.join("config"),
+            "Host production\n  User deployer\n  Include included.conf\n  HostName prod.example.com\n",
+        )
+        .unwrap();
+
+        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
+        let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
+        assert_eq!(host.user.as_deref(), Some("deployer"));
+        assert_eq!(host.port, Some(2201));
+        let _ = fs::remove_dir_all(directory);
     }
 }

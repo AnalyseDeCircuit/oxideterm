@@ -602,6 +602,9 @@
       "ssh_config": {
         "title": "Importer depuis la config SSH",
         "description": "Scanner ~/.ssh/config pour les hôtes.",
+        "auto_load": "Afficher automatiquement les hôtes de la configuration SSH",
+        "auto_load_hint": "Affiche les hôtes de ~/.ssh/config dans la palette de commandes et le gestionnaire de sessions sans les importer.",
+        "load_failed": "Impossible de lire la configuration SSH : {{error}}",
         "no_hosts": "Aucun hôte trouvé dans ~/.ssh/config",
         "import": "Importer",
         "select_all": "Tout sélectionner",

@@ -2,8 +2,7 @@ use super::*;
 #[cfg(test)]
 use oxideterm_connections::is_literal_ssh_config_alias_query;
 use oxideterm_connections::{
-    canonical_ssh_config_alias, list_ssh_config_hosts, resolve_ssh_config_alias,
-    saved_connection_from_ssh_host,
+    list_ssh_config_hosts, resolve_ssh_config_alias, saved_connection_from_ssh_host,
 };
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::{
@@ -166,9 +165,15 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn load_command_palette_ssh_config_hosts(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn load_command_palette_ssh_config_hosts(&mut self, cx: &mut Context<Self>) {
+        if !self.settings_store.settings().ssh_config.auto_load_hosts {
+            self.command_palette.ssh_config_hosts.clear();
+            self.command_palette.ssh_config_hosts_loading = false;
+            return;
+        }
         self.command_palette.ssh_config_hosts_loading = true;
         self.command_palette.error = None;
+        let runtime = self.forwarding_runtime.clone();
         let existing_names = self
             .connection_store
             .connections()
@@ -176,7 +181,11 @@ impl WorkspaceApp {
             .map(|conn| conn.name.clone())
             .collect::<HashSet<_>>();
         cx.spawn(async move |weak, cx| {
-            let result = list_ssh_config_hosts(&existing_names).map_err(|error| error.to_string());
+            let result = runtime
+                .spawn_blocking(move || list_ssh_config_hosts(&existing_names))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
             let _ = weak.update(cx, |this, cx| {
                 this.command_palette.ssh_config_hosts_loading = false;
                 match result {
@@ -787,7 +796,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn open_ssh_config_alias_from_palette(
+    pub(super) fn open_ssh_config_alias_from_palette(
         &mut self,
         alias: String,
         window: &mut Window,
@@ -888,7 +897,8 @@ impl WorkspaceApp {
 
         let command_items = self.command_palette_command_items();
         let session_items = self.command_palette_session_items();
-        let connection_items = self.command_palette_connection_items();
+        let mut connection_items = self.command_palette_connection_items();
+        connection_items.extend(self.command_palette_ssh_config_items());
         let plugin_items = self.command_palette_plugin_items();
         let help_items = self.command_palette_help_items();
 
@@ -972,22 +982,6 @@ impl WorkspaceApp {
                     host,
                     port,
                 },
-                disabled: false,
-            });
-        }
-        if let Some(alias) =
-            canonical_ssh_config_alias(&self.command_palette.ssh_config_hosts, query)
-        {
-            let alias = alias.to_string();
-            return Some(PaletteItem {
-                id: format!("quick_connect_alias:{alias}"),
-                label: self.quick_connect_label(&alias),
-                section: PaletteSection::QuickConnect,
-                icon: LucideIcon::Zap,
-                detail: None,
-                shortcut: None,
-                value: format!("quick_connect {alias}"),
-                action: PaletteAction::QuickConnectAlias(alias),
                 disabled: false,
             });
         }
@@ -1096,6 +1090,39 @@ impl WorkspaceApp {
                     shortcut: None,
                     value: format!("{label} {detail}"),
                     action: PaletteAction::OpenSavedConnection(conn.id.clone()),
+                    disabled: false,
+                }
+            })
+            .collect()
+    }
+
+    fn command_palette_ssh_config_items(&self) -> Vec<PaletteItem> {
+        if !self.settings_store.settings().ssh_config.auto_load_hosts {
+            return Vec::new();
+        }
+        self.command_palette
+            .ssh_config_hosts
+            .iter()
+            .filter(|host| !host.already_imported)
+            .map(|host| {
+                let alias = host.alias.clone();
+                let hostname = host.hostname.as_deref().unwrap_or(&host.alias);
+                let user = host.user.as_deref().unwrap_or_default();
+                let port = host.port.unwrap_or(22);
+                let detail = if user.is_empty() {
+                    format!("{hostname}:{port}")
+                } else {
+                    format!("{user}@{hostname}:{port}")
+                };
+                PaletteItem {
+                    id: format!("ssh-config:{alias}"),
+                    label: alias.clone(),
+                    section: PaletteSection::Connections,
+                    icon: LucideIcon::FileTerminal,
+                    detail: Some(self.i18n.t("command_palette.ssh_config_source")),
+                    shortcut: None,
+                    value: format!("{alias} {detail} {hostname} {user} ssh config"),
+                    action: PaletteAction::QuickConnectAlias(alias),
                     disabled: false,
                 }
             })

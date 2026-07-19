@@ -104,7 +104,47 @@ pub struct ConnectionDraft {
 
 pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnection> {
     let now = Utc::now();
-    let auth = match (host.identity_file, host.certificate_file) {
+    let auth = saved_auth_from_ssh_paths(host.identity_file, host.certificate_file);
+    let proxy_chain = host
+        .proxy_chain
+        .into_iter()
+        .map(|hop| SavedProxyHop {
+            host: hop.host,
+            port: hop.port.unwrap_or(22),
+            username: hop.user.unwrap_or_else(current_username),
+            auth: saved_auth_from_ssh_paths(hop.identity_file, hop.certificate_file),
+            agent_forwarding: false,
+            legacy_ssh_compatibility: false,
+        })
+        .collect();
+    Ok(SavedConnection {
+        id: String::new(),
+        version: crate::store::CONFIG_VERSION,
+        name: host.alias.clone(),
+        group: Some(IMPORTED_GROUP.to_string()),
+        host: host.hostname.unwrap_or(host.alias),
+        port: host.port.unwrap_or(22),
+        username: host.user.unwrap_or_else(current_username),
+        auth,
+        proxy_chain,
+        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
+        options: ConnectionOptions::default(),
+        created_at: now,
+        last_used_at: None,
+        updated_at: Some(now),
+        color: None,
+        icon: None,
+        tags: vec![SSH_CONFIG_TAG.to_string()],
+        post_connect_command: None,
+        privilege_credentials: Vec::new(),
+    })
+}
+
+fn saved_auth_from_ssh_paths(
+    identity_file: Option<String>,
+    certificate_file: Option<String>,
+) -> SavedAuth {
+    match (identity_file, certificate_file) {
         (Some(key_path), Some(cert_path)) => SavedAuth::Certificate {
             key_path,
             cert_path,
@@ -119,28 +159,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
             plaintext_passphrase: None,
         },
         _ => SavedAuth::Agent,
-    };
-    Ok(SavedConnection {
-        id: String::new(),
-        version: crate::store::CONFIG_VERSION,
-        name: host.alias.clone(),
-        group: Some(IMPORTED_GROUP.to_string()),
-        host: host.hostname.unwrap_or(host.alias),
-        port: host.port.unwrap_or(22),
-        username: host.user.unwrap_or_else(current_username),
-        auth,
-        proxy_chain: Vec::new(),
-        upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
-        options: ConnectionOptions::default(),
-        created_at: now,
-        last_used_at: None,
-        updated_at: Some(now),
-        color: None,
-        icon: None,
-        tags: vec![SSH_CONFIG_TAG.to_string()],
-        post_connect_command: None,
-        privilege_credentials: Vec::new(),
-    })
+    }
 }
 
 pub fn save_request_from_draft(
@@ -360,6 +379,33 @@ mod tests {
             save_password: true,
             ..ConnectionAuthDraft::default()
         }
+    }
+
+    #[test]
+    fn ssh_config_proxy_jump_becomes_saved_proxy_chain() {
+        let connection = saved_connection_from_ssh_host(SshConfigHost {
+            alias: "production".to_string(),
+            hostname: Some("production.example.com".to_string()),
+            user: Some("deployer".to_string()),
+            proxy_chain: vec![crate::SshConfigProxyHop {
+                host: "jump.example.com".to_string(),
+                user: Some("operator".to_string()),
+                port: Some(2200),
+                identity_file: Some("/keys/jump".to_string()),
+                certificate_file: None,
+            }],
+            ..SshConfigHost::default()
+        })
+        .unwrap();
+
+        assert_eq!(connection.proxy_chain.len(), 1);
+        assert_eq!(connection.proxy_chain[0].host, "jump.example.com");
+        assert_eq!(connection.proxy_chain[0].username, "operator");
+        assert_eq!(connection.proxy_chain[0].port, 2200);
+        assert!(matches!(
+            connection.proxy_chain[0].auth,
+            SavedAuth::Key { ref key_path, .. } if key_path == "/keys/jump"
+        ));
     }
 
     #[test]

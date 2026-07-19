@@ -26,9 +26,9 @@ pub use draft::{
 };
 pub use secret::SecretString;
 pub use ssh_config::{
-    SshBatchImportResult, SshConfigHost, SshConfigImportError, canonical_ssh_config_alias,
-    default_ssh_config_path, import_ssh_config_alias, is_literal_ssh_config_alias_query,
-    list_ssh_config_hosts, resolve_ssh_config_alias,
+    SshBatchImportResult, SshConfigHost, SshConfigImportError, SshConfigProxyHop,
+    canonical_ssh_config_alias, default_ssh_config_path, import_ssh_config_alias,
+    is_literal_ssh_config_alias_query, list_ssh_config_hosts, resolve_ssh_config_alias,
 };
 pub use ssh_keys::{SshKeyInfo, list_available_ssh_keys};
 pub use store::{

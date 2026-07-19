@@ -314,6 +314,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.refresh_session_manager_ssh_config_hosts(cx);
         let tab_id = if let Some(tab) = self
             .tabs
             .iter()
@@ -345,6 +346,87 @@ impl WorkspaceApp {
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
         self.persist_sidebar_settings();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn refresh_session_manager_ssh_config_hosts(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.settings_store.settings().ssh_config.auto_load_hosts {
+            self.session_manager.ssh_config_hosts.clear();
+            return;
+        }
+
+        let runtime = self.forwarding_runtime.clone();
+        let existing_names = self
+            .connection_store
+            .connections()
+            .iter()
+            .map(|connection| connection.name.clone())
+            .collect::<HashSet<_>>();
+        // Reading nested Include files may touch slow network-mounted homes, so
+        // discovery must never block GPUI's render thread.
+        cx.spawn(async move |weak, cx| {
+            let result = runtime
+                .spawn_blocking(move || {
+                    oxideterm_connections::list_ssh_config_hosts(&existing_names)
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = weak.update(cx, |this, cx| {
+                match result {
+                    Ok(hosts) => {
+                        this.session_manager.ssh_config_hosts = hosts;
+                    }
+                    Err(error) => {
+                        this.session_manager.ssh_config_hosts.clear();
+                        this.session_manager.status = Some(
+                            this.i18n
+                                .t("settings_view.connections.ssh_config.load_failed")
+                                .replace("{{error}}", &error),
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn import_session_manager_ssh_config_host(
+        &mut self,
+        alias: String,
+        cx: &mut Context<Self>,
+    ) {
+        match oxideterm_connections::import_ssh_config_alias(&mut self.connection_store, &alias) {
+            Ok(true) => {
+                self.session_manager
+                    .ssh_config_hosts
+                    .retain(|host| host.alias != alias);
+                self.session_manager.status = Some(
+                    self.i18n
+                        .t("settings_view.errors.import_success")
+                        .replace("{{name}}", &alias),
+                );
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Ok(false) => {
+                self.session_manager.status = Some(
+                    self.i18n
+                        .t("settings_view.connections.ssh_config.batch_import_skipped")
+                        .replace("{{count}}", "1"),
+                );
+            }
+            Err(error) => {
+                self.session_manager.status = Some(
+                    self.i18n
+                        .t("settings_view.errors.import_failed")
+                        .replace("{{error}}", &error.to_string()),
+                );
+            }
+        }
         cx.notify();
     }
 }
