@@ -1193,9 +1193,12 @@ impl WorkspaceApp {
         self.context_sidebar_motion_generation =
             self.context_sidebar_motion_generation.wrapping_add(1);
         self.sidebar_rendered = !settings.sidebar_ui.collapsed;
-        self.context_sidebar_rendered = !settings.sidebar_ui.ai_sidebar_collapsed
-            && !settings.sidebar_ui.zen_mode
-            && settings.ai.enabled;
+        self.context_sidebar_rendered = crate::workspace::sidebar::context_sidebar_panel_visible(
+            settings.sidebar_ui.ai_sidebar_collapsed,
+            settings.sidebar_ui.zen_mode,
+            settings.ai.enabled,
+            self.active_context_sidebar_panel,
+        );
         self.sidebar_width = settings.sidebar_ui.width as f32;
         self.ai.chat.sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
             .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);

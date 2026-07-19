@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::settings::settings_store_modified_time;
 
 fn should_collapse_context_sidebar_panel(
     sidebar_visible: bool,
@@ -6,6 +7,24 @@ fn should_collapse_context_sidebar_panel(
     requested_panel: ContextSidebarPanel,
 ) -> bool {
     sidebar_visible && active_panel == requested_panel
+}
+
+pub(in crate::workspace) fn context_sidebar_panel_visible(
+    sidebar_collapsed: bool,
+    zen_mode: bool,
+    ai_enabled: bool,
+    active_panel: ContextSidebarPanel,
+) -> bool {
+    if sidebar_collapsed || zen_mode {
+        return false;
+    }
+
+    // Host Tools shares the companion sidebar shell, but its visibility must
+    // remain independent from the optional AI feature.
+    match active_panel {
+        ContextSidebarPanel::Assistant => ai_enabled,
+        ContextSidebarPanel::HostTools => true,
+    }
 }
 
 impl WorkspaceApp {
@@ -80,7 +99,16 @@ impl WorkspaceApp {
             .effective_sidebar_panel_section()
             .as_settings_key()
             .to_string();
-        let _ = self.settings_store.save();
+        self.persist_sidebar_settings_store();
+    }
+
+    fn persist_sidebar_settings_store(&mut self) {
+        if self.settings_store.save().is_ok() {
+            // The settings poller must not mistake this in-process sidebar
+            // write for an external CLI or cloud-sync update.
+            self.settings_store_last_modified =
+                settings_store_modified_time(self.settings_store.path());
+        }
     }
 
     pub(in crate::workspace) fn ai_sidebar_visible(&self) -> bool {
@@ -91,13 +119,12 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn context_sidebar_visible(&self) -> bool {
         let settings = self.settings_store.settings();
-        if settings.sidebar_ui.ai_sidebar_collapsed || settings.sidebar_ui.zen_mode {
-            return false;
-        }
-        match self.active_context_sidebar_panel {
-            ContextSidebarPanel::Assistant => settings.ai.enabled,
-            ContextSidebarPanel::HostTools => true,
-        }
+        context_sidebar_panel_visible(
+            settings.sidebar_ui.ai_sidebar_collapsed,
+            settings.sidebar_ui.zen_mode,
+            settings.ai.enabled,
+            self.active_context_sidebar_panel,
+        )
     }
 
     pub(in crate::workspace) fn set_sidebar_section(
@@ -258,7 +285,7 @@ impl WorkspaceApp {
             self.sync_connection_monitor_selection(cx);
         }
         self.clear_ai_sidebar_keyboard_focus();
-        let _ = self.settings_store.save();
+        self.persist_sidebar_settings_store();
         cx.notify();
         true
     }
@@ -272,7 +299,7 @@ impl WorkspaceApp {
         self.ai.chat.sidebar_resizing = false;
         self.clear_ai_sidebar_keyboard_focus();
         self.close_ai_sidebar_popovers();
-        let _ = self.settings_store.save();
+        self.persist_sidebar_settings_store();
         cx.notify();
     }
 
@@ -341,7 +368,7 @@ impl WorkspaceApp {
                 .settings_mut()
                 .sidebar_ui
                 .ai_sidebar_width = self.ai.chat.sidebar_width.round() as i64;
-            let _ = self.settings_store.save();
+            self.persist_sidebar_settings_store();
             cx.notify();
         }
     }
@@ -375,6 +402,38 @@ mod tests {
         assert!(!should_collapse_context_sidebar_panel(
             false,
             ContextSidebarPanel::HostTools,
+            ContextSidebarPanel::HostTools,
+        ));
+    }
+
+    #[test]
+    fn host_tools_sidebar_visibility_does_not_require_ai() {
+        assert!(context_sidebar_panel_visible(
+            false,
+            false,
+            false,
+            ContextSidebarPanel::HostTools,
+        ));
+        assert!(!context_sidebar_panel_visible(
+            false,
+            false,
+            false,
+            ContextSidebarPanel::Assistant,
+        ));
+    }
+
+    #[test]
+    fn context_sidebar_visibility_respects_shared_collapse_states() {
+        assert!(!context_sidebar_panel_visible(
+            true,
+            false,
+            true,
+            ContextSidebarPanel::HostTools,
+        ));
+        assert!(!context_sidebar_panel_visible(
+            false,
+            true,
+            true,
             ContextSidebarPanel::HostTools,
         ));
     }

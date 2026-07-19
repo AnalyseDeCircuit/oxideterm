@@ -196,6 +196,7 @@ pub(in crate::workspace) use ai::{
     AiStreamDelivery,
 };
 use helpers::*;
+pub(in crate::workspace) use state::context_sidebar_panel_visible;
 
 #[cfg(test)]
 mod sidebar_persistence_tests {
