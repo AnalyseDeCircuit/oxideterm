@@ -19,6 +19,7 @@ fixes cross-platform terminal rendering defects, and improves workspace reliabil
 - Prevented Vim terminal queries from being misclassified as Sixel images, eliminating the repeated black artifact blocks they could leave across supported platforms.
 - Preserved a full-screen terminal application's hidden-cursor state instead of replacing it with the configured visible cursor shape.
 - Fixed Windows DirectWrite text corruption caused by mutable shaping buffers being reused after their callback lifetime ended.
+- Kept all four welcome-screen shortcut hints on one row in standard Windows layouts while preserving wrapping in narrow windows.
 - Restored Host Tools when OxideSens AI is disabled and corrected saved-connection search focus so hidden inputs no longer intercept terminal keys.
 - Fixed keyboard and IME input routing in portable connection-transfer dialogs.
 - Preserved ACP agent context across tool-call continuations and restored the configured default-key fallback when agent authentication is unavailable.

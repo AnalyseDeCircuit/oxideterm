@@ -787,6 +787,8 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        const WELCOME_CONTENT_MAX_WIDTH: f32 = 520.0;
+
         let theme = self.tokens.ui;
         div()
             .size_full()
@@ -804,7 +806,9 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(384.0))
+                    // Leave enough room for all four localized shortcut hints
+                    // while retaining wrapping in genuinely narrow windows.
+                    .max_w(px(WELCOME_CONTENT_MAX_WIDTH))
                     .flex()
                     .flex_col()
                     .items_center()
