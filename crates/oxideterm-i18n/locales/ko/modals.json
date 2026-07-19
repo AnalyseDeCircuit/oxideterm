@@ -653,7 +653,7 @@
     "confirm_password": "비밀번호 확인 *",
     "confirm_password_placeholder": "비밀번호 재입력",
     "security_notice": "🔒 보안 알림",
-    "security_encryption": "파일은 ChaCha20-Poly1305로 암호화됨, 군사 등급 보안",
+    "security_encryption": "파일은 ChaCha20-Poly1305 인증 암호화로 보호됨",
     "security_kdf": "비밀번호는 Argon2id로 파생됨 (256MB, 4회 반복)",
     "security_contains": "파일에는 선택한 연결, 포워딩, 키 패스프레이즈가 포함됨",
     "security_settings": "전역 설정 포함: {{app}}; 플러그인 환경설정 포함: {{plugin}}",

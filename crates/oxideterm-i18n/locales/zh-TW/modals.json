@@ -653,7 +653,7 @@
     "confirm_password": "確認密碼 *",
     "confirm_password_placeholder": "再次輸入密碼",
     "security_notice": "🔒 安全注意事項",
-    "security_encryption": "檔案使用 ChaCha20-Poly1305 加密，軍事級安全性",
+    "security_encryption": "檔案使用 ChaCha20-Poly1305 驗證式加密保護",
     "security_kdf": "密碼使用 Argon2id 衍生（256MB、4 次迭代）",
     "security_contains": "檔案包含所選連線、轉發規則與金鑰密碼短語",
     "security_settings": "包含全域設定：{{app}}；包含外掛偏好設定：{{plugin}}",

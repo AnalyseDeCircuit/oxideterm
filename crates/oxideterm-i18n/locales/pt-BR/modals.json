@@ -653,7 +653,7 @@
     "confirm_password": "Confirmar senha *",
     "confirm_password_placeholder": "Repetir senha",
     "security_notice": "🔒 Aviso de segurança",
-    "security_encryption": "Arquivo criptografado com ChaCha20-Poly1305, segurança de nível militar",
+    "security_encryption": "Arquivo protegido com criptografia autenticada ChaCha20-Poly1305",
     "security_kdf": "Senha derivada com Argon2id (256MB, 4 iterações)",
     "security_contains": "O arquivo contém as conexões, encaminhamentos e frases secretas de chave selecionados",
     "security_settings": "Incluir configurações globais: {{app}}; incluir preferências de plugins: {{plugin}}",

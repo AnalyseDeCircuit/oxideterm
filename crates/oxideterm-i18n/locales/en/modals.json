@@ -649,7 +649,7 @@
     "confirm_password": "Confirm Password *",
     "confirm_password_placeholder": "Re-enter password",
     "security_notice": "🔒 Security Notice",
-    "security_encryption": "File encrypted with ChaCha20-Poly1305, military-grade security",
+    "security_encryption": "File protected with ChaCha20-Poly1305 authenticated encryption",
     "security_kdf": "Password derived with Argon2id (256MB, 4 iterations)",
     "security_contains": "File contains selected connections, forwards, and key passphrases",
     "security_settings": "Include global settings: {{app}}; include plugin preferences: {{plugin}}",

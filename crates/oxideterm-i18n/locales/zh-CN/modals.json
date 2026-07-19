@@ -640,7 +640,7 @@
     "confirm_password": "确认密码 *",
     "confirm_password_placeholder": "重新输入密码",
     "security_notice": "🔒 安全提示",
-    "security_encryption": "文件使用 ChaCha20-Poly1305 加密，军事级安全",
+    "security_encryption": "文件使用 ChaCha20-Poly1305 认证加密保护",
     "security_kdf": "密码使用 Argon2id 派生 (256MB, 4 轮)",
     "security_contains": "文件包含所选连接、转发规则和密钥口令",
     "security_settings": "包含全局设置：{{app}}；包含插件偏好：{{plugin}}",

@@ -653,7 +653,7 @@
     "confirm_password": "Passwort bestätigen *",
     "confirm_password_placeholder": "Passwort erneut eingeben",
     "security_notice": "🔒 Sicherheitshinweis",
-    "security_encryption": "Datei mit ChaCha20-Poly1305 verschlüsselt, militärische Sicherheit",
+    "security_encryption": "Datei mit authentifizierter ChaCha20-Poly1305-Verschlüsselung geschützt",
     "security_kdf": "Passwort mit Argon2id abgeleitet (256MB, 4 Iterationen)",
     "security_contains": "Datei enthält ausgewählte Verbindungen, Weiterleitungen und Schlüssel-Passphrasen",
     "security_settings": "Globale Einstellungen einschließen: {{app}}; Plugin-Einstellungen einschließen: {{plugin}}",
