@@ -184,6 +184,54 @@ pub(super) fn oxide_export_native_i18n_keys_resolve_without_tauri_namespace() {
 }
 
 #[test]
+pub(super) fn oxide_dialog_inputs_are_active_outside_the_session_manager_tab() {
+    let export_dialog = OxideExportDialogState::default();
+    assert!(session_manager_input_is_active(
+        SessionManagerInput::OxideExportPassword,
+        false,
+        None,
+        Some(&export_dialog),
+    ));
+
+    let mut import_dialog = OxideImportDialogState::default();
+    import_dialog.file_data = Some(vec![1]);
+    assert!(session_manager_input_is_active(
+        SessionManagerInput::OxideImportPassword,
+        false,
+        Some(&import_dialog),
+        None,
+    ));
+
+    assert!(!session_manager_input_is_active(
+        SessionManagerInput::Search,
+        false,
+        None,
+        None,
+    ));
+    assert!(session_manager_input_is_active(
+        SessionManagerInput::Search,
+        true,
+        None,
+        None,
+    ));
+}
+
+#[test]
+pub(super) fn busy_oxide_export_does_not_keep_a_stale_text_input_active() {
+    let export_dialog = OxideExportDialogState {
+        busy: true,
+        ..OxideExportDialogState::default()
+    };
+
+    assert!(!session_manager_input_is_active(
+        SessionManagerInput::OxideExportPassword,
+        false,
+        None,
+        Some(&export_dialog),
+    ));
+}
+
+#[test]
 pub(super) fn new_connection_save_password_false_does_not_request_keychain_storage() {
     let form = NewConnectionForm {
         password: "secret".to_string(),

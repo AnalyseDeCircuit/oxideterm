@@ -266,6 +266,22 @@ pub(super) fn oxide_export_footer_body_inputs(
     }
 }
 
+pub(super) fn session_manager_input_is_active(
+    input: SessionManagerInput,
+    session_manager_tab_active: bool,
+    import_dialog: Option<&OxideImportDialogState>,
+    export_dialog: Option<&OxideExportDialogState>,
+) -> bool {
+    // Import and export are workspace-level dialogs and may be opened from
+    // Settings. Their text fields must remain active independently of the tab
+    // underneath the modal, while ordinary manager inputs stay tab-scoped.
+    session_manager_tab_active
+        || import_dialog
+            .is_some_and(|dialog| oxide_import_footer_body_inputs(dialog).contains(&input))
+        || export_dialog
+            .is_some_and(|dialog| oxide_export_footer_body_inputs(dialog).contains(&input))
+}
+
 pub(super) fn import_preview_selectable_names(preview: &ImportPreview) -> HashSet<String> {
     let mut names = HashSet::new();
     names.extend(preview.unchanged.iter().cloned());

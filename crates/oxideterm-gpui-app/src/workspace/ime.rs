@@ -519,6 +519,12 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::NewConnection(form.focused_field));
         }
 
+        if let Some(input) = self.focused_oxide_dialog_input() {
+            // Oxide import/export dialogs are workspace-level overlays, so
+            // their focused field takes priority over the underlying surface.
+            return Some(WorkspaceImeTarget::SessionManager(input));
+        }
+
         if let Some(input) = self.focused_settings_input {
             return Some(WorkspaceImeTarget::Settings(input));
         }
@@ -588,11 +594,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalProjectSearch);
         }
 
-        if self
-            .active_tab()
-            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager)
-            && let Some(input) = self.session_manager.focused_input
-        {
+        if let Some(input) = self.active_session_manager_input() {
             return Some(WorkspaceImeTarget::SessionManager(input));
         }
 

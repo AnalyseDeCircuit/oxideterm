@@ -175,6 +175,31 @@ impl WorkspaceApp {
         self.open_oxide_export_dialog_with_portable_mode(false, cx);
     }
 
+    pub(in crate::workspace) fn active_session_manager_input(&self) -> Option<SessionManagerInput> {
+        let input = self.session_manager.focused_input?;
+        let session_manager_tab_active = self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager);
+        session_manager_input_is_active(
+            input,
+            session_manager_tab_active,
+            self.session_manager.oxide_import_dialog.as_ref(),
+            self.session_manager.oxide_export_dialog.as_ref(),
+        )
+        .then_some(input)
+    }
+
+    pub(in crate::workspace) fn focused_oxide_dialog_input(&self) -> Option<SessionManagerInput> {
+        let input = self.session_manager.focused_input?;
+        session_manager_input_is_active(
+            input,
+            false,
+            self.session_manager.oxide_import_dialog.as_ref(),
+            self.session_manager.oxide_export_dialog.as_ref(),
+        )
+        .then_some(input)
+    }
+
     pub(in crate::workspace) fn open_oxide_export_portable_migration_dialog(
         &mut self,
         cx: &mut Context<Self>,

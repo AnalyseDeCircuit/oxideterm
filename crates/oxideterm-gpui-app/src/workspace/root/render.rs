@@ -471,11 +471,7 @@ impl Render for WorkspaceApp {
                 } else if this.forward_terminal_tab_from_capture(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this
-                    .active_tab()
-                    .is_some_and(|tab| tab.kind == TabKind::SessionManager)
-                    && this.session_manager.focused_input.is_some()
-                {
+                } else if this.active_session_manager_input().is_some() {
                     let _ = this.handle_session_manager_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
