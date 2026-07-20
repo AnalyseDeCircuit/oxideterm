@@ -78,6 +78,7 @@ pub enum SelectAnchorId {
     SettingsReconnectMaxAttempts,
     SettingsReconnectBaseDelay,
     SettingsReconnectMaxDelay,
+    SettingsNetworkApplicationProxyMode,
     SettingsNetworkProxyProtocol,
     SettingsNetworkProxyAuth,
     SettingsAiProviderTemplate,
@@ -166,6 +167,7 @@ impl SelectAnchorId {
                 | Self::SettingsReconnectMaxAttempts
                 | Self::SettingsReconnectBaseDelay
                 | Self::SettingsReconnectMaxDelay
+                | Self::SettingsNetworkApplicationProxyMode
                 | Self::SettingsNetworkProxyProtocol
                 | Self::SettingsNetworkProxyAuth
                 | Self::SettingsAiProviderTemplate

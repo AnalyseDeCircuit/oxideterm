@@ -10,7 +10,7 @@ use std::{
 
 use futures_util::{FutureExt as _, StreamExt as _, future::BoxFuture};
 use parking_lot::RwLock;
-use reqwest::{Client, StatusCode, header::HeaderName};
+use reqwest::{StatusCode, header::HeaderName};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{
@@ -333,6 +333,5 @@ struct McpRuntimeState {
 pub struct McpRegistry {
     state: Arc<RwLock<McpRuntimeState>>,
     processes: Arc<McpProcessOwner>,
-    http: Client,
     key_store: AiProviderKeyStore,
 }

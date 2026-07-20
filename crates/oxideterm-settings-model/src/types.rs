@@ -82,6 +82,7 @@ pub enum SettingsSelect {
     ReconnectMaxAttempts,
     ReconnectBaseDelay,
     ReconnectMaxDelay,
+    NetworkApplicationProxyMode,
     NetworkProxyProtocol,
     NetworkProxyAuth,
     AiProviderTemplate,

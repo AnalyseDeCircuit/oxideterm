@@ -392,7 +392,7 @@
       "cwd_desc": "Current working directory"
     },
     "sidebar": {
-      "not_enabled_hint": "OxideSens is not enabled. Please enable it in Settings → AI to get started."
+      "not_enabled_hint": "OxideSens is not enabled. Please enable it in Settings → OxideSens to get started."
     }
   }
 }

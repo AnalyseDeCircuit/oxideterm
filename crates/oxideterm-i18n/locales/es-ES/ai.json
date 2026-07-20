@@ -392,7 +392,7 @@
       "cwd_desc": "Directorio de trabajo actual"
     },
     "sidebar": {
-      "not_enabled_hint": "OxideSens no está habilitado. Actívelo en Configuración → AI para comenzar."
+      "not_enabled_hint": "OxideSens no está habilitado. Actívelo en Configuración → OxideSens para comenzar."
     }
   }
 }

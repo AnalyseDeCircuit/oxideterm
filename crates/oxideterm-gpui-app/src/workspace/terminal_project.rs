@@ -4,10 +4,9 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use oxideterm_environment::{
-    ProjectManifestEntry, ProjectProbeError, ProjectProbeKey, ProjectProbeOutcome,
-    ProjectProbeScope, ProjectSnapshot, ProjectTask, current_directory_cd_command,
-    interpret_project_manifest_entries, parse_remote_shell_project_probe_output,
-    project_manifest_file_names, remote_shell_project_probe_command,
+    ProjectProbeError, ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectSnapshot,
+    ProjectTask, current_directory_cd_command, parse_remote_shell_project_probe_output,
+    probe_local_project, remote_project_cwd_source_is_trusted, remote_shell_project_probe_command,
 };
 use oxideterm_ssh::NodeId;
 
@@ -16,8 +15,6 @@ use super::*;
 const TERMINAL_PROJECT_PROBE_TTL_MS: u64 = 5_000;
 const TERMINAL_PROJECT_REMOTE_TIMEOUT: Duration = Duration::from_secs(3);
 const TERMINAL_PROJECT_REMOTE_MAX_OUTPUT: usize = 512 * 1024;
-const TERMINAL_PROJECT_MAX_ANCESTORS: usize = 12;
-const TERMINAL_PROJECT_MAX_FILE_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub(in crate::workspace) enum TerminalProjectDelivery {
@@ -258,7 +255,7 @@ impl WorkspaceApp {
         let scope = match snapshot.scope() {
             oxideterm_environment::CurrentDirectoryScope::Local => ProjectProbeScope::Local,
             oxideterm_environment::CurrentDirectoryScope::SshNode(node_id) => {
-                if !terminal_project_remote_cwd_source_is_trusted(snapshot.source()) {
+                if !remote_project_cwd_source_is_trusted(snapshot.source()) {
                     return None;
                 }
                 ProjectProbeScope::ssh_node(node_id.clone())
@@ -271,7 +268,7 @@ impl WorkspaceApp {
         let tx = self.terminal_project_tx.clone();
         let cwd = key.cwd().to_string();
         self.forwarding_runtime.spawn(async move {
-            let outcome = run_local_project_probe(&cwd);
+            let outcome = probe_local_project(&cwd);
             let _ = tx.send(TerminalProjectDelivery::Probe {
                 key,
                 generation,
@@ -371,89 +368,9 @@ impl WorkspaceApp {
     }
 }
 
-fn terminal_project_remote_cwd_source_is_trusted(
-    source: oxideterm_environment::CurrentDirectorySource,
-) -> bool {
-    matches!(
-        source,
-        oxideterm_environment::CurrentDirectorySource::ShellIntegration
-            | oxideterm_environment::CurrentDirectorySource::UserAction
-    )
-}
-
-fn run_local_project_probe(cwd: &str) -> ProjectProbeOutcome {
-    let cwd = terminal_project_expand_local_home(cwd);
-    if !cwd.is_dir() {
-        return ProjectProbeOutcome::CwdMissing;
-    }
-    let mut entries = Vec::new();
-    let mut dir = cwd.as_path();
-    for _ in 0..TERMINAL_PROJECT_MAX_ANCESTORS {
-        collect_local_project_manifest_entries(dir, &mut entries);
-        let Some(parent) = dir.parent() else {
-            break;
-        };
-        if parent == dir {
-            break;
-        }
-        dir = parent;
-    }
-    interpret_project_manifest_entries(entries)
-}
-
-fn collect_local_project_manifest_entries(
-    dir: &std::path::Path,
-    entries: &mut Vec<ProjectManifestEntry>,
-) {
-    for file_name in project_manifest_file_names() {
-        let path = dir.join(file_name);
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            continue;
-        };
-        if !metadata.is_file() || metadata.len() > TERMINAL_PROJECT_MAX_FILE_BYTES {
-            continue;
-        }
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        if let Some(entry) = ProjectManifestEntry::new(path.to_string_lossy(), content) {
-            entries.push(entry);
-        }
-    }
-}
-
-fn terminal_project_expand_local_home(cwd: &str) -> std::path::PathBuf {
-    if cwd == "~" {
-        return terminal_project_local_home().unwrap_or_else(|| std::path::PathBuf::from(cwd));
-    }
-    if let Some(rest) = cwd.strip_prefix("~/")
-        && let Some(home) = terminal_project_local_home()
-    {
-        return home.join(rest);
-    }
-    std::path::PathBuf::from(cwd)
-}
-
-fn terminal_project_local_home() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(std::path::PathBuf::from)
-}
-
 fn terminal_project_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_home_expansion_preserves_home_relative_paths() {
-        let expanded = terminal_project_expand_local_home("~/project");
-        assert!(expanded.ends_with("project"));
-    }
 }

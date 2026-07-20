@@ -76,6 +76,9 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::ReconnectMaxAttempts => SelectAnchorId::SettingsReconnectMaxAttempts,
             Self::ReconnectBaseDelay => SelectAnchorId::SettingsReconnectBaseDelay,
             Self::ReconnectMaxDelay => SelectAnchorId::SettingsReconnectMaxDelay,
+            Self::NetworkApplicationProxyMode => {
+                SelectAnchorId::SettingsNetworkApplicationProxyMode
+            }
             Self::NetworkProxyProtocol => SelectAnchorId::SettingsNetworkProxyProtocol,
             Self::NetworkProxyAuth => SelectAnchorId::SettingsNetworkProxyAuth,
             Self::AiProviderTemplate => SelectAnchorId::SettingsAiProviderTemplate,

@@ -392,7 +392,7 @@
       "cwd_desc": "当前工作目录"
     },
     "sidebar": {
-      "not_enabled_hint": "OxideSens 尚未启用。请前往 设置 → AI 开启后使用。"
+      "not_enabled_hint": "OxideSens 尚未启用。请前往 设置 → OxideSens 开启后使用。"
     }
   }
 }

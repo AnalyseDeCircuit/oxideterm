@@ -191,6 +191,20 @@ pub async fn dial_initial_tcp(
     Ok(stream)
 }
 
+pub async fn probe_upstream_proxy_route(
+    target_host: &str,
+    target_port: u16,
+    timeout_secs: u64,
+    upstream_proxy: &UpstreamProxyConfig,
+) -> Result<(), SshTransportError> {
+    // A route probe must always open a fresh tunnel. Host-key caches belong to
+    // SSH identity verification and cannot prove that the proxy is reachable.
+    let stream =
+        dial_initial_tcp(target_host, target_port, timeout_secs, Some(upstream_proxy)).await?;
+    drop(stream);
+    Ok(())
+}
+
 pub fn socks5_proxy_from_env() -> Result<Option<UpstreamProxyConfig>, SshTransportError> {
     upstream_proxy_from_env_values(
         env::var("OXIDETERM_SOCKS5_PROXY").ok().as_deref(),

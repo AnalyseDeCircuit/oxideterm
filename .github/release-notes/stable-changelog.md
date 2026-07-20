@@ -3,6 +3,30 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.8
+
+OxideTerm 2.0.8 unifies application proxy routing, strengthens SSH forwarding and
+SFTP transfer ownership, and makes network configuration easier to understand.
+
+### ✨ Highlights
+
+- Reorganized Network & Proxy settings around one reusable upstream proxy and explicit routing choices for SSH connections, application requests, and update checks.
+- Added system, direct, and shared-proxy routing for application HTTP traffic, covering OxideSens, cloud sync, plugin services, and runtime downloads.
+
+### 🛠️ Fixes
+
+- Preserved explicitly requested remote-forwarding ports when SSH servers return an empty allocation field, while continuing to use server-assigned ports for dynamic allocation.
+- Kept local, dynamic, and remote forwarding work owned by their rules so stopping a forward also cancels its listeners, handshakes, bridges, and server registration cleanly.
+- Corrected remote-forward health checks to validate the local target and restored uploads to virtual SFTP gateways that reject temporary sibling files.
+- Preserved active SFTP transfer ownership across session replacement and reconnects, including paused, cancelled, and resumable transfer state.
+- Corrected the disabled OxideSens prompt so it points to Settings → OxideSens instead of the former AI settings label.
+
+### 🧰 Release Maintenance
+
+- Moved proxy policy, settings conversion, credential hydration, and HTTP client construction into a dedicated network-proxy crate with focused security and compatibility tests.
+- Moved local directory, project probing, and plugin-settings persistence rules out of the GPUI application layer into their owning domain crates.
+- Added end-to-end SSH forwarding coverage for explicit remote ports and shutdown behavior.
+
 ## 2.0.7
 
 OxideTerm 2.0.7 expands SSH configuration interoperability and startup controls,

@@ -24,11 +24,14 @@ pub fn ssh_config_from_saved_connection(
         username: conn.username.clone(),
         auth,
         proxy_chain: (!proxy_chain.is_empty()).then_some(proxy_chain),
+        // A configured proxy that cannot be hydrated must stop materialization
+        // instead of silently turning into a direct connection.
         upstream_proxy: upstream_proxy_config_from_saved_policy(
             store,
             settings,
             &conn.upstream_proxy,
-        ),
+        )
+        .ok()?,
         proxy_command,
         agent_forwarding: conn.options.agent_forwarding,
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
@@ -119,7 +122,8 @@ pub fn ssh_config_for_saved_connection_hop(
                 store,
                 settings,
                 &connection.upstream_proxy,
-            ),
+            )
+            .ok()?,
             agent_forwarding: hop.agent_forwarding,
             strict_host_key_checking: true,
             ..SshConfig::default()

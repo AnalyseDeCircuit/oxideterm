@@ -392,7 +392,7 @@
       "cwd_desc": "현재 작업 디렉터리"
     },
     "sidebar": {
-      "not_enabled_hint": "OxideSens가 활성화되지 않았습니다. 설정 → AI에서 활성화해 주세요."
+      "not_enabled_hint": "OxideSens가 활성화되지 않았습니다. 설정 → OxideSens에서 활성화해 주세요."
     }
   }
 }

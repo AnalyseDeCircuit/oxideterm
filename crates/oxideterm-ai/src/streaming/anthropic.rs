@@ -20,7 +20,8 @@ pub(crate) async fn stream_anthropic_completion(
         "{}/v1/messages",
         config.base_url.trim().trim_end_matches('/')
     );
-    let client = reqwest::Client::builder()
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .context("failed to apply application proxy to AI chat client")?
         .timeout(CHAT_STREAM_TIMEOUT)
         .build()
         .context("failed to create Anthropic chat client")?;

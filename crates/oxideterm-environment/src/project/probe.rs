@@ -3,11 +3,41 @@
 
 use super::model::{ProjectManifestEntry, ProjectProbeError, ProjectProbeOutcome};
 use super::parse::{interpret_project_manifest_entries, project_manifest_file_names};
+use crate::cwd::{CurrentDirectorySource, expand_local_home_path};
 use crate::shell::shell_quote;
 
 pub const PROJECT_SHELL_PROBE_SENTINEL: &str = "OXIDETERM_PROJECT_PROBE_V1";
 pub const PROJECT_PROBE_MAX_ANCESTORS: usize = 12;
 pub const PROJECT_PROBE_MAX_FILE_BYTES: usize = 64 * 1024;
+
+/// Probe project manifests from a local terminal working directory.
+pub fn probe_local_project(cwd: &str) -> ProjectProbeOutcome {
+    let cwd = expand_local_home_path(cwd);
+    if !cwd.is_dir() {
+        return ProjectProbeOutcome::CwdMissing;
+    }
+    let mut entries = Vec::new();
+    let mut directory = cwd.as_path();
+    for _ in 0..PROJECT_PROBE_MAX_ANCESTORS {
+        collect_local_project_manifest_entries(directory, &mut entries);
+        let Some(parent) = directory.parent() else {
+            break;
+        };
+        if parent == directory {
+            break;
+        }
+        directory = parent;
+    }
+    interpret_project_manifest_entries(entries)
+}
+
+/// Remote project probes require a cwd asserted by the shell or the user.
+pub fn remote_project_cwd_source_is_trusted(source: CurrentDirectorySource) -> bool {
+    matches!(
+        source,
+        CurrentDirectorySource::ShellIntegration | CurrentDirectorySource::UserAction
+    )
+}
 
 /// Build the POSIX shell command used by SSH node exec probes.
 pub fn remote_shell_project_probe_command(cwd: &str) -> String {
@@ -124,9 +154,41 @@ fn remote_project_cd_target(cwd: &str) -> String {
     }
 }
 
+fn collect_local_project_manifest_entries(
+    directory: &std::path::Path,
+    entries: &mut Vec<ProjectManifestEntry>,
+) {
+    for file_name in project_manifest_file_names() {
+        let path = directory.join(file_name);
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.len() > PROJECT_PROBE_MAX_FILE_BYTES as u64 {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(entry) = ProjectManifestEntry::new(path.to_string_lossy(), content) {
+            entries.push(entry);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temporary_directory(name: &str) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "oxideterm-environment-{name}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn remote_project_probe_quotes_cwd_and_uses_manifest_names() {
@@ -159,5 +221,46 @@ mod tests {
             parse_remote_shell_project_probe_output(&output),
             ProjectProbeOutcome::CwdMissing
         );
+    }
+
+    #[test]
+    fn local_project_probe_reports_missing_cwd() {
+        let missing = temporary_directory("missing-project-probe");
+        assert_eq!(
+            probe_local_project(&missing.to_string_lossy()),
+            ProjectProbeOutcome::CwdMissing
+        );
+    }
+
+    #[test]
+    fn local_project_probe_reads_manifest_from_parent_directory() {
+        let root = temporary_directory("project-probe");
+        let child = root.join("src");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
+
+        let outcome = probe_local_project(&child.to_string_lossy());
+
+        let ProjectProbeOutcome::Ready(snapshot) = outcome else {
+            panic!("expected a detected project");
+        };
+        assert_eq!(snapshot.root_path(), root.to_string_lossy());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn remote_project_probe_accepts_only_authoritative_cwd_sources() {
+        assert!(remote_project_cwd_source_is_trusted(
+            CurrentDirectorySource::ShellIntegration
+        ));
+        assert!(remote_project_cwd_source_is_trusted(
+            CurrentDirectorySource::UserAction
+        ));
+        assert!(!remote_project_cwd_source_is_trusted(
+            CurrentDirectorySource::VisibleText
+        ));
+        assert!(!remote_project_cwd_source_is_trusted(
+            CurrentDirectorySource::ProcessFallback
+        ));
     }
 }

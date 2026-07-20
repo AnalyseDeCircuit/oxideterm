@@ -591,6 +591,7 @@ pub fn update_channel_label(channel: UpdateChannel, i18n: &I18n) -> String {
 pub fn update_proxy_mode_label(mode: UpdateProxyMode, i18n: &I18n) -> String {
     match mode {
         UpdateProxyMode::Direct => i18n.t("settings_view.help.update_proxy_mode_direct"),
+        UpdateProxyMode::Application => i18n.t("settings_view.help.update_proxy_mode_application"),
         UpdateProxyMode::System => i18n.t("settings_view.help.update_proxy_mode_system"),
         UpdateProxyMode::Custom => i18n.t("settings_view.help.update_proxy_mode_custom"),
     }

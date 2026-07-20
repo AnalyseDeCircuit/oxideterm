@@ -472,11 +472,12 @@ impl WorkspaceApp {
                     .network
                     .upstream_proxy_disclaimer_accepted
                     .hash(&mut hasher);
+                settings.network.application_proxy_mode.hash(&mut hasher);
+                settings.general.update_proxy.mode.hash(&mut hasher);
+                settings.general.update_proxy.protocol.hash(&mut hasher);
             }
             SettingsTab::Help => {
                 settings.general.update_channel.hash(&mut hasher);
-                settings.general.update_proxy.mode.hash(&mut hasher);
-                settings.general.update_proxy.protocol.hash(&mut hasher);
             }
             SettingsTab::Connections => {
                 self.connection_store.connections().len().hash(&mut hasher);
@@ -1131,6 +1132,7 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
+        install_application_proxy_policy_from_settings(settings, &self.connection_store);
         crate::app_icon::install_runtime_app_icon(settings.appearance.app_icon);
         if let Err(error) =
             bundled_fonts::load_terminal_font_open_critical(settings, &cx.text_system())

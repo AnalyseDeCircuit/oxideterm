@@ -13,7 +13,7 @@ use base64::{
 use chrono::{DateTime, Utc};
 use rand::RngCore;
 use reqwest::{
-    Client as ReqwestClient, IntoUrl, Method, StatusCode, Url,
+    IntoUrl, Method, StatusCode, Url,
     header::{
         ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ETAG, HeaderMap, HeaderName,
         HeaderValue, RETRY_AFTER, USER_AGENT,
@@ -294,9 +294,7 @@ impl IntoHttpHeaderValue for String {
     }
 }
 
-struct ReqwestHttpExecutor {
-    client: ReqwestClient,
-}
+struct ReqwestHttpExecutor;
 
 impl HttpExecutor for ReqwestHttpExecutor {
     fn execute(&self, request: HttpRequestSpec) -> HttpExecuteFuture<'_> {
@@ -307,7 +305,9 @@ impl HttpExecutor for ReqwestHttpExecutor {
                 headers,
                 body,
             } = request;
-            let mut request = self.client.request(method, url).headers(headers);
+            let client = oxideterm_network_proxy::application_http_client()
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            let mut request = client.request(method, url).headers(headers);
             request = match body {
                 HttpRequestBody::Empty => request,
                 HttpRequestBody::Bytes(mut bytes) => request.body(std::mem::take(&mut *bytes)),
@@ -319,7 +319,11 @@ impl HttpExecutor for ReqwestHttpExecutor {
                     request.form(&fields)
                 }
             };
-            let response = request.send().await.map_err(normalize_network_error)?;
+            let response = request
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+                .map_err(normalize_network_error)?;
             let status = response.status();
             let headers = response.headers().clone();
             let body = response
@@ -372,12 +376,8 @@ impl Default for CloudSyncBackend {
 
 impl CloudSyncBackend {
     pub fn new() -> Self {
-        let client = ReqwestClient::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| ReqwestClient::new());
         Self {
-            client: CloudHttpClient::new(Arc::new(ReqwestHttpExecutor { client })),
+            client: CloudHttpClient::new(Arc::new(ReqwestHttpExecutor)),
         }
     }
 

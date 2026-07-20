@@ -208,7 +208,7 @@ pub fn settings_tab_section_count(
         // Reconnect controls share one card and therefore one virtual section.
         SettingsTab::Connections => 6,
         SettingsTab::Privilege => 1,
-        SettingsTab::Network => 4,
+        SettingsTab::Network => 2,
         SettingsTab::Sftp => 3,
         SettingsTab::Ide => 5,
         SettingsTab::Ai => ai_settings_section_count(dynamic.ai_page),
@@ -431,6 +431,19 @@ mod tests {
             settings_tab_section_count(SettingsTab::Connections, dynamic),
             6
         );
+    }
+
+    #[test]
+    fn network_page_groups_proxy_definition_and_routing_policy() {
+        let dynamic = SettingsDynamicSectionCounts {
+            terminal_page: TerminalSettingsPage::Display,
+            ai_page: AiSettingsPage::General,
+            visible_keybinding_scope_count: 0,
+            knowledge_has_error: false,
+            knowledge_has_selected_collection: false,
+        };
+
+        assert_eq!(settings_tab_section_count(SettingsTab::Network, dynamic), 2);
     }
 
     #[test]

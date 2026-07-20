@@ -1989,7 +1989,7 @@ impl WorkspaceApp {
             .ok()
             .map(|snapshot| snapshot.revision);
         let sync_plugin_settings =
-            super::plugin_settings_store::load_plugin_settings(self.settings_store.path())
+            oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())
                 .unwrap_or_default();
         let sync_plugin_settings_revisions =
             native_plugin_settings_revision_map(&sync_plugin_settings);

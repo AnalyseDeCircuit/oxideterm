@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true

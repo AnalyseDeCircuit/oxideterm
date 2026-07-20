@@ -11,12 +11,9 @@ use std::{
 };
 
 use futures_util::StreamExt as _;
-use oxideterm_settings::{
-    UpdateChannel, UpdateProxyMode, UpdateProxyProtocol, UpdateProxySettings,
-    is_gpui_preview_version,
-};
+use oxideterm_settings::{UpdateChannel, UpdateProxySettings, is_gpui_preview_version};
 use reqwest::{
-    NoProxy, Proxy, StatusCode,
+    StatusCode,
     header::{
         ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, ETAG, HeaderValue, IF_RANGE,
         IF_UNMODIFIED_SINCE, LAST_MODIFIED, RANGE,
@@ -567,50 +564,12 @@ fn validate_update_request(request: &NativeUpdateRequest) -> Result<(), NativeUp
 fn build_update_http_client(
     proxy: &UpdateProxySettings,
 ) -> Result<reqwest::Client, NativeUpdateError> {
-    let mut builder = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .timeout(Duration::from_millis(DOWNLOAD_TIMEOUT_MS))
         .user_agent(format!("OxideTerm/{}", env!("CARGO_PKG_VERSION")));
-
-    match proxy.mode {
-        UpdateProxyMode::Direct => {
-            // Direct mode must ignore environment/system proxy settings so the
-            // UI switch is an explicit transport boundary.
-            builder = builder.no_proxy();
-        }
-        UpdateProxyMode::System => {}
-        UpdateProxyMode::Custom => {
-            let proxy_url = update_proxy_url(proxy)?;
-            let mut update_proxy = Proxy::all(proxy_url).map_err(NativeUpdateError::Client)?;
-            if !proxy.no_proxy.trim().is_empty() {
-                update_proxy = update_proxy.no_proxy(NoProxy::from_string(&proxy.no_proxy));
-            }
-            builder = builder.no_proxy().proxy(update_proxy);
-        }
-    }
-
+    let builder = oxideterm_network_proxy::configure_update_http_client_builder(builder, proxy)
+        .map_err(|error| NativeUpdateError::General(error.to_string()))?;
     builder.build().map_err(NativeUpdateError::Client)
-}
-
-fn update_proxy_url(proxy: &UpdateProxySettings) -> Result<String, NativeUpdateError> {
-    let host = proxy.host.trim();
-    if host.is_empty() {
-        return Err(NativeUpdateError::General(
-            "update proxy host is empty".to_string(),
-        ));
-    }
-    if proxy.port == 0 {
-        return Err(NativeUpdateError::General(
-            "update proxy port is invalid".to_string(),
-        ));
-    }
-
-    let scheme = match proxy.protocol {
-        UpdateProxyProtocol::Http => "http",
-        UpdateProxyProtocol::Https => "https",
-        // Use socks5h so update hostnames are resolved by the proxy.
-        UpdateProxyProtocol::Socks5 => "socks5h",
-    };
-    Ok(format!("{scheme}://{host}:{}", proxy.port))
 }
 
 fn emit_progress(
@@ -891,32 +850,5 @@ mod tests {
     fn parses_content_range_total_like_tauri_backend() {
         assert_eq!(parse_content_range_total("bytes 10-19/42"), Some(42));
         assert_eq!(parse_content_range_total("bytes 10-19/*"), None);
-    }
-
-    #[test]
-    fn update_proxy_url_uses_remote_dns_for_socks5() {
-        let proxy = UpdateProxySettings {
-            mode: UpdateProxyMode::Custom,
-            protocol: UpdateProxyProtocol::Socks5,
-            host: "127.0.0.1".to_string(),
-            port: 7890,
-            ..UpdateProxySettings::default()
-        };
-
-        assert_eq!(
-            update_proxy_url(&proxy).expect("proxy URL should be valid"),
-            "socks5h://127.0.0.1:7890"
-        );
-    }
-
-    #[test]
-    fn update_proxy_url_rejects_empty_host() {
-        let proxy = UpdateProxySettings {
-            mode: UpdateProxyMode::Custom,
-            host: "  ".to_string(),
-            ..UpdateProxySettings::default()
-        };
-
-        assert!(update_proxy_url(&proxy).is_err());
     }
 }

@@ -16,25 +16,23 @@ pub fn upstream_proxy_config_from_saved_policy(
     store: &ConnectionStore,
     settings: &PersistedSettings,
     policy: &SavedUpstreamProxyPolicy,
-) -> Option<UpstreamProxyConfig> {
+) -> Result<Option<UpstreamProxyConfig>, String> {
     match policy {
-        SavedUpstreamProxyPolicy::UseGlobal => settings
-            .network
-            .upstream_proxy
-            .as_ref()
-            .and_then(|proxy| upstream_proxy_config_from_global_proxy(store, proxy))
-            .or_else(|| upstream_proxy_from_env().ok().flatten()),
-        SavedUpstreamProxyPolicy::Direct => None,
+        SavedUpstreamProxyPolicy::UseGlobal => match settings.network.upstream_proxy.as_ref() {
+            Some(proxy) => upstream_proxy_config_from_global_settings(store, proxy).map(Some),
+            None => upstream_proxy_from_env().map_err(|error| error.to_string()),
+        },
+        SavedUpstreamProxyPolicy::Direct => Ok(None),
         SavedUpstreamProxyPolicy::Custom { proxy } => {
-            Some(upstream_proxy_config_from_saved_proxy(store, proxy)?)
+            upstream_proxy_config_from_saved_proxy(store, proxy).map(Some)
         }
     }
 }
 
-fn upstream_proxy_config_from_global_proxy(
+pub fn upstream_proxy_config_from_global_settings(
     store: &ConnectionStore,
     proxy: &SettingsUpstreamProxyConfig,
-) -> Option<UpstreamProxyConfig> {
+) -> Result<UpstreamProxyConfig, String> {
     let auth = match &proxy.auth {
         SettingsUpstreamProxyAuth::None => UpstreamProxyAuth::None,
         SettingsUpstreamProxyAuth::Password {
@@ -45,13 +43,17 @@ fn upstream_proxy_config_from_global_proxy(
             // Global proxy passwords are stored separately from settings; the
             // hydrated runtime config is the only owner of this secret copy.
             password: store
-                .get_global_upstream_proxy_password(keychain_id.as_deref()?)
-                .ok()?
+                .get_global_upstream_proxy_password(
+                    keychain_id
+                        .as_deref()
+                        .ok_or_else(|| "Global upstream proxy password is not saved".to_string())?,
+                )
+                .map_err(|_| "Global upstream proxy password is not available".to_string())?
                 .into_zeroizing(),
         },
     };
 
-    Some(UpstreamProxyConfig {
+    Ok(UpstreamProxyConfig {
         protocol: match proxy.protocol {
             SettingsUpstreamProxyProtocol::Socks5 => UpstreamProxyProtocol::Socks5,
             SettingsUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
@@ -67,7 +69,7 @@ fn upstream_proxy_config_from_global_proxy(
 fn upstream_proxy_config_from_saved_proxy(
     store: &ConnectionStore,
     proxy: &SavedUpstreamProxyConfig,
-) -> Option<UpstreamProxyConfig> {
+) -> Result<UpstreamProxyConfig, String> {
     let auth = match &proxy.auth {
         SavedUpstreamProxyAuth::None => UpstreamProxyAuth::None,
         SavedUpstreamProxyAuth::Password { username, .. } => UpstreamProxyAuth::Password {
@@ -76,12 +78,12 @@ fn upstream_proxy_config_from_saved_proxy(
             // store; hydrate them only for runtime dialing.
             password: store
                 .get_saved_upstream_proxy_password(&proxy.auth)
-                .ok()?
+                .map_err(|_| "Connection upstream proxy password is not available".to_string())?
                 .into_zeroizing(),
         },
     };
 
-    Some(UpstreamProxyConfig {
+    Ok(UpstreamProxyConfig {
         protocol: match proxy.protocol {
             oxideterm_connections::SavedUpstreamProxyProtocol::Socks5 => {
                 UpstreamProxyProtocol::Socks5

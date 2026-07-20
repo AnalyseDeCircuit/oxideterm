@@ -7,9 +7,9 @@ use gpui::{
 use oxideterm_settings::{
     AppIconVariant, FrostedGlassMode, HighlightRule, IdeAgentMode, Language, MAX_HIGHLIGHT_RULES,
     PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS, RemoteShellIntegrationMode,
-    SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol,
-    UpdateChannel, UpdateProxyMode, UpdateProxyProtocol, create_default_highlight_rule,
-    is_gpui_preview_version, reindex_highlight_rules,
+    SettingsApplicationProxyMode, SettingsUpstreamProxyAuth, SettingsUpstreamProxyConfig,
+    SettingsUpstreamProxyProtocol, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
+    create_default_highlight_rule, is_gpui_preview_version, reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
     AI_MODEL_REFRESH_MISSING_API_KEY, AcpAgentPreset, AiMcpServerDraft, AiModelRefreshDelivery,
@@ -41,10 +41,7 @@ use oxideterm_settings_model::{
     settings_section_list_item_count as settings_model_section_list_item_count,
     terminal_theme_to_colors, theme_editor_from_settings, toggle_string_set,
 };
-use oxideterm_ssh::{
-    HostKeyStatus, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
-    check_host_key_with_upstream_proxy,
-};
+use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 use oxideterm_theme::BUILT_IN_THEMES;
 
 use super::ime::WorkspaceImeTarget;
@@ -99,6 +96,8 @@ use oxideterm_gpui_ui::{
     },
 };
 use oxideterm_i18n::I18n;
+use oxideterm_network_proxy::install_application_proxy_policy_from_settings;
+use oxideterm_session_adapter::upstream_proxy_config_from_global_settings;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PortableSettingsDialog {
@@ -205,7 +204,10 @@ use connections_page::{
     connection_idle_timeout_options, connection_import_duplicate_strategy_label,
     connection_import_source_label, connection_import_source_options,
 };
-use network_page::{NetworkProxyAuthMode, network_proxy_auth_label, network_proxy_protocol_label};
+use network_page::{
+    NetworkProxyAuthMode, network_application_proxy_mode_label, network_proxy_auth_label,
+    network_proxy_protocol_label,
+};
 use pages::settings_keybinding_scope_matches;
 pub(in crate::workspace) use remote_shell_integration::RemoteShellIntegrationUiState;
 pub(in crate::workspace) use update::{

@@ -15,6 +15,7 @@ eventsource-stream = "0.2.3"
 futures-util.workspace = true
 futures.workspace = true
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 parking_lot.workspace = true

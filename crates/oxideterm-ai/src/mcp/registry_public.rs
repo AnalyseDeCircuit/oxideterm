@@ -3,7 +3,6 @@ impl McpRegistry {
         Self {
             state: Arc::new(RwLock::new(McpRuntimeState::default())),
             processes: Arc::new(McpProcessOwner::default()),
-            http: Client::new(),
             key_store,
         }
     }

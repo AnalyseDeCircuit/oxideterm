@@ -1,0 +1,13 @@
+[package]
+name = "oxideterm-network-proxy"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+parking_lot.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true

@@ -392,7 +392,7 @@
       "cwd_desc": "現在の作業ディレクトリ"
     },
     "sidebar": {
-      "not_enabled_hint": "OxideSens が有効になっていません。設定 → AI から有効にしてください。"
+      "not_enabled_hint": "OxideSens が有効になっていません。設定 → OxideSens から有効にしてください。"
     }
   }
 }

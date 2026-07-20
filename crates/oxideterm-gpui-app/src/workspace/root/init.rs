@@ -19,6 +19,10 @@ impl WorkspaceApp {
         let version_migration = VersionMigrationState::from_settings_path(settings_store.path())?;
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
+        oxideterm_network_proxy::install_application_proxy_policy_from_settings(
+            &settings,
+            &connection_store,
+        );
         // Native plugin discovery intentionally stops at manifest parsing.
         // Legacy Tauri ESM plugins remain visible in Plugin Manager, but
         // the native path never evaluates JS or creates a WebView runtime.

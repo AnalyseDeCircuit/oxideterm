@@ -13,6 +13,7 @@ pub use model::{
 pub use parse::{interpret_project_manifest_entries, project_manifest_file_names};
 pub use probe::{
     PROJECT_PROBE_MAX_ANCESTORS, PROJECT_PROBE_MAX_FILE_BYTES, PROJECT_SHELL_PROBE_SENTINEL,
-    parse_remote_shell_project_probe_output, remote_shell_project_probe_command,
+    parse_remote_shell_project_probe_output, probe_local_project,
+    remote_project_cwd_source_is_trusted, remote_shell_project_probe_command,
 };
 pub use store::{ProjectProbeEntry, ProjectProbeState, ProjectStatusStore};

@@ -6,8 +6,9 @@ use std::{cell::RefCell, time::Duration};
 use oxideterm_environment::{
     CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
-    current_directory_parent, current_directory_report_command,
-    current_directory_shell_path_argument,
+    current_directory_parent, current_directory_path_is_explicit, current_directory_report_command,
+    current_directory_shell_path_argument, list_local_current_directory,
+    sort_current_directory_entries,
 };
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};
 use oxideterm_ssh::NodeId;
@@ -340,7 +341,10 @@ impl WorkspaceApp {
         match snapshot.scope() {
             CurrentDirectoryScope::Local => {
                 self.terminal_cwd_picker.loading = false;
-                let outcome = terminal_cwd_local_directory_entries(snapshot.path());
+                let outcome =
+                    list_local_current_directory(snapshot.path(), TERMINAL_CWD_MAX_ENTRIES)
+                        .map(TerminalCwdListOutcome::Ready)
+                        .unwrap_or(TerminalCwdListOutcome::Unavailable);
                 let changed =
                     self.apply_terminal_cwd_directory_list_result(key, generation, outcome);
                 if changed {
@@ -753,7 +757,7 @@ impl WorkspaceApp {
                         }
                     })
                     .collect::<Vec<_>>();
-                rows.sort_by(terminal_cwd_entry_order);
+                sort_current_directory_entries(&mut rows);
                 rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
                 Ok::<Vec<CurrentDirectoryEntry>, String>(rows)
             })
@@ -787,7 +791,9 @@ impl WorkspaceApp {
         match key.scope().clone() {
             CurrentDirectoryScope::Local => {
                 self.terminal_cwd_picker.loading = false;
-                let outcome = terminal_cwd_local_directory_entries(key.path());
+                let outcome = list_local_current_directory(key.path(), TERMINAL_CWD_MAX_ENTRIES)
+                    .map(TerminalCwdListOutcome::Ready)
+                    .unwrap_or(TerminalCwdListOutcome::Unavailable);
                 let changed =
                     self.apply_terminal_cwd_directory_list_result(key, generation, outcome);
                 if changed {
@@ -843,7 +849,7 @@ impl WorkspaceApp {
 
     fn terminal_cwd_query_path_candidate(&self) -> Option<String> {
         let query = self.terminal_cwd_picker.query.trim();
-        if !terminal_cwd_looks_path_like(query) {
+        if !current_directory_path_is_explicit(query) {
             return None;
         }
         if self
@@ -898,89 +904,6 @@ impl WorkspaceApp {
     }
 }
 
-fn terminal_cwd_local_directory_entries(cwd: &str) -> TerminalCwdListOutcome {
-    let actual_cwd = terminal_cwd_expand_local_home(cwd);
-    let Ok(entries) = std::fs::read_dir(&actual_cwd) else {
-        return TerminalCwdListOutcome::Unavailable;
-    };
-    let mut rows = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let metadata = std::fs::symlink_metadata(entry.path()).ok()?;
-            let kind = if metadata.is_dir() {
-                CurrentDirectoryEntryKind::Directory
-            } else if metadata.is_file() || metadata.file_type().is_symlink() {
-                CurrentDirectoryEntryKind::File
-            } else {
-                return None;
-            };
-            let name = entry.file_name().to_string_lossy().to_string();
-            let path = terminal_cwd_join_display_child(cwd, &entry.path(), &name);
-            CurrentDirectoryEntry::new_with_kind(name, path, kind)
-        })
-        .collect::<Vec<_>>();
-    rows.sort_by(terminal_cwd_entry_order);
-    rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
-    TerminalCwdListOutcome::Ready(rows)
-}
-
-fn terminal_cwd_entry_order(
-    left: &CurrentDirectoryEntry,
-    right: &CurrentDirectoryEntry,
-) -> std::cmp::Ordering {
-    match (left.kind(), right.kind()) {
-        (CurrentDirectoryEntryKind::Directory, CurrentDirectoryEntryKind::File) => {
-            std::cmp::Ordering::Less
-        }
-        (CurrentDirectoryEntryKind::File, CurrentDirectoryEntryKind::Directory) => {
-            std::cmp::Ordering::Greater
-        }
-        _ => left.name().to_lowercase().cmp(&right.name().to_lowercase()),
-    }
-}
-
-fn terminal_cwd_expand_local_home(cwd: &str) -> std::path::PathBuf {
-    let cwd = cwd.trim();
-    if cwd == "~" {
-        return terminal_cwd_local_home().unwrap_or_else(|| std::path::PathBuf::from(cwd));
-    }
-    if let Some(rest) = cwd.strip_prefix("~/")
-        && let Some(home) = terminal_cwd_local_home()
-    {
-        return home.join(rest);
-    }
-    std::path::PathBuf::from(cwd)
-}
-
-fn terminal_cwd_local_home() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(std::path::PathBuf::from)
-}
-
-fn terminal_cwd_join_display_child(
-    cwd: &str,
-    absolute_path: &std::path::Path,
-    name: &str,
-) -> String {
-    let cwd = cwd.trim_end_matches(['/', '\\']);
-    if cwd == "~" {
-        format!("~/{name}")
-    } else if cwd.starts_with("~/") {
-        format!("{cwd}/{name}")
-    } else {
-        absolute_path.to_string_lossy().to_string()
-    }
-}
-
-fn terminal_cwd_looks_path_like(value: &str) -> bool {
-    value == "~"
-        || value.starts_with("~/")
-        || value.starts_with('/')
-        || value.starts_with("\\\\")
-        || (value.len() > 2 && value.as_bytes().get(1) == Some(&b':'))
-}
-
 fn terminal_cwd_entry_confirms_directory(kind: TerminalCwdVisibleEntryKind) -> bool {
     // Parent and directory rows come from a resolved listing. Typed rows are
     // user input and may still fail when the shell executes `cd`.
@@ -993,34 +916,6 @@ fn terminal_cwd_entry_confirms_directory(kind: TerminalCwdVisibleEntryKind) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn typed_candidate_requires_path_shape() {
-        assert!(!terminal_cwd_looks_path_like("Documents"));
-        assert!(terminal_cwd_looks_path_like("~/Documents"));
-        assert!(terminal_cwd_looks_path_like("/Users/dominical"));
-        assert!(terminal_cwd_looks_path_like("C:\\Users"));
-    }
-
-    #[test]
-    fn display_child_preserves_home_relative_paths() {
-        assert_eq!(
-            terminal_cwd_join_display_child(
-                "~",
-                std::path::Path::new("/home/a/Documents"),
-                "Documents"
-            ),
-            "~/Documents"
-        );
-        assert_eq!(
-            terminal_cwd_join_display_child(
-                "~/Documents",
-                std::path::Path::new("/home/a/Documents/OxideTerm"),
-                "OxideTerm",
-            ),
-            "~/Documents/OxideTerm"
-        );
-    }
 
     #[test]
     fn only_resolved_rows_update_cwd_optimistically() {

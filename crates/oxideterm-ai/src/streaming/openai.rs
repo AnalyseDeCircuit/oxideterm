@@ -17,7 +17,8 @@ pub(crate) async fn stream_openai_completion(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<()> {
-    let client = reqwest::Client::builder()
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .context("failed to apply application proxy to AI chat client")?
         .timeout(CHAT_STREAM_TIMEOUT)
         .build()
         .context("failed to create AI chat client")?;
@@ -163,7 +164,8 @@ pub(crate) async fn stream_ollama_completion(
 ) -> Result<()> {
     config.base_url = config.base_url.trim_end_matches('/').to_string();
     let url = format!("{}/v1/chat/completions", config.base_url);
-    let client = reqwest::Client::builder()
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .context("failed to apply application proxy to AI chat client")?
         .timeout(CHAT_STREAM_TIMEOUT)
         .build()
         .context("failed to create Ollama chat client")?;

@@ -43,6 +43,23 @@ pub(in crate::workspace) fn network_proxy_auth_label(
     }
 }
 
+pub(in crate::workspace) fn network_application_proxy_mode_label(
+    mode: SettingsApplicationProxyMode,
+    i18n: &oxideterm_i18n::I18n,
+) -> String {
+    match mode {
+        SettingsApplicationProxyMode::System => {
+            i18n.t("settings_view.network.application_mode_system")
+        }
+        SettingsApplicationProxyMode::Direct => {
+            i18n.t("settings_view.network.application_mode_direct")
+        }
+        SettingsApplicationProxyMode::Shared => {
+            i18n.t("settings_view.network.application_mode_shared")
+        }
+    }
+}
+
 fn schedule_settings_network_proxy_test(
     runtime: &tokio::runtime::Runtime,
     host: String,
@@ -53,8 +70,12 @@ fn schedule_settings_network_proxy_test(
     // The workspace runtime owns network I/O; the GPUI task receives only the
     // resulting status and never polls Tokio sockets on the UI executor.
     runtime.spawn(async move {
-        let status =
-            check_host_key_with_upstream_proxy(&host, port, 10, Some(&upstream_proxy)).await;
+        let status = match probe_upstream_proxy_route(&host, port, 10, &upstream_proxy).await {
+            Ok(()) => HostKeyStatus::Verified,
+            Err(error) => HostKeyStatus::Error {
+                message: error.to_string(),
+            },
+        };
         let _ = status_tx.send(status);
     });
     status_rx
@@ -69,120 +90,169 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         let proxy = settings.network.upstream_proxy.as_ref();
         match section_index {
-            0 => self.plain_settings_card(vec![
-                self.network_checkbox_row(
-                    "settings_view.network.disclaimer",
-                    "settings_view.network.disclaimer_hint",
-                    settings.network.upstream_proxy_disclaimer_accepted,
-                    true,
-                    Self::toggle_settings_network_disclaimer,
-                    cx,
-                ),
-                self.card_separator(),
-                self.network_checkbox_row(
-                    "settings_view.network.enabled",
-                    "settings_view.network.enabled_hint",
-                    proxy.is_some(),
-                    settings.network.upstream_proxy_disclaimer_accepted,
-                    Self::toggle_settings_network_enabled,
-                    cx,
-                ),
-            ]),
-            1 => {
-                self.settings_card(
-                    "settings_view.network.proxy",
-                    "settings_view.network.protocol_hint",
-                    vec![
-                        div()
-                            .w_full()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.metrics.settings_row_gap))
-                            // Keep the card structure visible while its controls are disabled.
-                            .opacity(if proxy.is_some() { 1.0 } else { 0.4 })
-                            .child(
-                                div()
-                                    .w_full()
-                                    .min_w(px(0.0))
-                                    .flex()
-                                    .flex_wrap()
-                                    .items_start()
-                                    .gap(px(32.0))
-                                    .child(self.network_responsive_field(
-                                        SETTINGS_NETWORK_FIELD_WIDTH,
-                                        self.network_select_field(
-                                            "settings_view.network.protocol",
-                                            "settings_view.network.protocol_hint",
-                                            SettingsSelect::NetworkProxyProtocol,
-                                            network_proxy_protocol_label(
-                                                proxy.map(|proxy| proxy.protocol).unwrap_or(
-                                                    SettingsUpstreamProxyProtocol::Socks5,
-                                                ),
-                                                &self.i18n,
-                                            ),
-                                            proxy.is_some(),
-                                            cx,
-                                        ),
-                                    ))
-                                    .child(
-                                        self.network_compact_field(
-                                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
-                                            self.network_input_field(
-                                                "settings_view.network.port",
-                                                "settings_view.network.port_hint",
-                                                SettingsInput::NetworkProxyPort,
-                                                proxy
-                                                    .map(|proxy| proxy.port.to_string())
-                                                    .unwrap_or_else(|| "1080".to_string()),
-                                                "1080".to_string(),
-                                                proxy.is_some(),
-                                                cx,
-                                            ),
-                                        ),
-                                    ),
-                            )
-                            .child(self.network_full_width_input(
-                                "settings_view.network.host",
-                                "settings_view.network.host_hint",
-                                SettingsInput::NetworkProxyHost,
-                                proxy.map(|proxy| proxy.host.clone()).unwrap_or_default(),
-                                "127.0.0.1".to_string(),
-                                proxy.is_some(),
-                                cx,
-                            ))
-                            .child(
-                                self.network_full_width_input(
-                                    "settings_view.network.no_proxy",
-                                    "settings_view.network.no_proxy_hint",
-                                    SettingsInput::NetworkProxyNoProxy,
-                                    proxy
-                                        .map(|proxy| proxy.no_proxy.clone())
-                                        .unwrap_or_default(),
-                                    "localhost,127.0.0.1,*.internal".to_string(),
-                                    proxy.is_some(),
-                                    cx,
-                                ),
-                            )
-                            .child(self.network_checkbox_row(
-                                "settings_view.network.remote_dns",
-                                "settings_view.network.remote_dns_hint",
-                                proxy.map(|proxy| proxy.remote_dns).unwrap_or(true),
-                                proxy.is_some(),
-                                Self::toggle_settings_network_remote_dns,
-                                cx,
-                            ))
-                            .into_any_element(),
-                    ],
-                )
-            }
-            2 => self.settings_network_auth_section(proxy, cx),
-            3 => self.settings_network_test_section(proxy.is_some(), cx),
+            0 => self.settings_network_shared_proxy_section(proxy, cx),
+            1 => self.settings_network_routing_section(cx),
             _ => div().into_any_element(),
         }
     }
 
-    pub(in crate::workspace) fn settings_network_auth_section(
+    fn settings_network_shared_proxy_section(
+        &self,
+        proxy: Option<&SettingsUpstreamProxyConfig>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(proxy) = proxy else {
+            let disclaimer_accepted = self
+                .settings_store
+                .settings()
+                .network
+                .upstream_proxy_disclaimer_accepted;
+            let empty_state = div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.settings_card_gap))
+                .child(self.network_checkbox_row(
+                    "settings_view.network.disclaimer",
+                    "settings_view.network.disclaimer_hint",
+                    disclaimer_accepted,
+                    true,
+                    Self::toggle_settings_network_disclaimer,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex_none()
+                        .child(self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.network.add_shared_proxy"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Default,
+                                    size: ButtonSize::Default,
+                                    radius: ButtonRadius::Md,
+                                    disabled: !disclaimer_accepted,
+                                },
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(|this, _event, _window, cx| {
+                                this.toggle_settings_network_enabled(cx);
+                                cx.stop_propagation();
+                            }),
+                        )),
+                )
+                .into_any_element();
+            return self.settings_card(
+                "settings_view.network.shared_proxy",
+                "settings_view.network.shared_proxy_empty_hint",
+                vec![empty_state],
+            );
+        };
+
+        let content =
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.settings_card_gap))
+                .child(
+                    div()
+                        .w_full()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_wrap()
+                        .items_start()
+                        .gap(px(32.0))
+                        .child(self.network_responsive_field(
+                            SETTINGS_NETWORK_FIELD_WIDTH,
+                            self.network_select_field(
+                                "settings_view.network.protocol",
+                                "settings_view.network.protocol_hint",
+                                SettingsSelect::NetworkProxyProtocol,
+                                network_proxy_protocol_label(proxy.protocol, &self.i18n),
+                                true,
+                                cx,
+                            ),
+                        ))
+                        .child(self.network_compact_field(
+                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
+                            self.network_input_field(
+                                "settings_view.network.port",
+                                "settings_view.network.port_hint",
+                                SettingsInput::NetworkProxyPort,
+                                proxy.port.to_string(),
+                                "1080".to_string(),
+                                true,
+                                cx,
+                            ),
+                        )),
+                )
+                .child(self.network_full_width_input(
+                    "settings_view.network.host",
+                    "settings_view.network.host_hint",
+                    SettingsInput::NetworkProxyHost,
+                    proxy.host.clone(),
+                    "127.0.0.1".to_string(),
+                    true,
+                    cx,
+                ))
+                .child(self.network_full_width_input(
+                    "settings_view.network.no_proxy",
+                    "settings_view.network.no_proxy_hint",
+                    SettingsInput::NetworkProxyNoProxy,
+                    proxy.no_proxy.clone(),
+                    "localhost,127.0.0.1,*.internal".to_string(),
+                    true,
+                    cx,
+                ))
+                .child(self.network_checkbox_row(
+                    "settings_view.network.remote_dns",
+                    "settings_view.network.remote_dns_hint",
+                    proxy.remote_dns,
+                    true,
+                    Self::toggle_settings_network_remote_dns,
+                    cx,
+                ))
+                .child(self.card_separator())
+                .child(self.settings_network_auth_content(Some(proxy), cx))
+                .child(self.card_separator())
+                .child(self.settings_network_test_content(true, cx))
+                .child(self.card_separator())
+                .child(div().w_full().flex().justify_end().child(
+                    self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.network.remove_shared_proxy"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::Trash2,
+                            16.0,
+                            rgb(self.tokens.ui.error),
+                        )),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Destructive,
+                                size: ButtonSize::Default,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.toggle_settings_network_enabled(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                ))
+                .into_any_element();
+
+        self.settings_card(
+            "settings_view.network.shared_proxy",
+            "settings_view.network.shared_proxy_hint",
+            vec![content],
+        )
+    }
+
+    fn settings_network_auth_content(
         &self,
         proxy: Option<&SettingsUpstreamProxyConfig>,
         cx: &mut Context<Self>,
@@ -246,14 +316,10 @@ impl WorkspaceApp {
                 .child(self.network_password_field(auth_has_saved_password, proxy.is_some(), cx));
         }
 
-        self.settings_card(
-            "settings_view.network.auth",
-            "settings_view.network.auth_hint",
-            vec![section.into_any_element()],
-        )
+        section.into_any_element()
     }
 
-    pub(in crate::workspace) fn settings_network_test_section(
+    fn settings_network_test_content(
         &self,
         proxy_enabled: bool,
         cx: &mut Context<Self>,
@@ -275,20 +341,17 @@ impl WorkspaceApp {
             || host_value.trim().is_empty()
             || port_value.trim().parse::<u16>().is_err();
 
-        let content = div()
+        div()
             .w_full()
             .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.settings_card_gap))
             .opacity(if proxy_enabled { 1.0 } else { 0.4 })
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.network.test_hint")),
-            )
+            .child(self.network_subsection_heading(
+                "settings_view.network.test_title",
+                "settings_view.network.test_hint",
+            ))
             .child(
                 div()
                     .w_full()
@@ -300,7 +363,7 @@ impl WorkspaceApp {
                         SETTINGS_NETWORK_FIELD_WIDTH,
                         self.network_input_field(
                             "settings_view.network.test_host",
-                            "settings_view.network.host_hint",
+                            "settings_view.network.test_host_hint",
                             SettingsInput::NetworkProxyTestHost,
                             host_value,
                             "server.example.com".to_string(),
@@ -312,7 +375,7 @@ impl WorkspaceApp {
                         SETTINGS_NETWORK_PORT_FIELD_WIDTH,
                         self.network_input_field(
                             "settings_view.network.test_port",
-                            "settings_view.network.port_hint",
+                            "settings_view.network.test_port_hint",
                             SettingsInput::NetworkProxyTestPort,
                             port_value,
                             "22".to_string(),
@@ -368,13 +431,191 @@ impl WorkspaceApp {
                         },
                     ),
             )
-            .into_any_element();
+            .into_any_element()
+    }
+
+    fn settings_network_routing_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Routing policy is distinct from the reusable proxy definition above.
+        // SSH remains connection-owned while app and updater routes are global.
+        let settings = self.settings_store.settings();
+        let application_mode = settings.network.application_proxy_mode;
+        let update_proxy = &settings.general.update_proxy;
+        let mut content = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_card_gap))
+            .child(self.network_static_route_row(
+                "settings_view.network.ssh_route",
+                "settings_view.network.ssh_route_hint",
+                "settings_view.network.per_connection",
+            ))
+            .child(self.card_separator())
+            .child(self.network_route_select_row(
+                "settings_view.network.application_route",
+                "settings_view.network.application_route_hint",
+                SettingsSelect::NetworkApplicationProxyMode,
+                network_application_proxy_mode_label(application_mode, &self.i18n),
+                cx,
+            ))
+            .child(self.card_separator())
+            .child(self.network_route_select_row(
+                "settings_view.network.update_route",
+                "settings_view.network.update_route_hint",
+                SettingsSelect::UpdateProxyMode,
+                update_proxy_mode_label(update_proxy.mode, &self.i18n),
+                cx,
+            ));
+
+        if update_proxy.mode == UpdateProxyMode::Custom {
+            content = content.child(self.settings_network_custom_update_proxy(cx));
+        }
+
+        content = content.child(
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t("settings_view.network.legal_hint")),
+        );
 
         self.settings_card(
-            "settings_view.network.test_title",
-            "settings_view.network.test_hint",
-            vec![content],
+            "settings_view.network.routing",
+            "settings_view.network.routing_hint",
+            vec![content.into_any_element()],
         )
+    }
+
+    fn settings_network_custom_update_proxy(&self, cx: &mut Context<Self>) -> AnyElement {
+        let proxy = &self.settings_store.settings().general.update_proxy;
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .pt(px(self.tokens.metrics.settings_row_gap))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_row_gap))
+            .child(self.network_subsection_heading(
+                "settings_view.network.custom_update_proxy",
+                "settings_view.network.custom_update_proxy_hint",
+            ))
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap(px(32.0))
+                    .child(self.network_responsive_field(
+                        SETTINGS_NETWORK_FIELD_WIDTH,
+                        self.network_select_field(
+                            "settings_view.network.update_protocol",
+                            "settings_view.network.update_protocol_hint",
+                            SettingsSelect::UpdateProxyProtocol,
+                            update_proxy_protocol_label(proxy.protocol, &self.i18n),
+                            true,
+                            cx,
+                        ),
+                    ))
+                    .child(self.network_compact_field(
+                        SETTINGS_NETWORK_PORT_FIELD_WIDTH,
+                        self.network_input_field(
+                            "settings_view.network.update_port",
+                            "settings_view.network.update_port_hint",
+                            SettingsInput::UpdateProxyPort,
+                            self.current_settings_input_value(SettingsInput::UpdateProxyPort),
+                            "7890".to_string(),
+                            true,
+                            cx,
+                        ),
+                    )),
+            )
+            .child(self.network_full_width_input(
+                "settings_view.network.update_host",
+                "settings_view.network.update_host_hint",
+                SettingsInput::UpdateProxyHost,
+                self.current_settings_input_value(SettingsInput::UpdateProxyHost),
+                "127.0.0.1".to_string(),
+                true,
+                cx,
+            ))
+            .child(self.network_full_width_input(
+                "settings_view.network.update_no_proxy",
+                "settings_view.network.update_no_proxy_hint",
+                SettingsInput::UpdateProxyNoProxy,
+                self.current_settings_input_value(SettingsInput::UpdateProxyNoProxy),
+                "localhost,127.0.0.1".to_string(),
+                true,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn network_subsection_heading(&self, label_key: &str, hint_key: &str) -> AnyElement {
+        self.network_field_label(label_key, hint_key)
+    }
+
+    fn network_static_route_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        value_key: &str,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
+                    .child(self.network_field_label(label_key, hint_key)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(value_key)),
+            )
+            .into_any_element()
+    }
+
+    fn network_route_select_row(
+        &self,
+        label_key: &str,
+        hint_key: &str,
+        select_id: SettingsSelect,
+        value: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
+                    .child(self.network_field_label(label_key, hint_key)),
+            )
+            .child(
+                div()
+                    .w(px(240.0))
+                    .max_w_full()
+                    .flex_none()
+                    .child(self.settings_select_control(select_id, value, false, None, cx)),
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn network_responsive_field(
@@ -751,8 +992,37 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn toggle_settings_network_enabled(&mut self, cx: &mut Context<Self>) {
         self.settings_network_proxy_password_status = None;
+        let removes_saved_password = self
+            .settings_store
+            .settings()
+            .network
+            .upstream_proxy
+            .as_ref()
+            .is_some_and(|proxy| {
+                matches!(
+                    &proxy.auth,
+                    SettingsUpstreamProxyAuth::Password {
+                        keychain_id: Some(_),
+                        ..
+                    }
+                )
+            });
+        if removes_saved_password
+            && let Err(error) = self
+                .connection_store
+                .delete_global_upstream_proxy_password()
+        {
+            self.settings_network_proxy_password_status = Some(error.to_string());
+            cx.notify();
+            return;
+        }
+        // Disabling the proxy also clears any transient credential draft.
+        self.clear_settings_input_draft(SettingsInput::NetworkProxyPassword);
         self.edit_settings(
             |settings| {
+                if settings.network.upstream_proxy.is_some() {
+                    settings.network.application_proxy_mode = SettingsApplicationProxyMode::System;
+                }
                 settings.network.upstream_proxy = if settings.network.upstream_proxy.is_some() {
                     None
                 } else {
@@ -888,7 +1158,9 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Ok(upstream_proxy) = self.runtime_global_upstream_proxy_config(proxy) else {
+        let Ok(upstream_proxy) =
+            upstream_proxy_config_from_global_settings(&self.connection_store, &proxy)
+        else {
             self.settings_network_proxy_test_status = Some(
                 self.i18n
                     .t("settings_view.network.test_error")
@@ -930,43 +1202,12 @@ impl WorkspaceApp {
         .detach();
         cx.notify();
     }
-
-    pub(in crate::workspace) fn runtime_global_upstream_proxy_config(
-        &self,
-        proxy: SettingsUpstreamProxyConfig,
-    ) -> anyhow::Result<UpstreamProxyConfig> {
-        let auth = match proxy.auth {
-            SettingsUpstreamProxyAuth::None => UpstreamProxyAuth::None,
-            SettingsUpstreamProxyAuth::Password {
-                username,
-                keychain_id,
-            } => {
-                let password = self
-                    .connection_store
-                    .get_global_upstream_proxy_password(keychain_id.as_deref().unwrap_or_default())?
-                    .into_zeroizing();
-                // The test route uses the same hydrated runtime proxy boundary as
-                // real SSH preflight and never writes the secret into UI state.
-                UpstreamProxyAuth::Password { username, password }
-            }
-        };
-        Ok(UpstreamProxyConfig {
-            protocol: match proxy.protocol {
-                SettingsUpstreamProxyProtocol::Socks5 => UpstreamProxyProtocol::Socks5,
-                SettingsUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
-            },
-            host: proxy.host,
-            port: proxy.port,
-            auth,
-            remote_dns: proxy.remote_dns,
-            no_proxy: proxy.no_proxy,
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyProtocol};
 
     #[test]
     fn proxy_route_test_enters_workspace_tokio_runtime() {

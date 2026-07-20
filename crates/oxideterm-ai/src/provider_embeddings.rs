@@ -335,7 +335,8 @@ async fn embed_ollama(
 }
 
 fn embedding_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+    oxideterm_network_proxy::application_http_client_builder()
+        .context("failed to apply application proxy to embedding client")?
         .timeout(EMBEDDING_TIMEOUT)
         .build()
         .context("failed to create embedding client")

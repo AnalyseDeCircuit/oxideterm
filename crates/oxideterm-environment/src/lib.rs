@@ -16,8 +16,9 @@ pub mod terminal_context;
 pub use cwd::{
     CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
-    current_directory_parent, current_directory_report_command,
+    current_directory_parent, current_directory_path_is_explicit, current_directory_report_command,
     current_directory_shell_integration_command, current_directory_shell_path_argument,
+    list_local_current_directory, sort_current_directory_entries,
 };
 pub use git::{
     GitActionPlan, GitBranchIdentity, GitBranchListOutcome, GitBranchReference, GitChangedPath,
@@ -41,7 +42,7 @@ pub use project::{
     ProjectFacet, ProjectFacetKind, ProjectManifestEntry, ProjectProbeEntry, ProjectProbeError,
     ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectProbeState, ProjectSnapshot,
     ProjectStatusStore, ProjectTask, ProjectTaskGroup, interpret_project_manifest_entries,
-    parse_remote_shell_project_probe_output, project_manifest_file_names,
-    remote_shell_project_probe_command,
+    parse_remote_shell_project_probe_output, probe_local_project, project_manifest_file_names,
+    remote_project_cwd_source_is_trusted, remote_shell_project_probe_command,
 };
 pub use terminal_context::infer_terminal_cwd_from_text;

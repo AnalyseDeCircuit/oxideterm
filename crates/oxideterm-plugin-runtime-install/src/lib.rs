@@ -37,7 +37,8 @@ pub struct WasmRuntimeInstallResult {
 pub async fn install_wasm_runtime_sidecar(
     settings_path: &Path,
 ) -> Result<WasmRuntimeInstallResult, String> {
-    let client = reqwest::Client::builder()
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .map_err(|error| format!("Failed to apply application proxy: {error}"))?
         .timeout(std::time::Duration::from_secs(
             WASM_RUNTIME_HTTP_TIMEOUT_SECONDS,
         ))

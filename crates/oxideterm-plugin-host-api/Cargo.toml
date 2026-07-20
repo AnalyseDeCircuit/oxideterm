@@ -18,6 +18,7 @@ oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }

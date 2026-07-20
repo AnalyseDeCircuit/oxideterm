@@ -193,7 +193,9 @@ fn custom_upstream_proxy_hydrates_plaintext_secret_without_keychain() {
         },
     };
 
-    let proxy = upstream_proxy_config_from_saved_policy(&store, &settings, &policy).unwrap();
+    let proxy = upstream_proxy_config_from_saved_policy(&store, &settings, &policy)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(proxy.host, "custom-proxy.local");
     assert_eq!(proxy.no_proxy, "localhost");
@@ -221,7 +223,11 @@ fn direct_upstream_proxy_policy_ignores_global_proxy() {
     });
     let policy = SavedUpstreamProxyPolicy::Direct;
 
-    assert!(upstream_proxy_config_from_saved_policy(&store, &settings, &policy).is_none());
+    assert!(
+        upstream_proxy_config_from_saved_policy(&store, &settings, &policy)
+            .unwrap()
+            .is_none()
+    );
     let _ = std::fs::remove_file(path);
 }
 
@@ -241,10 +247,39 @@ fn use_global_upstream_proxy_prefers_global_settings_over_env_fallback() {
     });
     let policy = SavedUpstreamProxyPolicy::UseGlobal;
 
-    let proxy = upstream_proxy_config_from_saved_policy(&store, &settings, &policy).unwrap();
+    let proxy = upstream_proxy_config_from_saved_policy(&store, &settings, &policy)
+        .unwrap()
+        .unwrap();
 
     assert_eq!(proxy.host, "global-proxy.local");
     assert!(matches!(proxy.auth, UpstreamProxyAuth::None));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn use_global_upstream_proxy_fails_when_saved_password_is_missing() {
+    let (store, path) = temp_connection_store("missing-global-proxy-password");
+    let mut settings = PersistedSettings::default();
+    settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
+        protocol: SettingsUpstreamProxyProtocol::HttpConnect,
+        host: "global-proxy.local".to_string(),
+        port: 8080,
+        auth: SettingsUpstreamProxyAuth::Password {
+            username: "proxy-user".to_string(),
+            keychain_id: None,
+        },
+        remote_dns: true,
+        no_proxy: String::new(),
+    });
+
+    let error = upstream_proxy_config_from_saved_policy(
+        &store,
+        &settings,
+        &SavedUpstreamProxyPolicy::UseGlobal,
+    )
+    .expect_err("missing proxy credentials must not silently select a direct route");
+
+    assert!(error.contains("password is not saved"));
     let _ = std::fs::remove_file(path);
 }
 

@@ -88,7 +88,11 @@ const APPEARANCE_KEYS: &[&str] = &[
 const CONNECTION_DEFAULT_KEYS: &[&str] = &["username", "port"];
 const RECONNECT_KEYS: &[&str] = &["enabled", "maxAttempts", "baseDelayMs", "maxDelayMs"];
 const CONNECTION_POOL_KEYS: &[&str] = &["idleTimeoutSecs"];
-const NETWORK_KEYS: &[&str] = &["upstreamProxy", "upstreamProxyDisclaimerAccepted"];
+const NETWORK_KEYS: &[&str] = &[
+    "upstreamProxy",
+    "upstreamProxyDisclaimerAccepted",
+    "applicationProxyMode",
+];
 const AI_KEYS: &[&str] = &[
     "enabled",
     "enabledConfirmed",

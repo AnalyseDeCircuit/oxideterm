@@ -29,6 +29,7 @@ members = [
   "crates/oxideterm-quick-commands",
   "crates/oxideterm-connection-monitor",
   "crates/oxideterm-notification-center",
+  "crates/oxideterm-network-proxy",
   "crates/oxideterm-topology",
   "crates/oxideterm-backend-classification",
   "crates/oxideterm-cloud-sync",
@@ -95,7 +96,7 @@ russh-sftp = { path = "crates/russh-sftp" }
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
-version = "2.0.7"
+version = "2.0.8"
 
 [workspace.dependencies]
 accesskit = "0.24.0"

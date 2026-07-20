@@ -123,6 +123,7 @@ impl Default for UpdateChannel {
 pub enum UpdateProxyMode {
     #[default]
     Direct,
+    Application,
     System,
     Custom,
 }

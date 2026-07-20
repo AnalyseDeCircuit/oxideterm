@@ -68,11 +68,12 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Help, SettingsSelect::UpdateProxyMode) => {
+            (SettingsTab::Network, SettingsSelect::UpdateProxyMode) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 let current = settings.general.update_proxy.mode;
                 for mode in [
                     UpdateProxyMode::Direct,
+                    UpdateProxyMode::Application,
                     UpdateProxyMode::System,
                     UpdateProxyMode::Custom,
                 ] {
@@ -96,7 +97,7 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Help, SettingsSelect::UpdateProxyProtocol) => {
+            (SettingsTab::Network, SettingsSelect::UpdateProxyProtocol) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 let current = settings.general.update_proxy.protocol;
                 for protocol in [
@@ -116,6 +117,41 @@ impl WorkspaceApp {
                             this.close_settings_select();
                             this.edit_settings(
                                 |settings| settings.general.update_proxy.protocol = protocol,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Network, SettingsSelect::NetworkApplicationProxyMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = settings.network.application_proxy_mode;
+                for mode in [
+                    SettingsApplicationProxyMode::System,
+                    SettingsApplicationProxyMode::Direct,
+                    SettingsApplicationProxyMode::Shared,
+                ] {
+                    // A missing shared profile is shown but cannot become an
+                    // active route, keeping the runtime policy fail-closed.
+                    let shared_proxy_missing = mode == SettingsApplicationProxyMode::Shared
+                        && settings.network.upstream_proxy.is_none();
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            network_application_proxy_mode_label(mode, &self.i18n),
+                            mode == current,
+                        ),
+                        shared_proxy_missing,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if shared_proxy_missing {
+                                return;
+                            }
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.network.application_proxy_mode = mode,
                                 cx,
                             );
                             cx.stop_propagation();
@@ -818,6 +854,20 @@ impl WorkspaceApp {
                         }
                     })
                     .unwrap_or(NetworkProxyAuthMode::None);
+                let has_saved_password =
+                    settings
+                        .network
+                        .upstream_proxy
+                        .as_ref()
+                        .is_some_and(|proxy| {
+                            matches!(
+                                &proxy.auth,
+                                SettingsUpstreamProxyAuth::Password {
+                                    keychain_id: Some(_),
+                                    ..
+                                }
+                            )
+                        });
                 for mode in [NetworkProxyAuthMode::None, NetworkProxyAuthMode::Password] {
                     popup = popup.child(select_option_action(
                         select_option(
@@ -831,6 +881,18 @@ impl WorkspaceApp {
                             this.close_settings_select();
                             this.settings_network_proxy_password_status = None;
                             this.clear_settings_input_draft(SettingsInput::NetworkProxyPassword);
+                            if mode == NetworkProxyAuthMode::None
+                                && has_saved_password
+                                && let Err(error) = this
+                                    .connection_store
+                                    .delete_global_upstream_proxy_password()
+                            {
+                                this.settings_network_proxy_password_status =
+                                    Some(error.to_string());
+                                cx.notify();
+                                cx.stop_propagation();
+                                return;
+                            }
                             this.edit_settings(
                                 move |settings| {
                                     if let Some(proxy) = settings.network.upstream_proxy.as_mut() {

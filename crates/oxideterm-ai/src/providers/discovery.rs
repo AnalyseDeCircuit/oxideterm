@@ -25,7 +25,8 @@ pub async fn fetch_provider_models(
     provider: AiProviderView,
     api_key: Option<Zeroizing<String>>,
 ) -> Result<ProviderModelRefresh> {
-    let client = reqwest::Client::builder()
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .context("failed to apply application proxy to model discovery client")?
         .timeout(MODEL_REFRESH_TIMEOUT)
         .build()
         .context("failed to create AI model refresh client")?;

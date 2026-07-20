@@ -168,9 +168,11 @@ impl McpRegistry {
             false,
             "text/event-stream",
         )?;
+        let client = oxideterm_network_proxy::application_http_client()
+            .map_err(|error| McpError::Message(error.to_string()))?;
         let response = tokio::time::timeout(
             MCP_REQUEST_TIMEOUT,
-            self.http.get(&url).headers(headers).send(),
+            client.get(&url).headers(headers).send(),
         )
         .await
         .map_err(|_| McpError::Timeout(config.name.clone()))?
@@ -216,9 +218,10 @@ impl McpRegistry {
             true,
             "application/json, text/event-stream",
         )?;
+        let client = oxideterm_network_proxy::application_http_client()
+            .map_err(|error| McpError::Message(error.to_string()))?;
         tokio::time::timeout(MCP_REQUEST_TIMEOUT, async {
-            let response = self
-                .http
+            let response = client
                 .post(&url)
                 .headers(headers)
                 .json(&request)

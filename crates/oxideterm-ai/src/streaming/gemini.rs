@@ -25,7 +25,8 @@ pub(crate) async fn stream_gemini_completion(
         config.base_url.trim().trim_end_matches('/'),
         url_encode_component(&config.model)
     );
-    let client = reqwest::Client::builder()
+    let client = oxideterm_network_proxy::application_http_client_builder()
+        .context("failed to apply application proxy to AI chat client")?
         .timeout(CHAT_STREAM_TIMEOUT)
         .build()
         .context("failed to create Gemini chat client")?;

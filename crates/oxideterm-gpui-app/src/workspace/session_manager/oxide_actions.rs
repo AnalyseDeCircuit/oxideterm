@@ -229,10 +229,9 @@ impl WorkspaceApp {
             .iter()
             .map(|forward| forward.id.clone())
             .collect();
-        let plugin_settings = crate::workspace::plugin_settings_store::load_plugin_settings(
-            self.settings_store.path(),
-        )
-        .unwrap_or_default();
+        let plugin_settings =
+            oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())
+                .unwrap_or_default();
         for setting in plugin_settings {
             if let Some(plugin_id) = plugin_id_from_setting_storage_key(&setting.storage_key) {
                 *dialog.plugin_groups.entry(plugin_id).or_insert(0) += 1;
@@ -1356,15 +1355,13 @@ impl WorkspaceApp {
             None
         };
         let plugin_settings = if dialog.include_plugin_settings {
-            crate::workspace::plugin_settings_store::load_plugin_settings(
-                self.settings_store.path(),
-            )?
-            .into_iter()
-            .filter(|setting| {
-                plugin_id_from_setting_storage_key(&setting.storage_key)
-                    .is_some_and(|plugin_id| dialog.selected_plugin_ids.contains(&plugin_id))
-            })
-            .collect()
+            oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())?
+                .into_iter()
+                .filter(|setting| {
+                    plugin_id_from_setting_storage_key(&setting.storage_key)
+                        .is_some_and(|plugin_id| dialog.selected_plugin_ids.contains(&plugin_id))
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -1520,7 +1517,7 @@ impl WorkspaceApp {
             })
             .cloned()
             .collect::<Vec<_>>();
-        crate::workspace::plugin_settings_store::upsert_plugin_settings(
+        oxideterm_cloud_sync::plugin_settings::upsert_plugin_settings(
             self.settings_store.path(),
             &filtered,
         )

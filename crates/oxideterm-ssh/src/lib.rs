@@ -74,6 +74,6 @@ pub use transport::{
 };
 pub use upstream_proxy::{
     UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyError, UpstreamProxyProtocol,
-    dial_initial_tcp, parse_http_proxy_value, parse_socks5_proxy_value, socks5_proxy_from_env,
-    upstream_proxy_from_env,
+    dial_initial_tcp, parse_http_proxy_value, parse_socks5_proxy_value, probe_upstream_proxy_route,
+    socks5_proxy_from_env, upstream_proxy_from_env,
 };

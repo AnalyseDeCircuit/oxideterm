@@ -15,10 +15,11 @@ chrono.workspace = true
 hmac = "0.12"
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-connections = { path = "../oxideterm-connections" }
-oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
-oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
+oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 reqwest.workspace = true
 rand.workspace = true

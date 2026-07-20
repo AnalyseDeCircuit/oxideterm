@@ -130,7 +130,11 @@ impl NativePluginRegistry {
     #[allow(dead_code)]
     pub async fn fetch_plugin_registry(url: &str) -> Result<NativePluginRegistryIndex, String> {
         validate_native_plugin_package_url(url)?;
-        let response = reqwest::get(url)
+        let client = oxideterm_network_proxy::application_http_client()
+            .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
+        let response = client
+            .get(url)
+            .send()
             .await
             .map_err(|error| format!("Failed to fetch registry: {error}"))?;
         if !response.status().is_success() {
@@ -155,7 +159,8 @@ impl NativePluginRegistry {
         overwrite: bool,
     ) -> Result<NativePluginUrlInstallResult, String> {
         validate_native_plugin_package_url(download_url)?;
-        let client = reqwest::Client::builder()
+        let client = oxideterm_network_proxy::application_http_client_builder()
+            .map_err(|error| format!("Failed to apply application proxy: {error}"))?
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|error| format!("Failed to create HTTP client: {error}"))?;

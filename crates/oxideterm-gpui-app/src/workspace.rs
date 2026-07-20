@@ -25,7 +25,6 @@ mod plugin_host;
 mod plugin_lifecycle;
 mod plugin_manager;
 mod plugin_runtime;
-mod plugin_settings_store;
 mod plugin_ui;
 mod quick_commands;
 mod remote_desktop;

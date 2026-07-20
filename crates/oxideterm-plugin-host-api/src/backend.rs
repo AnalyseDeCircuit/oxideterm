@@ -387,7 +387,8 @@ async fn native_plugin_http_request_result(args: &Value) -> Result<Value, String
         _ => None,
     };
 
-    let client = reqwest::Client::new();
+    let client = oxideterm_network_proxy::application_http_client()
+        .map_err(|error| format!("Failed to create plugin HTTP client: {error}"))?;
     let mut builder = native_plugin_http_request_builder(&client, url, method, &headers, body)?;
     if let Some(timeout_ms) = args
         .get("timeoutMs")

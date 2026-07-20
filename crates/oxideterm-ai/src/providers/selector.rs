@@ -121,10 +121,10 @@ pub async fn check_model_selector_provider_online(base_url: &str, endpoint: &str
         return false;
     }
 
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(MODEL_SELECTOR_ONLINE_TIMEOUT)
-        .build()
-    else {
+    let Ok(builder) = oxideterm_network_proxy::application_http_client_builder() else {
+        return false;
+    };
+    let Ok(client) = builder.timeout(MODEL_SELECTOR_ONLINE_TIMEOUT).build() else {
         return false;
     };
     client

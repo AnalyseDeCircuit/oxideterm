@@ -46,6 +46,7 @@ oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-launcher = { path = "../oxideterm-launcher" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }
 oxideterm-notification-center = { path = "../oxideterm-notification-center" }
+oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-plugin-host-api = { path = "../oxideterm-plugin-host-api" }
 oxideterm-plugin-protocol = { path = "../oxideterm-plugin-protocol" }
 oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }

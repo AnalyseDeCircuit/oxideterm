@@ -584,11 +584,12 @@ pub(in crate::workspace) fn upstream_proxy_config_from_form(
     form: &NewConnectionForm,
 ) -> anyhow::Result<Option<UpstreamProxyConfig>> {
     match form.upstream_proxy_policy {
-        NewConnectionUpstreamProxyPolicy::UseGlobal => Ok(upstream_proxy_config_from_saved_policy(
+        NewConnectionUpstreamProxyPolicy::UseGlobal => upstream_proxy_config_from_saved_policy(
             store,
             settings,
             &SavedUpstreamProxyPolicy::UseGlobal,
-        )),
+        )
+        .map_err(anyhow::Error::msg),
         NewConnectionUpstreamProxyPolicy::Direct => Ok(None),
         NewConnectionUpstreamProxyPolicy::Custom => {
             Ok(Some(runtime_upstream_proxy_config_from_form(store, form)?))

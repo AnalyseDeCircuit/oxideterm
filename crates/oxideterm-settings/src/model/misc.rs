@@ -158,15 +158,64 @@ pub struct SettingsUpstreamProxyConfig {
     pub no_proxy: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SettingsApplicationProxyMode {
+    #[default]
+    System,
+    Direct,
+    Shared,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_proxy: Option<SettingsUpstreamProxyConfig>,
     #[serde(default)]
     pub upstream_proxy_disclaimer_accepted: bool,
+    #[serde(default)]
+    pub application_proxy_mode: SettingsApplicationProxyMode,
     #[serde(flatten)]
     pub extra: ExtraFields,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkSettingsCompat {
+    #[serde(default)]
+    upstream_proxy: Option<SettingsUpstreamProxyConfig>,
+    #[serde(default)]
+    upstream_proxy_disclaimer_accepted: bool,
+    #[serde(default)]
+    application_proxy_mode: Option<SettingsApplicationProxyMode>,
+    #[serde(default)]
+    application_proxy_enabled: Option<bool>,
+    #[serde(flatten)]
+    extra: ExtraFields,
+}
+
+impl<'de> Deserialize<'de> for NetworkSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let legacy = NetworkSettingsCompat::deserialize(deserializer)?;
+        // Older settings stored only whether the shared proxy handled app traffic.
+        let application_proxy_mode = legacy.application_proxy_mode.unwrap_or_else(|| {
+            if legacy.application_proxy_enabled.unwrap_or(false) {
+                SettingsApplicationProxyMode::Shared
+            } else {
+                SettingsApplicationProxyMode::System
+            }
+        });
+        Ok(Self {
+            upstream_proxy: legacy.upstream_proxy,
+            upstream_proxy_disclaimer_accepted: legacy.upstream_proxy_disclaimer_accepted,
+            application_proxy_mode,
+            extra: legacy.extra,
+        })
+    }
 }
 
 fn default_proxy_remote_dns() -> bool {
@@ -333,7 +382,7 @@ impl PersistedSettings {
 
 #[cfg(test)]
 mod misc_tests {
-    use super::PersistedSettings;
+    use super::{PersistedSettings, SettingsApplicationProxyMode};
 
     #[test]
     fn command_palette_mru_deduplicates_promotes_and_bounds_entries() {
@@ -404,5 +453,34 @@ mod misc_tests {
         assert!(restored.ssh_config.auto_load_hosts);
         assert!(!restored.ssh_config.auto_sync_hosts);
         assert!(!restored.ssh_config.allow_proxy_command);
+    }
+
+    #[test]
+    fn legacy_application_proxy_flag_migrates_to_explicit_routing_mode() {
+        let mut serialized = PersistedSettings::default().to_value();
+        let network = serialized["network"]
+            .as_object_mut()
+            .expect("network settings should be an object");
+        network.remove("applicationProxyMode");
+        network.insert("applicationProxyEnabled".to_string(), true.into());
+
+        let restored: PersistedSettings =
+            serde_json::from_value(serialized).expect("legacy settings should deserialize");
+
+        assert_eq!(
+            restored.network.application_proxy_mode,
+            SettingsApplicationProxyMode::Shared
+        );
+    }
+
+    #[test]
+    fn application_proxy_mode_serializes_without_the_legacy_flag() {
+        let mut settings = PersistedSettings::default();
+        settings.network.application_proxy_mode = SettingsApplicationProxyMode::Direct;
+
+        let serialized = settings.to_value();
+
+        assert_eq!(serialized["network"]["applicationProxyMode"], "direct");
+        assert!(serialized["network"].get("applicationProxyEnabled").is_none());
     }
 }
