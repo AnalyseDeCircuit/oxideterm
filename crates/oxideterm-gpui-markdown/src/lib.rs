@@ -31,12 +31,17 @@
 //! - Generated heading IDs and safe fragment-link handling
 //! - Clickable links and local/remote images via GPUI async image cache
 //! - Link/image scheme allowlists for untrusted markdown surfaces
-//! - Safe inline HTML subset: `<br>`, `<kbd>`, `<sub>`, `<sup>`
+//! - Safe native inline HTML (`a`, `img`, `span`, `br`, emphasis, code, keyboard,
+//!   underline, highlight, subscript, and superscript)
+//! - Safe native block HTML (headings, containers, lists, quotes, preformatted
+//!   code, tables, details content, and alignment); scripts are never executed
+//!   and CSS is ignored
 //! - Bare `http://` / `https://` URL autolinks
 //! - Horizontal rules
 //! - Smart punctuation
 
 pub mod highlight;
+mod html;
 pub mod layout;
 pub mod math;
 pub mod mermaid;

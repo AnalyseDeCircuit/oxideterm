@@ -35,8 +35,14 @@ pub enum Block {
     /// A normal paragraph.
     Paragraph { inlines: Vec<Inline> },
 
-    /// Raw block HTML preserved as inert text.
+    /// Unsupported raw block HTML preserved as inert text.
     Html(String),
+
+    /// Safe HTML container with native text alignment.
+    HtmlContainer {
+        alignment: BlockAlignment,
+        blocks: Vec<Block>,
+    },
 
     /// Fenced or indented code block with an optional language hint.
     CodeBlock {
@@ -65,6 +71,14 @@ pub enum Block {
         alignments: Vec<TableAlignment>,
         rows: Vec<Vec<Vec<Inline>>>,
     },
+}
+
+/// Text alignment accepted from safe block-level HTML attributes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockAlignment {
+    Left,
+    Center,
+    Right,
 }
 
 /// Column alignment for GFM tables.
@@ -126,6 +140,12 @@ pub enum Inline {
 
     /// Safe `<sup>...</sup>` inline HTML rendered without exposing tags.
     Superscript(Vec<Inline>),
+
+    /// Safe `<u>...</u>` inline HTML.
+    Underline(Vec<Inline>),
+
+    /// Safe `<mark>...</mark>` inline HTML.
+    Highlight(Vec<Inline>),
 
     /// `~~strikethrough~~`.
     Strikethrough(Vec<Inline>),

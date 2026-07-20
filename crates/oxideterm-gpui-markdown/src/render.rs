@@ -9,8 +9,8 @@
 use std::{ops::Range, path::PathBuf, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontStyle, FontWeight, Hsla, Image,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
+    AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontFeatures, FontStyle, FontWeight,
+    Hsla, Image, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextAlign, TextRun,
     UnderlineStyle, Window, div, image_cache, img, prelude::FluentBuilder, px, relative,
     retain_all,
@@ -23,7 +23,8 @@ use crate::layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 use crate::math;
 use crate::mermaid;
 use crate::model::{
-    Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment,
+    Block, BlockAlignment, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument,
+    TableAlignment,
 };
 use crate::options::MarkdownOptions;
 use crate::style;
@@ -606,6 +607,9 @@ fn render_block_with_code_actions(
         Block::Heading { level, id, inlines } => render_heading(*level, id, inlines, tokens, opts),
         Block::Paragraph { inlines } => render_paragraph(inlines, tokens, opts),
         Block::Html(html) => render_html_block(html, tokens, opts),
+        Block::HtmlContainer { alignment, blocks } => {
+            render_html_container(*alignment, blocks, tokens, opts, code_actions)
+        }
         Block::CodeBlock { language, code } => {
             render_code_block(language.as_deref(), code, tokens, opts, code_actions)
         }
@@ -639,6 +643,15 @@ fn render_selectable_block(
             render_selectable_paragraph(inlines, tokens, opts, path, render_text)
         }
         Block::Html(html) => render_selectable_html_block(html, tokens, opts, path, render_text),
+        Block::HtmlContainer { alignment, blocks } => render_selectable_html_container(
+            *alignment,
+            blocks,
+            tokens,
+            opts,
+            code_actions,
+            path,
+            render_text,
+        ),
         Block::CodeBlock { language, code } => render_selectable_code_block(
             language.as_deref(),
             code,
@@ -798,6 +811,50 @@ fn render_selectable_html_block(
         path,
         render_text,
     )
+}
+
+fn render_html_container(
+    alignment: BlockAlignment,
+    blocks: &[Block],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .text_align(block_alignment_text_align(alignment))
+        .child(render_blocks_with_code_actions(
+            blocks,
+            tokens,
+            opts,
+            code_actions,
+        ))
+        .into_any_element()
+}
+
+fn render_selectable_html_container(
+    alignment: BlockAlignment,
+    blocks: &[Block],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    code_actions: Option<&MarkdownCodeBlockActions>,
+    path: &str,
+    render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .text_align(block_alignment_text_align(alignment))
+        .child(render_selectable_blocks(
+            blocks,
+            tokens,
+            opts,
+            code_actions,
+            path,
+            render_text,
+        ))
+        .into_any_element()
 }
 
 // ─── code blocks ────────────────────────────────────────────────────────
@@ -1563,12 +1620,14 @@ fn table_cell_text_width(inlines: &[Inline]) -> f32 {
 fn inline_text_width(inline: &Inline) -> usize {
     match inline {
         Inline::Text(text) | Inline::Code(text) | Inline::Html(text) => text.chars().count(),
-        Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
-            children.iter().map(inline_text_width).sum()
-        }
-        Inline::Kbd(children) | Inline::Subscript(children) | Inline::Superscript(children) => {
-            children.iter().map(inline_text_width).sum()
-        }
+        Inline::Bold(children)
+        | Inline::Italic(children)
+        | Inline::Strikethrough(children)
+        | Inline::Kbd(children)
+        | Inline::Subscript(children)
+        | Inline::Superscript(children)
+        | Inline::Underline(children)
+        | Inline::Highlight(children) => children.iter().map(inline_text_width).sum(),
         Inline::Link { text, .. } => text.iter().map(inline_text_width).sum(),
         Inline::Image { alt, .. } => alt.chars().count().max(2),
         Inline::Math { latex, .. } => latex.chars().count(),
@@ -1589,6 +1648,14 @@ fn table_alignment_text_align(alignment: TableAlignment) -> TextAlign {
         TableAlignment::None | TableAlignment::Left => TextAlign::Left,
         TableAlignment::Center => TextAlign::Center,
         TableAlignment::Right => TextAlign::Right,
+    }
+}
+
+fn block_alignment_text_align(alignment: BlockAlignment) -> TextAlign {
+    match alignment {
+        BlockAlignment::Left => TextAlign::Left,
+        BlockAlignment::Center => TextAlign::Center,
+        BlockAlignment::Right => TextAlign::Right,
     }
 }
 
@@ -1886,7 +1953,7 @@ fn render_styled_inlines(
     opts: &MarkdownOptions,
 ) -> AnyElement {
     let mut flat: Vec<FlatRun> = Vec::new();
-    collect_runs(inlines, false, false, false, false, false, &mut flat);
+    collect_runs(inlines, FlatRunStyle::default(), &mut flat);
 
     if flat.is_empty() {
         return div().into_any_element();
@@ -1928,7 +1995,7 @@ fn render_selectable_inlines(
     render_text: &mut impl FnMut(String, SharedString, Vec<TextRun>) -> AnyElement,
 ) -> AnyElement {
     let mut flat: Vec<FlatRun> = Vec::new();
-    collect_runs(inlines, false, false, false, false, false, &mut flat);
+    collect_runs(inlines, FlatRunStyle::default(), &mut flat);
 
     if flat.is_empty() {
         return div().into_any_element();
@@ -2282,7 +2349,7 @@ fn text_run_for_flat(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> TextRun {
-    let font: Font = if run.code {
+    let mut font: Font = if run.code {
         style::code_font(opts)
     } else if run.bold && run.italic {
         Font {
@@ -2297,6 +2364,11 @@ fn text_run_for_flat(
     } else {
         style::body_font(opts)
     };
+    if let Some(feature_tag) = run.script_position.open_type_feature() {
+        // OpenType `subs`/`sups` keeps the run inside one selectable text
+        // layout while allowing fonts with native glyphs to shift the baseline.
+        font.features = FontFeatures(Arc::new(vec![(feature_tag.to_string(), 1)]));
+    }
 
     let color: Hsla = if run.link {
         style::accent_color(tokens)
@@ -2306,14 +2378,20 @@ fn text_run_for_flat(
 
     let background_color: Option<Hsla> = if run.code {
         Some(style::inline_code_bg_color(tokens, opts))
+    } else if run.highlight {
+        Some(style::highlight_bg_color(tokens))
     } else {
         None
     };
 
-    let underline: Option<UnderlineStyle> = if run.link {
+    let underline: Option<UnderlineStyle> = if run.link || run.underline {
         Some(UnderlineStyle {
             thickness: px(1.0),
-            color: Some(style::accent_color(tokens)),
+            color: Some(if run.link {
+                style::accent_color(tokens)
+            } else {
+                style::text_color(tokens)
+            }),
             wavy: false,
         })
     } else {
@@ -2360,52 +2438,97 @@ struct FlatRun {
     link: bool,
     link_url: Option<String>,
     strikethrough: bool,
+    underline: bool,
+    highlight: bool,
+    script_position: ScriptPosition,
     /// If set, this run represents an image and should be rendered via `img()`.
     image_url: Option<String>,
     math_latex: Option<String>,
     math_display: bool,
 }
 
-fn collect_runs(
-    inlines: &[Inline],
+#[derive(Clone, Copy, Default)]
+enum ScriptPosition {
+    #[default]
+    Normal,
+    Subscript,
+    Superscript,
+}
+
+impl ScriptPosition {
+    fn open_type_feature(self) -> Option<&'static str> {
+        match self {
+            Self::Normal => None,
+            Self::Subscript => Some("subs"),
+            Self::Superscript => Some("sups"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct FlatRunStyle {
     bold: bool,
     italic: bool,
     code: bool,
     link: bool,
     strikethrough: bool,
-    out: &mut Vec<FlatRun>,
-) {
+    underline: bool,
+    highlight: bool,
+    script_position: ScriptPosition,
+}
+
+fn collect_runs(inlines: &[Inline], run_style: FlatRunStyle, out: &mut Vec<FlatRun>) {
     for inline in inlines {
         match inline {
             Inline::Text(text) => {
                 out.push(FlatRun {
                     text: text.clone(),
-                    bold,
-                    italic,
-                    code,
-                    link,
+                    bold: run_style.bold,
+                    italic: run_style.italic,
+                    code: run_style.code,
+                    link: run_style.link,
                     link_url: None,
-                    strikethrough,
+                    strikethrough: run_style.strikethrough,
+                    underline: run_style.underline,
+                    highlight: run_style.highlight,
+                    script_position: run_style.script_position,
                     image_url: None,
                     math_latex: None,
                     math_display: false,
                 });
             }
             Inline::Bold(children) => {
-                collect_runs(children, true, italic, code, link, strikethrough, out);
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        bold: true,
+                        ..run_style
+                    },
+                    out,
+                );
             }
             Inline::Italic(children) => {
-                collect_runs(children, bold, true, code, link, strikethrough, out);
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        italic: true,
+                        ..run_style
+                    },
+                    out,
+                );
             }
             Inline::Code(text) => {
                 out.push(FlatRun {
                     text: text.clone(),
-                    bold,
-                    italic,
+                    bold: run_style.bold,
+                    italic: run_style.italic,
                     code: true,
-                    link,
+                    link: run_style.link,
                     link_url: None,
-                    strikethrough,
+                    strikethrough: run_style.strikethrough,
+                    underline: run_style.underline,
+                    highlight: run_style.highlight,
+                    script_position: run_style.script_position,
                     image_url: None,
                     math_latex: None,
                     math_display: false,
@@ -2416,19 +2539,77 @@ fn collect_runs(
                 url,
             } => {
                 let start = out.len();
-                collect_runs(children, bold, italic, code, true, strikethrough, out);
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        link: true,
+                        ..run_style
+                    },
+                    out,
+                );
                 for run in &mut out[start..] {
                     run.link_url = Some(url.clone());
                 }
             }
             Inline::Strikethrough(children) => {
-                collect_runs(children, bold, italic, code, link, true, out);
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        strikethrough: true,
+                        ..run_style
+                    },
+                    out,
+                );
             }
             Inline::Kbd(children) => {
-                collect_runs(children, bold, italic, true, link, strikethrough, out);
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        code: true,
+                        ..run_style
+                    },
+                    out,
+                );
             }
-            Inline::Subscript(children) | Inline::Superscript(children) => {
-                collect_runs(children, bold, italic, code, link, strikethrough, out);
+            Inline::Subscript(children) => {
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        script_position: ScriptPosition::Subscript,
+                        ..run_style
+                    },
+                    out,
+                );
+            }
+            Inline::Superscript(children) => {
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        script_position: ScriptPosition::Superscript,
+                        ..run_style
+                    },
+                    out,
+                );
+            }
+            Inline::Underline(children) => {
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        underline: true,
+                        ..run_style
+                    },
+                    out,
+                );
+            }
+            Inline::Highlight(children) => {
+                collect_runs(
+                    children,
+                    FlatRunStyle {
+                        highlight: true,
+                        ..run_style
+                    },
+                    out,
+                );
             }
             Inline::Image { alt, url } => {
                 out.push(FlatRun {
@@ -2439,6 +2620,9 @@ fn collect_runs(
                     link: false,
                     link_url: None,
                     strikethrough: false,
+                    underline: false,
+                    highlight: false,
+                    script_position: ScriptPosition::Normal,
                     image_url: Some(url.clone()),
                     math_latex: None,
                     math_display: false,
@@ -2453,6 +2637,9 @@ fn collect_runs(
                     link: false,
                     link_url: None,
                     strikethrough: false,
+                    underline: false,
+                    highlight: false,
+                    script_position: ScriptPosition::Normal,
                     image_url: None,
                     math_latex: Some(latex.clone()),
                     math_display: *display,
@@ -2461,12 +2648,15 @@ fn collect_runs(
             Inline::FootnoteReference { index, .. } => {
                 out.push(FlatRun {
                     text: format!("[{}]", index),
-                    bold,
-                    italic,
-                    code,
+                    bold: run_style.bold,
+                    italic: run_style.italic,
+                    code: run_style.code,
                     link: true,
                     link_url: None,
-                    strikethrough,
+                    strikethrough: run_style.strikethrough,
+                    underline: run_style.underline,
+                    highlight: run_style.highlight,
+                    script_position: run_style.script_position,
                     image_url: None,
                     math_latex: None,
                     math_display: false,
@@ -2475,12 +2665,15 @@ fn collect_runs(
             Inline::LineBreak => {
                 out.push(FlatRun {
                     text: "\n".into(),
-                    bold,
-                    italic,
-                    code,
-                    link,
+                    bold: run_style.bold,
+                    italic: run_style.italic,
+                    code: run_style.code,
+                    link: run_style.link,
                     link_url: None,
-                    strikethrough,
+                    strikethrough: run_style.strikethrough,
+                    underline: run_style.underline,
+                    highlight: run_style.highlight,
+                    script_position: run_style.script_position,
                     image_url: None,
                     math_latex: None,
                     math_display: false,
@@ -2489,12 +2682,15 @@ fn collect_runs(
             Inline::Html(html) => {
                 out.push(FlatRun {
                     text: html.clone(),
-                    bold,
-                    italic,
-                    code,
-                    link,
+                    bold: run_style.bold,
+                    italic: run_style.italic,
+                    code: run_style.code,
+                    link: run_style.link,
                     link_url: None,
-                    strikethrough,
+                    strikethrough: run_style.strikethrough,
+                    underline: run_style.underline,
+                    highlight: run_style.highlight,
+                    script_position: run_style.script_position,
                     image_url: None,
                     math_latex: None,
                     math_display: false,
@@ -2624,6 +2820,10 @@ mod tests {
             table_alignment_text_align(TableAlignment::Right),
             TextAlign::Right
         );
+        assert_eq!(
+            block_alignment_text_align(BlockAlignment::Center),
+            TextAlign::Center
+        );
     }
 
     #[test]
@@ -2675,11 +2875,7 @@ mod tests {
                 text: vec![Inline::Text("docs".into())],
                 url: "https://example.com/docs".into(),
             }],
-            false,
-            false,
-            false,
-            false,
-            false,
+            FlatRunStyle::default(),
             &mut runs,
         );
 
@@ -2697,11 +2893,7 @@ mod tests {
         let mut runs = Vec::new();
         collect_runs(
             &[Inline::Html("<kbd>Esc</kbd>".into())],
-            false,
-            false,
-            false,
-            false,
-            false,
+            FlatRunStyle::default(),
             &mut runs,
         );
 
@@ -2710,6 +2902,56 @@ mod tests {
         assert!(runs[0].link_url.is_none());
         assert!(runs[0].image_url.is_none());
         assert!(runs[0].math_latex.is_none());
+    }
+
+    #[test]
+    fn flat_runs_preserve_html_underline_and_highlight_styles() {
+        let mut runs = Vec::new();
+        collect_runs(
+            &[Inline::Underline(vec![Inline::Highlight(vec![
+                Inline::Text("styled".into()),
+            ])])],
+            FlatRunStyle::default(),
+            &mut runs,
+        );
+
+        assert_eq!(runs.len(), 1);
+        assert!(runs[0].underline);
+        assert!(runs[0].highlight);
+        let tokens = oxideterm_theme::default_tokens();
+        let opts = MarkdownOptions::from_theme(&tokens);
+        let text_run = text_run_for_flat(&runs[0], runs[0].text.len(), &tokens, &opts);
+        assert!(text_run.underline.is_some());
+        assert_eq!(
+            text_run.background_color,
+            Some(style::highlight_bg_color(&tokens))
+        );
+    }
+
+    #[test]
+    fn flat_runs_apply_native_subscript_and_superscript_features() {
+        let mut runs = Vec::new();
+        collect_runs(
+            &[
+                Inline::Subscript(vec![Inline::Text("2".into())]),
+                Inline::Superscript(vec![Inline::Text("3".into())]),
+            ],
+            FlatRunStyle::default(),
+            &mut runs,
+        );
+
+        let tokens = oxideterm_theme::default_tokens();
+        let opts = MarkdownOptions::from_theme(&tokens);
+        let subscript = text_run_for_flat(&runs[0], 1, &tokens, &opts);
+        let superscript = text_run_for_flat(&runs[1], 1, &tokens, &opts);
+        assert_eq!(
+            subscript.font.features.tag_value_list(),
+            &[("subs".to_string(), 1)]
+        );
+        assert_eq!(
+            superscript.font.features.tag_value_list(),
+            &[("sups".to_string(), 1)]
+        );
     }
 
     #[test]

@@ -106,6 +106,13 @@ pub fn inline_code_bg_color(tokens: &ThemeTokens, opts: &MarkdownOptions) -> Hsl
     background_surface_color(tokens.ui.bg_elevated, opts)
 }
 
+/// Theme-aware background used by safe HTML `<mark>` content.
+pub fn highlight_bg_color(tokens: &ThemeTokens) -> Hsla {
+    let mut color = accent_color(tokens);
+    color.a = 0.22;
+    color
+}
+
 // ── fonts ───────────────────────────────────────────────────────────────
 
 pub fn body_font(opts: &MarkdownOptions) -> Font {
