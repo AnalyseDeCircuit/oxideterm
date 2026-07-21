@@ -1315,12 +1315,17 @@ impl IdeSurface {
         } else {
             String::new()
         };
+        let selection_range = (kind == TreeNameInputKind::Rename)
+            .then(|| tree_name_initial_selection(&name, is_directory));
         self.tree_name_input = Some(TreeNameInputState {
             kind,
             target: location,
             parent_path,
             original_name: (kind == TreeNameInputKind::Rename).then_some(name),
             value,
+            // Files select the base name while directories select the full
+            // name, matching the established Tauri IDE rename behavior.
+            selection_range,
             error: None,
             submitting: false,
         });
@@ -1346,6 +1351,13 @@ impl IdeSurface {
         if let Some(error) = validate_file_name(&name) {
             input.error = Some(error);
             self.tree_name_input = Some(input);
+            cx.notify();
+            return;
+        }
+        if !tree_name_input_has_effect(&input, &name) {
+            // An unchanged rename is a UI no-op and must not acquire an Agent
+            // or SFTP consumer just to rename a path onto itself.
+            self.tree_name_input = None;
             cx.notify();
             return;
         }
@@ -1442,11 +1454,26 @@ impl IdeSurface {
         match event.keystroke.key.as_str() {
             "escape" => self.cancel_tree_name_input(cx),
             "enter" => self.submit_tree_name_input(cx),
+            "a"
+                if event.keystroke.modifiers.platform
+                    || event.keystroke.modifiers.control =>
+            {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    input.selection_range = Some(0..input.value.encode_utf16().count());
+                    cx.notify();
+                }
+            }
             "backspace" => {
                 if let Some(input) = self.tree_name_input.as_mut()
                     && !input.submitting
-                    && input.value.pop().is_some()
                 {
+                    if input.selection_range.is_some() {
+                        replace_tree_name_selection(input, "");
+                    } else {
+                        input.value.pop();
+                    }
                     input.error = validate_file_name(input.value.trim());
                     cx.notify();
                 }
@@ -1460,8 +1487,7 @@ impl IdeSurface {
                     && !event.keystroke.modifiers.platform
                     && !event.keystroke.modifiers.control
                 {
-                    input.value.push_str(text);
-                    input.error = validate_file_name(input.value.trim());
+                    apply_tree_name_text(input, text);
                     cx.notify();
                 }
             }
@@ -2001,6 +2027,97 @@ impl IdeSurface {
         self.last_error = Some(self.remote_action_unavailable_message());
         cx.notify();
         false
+    }
+}
+
+fn tree_name_input_has_effect(input: &TreeNameInputState, normalized_name: &str) -> bool {
+    input.kind != TreeNameInputKind::Rename
+        || input.original_name.as_deref() != Some(normalized_name)
+}
+
+fn apply_tree_name_text(input: &mut TreeNameInputState, text: &str) {
+    if input.selection_range.is_some() {
+        replace_tree_name_selection(input, text);
+    } else {
+        input.value.push_str(text);
+    }
+    input.error = validate_file_name(input.value.trim());
+}
+
+fn tree_name_initial_selection(name: &str, is_directory: bool) -> Range<usize> {
+    let selection_end = if is_directory {
+        name.len()
+    } else {
+        name.rfind('.').filter(|index| *index > 0).unwrap_or(name.len())
+    };
+    0..name[..selection_end].encode_utf16().count()
+}
+
+fn replace_tree_name_selection(input: &mut TreeNameInputState, replacement: &str) {
+    let Some(selection) = input.selection_range.take() else {
+        return;
+    };
+    let start = utf16_offset_to_byte(&input.value, selection.start);
+    let end = utf16_offset_to_byte(&input.value, selection.end);
+    input.value.replace_range(start..end, replacement);
+}
+
+fn utf16_offset_to_byte(value: &str, utf16_offset: usize) -> usize {
+    let mut consumed_utf16 = 0;
+    for (byte_offset, character) in value.char_indices() {
+        if consumed_utf16 >= utf16_offset {
+            return byte_offset;
+        }
+        consumed_utf16 += character.len_utf16();
+    }
+    value.len()
+}
+
+#[cfg(test)]
+mod tree_name_input_tests {
+    use super::*;
+
+    fn rename_input(value: &str) -> TreeNameInputState {
+        TreeNameInputState {
+            kind: TreeNameInputKind::Rename,
+            target: IdeLocation::remote("node-a", "/repo/settings.json"),
+            parent_path: "/repo".into(),
+            original_name: Some("settings.json".into()),
+            value: value.into(),
+            selection_range: Some(tree_name_initial_selection("settings.json", false)),
+            error: None,
+            submitting: false,
+        }
+    }
+
+    #[test]
+    fn first_text_replaces_the_selected_original_name() {
+        let mut input = rename_input("settings.json");
+
+        apply_tree_name_text(&mut input, "renamed");
+
+        assert_eq!(input.value, "renamed.json");
+        assert!(input.selection_range.is_none());
+        assert!(input.error.is_none());
+    }
+
+    #[test]
+    fn basename_selection_handles_multibyte_filenames() {
+        let mut input = rename_input("配置.json");
+        input.original_name = Some("配置.json".into());
+        input.selection_range = Some(tree_name_initial_selection("配置.json", false));
+
+        apply_tree_name_text(&mut input, "settings");
+
+        assert_eq!(input.value, "settings.json");
+    }
+
+    #[test]
+    fn unchanged_rename_is_not_an_effectful_backend_operation() {
+        let input = rename_input("settings.json");
+
+        assert!(!tree_name_input_has_effect(&input, "settings.json"));
+        assert!(tree_name_input_has_effect(&input, "renamed.json"));
     }
 }
 

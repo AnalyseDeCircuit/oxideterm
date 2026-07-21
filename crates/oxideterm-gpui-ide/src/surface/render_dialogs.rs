@@ -650,29 +650,44 @@ impl IdeSurface {
                     .flex_col()
                     .gap_2()
                     .child(
-                        div()
-                            .h(px(36.0))
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .rounded(px(tokens.radii.sm))
-                            .border_1()
-                            .border_color(rgb(if input.error.is_some() {
-                                tokens.ui.error
-                            } else {
-                                tokens.ui.border
-                            }))
-                            .bg(rgb(tokens.ui.bg_sunken))
-                            .px_3()
-                            .text_color(rgb(tokens.ui.text))
-                            .child(if input.value.is_empty() {
-                                div()
-                                    .text_color(rgb(tokens.ui.text_muted))
-                                    .child("filename.ext")
-                                    .into_any_element()
-                            } else {
-                                div().child(input.value.clone()).into_any_element()
+                        text_input_control(
+                            tokens,
+                            TextInputView {
+                                value: &input.value,
+                                placeholder: "filename.ext".to_string(),
+                                focused: true,
+                                caret_visible: true,
+                                secret: false,
+                                selected_all: false,
+                                selected_range: input.selection_range.clone(),
+                                marked_text: None,
+                            },
+                        )
+                        .w_full()
+                        .opacity(if input.submitting { 0.5 } else { 1.0 })
+                        .border_color(rgb(if input.error.is_some() {
+                            tokens.ui.error
+                        } else {
+                            tokens.ui.accent
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                window.focus(&this.focus_handle, cx);
+                                if let Some(input) = this.tree_name_input.as_mut()
+                                    && !input.submitting
+                                {
+                                    // Keep the initial base-name selection on
+                                    // the first click; later clicks select all.
+                                    if input.selection_range.is_none() {
+                                        input.selection_range =
+                                            Some(0..input.value.encode_utf16().count());
+                                    }
+                                }
+                                cx.stop_propagation();
+                                cx.notify();
                             }),
+                        ),
                     )
                     .when_some(input.error.clone(), |this, error| {
                         this.child(

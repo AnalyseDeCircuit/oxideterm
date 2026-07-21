@@ -3,6 +3,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::Range,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -26,6 +27,7 @@ use oxideterm_gpui_ui::{
     },
     select::{SelectAnchorId, select_anchor_probe},
     tauri_ui_font_family,
+    text_input::{TextInputView, text_input as text_input_control},
 };
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
@@ -302,6 +304,7 @@ struct TreeNameInputState {
     parent_path: String,
     original_name: Option<String>,
     value: String,
+    selection_range: Option<Range<usize>>,
     error: Option<String>,
     submitting: bool,
 }
