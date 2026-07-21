@@ -23,7 +23,7 @@ use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, button_with},
     modal::{
         dialog_backdrop, dialog_content, dialog_description, dialog_footer, dialog_header,
-        dialog_title, popover_backdrop,
+        dialog_title, modal_body, popover_backdrop,
     },
     select::{SelectAnchorId, select_anchor_probe},
     tauri_ui_font_family,
@@ -305,8 +305,15 @@ struct TreeNameInputState {
     original_name: Option<String>,
     value: String,
     selection_range: Option<Range<usize>>,
+    marked_text: Option<TreeNameMarkedText>,
     error: Option<String>,
     submitting: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TreeNameMarkedText {
+    replacement_range: Range<usize>,
+    text: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -429,6 +436,7 @@ pub struct IdeSurface {
 include!("surface/lifecycle.rs");
 include!("surface/folder_picker.rs");
 include!("surface/editor_actions.rs");
+include!("surface/tree_name_input.rs");
 include!("surface/render_root.rs");
 include!("surface/render_tree.rs");
 include!("surface/render_tabs.rs");

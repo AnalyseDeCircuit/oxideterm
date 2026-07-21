@@ -3,6 +3,30 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.9
+
+OxideTerm 2.0.9 adds multi-vendor GPU and NPU monitoring, expands native Markdown
+compatibility, and improves reliability across sidebars, remote editing, and terminals.
+
+### ✨ Highlights
+
+- Added a GPU / NPU Host Tool with available per-device utilization, memory, temperature, power, health, and process visibility for NVIDIA, AMD ROCm, Hygon DCU, Huawei Ascend, Intel XPU, Moore Threads MUSA, and Cambricon accelerators.
+- Added safe native rendering for common inline and block HTML in Markdown, including headings, tables, lists, links, details, alignment, highlighting, and subscript or superscript content without executing active HTML.
+
+### 🛠️ Fixes
+
+- Kept the right companion sidebar freely resizable after live Host Tool refreshes and removed the visible seam between the main workspace and sidebar.
+- Stopped high-frequency accelerator polling after a host proves that no supported device is available, while retaining manual refresh for re-detection.
+- Rebuilt IDE rename input around the shared text-input contract so the existing name, base-name selection, IME input, clipboard actions, validation, and localized errors behave consistently.
+- Preserved CRLF line endings when opening, editing, and saving remote text files through the SFTP editor.
+- Returned scrolled terminals to live output when the user types, without changing the viewport for terminal-owned protocol traffic.
+- Restored the OxideTerm icon in Windows installed-app and uninstall surfaces.
+
+### 🧰 Release Maintenance
+
+- Split accelerator sampling into provider-owned adapters with focused parsing coverage for each supported vendor family.
+- Added a standalone CC BY 4.0 license alongside the bundled background resources.
+
 ## 2.0.8
 
 OxideTerm 2.0.8 unifies application proxy routing, strengthens SSH forwarding and

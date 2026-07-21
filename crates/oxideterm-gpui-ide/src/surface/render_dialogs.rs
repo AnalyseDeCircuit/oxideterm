@@ -614,24 +614,20 @@ impl IdeSurface {
             return div().into_any_element();
         };
         let tokens = &self.tokens;
-        let (title, description, confirm_label) = match input.kind {
+        let (title, placeholder, confirm_label) = match input.kind {
             TreeNameInputKind::NewFile => (
                 self.labels.context_new_file.clone(),
-                format!("Create in {}", input.parent_path),
+                self.labels.new_file_placeholder.clone(),
                 self.labels.context_new_file.clone(),
             ),
             TreeNameInputKind::NewFolder => (
                 self.labels.context_new_folder.clone(),
-                format!("Create in {}", input.parent_path),
+                self.labels.new_folder_placeholder.clone(),
                 self.labels.context_new_folder.clone(),
             ),
             TreeNameInputKind::Rename => (
                 self.labels.context_rename.clone(),
-                input
-                    .original_name
-                    .as_ref()
-                    .map(|name| format!("Rename {name}"))
-                    .unwrap_or_else(|| self.labels.context_rename.clone()),
+                String::new(),
                 self.labels.context_rename.clone(),
             ),
         };
@@ -639,54 +635,43 @@ impl IdeSurface {
             && !input.value.trim().is_empty()
             && validate_file_name(input.value.trim()).is_none();
         let dialog = dialog_content(tokens)
+            .child(dialog_header(tokens).child(dialog_title(tokens, title)))
             .child(
-                dialog_header(tokens)
-                    .child(dialog_title(tokens, title))
-                    .child(dialog_description(tokens, description)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
+                modal_body(tokens)
                     .child(
-                        text_input_control(
-                            tokens,
-                            TextInputView {
-                                value: &input.value,
-                                placeholder: "filename.ext".to_string(),
-                                focused: true,
-                                caret_visible: true,
-                                secret: false,
-                                selected_all: false,
-                                selected_range: input.selection_range.clone(),
-                                marked_text: None,
-                            },
-                        )
-                        .w_full()
-                        .opacity(if input.submitting { 0.5 } else { 1.0 })
-                        .border_color(rgb(if input.error.is_some() {
-                            tokens.ui.error
-                        } else {
-                            tokens.ui.accent
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, window, cx| {
-                                window.focus(&this.focus_handle, cx);
-                                if let Some(input) = this.tree_name_input.as_mut()
-                                    && !input.submitting
-                                {
-                                    // Keep the initial base-name selection on
-                                    // the first click; later clicks select all.
-                                    if input.selection_range.is_none() {
-                                        input.selection_range =
-                                            Some(0..input.value.encode_utf16().count());
-                                    }
-                                }
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
+                        TreeNameInputElement::new(
+                            text_input_control(
+                                tokens,
+                                TextInputView {
+                                    value: &input.value,
+                                    placeholder,
+                                    focused: true,
+                                    caret_visible: true,
+                                    secret: false,
+                                    selected_all: false,
+                                    selected_range: input.selection_range.clone(),
+                                    marked_text: input
+                                        .marked_text
+                                        .as_ref()
+                                        .map(|marked| marked.text.as_str()),
+                                },
+                            )
+                            .w_full()
+                            .opacity(if input.submitting { 0.5 } else { 1.0 })
+                            .border_color(rgb(if input.error.is_some() {
+                                tokens.ui.error
+                            } else {
+                                tokens.ui.accent
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, window, cx| {
+                                    window.focus(&this.focus_handle, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                            cx.entity(),
+                            self.focus_handle.clone(),
                         ),
                     )
                     .when_some(input.error.clone(), |this, error| {
@@ -694,7 +679,7 @@ impl IdeSurface {
                             div()
                                 .text_size(px(tokens.metrics.ui_text_xs))
                                 .text_color(rgb(tokens.ui.error))
-                                .child(error),
+                                .child(self.labels.tree_name_validation_message(&error)),
                         )
                     }),
             )
@@ -721,11 +706,7 @@ impl IdeSurface {
                     .child(
                         button_with(
                             tokens,
-                            if input.submitting {
-                                "Working...".to_string()
-                            } else {
-                                confirm_label
-                            },
+                            confirm_label,
                             ButtonOptions {
                                 variant: ButtonVariant::Default,
                                 size: ButtonSize::Default,

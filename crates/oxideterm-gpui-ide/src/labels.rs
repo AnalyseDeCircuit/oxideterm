@@ -62,6 +62,13 @@ pub struct IdeLabels {
     pub context_paste: String,
     pub context_copy_path: String,
     pub context_open_in_terminal: String,
+    pub new_file_placeholder: String,
+    pub new_folder_placeholder: String,
+    pub validation_name_empty: String,
+    pub validation_name_contains_slash: String,
+    pub validation_name_invalid: String,
+    pub validation_name_invalid_chars: String,
+    pub validation_name_too_long: String,
     pub delete_confirm_title: String,
     pub delete_folder_warning: String,
     pub delete_will_close_tabs: String,
@@ -157,6 +164,13 @@ impl Default for IdeLabels {
             context_paste: "Paste".into(),
             context_copy_path: "Copy Path".into(),
             context_open_in_terminal: "Open in Terminal".into(),
+            new_file_placeholder: "filename.ext".into(),
+            new_folder_placeholder: "folder name".into(),
+            validation_name_empty: "Name cannot be empty".into(),
+            validation_name_contains_slash: "Name cannot contain /".into(),
+            validation_name_invalid: "Invalid name".into(),
+            validation_name_invalid_chars: "Name contains invalid characters".into(),
+            validation_name_too_long: "Name is too long".into(),
             delete_confirm_title: "Confirm Delete".into(),
             delete_folder_warning:
                 "This will permanently delete all contents inside the folder.".into(),
@@ -198,6 +212,20 @@ impl Default for IdeLabels {
             agent_manual_update_expected_compatibility_version:
                 "Required compatibility version: {{version}}".into(),
             agent_retry_btn: "Retry Deploy".into(),
+        }
+    }
+}
+
+impl IdeLabels {
+    pub(crate) fn tree_name_validation_message(&self, key_or_message: &str) -> String {
+        match key_or_message {
+            "ide.validation.nameEmpty" => self.validation_name_empty.clone(),
+            "ide.validation.nameContainsSlash" => self.validation_name_contains_slash.clone(),
+            "ide.validation.nameInvalid" => self.validation_name_invalid.clone(),
+            "ide.validation.nameInvalidChars" => self.validation_name_invalid_chars.clone(),
+            "ide.validation.nameTooLong" => self.validation_name_too_long.clone(),
+            // Backend errors are already user-facing messages rather than i18n keys.
+            message => message.to_string(),
         }
     }
 }

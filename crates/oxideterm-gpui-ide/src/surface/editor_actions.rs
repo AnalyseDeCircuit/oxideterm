@@ -1326,6 +1326,7 @@ impl IdeSurface {
             // Files select the base name while directories select the full
             // name, matching the established Tauri IDE rename behavior.
             selection_range,
+            marked_text: None,
             error: None,
             submitting: false,
         });
@@ -1451,13 +1452,24 @@ impl IdeSurface {
         if self.tree_name_input.is_none() {
             return;
         }
-        match event.keystroke.key.as_str() {
+        let composing = self
+            .tree_name_input
+            .as_ref()
+            .is_some_and(|input| input.marked_text.is_some());
+        let key = event.keystroke.key.as_str();
+        if (composing && matches!(key, "enter" | "space" | " "))
+            || tree_name_key_uses_platform_input(event)
+        {
+            // Let GPUI deliver printable and composition text to the input
+            // handler. Stopping propagation here can suppress platform input.
+            return;
+        }
+        let uses_text_modifier = event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.control;
+        match key {
             "escape" => self.cancel_tree_name_input(cx),
             "enter" => self.submit_tree_name_input(cx),
-            "a"
-                if event.keystroke.modifiers.platform
-                    || event.keystroke.modifiers.control =>
-            {
+            "a" if uses_text_modifier => {
                 if let Some(input) = self.tree_name_input.as_mut()
                     && !input.submitting
                 {
@@ -1465,32 +1477,90 @@ impl IdeSurface {
                     cx.notify();
                 }
             }
-            "backspace" => {
+            "c" if uses_text_modifier => {
+                if let Some(selected) = self
+                    .tree_name_input
+                    .as_ref()
+                    .and_then(tree_name_selected_text)
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(selected));
+                }
+            }
+            "x" if uses_text_modifier => {
                 if let Some(input) = self.tree_name_input.as_mut()
                     && !input.submitting
+                    && let Some(selected) = tree_name_selected_text(input)
                 {
-                    if input.selection_range.is_some() {
-                        replace_tree_name_selection(input, "");
-                    } else {
-                        input.value.pop();
-                    }
+                    cx.write_to_clipboard(ClipboardItem::new_string(selected));
+                    replace_tree_name_selection(input, "");
                     input.error = validate_file_name(input.value.trim());
                     cx.notify();
                 }
             }
-            _ => {
-                if let Some(text) = event.keystroke.key_char.as_deref()
-                    && let Some(input) = self.tree_name_input.as_mut()
+            "v" if uses_text_modifier => {
+                let clipboard_text = cx.read_from_clipboard().and_then(|item| item.text());
+                if let Some(input) = self.tree_name_input.as_mut()
                     && !input.submitting
-                    && !text.is_empty()
-                    && !text.chars().any(char::is_control)
-                    && !event.keystroke.modifiers.platform
-                    && !event.keystroke.modifiers.control
+                    && let Some(text) = clipboard_text
                 {
-                    apply_tree_name_text(input, text);
+                    apply_tree_name_text(input, &text);
                     cx.notify();
                 }
             }
+            "backspace" => {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    delete_tree_name_backward(input);
+                    input.error = validate_file_name(input.value.trim());
+                    cx.notify();
+                }
+            }
+            "delete" => {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    delete_tree_name_forward(input);
+                    input.error = validate_file_name(input.value.trim());
+                    cx.notify();
+                }
+            }
+            "left" | "arrowleft" => {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    move_tree_name_caret(input, false);
+                    cx.notify();
+                }
+            }
+            "right" | "arrowright" => {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    move_tree_name_caret(input, true);
+                    cx.notify();
+                }
+            }
+            "home" => {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    input.marked_text = None;
+                    input.selection_range = Some(0..0);
+                    cx.notify();
+                }
+            }
+            "end" => {
+                if let Some(input) = self.tree_name_input.as_mut()
+                    && !input.submitting
+                {
+                    input.marked_text = None;
+                    let end = input.value.encode_utf16().count();
+                    input.selection_range = Some(end..end);
+                    cx.notify();
+                }
+            }
+            _ => {}
         }
         cx.stop_propagation();
     }
@@ -2035,12 +2105,20 @@ fn tree_name_input_has_effect(input: &TreeNameInputState, normalized_name: &str)
         || input.original_name.as_deref() != Some(normalized_name)
 }
 
+fn tree_name_key_uses_platform_input(event: &KeyDownEvent) -> bool {
+    !event.keystroke.modifiers.platform
+        && !event.keystroke.modifiers.control
+        && event
+            .keystroke
+            .key_char
+            .as_deref()
+            .is_some_and(|text| !text.is_empty() && !text.chars().any(char::is_control))
+}
+
 fn apply_tree_name_text(input: &mut TreeNameInputState, text: &str) {
-    if input.selection_range.is_some() {
-        replace_tree_name_selection(input, text);
-    } else {
-        input.value.push_str(text);
-    }
+    let end = input.value.encode_utf16().count();
+    let range = input.selection_range.clone().unwrap_or(end..end);
+    replace_tree_name_range(input, range, text);
     input.error = validate_file_name(input.value.trim());
 }
 
@@ -2054,12 +2132,101 @@ fn tree_name_initial_selection(name: &str, is_directory: bool) -> Range<usize> {
 }
 
 fn replace_tree_name_selection(input: &mut TreeNameInputState, replacement: &str) {
-    let Some(selection) = input.selection_range.take() else {
-        return;
-    };
-    let start = utf16_offset_to_byte(&input.value, selection.start);
-    let end = utf16_offset_to_byte(&input.value, selection.end);
+    let end = input.value.encode_utf16().count();
+    let selection = input.selection_range.clone().unwrap_or(end..end);
+    replace_tree_name_range(input, selection, replacement);
+}
+
+fn replace_tree_name_range(
+    input: &mut TreeNameInputState,
+    range: Range<usize>,
+    replacement: &str,
+) {
+    let start = utf16_offset_to_byte(&input.value, range.start);
+    let end = utf16_offset_to_byte(&input.value, range.end);
     input.value.replace_range(start..end, replacement);
+    input.marked_text = None;
+    let caret = range.start + replacement.encode_utf16().count();
+    input.selection_range = Some(caret..caret);
+}
+
+fn tree_name_selected_text(input: &TreeNameInputState) -> Option<String> {
+    let selection = input.selection_range.clone()?;
+    (selection.start < selection.end).then(|| {
+        let start = utf16_offset_to_byte(&input.value, selection.start);
+        let end = utf16_offset_to_byte(&input.value, selection.end);
+        input.value[start..end].to_string()
+    })
+}
+
+fn delete_tree_name_backward(input: &mut TreeNameInputState) {
+    let end = input.value.encode_utf16().count();
+    let selection = input.selection_range.clone().unwrap_or(end..end);
+    if selection.start < selection.end {
+        replace_tree_name_range(input, selection, "");
+        return;
+    }
+    let byte = utf16_offset_to_byte(&input.value, selection.start);
+    let previous = input.value[..byte]
+        .chars()
+        .next_back()
+        .map_or(selection.start, |character| {
+            selection.start.saturating_sub(character.len_utf16())
+        });
+    replace_tree_name_range(input, previous..selection.start, "");
+}
+
+fn delete_tree_name_forward(input: &mut TreeNameInputState) {
+    let value_end = input.value.encode_utf16().count();
+    let selection = input
+        .selection_range
+        .clone()
+        .unwrap_or(value_end..value_end);
+    if selection.start < selection.end {
+        replace_tree_name_range(input, selection, "");
+        return;
+    }
+    let byte = utf16_offset_to_byte(&input.value, selection.end);
+    let next = input.value[byte..]
+        .chars()
+        .next()
+        .map_or(selection.end, |character| {
+            selection.end + character.len_utf16()
+        });
+    replace_tree_name_range(input, selection.end..next, "");
+}
+
+fn move_tree_name_caret(input: &mut TreeNameInputState, forward: bool) {
+    let value_end = input.value.encode_utf16().count();
+    let selection = input
+        .selection_range
+        .clone()
+        .unwrap_or(value_end..value_end);
+    input.marked_text = None;
+    let caret = if selection.start < selection.end {
+        if forward {
+            selection.end
+        } else {
+            selection.start
+        }
+    } else if forward {
+        let byte = utf16_offset_to_byte(&input.value, selection.end);
+        input.value[byte..]
+            .chars()
+            .next()
+            .map_or(selection.end, |character| {
+                selection.end + character.len_utf16()
+            })
+    } else {
+        let byte = utf16_offset_to_byte(&input.value, selection.start);
+        input.value[..byte]
+            .chars()
+            .next_back()
+            .map_or(selection.start, |character| {
+                selection.start.saturating_sub(character.len_utf16())
+            })
+    };
+    input.selection_range = Some(caret..caret);
 }
 
 fn utf16_offset_to_byte(value: &str, utf16_offset: usize) -> usize {
@@ -2085,6 +2252,7 @@ mod tree_name_input_tests {
             original_name: Some("settings.json".into()),
             value: value.into(),
             selection_range: Some(tree_name_initial_selection("settings.json", false)),
+            marked_text: None,
             error: None,
             submitting: false,
         }
@@ -2097,7 +2265,7 @@ mod tree_name_input_tests {
         apply_tree_name_text(&mut input, "renamed");
 
         assert_eq!(input.value, "renamed.json");
-        assert!(input.selection_range.is_none());
+        assert_eq!(input.selection_range, Some(7..7));
         assert!(input.error.is_none());
     }
 
@@ -2110,6 +2278,29 @@ mod tree_name_input_tests {
         apply_tree_name_text(&mut input, "settings");
 
         assert_eq!(input.value, "settings.json");
+        assert_eq!(input.selection_range, Some(8..8));
+    }
+
+    #[test]
+    fn typing_after_replacing_basename_stays_before_extension() {
+        let mut input = rename_input("settings.json");
+
+        apply_tree_name_text(&mut input, "config");
+        apply_tree_name_text(&mut input, "2");
+
+        assert_eq!(input.value, "config2.json");
+        assert_eq!(input.selection_range, Some(7..7));
+    }
+
+    #[test]
+    fn backward_delete_respects_utf16_caret_boundaries() {
+        let mut input = rename_input("配置.json");
+        input.selection_range = Some(2..2);
+
+        delete_tree_name_backward(&mut input);
+
+        assert_eq!(input.value, "配.json");
+        assert_eq!(input.selection_range, Some(1..1));
     }
 
     #[test]
