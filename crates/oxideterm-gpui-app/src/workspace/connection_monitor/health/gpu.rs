@@ -1,4 +1,4 @@
-//! Owns the NVIDIA GPU Host Tool UI and its page-scoped sampling bridge.
+//! Owns the GPU / NPU Host Tool UI and its page-scoped sampling bridge.
 
 use super::*;
 
@@ -378,17 +378,22 @@ impl WorkspaceApp {
             self.connection_monitor.host_gpu.expanded_uuid.as_deref() == Some(device.uuid.as_str());
         let theme = self.tokens.ui;
         let device_uuid = device.uuid.clone();
+        let device_kind = match device.provider {
+            GpuProvider::Ascend | GpuProvider::Cambricon => "NPU",
+            GpuProvider::Nvidia
+            | GpuProvider::Amd
+            | GpuProvider::Hygon
+            | GpuProvider::Intel
+            | GpuProvider::Mthreads => "GPU",
+        };
         let utilization = percent_text(device.utilization_percent);
         let memory = match (device.memory_used, device.memory_total) {
             (Some(used), Some(total)) => {
                 format!("{} / {}", format_bytes(used), format_bytes(total))
             }
-            _ => "—".to_string(),
+            _ => percent_text(device.memory_utilization_percent),
         };
-        let process_rows = snapshot
-            .processes_for(&device.uuid)
-            .cloned()
-            .collect::<Vec<_>>();
+        let process_rows = snapshot.processes_for(&device).cloned().collect::<Vec<_>>();
 
         div()
             .w_full()
@@ -439,7 +444,10 @@ impl WorkspaceApp {
                                     .truncate()
                                     .text_size(px(12.0))
                                     .text_color(rgb(theme.text))
-                                    .child(format!("GPU {} · {}", device.index, device.name)),
+                                    .child(format!(
+                                        "{device_kind} {} · {}",
+                                        device.index, device.name
+                                    )),
                             )
                             .child(
                                 div()
@@ -507,6 +515,10 @@ impl WorkspaceApp {
                             .unwrap_or_else(|| "—".into()),
                     ),
                 )
+                .child(self.render_host_gpu_detail_line(
+                    "sidebar.host_gpu.details.health",
+                    device.health_status.clone().unwrap_or_else(|| "—".into()),
+                ))
                 .child(
                     self.render_host_gpu_detail_line(
                         "sidebar.host_gpu.details.temperature",
@@ -592,7 +604,7 @@ impl WorkspaceApp {
             .iter()
             .map(|device| {
                 let process_count = snapshot
-                    .map(|snapshot| snapshot.processes_for(&device.uuid).count())
+                    .map(|snapshot| snapshot.processes_for(device).count())
                     .unwrap_or_default();
                 let expanded = self.connection_monitor.host_gpu.expanded_uuid.as_deref()
                     == Some(device.uuid.as_str());

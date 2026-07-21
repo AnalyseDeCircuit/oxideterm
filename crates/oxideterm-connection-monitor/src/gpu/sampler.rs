@@ -17,9 +17,11 @@ use super::{
 };
 
 pub const GPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
-pub const GPU_SAMPLE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const GPU_SAMPLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const GPU_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
-pub const GPU_MAX_OUTPUT_SIZE: usize = 128 * 1024;
+// Multi-accelerator hosts can return sizeable per-process and per-tile data,
+// while the cap still prevents an unbounded remote command response.
+pub const GPU_MAX_OUTPUT_SIZE: usize = 512 * 1024;
 
 /// Owns one page-scoped GPU sampler and its cancellation path.
 pub struct GpuSamplingTask {
@@ -106,6 +108,9 @@ async fn sample_loop(
     };
     let command = build_gpu_sample_command(&os_type);
     let mut interval = tokio::time::interval(GPU_SAMPLE_INTERVAL);
+    // Vendor tools run serially in one registry-owned shell. Skip missed ticks
+    // so a slow provider never causes back-to-back catch-up samples.
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -304,38 +309,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unavailable_gpu_capability_stops_after_one_probe() {
-        let close_count = Arc::new(AtomicUsize::new(0));
-        let sample_count = Arc::new(AtomicUsize::new(0));
-        let sampler: Arc<dyn ResourceSampler> = Arc::new(TestSampler {
-            close_count: close_count.clone(),
-            sample_count: sample_count.clone(),
-            output: "===NVIDIA_STATUS===\nunavailable\n===NVIDIA_GPU_END===".into(),
-        });
-        let (update_tx, mut update_rx) = mpsc::unbounded_channel();
-        let task = start_gpu_sampling_on(
-            "connection-a".into(),
-            sampler,
-            "Linux".into(),
-            update_tx,
-            Handle::current(),
-        );
+    async fn stable_capability_absence_stops_after_one_probe() {
+        let cases = [
+            (
+                "===NVIDIA_STATUS===\nunavailable\n===GPU_NPU_SAMPLE_END===",
+                GpuSnapshotStatus::Unavailable,
+            ),
+            (
+                concat!(
+                    "===NVIDIA_STATUS===\nunavailable\n",
+                    "===AMD_STATUS===\nunavailable\n",
+                    "===ASCEND_STATUS===\navailable\n",
+                    "===ASCEND_DATA===\nNo devices found\n",
+                    "===ASCEND_QUERY_EXIT===\n0\n",
+                    "===GPU_NPU_SAMPLE_END==="
+                ),
+                GpuSnapshotStatus::NoDevices,
+            ),
+        ];
 
-        let update = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+        for (output, expected_status) in cases {
+            let close_count = Arc::new(AtomicUsize::new(0));
+            let sample_count = Arc::new(AtomicUsize::new(0));
+            let sampler: Arc<dyn ResourceSampler> = Arc::new(TestSampler {
+                close_count: close_count.clone(),
+                sample_count: sample_count.clone(),
+                output: output.into(),
+            });
+            let (update_tx, mut update_rx) = mpsc::unbounded_channel();
+            let task = start_gpu_sampling_on(
+                "connection-a".into(),
+                sampler,
+                "Linux".into(),
+                update_tx,
+                Handle::current(),
+            );
+
+            let update = tokio::time::timeout(Duration::from_secs(1), update_rx.recv())
+                .await
+                .expect("GPU capability probe should publish promptly")
+                .expect("GPU capability probe should publish one snapshot");
+            assert_eq!(update.snapshot.status, expected_status);
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while !task.is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            })
             .await
-            .expect("GPU capability probe should publish promptly")
-            .expect("GPU capability probe should publish one snapshot");
-        assert_eq!(update.snapshot.status, GpuSnapshotStatus::Unavailable);
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while !task.is_finished() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("unavailable capability should finish its sampling task");
+            .expect("stable capability absence should finish its sampling task");
 
-        assert_eq!(sample_count.load(Ordering::SeqCst), 1);
-        assert_eq!(close_count.load(Ordering::SeqCst), 1);
+            assert_eq!(sample_count.load(Ordering::SeqCst), 1);
+            assert_eq!(close_count.load(Ordering::SeqCst), 1);
+        }
     }
 
     fn available_gpu_output() -> String {

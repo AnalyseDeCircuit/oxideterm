@@ -8,6 +8,18 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuProvider {
+    Nvidia,
+    Amd,
+    Hygon,
+    Ascend,
+    Cambricon,
+    Intel,
+    Mthreads,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "message")]
 pub enum GpuSnapshotStatus {
@@ -23,12 +35,15 @@ pub enum GpuSnapshotStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GpuDevice {
+    pub provider: GpuProvider,
     pub index: u32,
     pub uuid: String,
     pub pci_bus_id: String,
     pub name: String,
     pub driver_version: Option<String>,
     pub performance_state: Option<String>,
+    #[serde(default)]
+    pub health_status: Option<String>,
     pub utilization_percent: Option<f64>,
     pub memory_utilization_percent: Option<f64>,
     pub memory_used: Option<u64>,
@@ -49,6 +64,7 @@ impl GpuDevice {
 
 pub fn gpu_device_row_signature(device: &GpuDevice, process_count: usize, expanded: bool) -> u64 {
     let mut hasher = DefaultHasher::new();
+    device.provider.hash(&mut hasher);
     device.uuid.hash(&mut hasher);
     device.index.hash(&mut hasher);
     device.name.hash(&mut hasher);
@@ -60,6 +76,7 @@ pub fn gpu_device_row_signature(device: &GpuDevice, process_count: usize, expand
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GpuProcess {
+    pub provider: GpuProvider,
     pub gpu_uuid: String,
     pub pid: u32,
     pub process_name: String,
@@ -109,13 +126,16 @@ impl GpuSnapshot {
         }
     }
 
-    pub fn processes_for(&self, gpu_uuid: &str) -> impl Iterator<Item = &GpuProcess> {
+    pub fn processes_for(&self, device: &GpuDevice) -> impl Iterator<Item = &GpuProcess> {
         self.processes
             .iter()
-            // MIG process UUIDs include the parent physical GPU UUID. Match
-            // both shapes so MIG workloads remain visible in the first version.
+            // NVIDIA MIG process UUIDs include the parent physical GPU UUID.
+            // AMD identifiers use a vendor prefix and only match exactly.
             .filter(move |process| {
-                process.gpu_uuid == gpu_uuid || process.gpu_uuid.contains(gpu_uuid)
+                process.provider == device.provider
+                    && (process.gpu_uuid == device.uuid
+                        || (device.provider == GpuProvider::Nvidia
+                            && process.gpu_uuid.contains(&device.uuid)))
             })
     }
 }
@@ -143,12 +163,14 @@ mod tests {
 
     fn device(index: u32, utilization: f64, used: u64, total: u64) -> GpuDevice {
         GpuDevice {
+            provider: GpuProvider::Nvidia,
             index,
             uuid: format!("GPU-{index}"),
             pci_bus_id: format!("00000000:{index:02x}:00.0"),
             name: "NVIDIA Test GPU".into(),
             driver_version: Some("555.1".into()),
             performance_state: Some("P0".into()),
+            health_status: None,
             utilization_percent: Some(utilization),
             memory_utilization_percent: None,
             memory_used: Some(used),
@@ -187,6 +209,7 @@ mod tests {
             status: GpuSnapshotStatus::Available,
             devices: vec![device(0, 20.0, 100, 1_000)],
             processes: vec![GpuProcess {
+                provider: GpuProvider::Nvidia,
                 gpu_uuid: "MIG-GPU-0/1/0".into(),
                 pid: 42,
                 process_name: "python".into(),
@@ -194,7 +217,7 @@ mod tests {
             }],
         };
 
-        assert_eq!(snapshot.processes_for("GPU-0").count(), 1);
+        assert_eq!(snapshot.processes_for(&snapshot.devices[0]).count(), 1);
     }
 
     #[test]
@@ -204,6 +227,7 @@ mod tests {
         updated.utilization_percent = Some(95.0);
         updated.memory_used = Some(900);
         updated.temperature_celsius = Some(88.0);
+        updated.health_status = Some("Warning".into());
 
         assert_eq!(
             gpu_device_row_signature(&original, 1, false),

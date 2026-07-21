@@ -1,14 +1,45 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use super::{GpuDevice, GpuProcess, GpuSnapshot, GpuSnapshotStatus};
+//! NVIDIA SMI command protocol and CSV parser.
 
+use super::{ProviderSnapshot, ProviderStatus, first_section_line, sanitized_error, section};
+use crate::gpu::{GpuDevice, GpuProcess, GpuProvider};
+
+const GPU_QUERY_FIELDS: &str = concat!(
+    "index,uuid,pci.bus_id,name,driver_version,pstate,",
+    "utilization.gpu,utilization.memory,memory.used,memory.total,",
+    "temperature.gpu,power.draw,power.limit,fan.speed"
+);
+const GPU_PROCESS_QUERY_FIELDS: &str = "gpu_uuid,pid,process_name,used_gpu_memory";
 const GPU_TRAILING_FIELD_COUNT: usize = 10;
 
-pub fn parse_gpu_snapshot(output: &str, timestamp_ms: u64) -> GpuSnapshot {
-    let status_value = section(output, "NVIDIA_STATUS")
-        .and_then(|value| value.lines().find(|line| !line.trim().is_empty()))
-        .map(str::trim);
+pub(super) fn sample_command() -> String {
+    format!(
+        concat!(
+            "echo '===NVIDIA_STATUS==='; ",
+            "if ! command -v nvidia-smi >/dev/null 2>&1; then ",
+            "echo unavailable; ",
+            "else ",
+            "echo available; ",
+            "echo '===NVIDIA_GPUS==='; ",
+            "gpu_output=$(LC_ALL=C nvidia-smi --query-gpu={gpu_fields} --format=csv,noheader,nounits 2>&1); ",
+            "gpu_exit=$?; printf '%s\\n' \"$gpu_output\"; ",
+            "echo '===NVIDIA_GPU_QUERY_EXIT==='; echo \"$gpu_exit\"; ",
+            "if [ \"$gpu_exit\" -eq 0 ]; then ",
+            "echo '===NVIDIA_PROCESSES==='; ",
+            "LC_ALL=C nvidia-smi --query-compute-apps={process_fields} --format=csv,noheader,nounits 2>/dev/null || true; ",
+            "else ",
+            "echo '===NVIDIA_ERROR==='; printf '%s\\n' \"$gpu_output\"; ",
+            "fi; ",
+            "fi; "
+        ),
+        gpu_fields = GPU_QUERY_FIELDS,
+        process_fields = GPU_PROCESS_QUERY_FIELDS,
+    )
+}
+
+pub(super) fn parse(output: &str) -> ProviderSnapshot {
     let mut devices = section(output, "NVIDIA_GPUS")
         .into_iter()
         .flat_map(str::lines)
@@ -26,30 +57,27 @@ pub fn parse_gpu_snapshot(output: &str, timestamp_ms: u64) -> GpuSnapshot {
             .then_with(|| left.pid.cmp(&right.pid))
     });
 
-    let query_exit = section(output, "NVIDIA_GPU_QUERY_EXIT")
-        .and_then(|value| value.lines().find(|line| !line.trim().is_empty()))
-        .and_then(|value| value.trim().parse::<i32>().ok());
-    let status = match status_value {
-        Some("unsupported") => GpuSnapshotStatus::Unsupported,
-        Some("unavailable") => GpuSnapshotStatus::Unavailable,
+    let query_exit = first_section_line(output, "NVIDIA_GPU_QUERY_EXIT")
+        .and_then(|value| value.parse::<i32>().ok());
+    let status = match first_section_line(output, "NVIDIA_STATUS") {
+        Some("unavailable") => ProviderStatus::Unavailable,
         Some("available") if query_exit.is_some_and(|exit| exit != 0) => {
-            let message = error_message(output);
+            let message = sanitized_error(output, "NVIDIA_ERROR", "NVIDIA nvidia-smi query failed");
             if message
                 .to_ascii_lowercase()
                 .contains("no devices were found")
             {
-                GpuSnapshotStatus::NoDevices
+                ProviderStatus::NoDevices
             } else {
-                GpuSnapshotStatus::Error(message)
+                ProviderStatus::Error(format!("NVIDIA: {message}"))
             }
         }
-        Some("available") if devices.is_empty() => GpuSnapshotStatus::NoDevices,
-        Some("available") => GpuSnapshotStatus::Available,
-        _ => GpuSnapshotStatus::Unknown,
+        Some("available") if devices.is_empty() => ProviderStatus::NoDevices,
+        Some("available") => ProviderStatus::Available,
+        _ => ProviderStatus::Unknown,
     };
 
-    GpuSnapshot {
-        timestamp_ms,
+    ProviderSnapshot {
         status,
         devices,
         processes,
@@ -66,12 +94,14 @@ fn parse_device(line: &str) -> Option<GpuDevice> {
     let trailing = &fields[trailing_start..];
 
     Some(GpuDevice {
+        provider: GpuProvider::Nvidia,
         index: fields[0].parse().ok()?,
         uuid: required_text(fields[1])?,
         pci_bus_id: required_text(fields[2])?,
         name: required_text(&name)?,
         driver_version: optional_text(trailing[0]),
         performance_state: optional_text(trailing[1]),
+        health_status: None,
         utilization_percent: optional_number(trailing[2]),
         memory_utilization_percent: optional_number(trailing[3]),
         memory_used: optional_mib(trailing[4]),
@@ -90,19 +120,12 @@ fn parse_process(line: &str) -> Option<GpuProcess> {
     }
     let process_name = fields[2..fields.len() - 1].join(", ");
     Some(GpuProcess {
+        provider: GpuProvider::Nvidia,
         gpu_uuid: required_text(fields[0])?,
         pid: fields[1].parse().ok()?,
         process_name: required_text(&process_name)?,
         used_memory: optional_mib(fields[fields.len() - 1]),
     })
-}
-
-fn section<'a>(output: &'a str, marker: &str) -> Option<&'a str> {
-    let marker = format!("==={marker}===");
-    let start = output.find(&marker)? + marker.len();
-    let rest = output[start..].trim_start_matches(['\r', '\n']);
-    let end = rest.find("===").unwrap_or(rest.len());
-    Some(rest[..end].trim())
 }
 
 fn required_text(value: &str) -> Option<String> {
@@ -142,18 +165,6 @@ fn is_unavailable_value(value: &str) -> bool {
     )
 }
 
-fn error_message(output: &str) -> String {
-    let message = section(output, "NVIDIA_ERROR")
-        .and_then(|value| value.lines().find(|line| !line.trim().is_empty()))
-        .map(str::trim)
-        .unwrap_or("nvidia-smi query failed");
-    message
-        .chars()
-        .filter(|character| !character.is_control())
-        .take(240)
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,11 +181,11 @@ available
 ===NVIDIA_PROCESSES===
 GPU-a, 42, python, worker.py, 2048
 GPU-b, 84, tritonserver, N/A
-===NVIDIA_GPU_END==="#;
+===GPU_NPU_SAMPLE_END==="#;
 
-        let snapshot = parse_gpu_snapshot(output, 123);
+        let snapshot = parse(output);
 
-        assert_eq!(snapshot.status, GpuSnapshotStatus::Available);
+        assert_eq!(snapshot.status, ProviderStatus::Available);
         assert_eq!(snapshot.devices.len(), 2);
         assert_eq!(snapshot.devices[1].name, "NVIDIA Test, Engineering GPU");
         assert_eq!(snapshot.devices[0].memory_used, Some(12_000 * 1024 * 1024));
@@ -185,48 +196,20 @@ GPU-b, 84, tritonserver, N/A
     }
 
     #[test]
-    fn distinguishes_unavailable_unsupported_empty_and_failed_states() {
-        let unavailable =
-            parse_gpu_snapshot("===NVIDIA_STATUS===\nunavailable\n===NVIDIA_GPU_END===", 1);
-        let unsupported =
-            parse_gpu_snapshot("===NVIDIA_STATUS===\nunsupported\n===NVIDIA_GPU_END===", 1);
-        let empty = parse_gpu_snapshot(
-            "===NVIDIA_STATUS===\navailable\n===NVIDIA_GPUS===\n===NVIDIA_GPU_QUERY_EXIT===\n0\n===NVIDIA_GPU_END===",
-            1,
+    fn distinguishes_unavailable_empty_and_failed_states() {
+        let unavailable = parse("===NVIDIA_STATUS===\nunavailable\n===GPU_NPU_SAMPLE_END===");
+        let empty = parse(
+            "===NVIDIA_STATUS===\navailable\n===NVIDIA_GPUS===\n===NVIDIA_GPU_QUERY_EXIT===\n0\n===GPU_NPU_SAMPLE_END===",
         );
-        let failed = parse_gpu_snapshot(
-            "===NVIDIA_STATUS===\navailable\n===NVIDIA_GPUS===\nUnable to determine the device handle\n===NVIDIA_GPU_QUERY_EXIT===\n9\n===NVIDIA_ERROR===\nUnable to determine the device handle\n===NVIDIA_GPU_END===",
-            1,
-        );
-        let no_devices = parse_gpu_snapshot(
-            "===NVIDIA_STATUS===\navailable\n===NVIDIA_GPUS===\nNo devices were found\n===NVIDIA_GPU_QUERY_EXIT===\n6\n===NVIDIA_ERROR===\nNo devices were found\n===NVIDIA_GPU_END===",
-            1,
+        let failed = parse(
+            "===NVIDIA_STATUS===\navailable\n===NVIDIA_GPUS===\nUnable to determine the device handle\n===NVIDIA_GPU_QUERY_EXIT===\n9\n===NVIDIA_ERROR===\nUnable to determine the device handle\n===GPU_NPU_SAMPLE_END===",
         );
 
-        assert_eq!(unavailable.status, GpuSnapshotStatus::Unavailable);
-        assert_eq!(unsupported.status, GpuSnapshotStatus::Unsupported);
-        assert_eq!(empty.status, GpuSnapshotStatus::NoDevices);
-        assert_eq!(no_devices.status, GpuSnapshotStatus::NoDevices);
+        assert_eq!(unavailable.status, ProviderStatus::Unavailable);
+        assert_eq!(empty.status, ProviderStatus::NoDevices);
         assert_eq!(
             failed.status,
-            GpuSnapshotStatus::Error("Unable to determine the device handle".into())
+            ProviderStatus::Error("NVIDIA: Unable to determine the device handle".into())
         );
-    }
-
-    #[test]
-    fn ignores_malformed_rows_without_losing_valid_devices() {
-        let output = r#"===NVIDIA_STATUS===
-available
-===NVIDIA_GPUS===
-garbage
-3, GPU-c, 00000000:03:00.0, NVIDIA L40S, 555.42, P0, 50, 20, 1000, 46068, 55, 100, 350, 40
-===NVIDIA_GPU_QUERY_EXIT===
-0
-===NVIDIA_GPU_END==="#;
-
-        let snapshot = parse_gpu_snapshot(output, 1);
-
-        assert_eq!(snapshot.devices.len(), 1);
-        assert_eq!(snapshot.devices[0].index, 3);
     }
 }

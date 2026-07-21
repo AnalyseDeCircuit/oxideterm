@@ -48,9 +48,9 @@ pub use filesystem::{
 };
 pub use gpu::{
     GPU_CHANNEL_OPEN_TIMEOUT, GPU_END_MARKER, GPU_MAX_OUTPUT_SIZE, GPU_SAMPLE_INTERVAL,
-    GPU_SAMPLE_TIMEOUT, GpuDevice, GpuProcess, GpuSamplingTask, GpuSnapshot, GpuSnapshotStatus,
-    GpuSummary, GpuUpdate, build_gpu_sample_command, gpu_device_row_signature, parse_gpu_snapshot,
-    start_gpu_sampling_on,
+    GPU_SAMPLE_TIMEOUT, GpuDevice, GpuProcess, GpuProvider, GpuSamplingTask, GpuSnapshot,
+    GpuSnapshotStatus, GpuSummary, GpuUpdate, build_gpu_sample_command, gpu_device_row_signature,
+    parse_gpu_snapshot, start_gpu_sampling_on,
 };
 pub use log::{
     LogCaptureCommand, LogCommandCapability, LogPreset, ResourceLogEntry, ResourceLogSnapshot,
