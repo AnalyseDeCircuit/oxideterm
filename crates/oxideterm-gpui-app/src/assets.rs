@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use anyhow::Result;
 use gpui::{AssetSource, SharedString};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LucideIcon {
     Activity,
     AlertCircle,
@@ -125,6 +125,135 @@ pub(crate) enum LucideIcon {
 }
 
 impl LucideIcon {
+    /// Resolves plugin-facing Lucide names without case or separator sensitivity.
+    pub(crate) fn from_plugin_name(name: &str) -> Self {
+        let normalized = name
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>();
+        match normalized.as_str() {
+            "activity" => Self::Activity,
+            "alertcircle" => Self::AlertCircle,
+            "alerttriangle" => Self::AlertTriangle,
+            "appwindow" | "layoutdashboard" => Self::AppWindow,
+            "archive" => Self::Archive,
+            "arrowdown" => Self::ArrowDown,
+            "arrowdownright" => Self::ArrowDownRight,
+            "arrowdownaz" => Self::ArrowDownAZ,
+            "arrowleftright" => Self::ArrowLeftRight,
+            "arrowright" => Self::ArrowRight,
+            "arrowup" => Self::ArrowUp,
+            "arrowupdown" => Self::ArrowUpDown,
+            "arrowupaz" => Self::ArrowUpAZ,
+            "bell" => Self::Bell,
+            "bookopen" => Self::BookOpen,
+            "bot" => Self::Bot,
+            "brain" => Self::Brain,
+            "cable" => Self::Cable,
+            "check" => Self::Check,
+            "checkcircle" => Self::CheckCircle,
+            "checksquare" => Self::CheckSquare,
+            "chevrondown" => Self::ChevronDown,
+            "chevronleft" => Self::ChevronLeft,
+            "chevronright" => Self::ChevronRight,
+            "circle" => Self::Circle,
+            "clock" => Self::Clock,
+            "cloud" => Self::Cloud,
+            "code" | "code2" => Self::Code2,
+            "copy" => Self::Copy,
+            "cornerdownleft" => Self::CornerDownLeft,
+            "cpu" => Self::Cpu,
+            "download" => Self::Download,
+            "eye" => Self::Eye,
+            "eyeoff" => Self::EyeOff,
+            "externallink" => Self::ExternalLink,
+            "file" => Self::File,
+            "filearchive" => Self::FileArchive,
+            "fileaudio" => Self::FileAudio,
+            "filecode" => Self::FileCode,
+            "fileimage" => Self::FileImage,
+            "filejson" => Self::FileJson,
+            "filelock" => Self::FileLock,
+            "fileplay" => Self::FilePlay,
+            "fileplus" => Self::FilePlus,
+            "filespreadsheet" => Self::FileSpreadsheet,
+            "fileterminal" => Self::FileTerminal,
+            "filetext" => Self::FileText,
+            "filevideo" => Self::FileVideo,
+            "folderarchive" => Self::FolderArchive,
+            "foldersync" => Self::FolderSync,
+            "folderinput" => Self::FolderInput,
+            "folder" => Self::Folder,
+            "folderplus" => Self::FolderPlus,
+            "folderopen" => Self::FolderOpen,
+            "gauge" => Self::Gauge,
+            "gitfork" => Self::GitFork,
+            "hash" => Self::Hash,
+            "harddrive" => Self::HardDrive,
+            "helpcircle" => Self::HelpCircle,
+            "history" => Self::History,
+            "home" => Self::Home,
+            "image" => Self::Image,
+            "info" => Self::Info,
+            "inbox" => Self::Inbox,
+            "key" => Self::Key,
+            "keyround" => Self::KeyRound,
+            "keyboard" => Self::Keyboard,
+            "layers" => Self::Layers,
+            "layoutlist" => Self::LayoutList,
+            "listchecks" => Self::ListChecks,
+            "listtree" => Self::ListTree,
+            "link" | "link2" => Self::Link2,
+            "loader" | "loadercircle" => Self::LoaderCircle,
+            "lock" => Self::Lock,
+            "messagesquare" => Self::MessageSquare,
+            "morevertical" => Self::MoreVertical,
+            "monitor" => Self::Monitor,
+            "memorystick" => Self::MemoryStick,
+            "network" => Self::Network,
+            "panelleft" => Self::PanelLeft,
+            "panelleftclose" => Self::PanelLeftClose,
+            "panelrightclose" => Self::PanelRightClose,
+            "pencil" => Self::Pencil,
+            "pause" => Self::Pause,
+            "pin" => Self::Pin,
+            "play" => Self::Play,
+            "plus" => Self::Plus,
+            "power" => Self::Power,
+            "puzzle" => Self::Puzzle,
+            "radio" => Self::Radio,
+            "refreshccw" => Self::RefreshCcw,
+            "refresh" | "refreshcw" => Self::RefreshCw,
+            "rotateccw" => Self::RotateCcw,
+            "rocket" => Self::Rocket,
+            "save" => Self::Save,
+            "search" => Self::Search,
+            "scissors" => Self::Scissors,
+            "server" => Self::Server,
+            "settings" => Self::Settings,
+            "shield" => Self::Shield,
+            "shieldalert" => Self::ShieldAlert,
+            "shieldcheck" => Self::ShieldCheck,
+            "shieldoff" => Self::ShieldOff,
+            "sparkles" => Self::Sparkles,
+            "splitsquarehorizontal" | "squaresplithorizontal" => Self::SplitSquareHorizontal,
+            "splitsquarevertical" | "squaresplitvertical" => Self::SplitSquareVertical,
+            "square" => Self::Square,
+            "star" => Self::Star,
+            "stopcircle" | "circlestop" => Self::StopCircle,
+            "terminal" => Self::Terminal,
+            "trash" | "trash2" => Self::Trash2,
+            "upload" => Self::Upload,
+            "wifi" => Self::Wifi,
+            "wifioff" => Self::WifiOff,
+            "wrench" => Self::Wrench,
+            "x" => Self::X,
+            "zap" => Self::Zap,
+            _ => Self::Puzzle,
+        }
+    }
+
     pub(crate) fn path(self) -> &'static str {
         match self {
             Self::Activity => "lucide/activity.svg",
@@ -519,6 +648,39 @@ impl AssetSource for NativeAssets {
             .collect());
         }
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_icon_names_ignore_case_and_common_separators() {
+        assert_eq!(
+            LucideIcon::from_plugin_name("Refresh-Cw"),
+            LucideIcon::RefreshCw
+        );
+        assert_eq!(
+            LucideIcon::from_plugin_name("LayoutDashboard"),
+            LucideIcon::AppWindow
+        );
+        assert_eq!(
+            LucideIcon::from_plugin_name("panel_left"),
+            LucideIcon::PanelLeft
+        );
+        assert_eq!(
+            LucideIcon::from_plugin_name("square-split-horizontal"),
+            LucideIcon::SplitSquareHorizontal
+        );
+        assert_eq!(
+            LucideIcon::from_plugin_name("circle-stop"),
+            LucideIcon::StopCircle
+        );
+        assert_eq!(
+            LucideIcon::from_plugin_name("not-bundled"),
+            LucideIcon::Puzzle
+        );
     }
 }
 

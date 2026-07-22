@@ -197,6 +197,43 @@ fn host_monitor_manifest_rejects_unsafe_or_ambiguous_declarations() {
 }
 
 #[test]
+fn activity_bar_manifest_rejects_duplicate_ids_and_invalid_positions() {
+    let item = NativePluginActivityBarItemDef {
+        id: "refresh".to_string(),
+        title: "Refresh".to_string(),
+        icon: "refresh-cw".to_string(),
+        command: "dashboard.refresh".to_string(),
+        position: "top".to_string(),
+    };
+    let duplicate_items = NativePluginContributes {
+        activity_bar_items: Some(vec![item.clone(), item.clone()]),
+        ..NativePluginContributes::default()
+    };
+    assert!(validate_native_plugin_contributions(&duplicate_items).is_err());
+
+    let mut invalid_item = item;
+    invalid_item.position = "middle".to_string();
+    let invalid_position = NativePluginContributes {
+        activity_bar_items: Some(vec![invalid_item]),
+        ..NativePluginContributes::default()
+    };
+    assert!(validate_native_plugin_contributions(&invalid_position).is_err());
+}
+
+#[test]
+fn repository_host_tools_dashboard_example_is_a_valid_native_plugin() {
+    let plugin_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/host-tools-dashboard");
+    let manifest_bytes = fs::read(plugin_dir.join(PLUGIN_MANIFEST_FILENAME)).unwrap();
+    let manifest: NativePluginManifest = serde_json::from_slice(&manifest_bytes).unwrap();
+
+    validate_native_plugin_manifest(&manifest).unwrap();
+    let runtime_plan = native_runtime_plan_for_manifest(&manifest).unwrap();
+    validate_runtime_entry_exists(&plugin_dir, &runtime_plan).unwrap();
+    assert_eq!(manifest.id, "com.oxideterm.examples.host-tools-dashboard");
+}
+
+#[test]
 fn permission_capabilities_normalize_order_and_whitespace() {
     let capabilities = vec![
         " terminal.input.send ".to_string(),
@@ -1376,6 +1413,13 @@ fn runtime_tab_and_sidebar_views_require_manifest_declarations_and_valid_schema(
             icon: "list".to_string(),
             position: "top".to_string(),
         }]),
+        activity_bar_items: Some(vec![NativePluginActivityBarItemDef {
+            id: "refresh".to_string(),
+            title: "Refresh".to_string(),
+            icon: "refresh-cw".to_string(),
+            command: "dashboard.refresh".to_string(),
+            position: "top".to_string(),
+        }]),
         ..NativePluginContributes::default()
     });
     write_manifest(&plugin_dir, &manifest);
@@ -1408,6 +1452,16 @@ fn runtime_tab_and_sidebar_views_require_manifest_declarations_and_valid_schema(
         .unwrap();
     registry
         .apply_runtime_registration(PluginRegistration {
+            registration_id: "activity-item-1".to_string(),
+            plugin_id: "com.example.demo".to_string(),
+            kind: PluginRegistrationKind::ActivityBarItem,
+            metadata: serde_json::json!({
+                "itemId": "refresh",
+            }),
+        })
+        .unwrap();
+    registry
+        .apply_runtime_registration(PluginRegistration {
             registration_id: "sidebar-view-1".to_string(),
             plugin_id: "com.example.demo".to_string(),
             kind: PluginRegistrationKind::SidebarPanel,
@@ -1432,6 +1486,29 @@ fn runtime_tab_and_sidebar_views_require_manifest_declarations_and_valid_schema(
         "Deploy"
     );
     assert_eq!(contributions.runtime_sidebar_panels()[0].panel_id, "jobs");
+    let activity_item = &contributions.runtime_activity_bar_items()[0];
+    assert_eq!(activity_item.item_id, "refresh");
+    assert_eq!(activity_item.icon, "refresh-cw");
+    assert_eq!(activity_item.command, "dashboard.refresh");
+
+    registry
+        .apply_runtime_registration(PluginRegistration {
+            registration_id: "activity-item-replacement".to_string(),
+            plugin_id: "com.example.demo".to_string(),
+            kind: PluginRegistrationKind::ActivityBarItem,
+            metadata: serde_json::json!({
+                "itemId": "refresh",
+                "command": "runtime.cannot.override",
+            }),
+        })
+        .unwrap();
+    let activity_items = registry.contributions().runtime_activity_bar_items();
+    assert_eq!(activity_items.len(), 1);
+    assert_eq!(
+        activity_items[0].registration_id,
+        "activity-item-replacement"
+    );
+    assert_eq!(activity_items[0].command, "dashboard.refresh");
 
     let undeclared_error = registry
         .apply_runtime_registration(PluginRegistration {
@@ -1445,6 +1522,18 @@ fn runtime_tab_and_sidebar_views_require_manifest_declarations_and_valid_schema(
         })
         .unwrap_err();
     assert!(undeclared_error.contains("not declared"));
+
+    let undeclared_activity_error = registry
+        .apply_runtime_registration(PluginRegistration {
+            registration_id: "activity-item-2".to_string(),
+            plugin_id: "com.example.demo".to_string(),
+            kind: PluginRegistrationKind::ActivityBarItem,
+            metadata: serde_json::json!({
+                "itemId": "unknown",
+            }),
+        })
+        .unwrap_err();
+    assert!(undeclared_activity_error.contains("not declared"));
 
     let schema_error = registry
         .apply_runtime_registration(PluginRegistration {
@@ -1468,7 +1557,7 @@ fn runtime_tab_and_sidebar_views_require_manifest_declarations_and_valid_schema(
     );
     assert_eq!(
         registry.cleanup_runtime_plugin_contributions("com.example.demo"),
-        1
+        2
     );
     let _ = fs::remove_dir_all(temp_dir);
 }
@@ -1480,12 +1569,25 @@ fn disabled_or_loading_declarative_buttons_are_not_actionable() {
         id: Some("run".to_string()),
         label: Some("Run".to_string()),
         description: None,
+        placeholder: None,
+        icon: None,
+        variant: None,
+        tone: None,
+        size: None,
+        gap: None,
         value: None,
         text: None,
         language: None,
         options: None,
         rows: None,
         columns: None,
+        column_defs: None,
+        children: Vec::new(),
+        min: None,
+        max: None,
+        step: None,
+        indeterminate: false,
+        strong: false,
         disabled: false,
         loading: false,
     };
@@ -1493,10 +1595,94 @@ fn disabled_or_loading_declarative_buttons_are_not_actionable() {
     disabled.disabled = true;
     let mut loading = active.clone();
     loading.loading = true;
+    let mut icon_button = active.clone();
+    icon_button.kind = "iconButton".to_string();
+    icon_button.icon = Some("refresh-cw".to_string());
 
     assert!(native_plugin_declarative_control_is_actionable(&active));
+    assert!(native_plugin_declarative_control_is_actionable(
+        &icon_button
+    ));
     assert!(!native_plugin_declarative_control_is_actionable(&disabled));
     assert!(!native_plugin_declarative_control_is_actionable(&loading));
+}
+
+#[test]
+fn declarative_component_schema_accepts_shared_components_and_rejects_unsafe_shapes() {
+    let schema = runtime_declarative_ui_schema(&serde_json::json!({
+        "componentVersion": 1,
+        "kind": "form",
+        "controls": [{
+            "kind": "card",
+            "variant": "inspector",
+            "children": [
+                { "kind": "statusBadge", "label": "Ready", "tone": "success" },
+                { "kind": "select", "id": "environment", "options": [
+                    { "label": "Production", "value": "production" }
+                ] },
+                { "kind": "slider", "id": "parallelism", "min": 1, "max": 8, "step": 1 },
+                { "kind": "iconButton", "id": "refresh", "icon": "refresh-cw", "label": "Refresh" }
+            ]
+        }]
+    }))
+    .unwrap();
+    assert!(validate_native_plugin_declarative_ui_schema(&schema).is_ok());
+
+    let unsupported_version = runtime_declarative_ui_schema(&serde_json::json!({
+        "componentVersion": 2,
+        "kind": "form",
+        "controls": [{ "kind": "divider" }]
+    }))
+    .unwrap();
+    assert!(
+        validate_native_plugin_declarative_ui_schema(&unsupported_version)
+            .unwrap_err()
+            .contains("componentVersion")
+    );
+
+    let duplicate_ids = runtime_declarative_ui_schema(&serde_json::json!({
+        "componentVersion": 1,
+        "kind": "form",
+        "controls": [{
+            "kind": "stack",
+            "children": [
+                { "kind": "text", "id": "target" },
+                { "kind": "select", "id": "target", "options": [
+                    { "label": "One", "value": 1 }
+                ] }
+            ]
+        }]
+    }))
+    .unwrap();
+    assert!(
+        validate_native_plugin_declarative_ui_schema(&duplicate_ids)
+            .unwrap_err()
+            .contains("Duplicate")
+    );
+
+    let invalid_range = runtime_declarative_ui_schema(&serde_json::json!({
+        "componentVersion": 1,
+        "kind": "form",
+        "controls": [{ "kind": "slider", "id": "range", "min": 10, "max": 1 }]
+    }))
+    .unwrap();
+    assert!(
+        validate_native_plugin_declarative_ui_schema(&invalid_range)
+            .unwrap_err()
+            .contains("max")
+    );
+
+    let password_with_value = runtime_declarative_ui_schema(&serde_json::json!({
+        "componentVersion": 1,
+        "kind": "form",
+        "controls": [{ "kind": "password", "id": "secret", "value": "plaintext" }]
+    }))
+    .unwrap();
+    assert!(
+        validate_native_plugin_declarative_ui_schema(&password_with_value)
+            .unwrap_err()
+            .contains("initial value")
+    );
 }
 
 #[test]
@@ -1748,6 +1934,7 @@ fn sample_contributes() -> NativePluginContributes {
             icon: "Puzzle".to_string(),
             position: "bottom".to_string(),
         }]),
+        activity_bar_items: None,
         settings: Some(vec![NativePluginSettingDef {
             id: "mode".to_string(),
             setting_type: "select".to_string(),

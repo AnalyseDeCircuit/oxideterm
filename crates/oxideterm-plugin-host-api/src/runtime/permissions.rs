@@ -102,6 +102,11 @@ fn validate_registration_permissions(
                 &[NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ],
             )?;
         }
+        PluginRegistrationKind::Tab
+        | PluginRegistrationKind::SidebarPanel
+        | PluginRegistrationKind::ActivityBarItem => {
+            require_capabilities(permissions, &[NATIVE_PLUGIN_CAPABILITY_UI_WRITE])?;
+        }
         _ => {}
     }
     Ok(())
@@ -246,5 +251,38 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn plugin_ui_registrations_require_ui_write_capability() {
+        for kind in [
+            PluginRegistrationKind::Tab,
+            PluginRegistrationKind::SidebarPanel,
+            PluginRegistrationKind::ActivityBarItem,
+        ] {
+            let message = PluginOutboundMessage::RegisterContribution {
+                registration: PluginRegistration {
+                    registration_id: format!("ui-{kind:?}"),
+                    plugin_id: "com.example.permissions".to_string(),
+                    kind,
+                    metadata: Value::Null,
+                },
+            };
+            let error = validate_outbound_message_permissions(
+                &[message.clone()],
+                &PluginPermissionSet::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "plugin_capability_not_allowed");
+
+            validate_outbound_message_permissions(
+                &[message],
+                &PluginPermissionSet {
+                    capabilities: vec![NATIVE_PLUGIN_CAPABILITY_UI_WRITE.to_string()],
+                    allowed_host_apis: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
     }
 }

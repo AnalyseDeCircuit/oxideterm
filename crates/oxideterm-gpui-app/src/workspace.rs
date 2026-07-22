@@ -814,6 +814,7 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     native_plugin_manager: plugin_manager::NativePluginManagerState,
+    native_plugin_ui: plugin_ui::NativePluginUiState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_collapsed: bool,

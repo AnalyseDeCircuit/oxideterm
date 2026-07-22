@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use gpui::{CursorStyle, Div, Styled};
 use oxideterm_theme::ThemeTokens;
 
@@ -16,6 +18,8 @@ pub struct InputView<'a> {
     pub caret_visible: bool,
     pub input_type: InputType,
     pub selected_all: bool,
+    pub selected_range: Option<Range<usize>>,
+    pub marked_text: Option<&'a str>,
     pub disabled: bool,
 }
 
@@ -28,6 +32,8 @@ impl<'a> InputView<'a> {
             caret_visible: false,
             input_type: InputType::Text,
             selected_all: false,
+            selected_range: None,
+            marked_text: None,
             disabled: false,
         }
     }
@@ -47,8 +53,8 @@ pub fn input(tokens: &ThemeTokens, view: InputView<'_>) -> Div {
             caret_visible: input_effective_focus(view.caret_visible, disabled),
             secret: view.input_type == InputType::Password,
             selected_all: view.selected_all && !disabled,
-            selected_range: None,
-            marked_text: None,
+            selected_range: view.selected_range,
+            marked_text: view.marked_text,
         },
     )
     .opacity(if disabled { 0.5 } else { 1.0 })

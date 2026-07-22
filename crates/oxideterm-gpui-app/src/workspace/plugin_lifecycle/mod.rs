@@ -2237,15 +2237,21 @@ impl WorkspaceApp {
         match (namespace, method) {
             ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args),
             ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args),
-            ("ui", "registerTabView") => self.register_native_plugin_declarative_view(
+            ("ui", "registerTabView") => self.register_native_plugin_ui_contribution(
                 plugin_id,
                 plugin_runtime::PluginRegistrationKind::Tab,
                 args,
                 cx,
             ),
-            ("ui", "registerSidebarPanel") => self.register_native_plugin_declarative_view(
+            ("ui", "registerSidebarPanel") => self.register_native_plugin_ui_contribution(
                 plugin_id,
                 plugin_runtime::PluginRegistrationKind::SidebarPanel,
+                args,
+                cx,
+            ),
+            ("ui", "registerActivityBarItem") => self.register_native_plugin_ui_contribution(
+                plugin_id,
+                plugin_runtime::PluginRegistrationKind::ActivityBarItem,
                 args,
                 cx,
             ),
@@ -2272,7 +2278,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn register_native_plugin_declarative_view(
+    fn register_native_plugin_ui_contribution(
         &mut self,
         plugin_id: &str,
         kind: plugin_runtime::PluginRegistrationKind,
@@ -2290,13 +2296,13 @@ impl WorkspaceApp {
                 {
                     self.native_plugin_runtime.registry.record_manager_error(
                         plugin_id.to_string(),
-                        format!("Native plugin declarative UI registration failed: {error}"),
+                        format!("Native plugin UI registration failed: {error}"),
                     );
                 }
             }
             Err(error) => self.native_plugin_runtime.registry.record_manager_error(
                 plugin_id.to_string(),
-                format!("Native plugin declarative UI registration failed: {error}"),
+                format!("Native plugin UI registration failed: {error}"),
             ),
         }
         cx.notify();

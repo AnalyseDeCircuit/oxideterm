@@ -61,6 +61,7 @@ pub enum PluginRegistrationKind {
     StatusBar,
     Tab,
     SidebarPanel,
+    ActivityBarItem,
     TerminalInputInterceptor,
     TerminalOutputProcessor,
     TerminalShortcut,
@@ -75,4 +76,19 @@ pub enum PluginRuntimeLogLevel {
     Info,
     Warn,
     Error,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_bar_registration_kind_uses_stable_wire_name() {
+        // The wire value is consumed by process and WASM plugins, so it must
+        // remain kebab-cased independently of Rust enum naming.
+        assert_eq!(
+            serde_json::to_value(PluginRegistrationKind::ActivityBarItem).unwrap(),
+            serde_json::json!("activity-bar-item")
+        );
+    }
 }

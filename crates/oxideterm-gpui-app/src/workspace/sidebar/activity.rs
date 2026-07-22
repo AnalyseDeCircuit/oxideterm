@@ -123,6 +123,11 @@ impl WorkspaceApp {
             LucideIcon::Puzzle,
             cx,
         ));
+        let plugin_activity_items = self
+            .native_plugin_runtime
+            .registry
+            .contributions()
+            .runtime_activity_bar_items();
         // Tauri inserts plugin-provided sidebar panels as independent activity
         // buttons immediately after the built-in Plugin Manager tab button.
         for panel in self
@@ -134,6 +139,13 @@ impl WorkspaceApp {
             primary_items =
                 primary_items.child(self.render_plugin_sidebar_activity_icon(panel, cx));
         }
+        for item in plugin_activity_items
+            .iter()
+            .filter(|item| item.position == "top")
+            .cloned()
+        {
+            primary_items = primary_items.child(self.render_plugin_activity_action_icon(item, cx));
+        }
         for (section, icon) in top_items_after_plugins {
             primary_items = primary_items.child(self.render_activity_icon(section, icon, cx));
         }
@@ -143,22 +155,23 @@ impl WorkspaceApp {
             primary_items = primary_items.child(self.render_app_lock_activity_icon(cx));
         }
 
-        let mut bottom = div()
-            .relative()
-            .flex()
-            .flex_col()
-            .items_center()
-            .child(
-                div()
-                    .w(px(self.tokens.metrics.divider_width))
-                    .h(px(self.tokens.metrics.divider_height))
-                    .bg(rgb(theme.divider)),
-            )
-            .children(
-                bottom_items
-                    .into_iter()
-                    .map(|(section, icon)| self.render_activity_icon(section, icon, cx)),
-            );
+        let mut bottom = div().relative().flex().flex_col().items_center().child(
+            div()
+                .w(px(self.tokens.metrics.divider_width))
+                .h(px(self.tokens.metrics.divider_height))
+                .bg(rgb(theme.divider)),
+        );
+        for item in plugin_activity_items
+            .into_iter()
+            .filter(|item| item.position == "bottom")
+        {
+            bottom = bottom.child(self.render_plugin_activity_action_icon(item, cx));
+        }
+        bottom = bottom.children(
+            bottom_items
+                .into_iter()
+                .map(|(section, icon)| self.render_activity_icon(section, icon, cx)),
+        );
         if let Some(popover) = self.render_detached_local_terminals_popover(cx) {
             bottom = bottom.child(popover);
         }
@@ -443,7 +456,7 @@ impl WorkspaceApp {
         let tooltip = panel.title.clone();
         let tooltip_id = format!("activity-plugin-{}-{}", panel.plugin_id, panel.panel_id);
         let tooltip_id_for_move = tooltip_id.clone();
-        let icon = native_plugin_sidebar_icon(&panel.icon);
+        let icon = LucideIcon::from_plugin_name(&panel.icon);
 
         let button = oxideterm_gpui_ui::button::icon_button(
             &self.tokens,
@@ -512,6 +525,71 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(in crate::workspace) fn render_plugin_activity_action_icon(
+        &self,
+        item: plugin_host::NativePluginRuntimeActivityBarItemContribution,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let tooltip_id = format!("activity-plugin-action-{}-{}", item.plugin_id, item.item_id);
+        let tooltip_id_for_move = tooltip_id.clone();
+        let tooltip = item.title.clone();
+        let plugin_id = item.plugin_id.clone();
+        let command = item.command.clone();
+        let icon = LucideIcon::from_plugin_name(&item.icon);
+        let button = oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(
+                icon,
+                self.tokens.metrics.activity_icon_glyph_size,
+                rgb(theme.text),
+            ),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: self.tokens.metrics.activity_icon_size,
+                radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
+                hover_background: Some(rgb(theme.bg_hover)),
+                idle_opacity: 1.0,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
+                    self.tokens.metrics.activity_icon_size,
+                )
+            },
+        );
+
+        button
+            .id((
+                "activity-plugin-action",
+                native_plugin_activity_bar_item_id(&item),
+            ))
+            .relative()
+            .mb(px(self.tokens.metrics.activity_icon_gap))
+            .on_mouse_move(
+                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id_for_move.clone(),
+                        tooltip.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
+                }),
+            )
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(&tooltip_id, cx);
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    // Action items invoke only the manifest-declared command
+                    // associated with their host-owned runtime registration.
+                    this.dispatch_native_plugin_command(plugin_id.clone(), command.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_lucide_icon(
         icon: LucideIcon,
         size: f32,
@@ -563,25 +641,6 @@ impl WorkspaceApp {
     }
 }
 
-pub(in crate::workspace) fn native_plugin_sidebar_icon(icon: &str) -> LucideIcon {
-    // Tauri resolves plugin sidebar icons through lucide-react names. Native
-    // maps the same common names to bundled lucide assets and falls back to
-    // Puzzle when a plugin asks for an icon this build does not expose yet.
-    match icon {
-        "activity" => LucideIcon::Activity,
-        "bell" => LucideIcon::Bell,
-        "bot" => LucideIcon::Bot,
-        "cloud" => LucideIcon::Cloud,
-        "folder" | "folder-open" => LucideIcon::FolderOpen,
-        "monitor" => LucideIcon::Monitor,
-        "network" => LucideIcon::Network,
-        "settings" => LucideIcon::Settings,
-        "sparkles" => LucideIcon::Sparkles,
-        "terminal" => LucideIcon::Terminal,
-        _ => LucideIcon::Puzzle,
-    }
-}
-
 pub(in crate::workspace) fn native_plugin_sidebar_activity_id(
     panel: &plugin_host::NativePluginRuntimeSidebarPanelContribution,
 ) -> u64 {
@@ -589,5 +648,15 @@ pub(in crate::workspace) fn native_plugin_sidebar_activity_id(
     panel.registration_id.hash(&mut hasher);
     panel.plugin_id.hash(&mut hasher);
     panel.panel_id.hash(&mut hasher);
+    hasher.finish()
+}
+
+pub(in crate::workspace) fn native_plugin_activity_bar_item_id(
+    item: &plugin_host::NativePluginRuntimeActivityBarItemContribution,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    item.registration_id.hash(&mut hasher);
+    item.plugin_id.hash(&mut hasher);
+    item.item_id.hash(&mut hasher);
     hasher.finish()
 }

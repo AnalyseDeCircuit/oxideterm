@@ -263,6 +263,8 @@ readline.createInterface({
 - 运行时界面不是 React，而是通过 `sidebar-panel` 或 `tab` 注册的声明式结构。
 - 需要返回值的宿主调用用出站 `callHostApi` 帧发送；宿主会把结果写回插件的 stdin。
 
+如果需要完整的仓库示例，可参考 [Host Tools Dashboard](../../../examples/plugins/host-tools-dashboard/README.md)。它会同时注册标签页和左侧活动栏面板，自动发现活动节点，并运行清单中声明的自定义 Host Tools 监控。
+
 ## 运行时通信过程
 
 进程运行时只有一条按行分隔的通信通道。
@@ -305,7 +307,8 @@ sequenceDiagram
           "app.getVersion",
           "connections.getSummaries",
           "settings.get",
-          "ui.registerSidebarPanel"
+          "ui.registerSidebarPanel",
+          "ui.registerActivityBarItem"
         ]
       }
     },
@@ -485,6 +488,7 @@ sequenceDiagram
     "metadata": {
       "tabId": "hello-tab",
       "schema": {
+        "componentVersion": 1,
         "kind": "form",
         "title": "Hello",
         "controls": [
@@ -575,6 +579,13 @@ sequenceDiagram
 - `registration.pluginId` 必须匹配清单 `id`。
 - `metadata.schema.kind` 应该是 `form`。
 - `button`、`text`、`password`、`number`、`checkbox`、`select` 等可交互控件需要稳定的 `id`。
+
+如果独立活动栏动作没有出现或无法执行：
+
+- `contributes.activityBarItems` 必须声明动作 id、标题、图标、命令和位置。
+- 运行时必须使用 `kind: "activity-bar-item"` 和相同的 `itemId` 注册。
+- 插件必须请求 `ui.write`，并处理清单中声明的 `dispatchCommand` 值。
+- 运行时元数据不能覆盖清单声明的图标或命令。
 
 如果 Host API 调用失败：
 
@@ -709,6 +720,9 @@ flowchart TB
     "sidebarPanels": [
       { "id": "dashboard-panel", "title": "Dashboard", "icon": "Activity", "position": "bottom" }
     ],
+    "activityBarItems": [
+      { "id": "refresh", "title": "刷新仪表盘", "icon": "RefreshCw", "command": "dashboard.refresh", "position": "top" }
+    ],
     "terminalHooks": {
       "shortcuts": [
         { "key": "Ctrl+Shift+D", "command": "dashboard.refresh" }
@@ -815,6 +829,7 @@ flowchart TB
 | `status-bar` | 添加宿主持有的状态栏项 |
 | `tab` | 为已声明标签页注册声明式界面 |
 | `sidebar-panel` | 为已声明面板注册声明式界面 |
+| `activity-bar-item` | 注册清单中声明的独立左侧活动栏动作 |
 | `event-subscription` | 订阅宿主事件 |
 | `terminal-input-interceptor` | 转换或抑制终端输入 |
 | `terminal-output-processor` | 在解析器前处理终端输出 |
@@ -825,7 +840,10 @@ flowchart TB
 
 ## 声明式 Native 界面
 
-Native 插件通过注册界面结构渲染界面，不注册组件。
+Native 插件通过带版本的结构选择 OxideTerm 组件。插件提供数据并接收事件；
+宿主提供真正的共享组件、主题令牌、密度、字体、焦点、输入法行为、无障碍语义
+和响应式布局。插件运行时不会获得原始 GPUI 对象，也不能注入 HTML、CSS、
+闭包或自绘代码。
 
 ```json
 {
@@ -840,6 +858,7 @@ Native 插件通过注册界面结构渲染界面，不注册组件。
       "metadata": {
         "tabId": "dashboard",
         "schema": {
+          "componentVersion": 1,
           "kind": "form",
           "title": "Dashboard",
           "sections": [
@@ -865,18 +884,48 @@ Native 插件通过注册界面结构渲染界面，不注册组件。
 
 | 类型 | 说明 |
 |---|---|
-| `text`, `password`, `number`, `checkbox`, `select` | 字段控件，需要 `id` |
-| `button` | 只有存在 `id` 且未禁用/加载中时才可操作 |
-| `markdown` | 宿主渲染的文本块 |
+| `stack`, `row`, `card`, `toolbar` | 布局组件，以有界的宿主布局渲染嵌套 `children` |
+| `text`, `password`, `number`, `checkbox`, `select` | 共享字段组件，需要稳定的 `id` |
+| `radioGroup`, `radio-group`, `segmentedControl`, `segmented-control`, `slider` | 共享选择/范围组件，需要稳定的 `id` |
+| `button`, `iconButton`, `icon-button` | 共享动作组件；有 `id`、未禁用且未加载时可操作；图标按钮还需要 `icon` 和 `label` |
+| `alert` | 带语义色调、可选图标、标题和说明的宿主提示 |
+| `markdown` | 使用 OxideTerm 的 Markdown 渲染器解析；禁用后台图片和本地文件链接 |
 | `code`, `codeBlock`, `code-block` | 代码块 |
-| `statusBadge`, `status-badge` | 状态指示 |
-| `progress` | 进度显示 |
-| `table`, `list` | 结构化数据显示 |
-| `emptyState`, `empty-state` | 空状态 |
-| `divider` | 分隔线 |
+| `statusBadge`, `status-badge`, `badge` | 带语义色调和强度的共享状态徽章 |
+| `progress` | 共享进度组件，数值可使用 `0..1` 或 `0..100` |
+| `table`, `list` | 有界、虚拟化的共享数据组件 |
+| `emptyState`, `empty-state` | 带可选图标和说明的共享空状态 |
+| `divider` | 共享分隔线 |
 | `keyValue`, `key-value`, `keyValueRow`, `key-value-row` | 键值行 |
 
-按钮点击会作为插件 UI 事件传回。焦点、布局、无障碍、主题和控件渲染都由宿主持有。
+组件事件只会发给拥有该界面的插件：
+
+```json
+{
+  "name": "ui.event",
+  "payload": {
+    "type": "change",
+    "componentKind": "select",
+    "surfaceKind": "tab",
+    "surfaceId": "dashboard",
+    "sectionId": "overview",
+    "controlId": "environment",
+    "value": "production"
+  }
+}
+```
+
+按钮发出 `click`，文本字段发出 `input`，选择和范围组件发出 `change`。
+密码草稿由宿主清零。没有明确获批的 `credentials.raw.read` 能力时，密码事件
+只包含 `{ "present": boolean, "redacted": true }`；只有敏感内容权限获批后，
+原文才会发给拥有该界面的插件。密码组件不能声明初始 `value`，因此凭据不会
+被保留在已注册的界面结构中。
+
+为保证安全和可预测性能，组件版本 1 最多接受 8 层嵌套、256 个组件、每个容器
+64 个直接子项、每个选择组件 128 个选项、每个数据组件 2,000 行，以及 64 个
+表格列。控件 ID 在其根区域或区段内必须唯一，`root` 不能用作区段 ID。
+注册时会拒绝未知版本、变体、色调、尺寸、间距或非法子组件位置。完整编码结构
+的上限是 2 MiB。
 
 ## 宿主 API 调用
 
@@ -1093,6 +1142,7 @@ interface NativePluginRuntime {
 interface NativePluginContributes {
   tabs?: NativePluginTabDef[];
   sidebarPanels?: NativePluginSidebarDef[];
+  activityBarItems?: NativePluginActivityBarItemDef[];
   settings?: NativePluginSettingDef[];
   terminalHooks?: NativePluginTerminalHooksDef;
   terminalTransports?: string[];
@@ -1129,6 +1179,14 @@ interface NativePluginSidebarDef {
   position?: 'top' | 'bottom';
 }
 
+interface NativePluginActivityBarItemDef {
+  id: string;
+  title: string;
+  icon: string;
+  command: string;
+  position?: 'top' | 'bottom';
+}
+
 interface NativePluginSettingDef {
   id: string;
   type: 'string' | 'number' | 'boolean' | 'select';
@@ -1158,6 +1216,8 @@ interface NativePluginAiToolDef {
 校验规则：
 
 - `id`、`name`、`version`、贡献 id、标题和图标必须是非空文本。
+- 活动栏动作的命令必须非空，插件内的动作 id 必须唯一，`position` 只接受 `top` 或 `bottom`。
+- 标签页、侧栏面板和活动栏动作的图标从 OxideTerm 内置 Lucide 图标中解析；匹配时忽略 ASCII 大小写、连字符与下划线，不支持的名称回退为 `Puzzle`。
 - 相对路径必须留在插件目录内。
 - `terminalTransports` 当前接受 `telnet`。
 - `apiCommands` 条目是兼容层适配器命令，例如 `get_app_version` 或 `plugin_http_request`；直接宿主 API 不在这里声明。
@@ -1234,6 +1294,7 @@ interface PluginRegistration {
     | 'status-bar'
     | 'tab'
     | 'sidebar-panel'
+    | 'activity-bar-item'
     | 'terminal-input-interceptor'
     | 'terminal-output-processor'
     | 'terminal-shortcut'
@@ -1253,6 +1314,7 @@ interface PluginRegistration {
 | `status-bar` | `text` | `alignment`、`icon`、`tooltip` |
 | `tab` | `tabId`、`schema` | schema 内的 `title` |
 | `sidebar-panel` | `panelId`、`schema` | `position`、schema 内的 `title` |
+| `activity-bar-item` | `itemId` | 无；标题、图标、位置和命令均来自清单 |
 | `event-subscription` | `event` 或 `namespace` + `method` | 部分事件族支持 `nodeId` 过滤 |
 | `terminal-input-interceptor` | `command` 或 `id` | 无 |
 | `terminal-output-processor` | `command` 或 `id` | 无 |
@@ -1263,6 +1325,7 @@ interface PluginRegistration {
 
 ```ts
 interface NativePluginDeclarativeUiSchema {
+  componentVersion?: 1;
   kind?: 'form';
   title?: string;
   description?: string;
@@ -1284,13 +1347,26 @@ interface NativePluginDeclarativeUiControl {
     | 'number'
     | 'checkbox'
     | 'select'
+    | 'radioGroup'
+    | 'radio-group'
+    | 'slider'
+    | 'segmentedControl'
+    | 'segmented-control'
     | 'button'
+    | 'iconButton'
+    | 'icon-button'
+    | 'stack'
+    | 'row'
+    | 'card'
+    | 'toolbar'
+    | 'alert'
     | 'markdown'
     | 'code'
     | 'codeBlock'
     | 'code-block'
     | 'statusBadge'
     | 'status-badge'
+    | 'badge'
     | 'progress'
     | 'table'
     | 'list'
@@ -1304,18 +1380,34 @@ interface NativePluginDeclarativeUiControl {
   id?: string;
   label?: string;
   description?: string;
+  placeholder?: string;
+  icon?: string;
+  variant?: 'default' | 'secondary' | 'outline' | 'ghost' | 'destructive' | 'link' | 'panel' | 'inset' | 'inspector';
+  tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'error' | 'info';
+  size?: 'small' | 'default' | 'large' | 'icon';
+  gap?: 'none' | 'compact' | 'normal' | 'spacious';
   value?: unknown;
   text?: string;
   language?: string;
   options?: Array<{ label: string; value: unknown }>;
   rows?: unknown[];
   columns?: string[];
+  columnDefs?: Array<{ key: string; label: string; style?: 'primary' | 'meta' | 'mono' }>;
+  children?: NativePluginDeclarativeUiControl[];
+  min?: number;
+  max?: number;
+  step?: number;
+  indeterminate?: boolean;
+  strong?: boolean;
   disabled?: boolean;
   loading?: boolean;
 }
 ```
 
-`text`、`password`、`number`、`checkbox`、`select` 和 `button` 控件需要 `id`。按钮只有在存在 `id`、未禁用且不处于加载中时才可操作。
+所有交互组件都需要稳定的 `id`：`text`、`password`、`number`、
+`checkbox`、`select`、单选组、分段选择、滑块、按钮和图标按钮。按钮只有在
+`disabled` 和 `loading` 均为 `false` 时可操作。为兼容旧结构，
+`componentVersion` 省略时默认为 `1`，但插件应明确声明它，以便将来协商组件变化。
 
 ## 宿主 API 参考
 
@@ -1386,6 +1478,7 @@ interface HostCall {
 | `ui.getLayout` | `{}` | 布局快照 |
 | `ui.registerTabView` | `{ tabId: string, schema: NativePluginDeclarativeUiSchema }` | 声明式标签页注册结果 |
 | `ui.registerSidebarPanel` | `{ panelId: string, schema: NativePluginDeclarativeUiSchema }` | 声明式侧边栏注册结果 |
+| `ui.registerActivityBarItem` | `{ itemId: string }` | 独立活动栏动作注册结果 |
 | `ui.openTab` | `{ tabId: string }` | 打开或聚焦已声明插件标签页 |
 | `ui.showToast` | `{ title?: string, description?: string, variant?: string }` | 单向 toast 效果 |
 | `ui.showNotification` | `{ title?: string, body?: string, severity?: string }` | 单向通知效果 |
@@ -1650,6 +1743,8 @@ Host Tools 动作名称是封闭枚举：`process` 通过 `execute` 支持 `stop
 - 界面结构的 `kind` 是 `form`。
 - 界面结构至少包含一个 section 或顶层控件。
 - 需要 id 的控件已经设置 `id`。
+
+对于独立活动栏动作，应检查 `contributes.activityBarItems`、运行时 `itemId`、`ui.write` 能力和插件的 `dispatchCommand` 处理器，而不是查找声明式界面结构。
 
 ## 迁移说明
 

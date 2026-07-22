@@ -274,6 +274,7 @@ impl WorkspaceApp {
             .measure_all(),
             detached_local_terminal_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             native_plugin_manager: plugin_manager::NativePluginManagerState::new(),
+            native_plugin_ui: plugin_ui::NativePluginUiState::default(),
             split_drag: None,
             sidebar_resizing: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,

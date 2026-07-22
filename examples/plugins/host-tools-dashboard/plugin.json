@@ -1,0 +1,99 @@
+{
+  "id": "com.oxideterm.examples.host-tools-dashboard",
+  "name": "Host Tools Dashboard",
+  "version": "0.3.0",
+  "description": "Example Native plugin using OxideTerm UI components, a tab, activity-bar entries, and a custom Host Tools monitor.",
+  "runtime": {
+    "kind": "process",
+    "entry": "bin/host-tools-dashboard.js"
+  },
+  "permissions": {
+    "capabilities": [
+      "host_tools.custom.execute",
+      "ui.write"
+    ]
+  },
+  "contributes": {
+    "tabs": [
+      {
+        "id": "dashboard",
+        "title": "Host Tools Dashboard",
+        "icon": "activity"
+      }
+    ],
+    "sidebarPanels": [
+      {
+        "id": "dashboard-panel",
+        "title": "Host Tools Dashboard",
+        "icon": "activity",
+        "position": "top"
+      }
+    ],
+    "activityBarItems": [
+      {
+        "id": "refresh-dashboard",
+        "title": "Refresh Host Tools Dashboard",
+        "icon": "refresh-cw",
+        "command": "dashboard.refresh",
+        "position": "top"
+      }
+    ],
+    "settings": [
+      {
+        "id": "nodeId",
+        "type": "string",
+        "default": "",
+        "title": "Target node ID",
+        "description": "Leave empty to use the first active connected node."
+      },
+      {
+        "id": "osType",
+        "type": "select",
+        "default": "linux",
+        "title": "Remote operating system",
+        "description": "Select the operating-system command declared by the monitor.",
+        "options": [
+          {
+            "label": "Linux",
+            "value": "linux"
+          },
+          {
+            "label": "macOS",
+            "value": "macos"
+          },
+          {
+            "label": "BSD",
+            "value": "bsd"
+          },
+          {
+            "label": "Windows",
+            "value": "windows"
+          }
+        ]
+      }
+    ],
+    "hostMonitors": [
+      {
+        "id": "system-facts",
+        "title": "System facts",
+        "description": "Reports the remote kernel, release, and machine architecture.",
+        "commands": {
+          "linux": "printf 'kernel\\t'; uname -s; printf 'release\\t'; uname -r; printf 'machine\\t'; uname -m",
+          "macos": "printf 'kernel\\t'; uname -s; printf 'release\\t'; uname -r; printf 'machine\\t'; uname -m",
+          "bsd": "printf 'kernel\\t'; uname -s; printf 'release\\t'; uname -r; printf 'machine\\t'; uname -m",
+          "windows": "powershell -NoProfile -NonInteractive -Command \"$os=[System.Environment]::OSVersion.VersionString; $arch=[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture; Write-Output ('kernel`tWindows'); Write-Output ('release`t' + $os); Write-Output ('machine`t' + $arch)\""
+        },
+        "output": {
+          "format": "tsv",
+          "columns": [
+            "metric",
+            "value"
+          ],
+          "maxRows": 16
+        },
+        "timeoutSeconds": 3,
+        "maxOutputBytes": 16384
+      }
+    ]
+  }
+}

@@ -1249,6 +1249,13 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
     ),
     api!(
         "ui",
+        "registerActivityBarItem",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_UI_WRITE),
+        "Registers a manifest-declared activity-bar command item."
+    ),
+    api!(
+        "ui",
         "openTab",
         Mutating,
         Some(NATIVE_PLUGIN_CAPABILITY_UI_WRITE),
@@ -1358,7 +1365,7 @@ mod tests {
             .map(HostApiDescriptor::qualified_name)
             .collect::<HashSet<_>>();
 
-        assert_eq!(HOST_API_CATALOG.len(), 178);
+        assert_eq!(HOST_API_CATALOG.len(), 179);
         assert_eq!(names.len(), HOST_API_CATALOG.len());
         assert!(names.contains("api.invoke"));
         assert!(names.contains("connections.getSummaries"));
@@ -1389,6 +1396,7 @@ mod tests {
         assert!(names.contains("terminal.getNodeBuffer"));
         assert!(names.contains("secrets.getMany"));
         assert!(names.contains("storage.get"));
+        assert!(names.contains("ui.registerActivityBarItem"));
         for api in [
             "sftp.init",
             "sftp.preview",
@@ -1458,6 +1466,7 @@ mod tests {
         assert!(!baseline.contains(&"hostTools.runExtension".to_string()));
         assert!(!baseline.contains(&"ide.replaceActiveText".to_string()));
         assert!(!baseline.contains(&"cloudSync.applyPreview".to_string()));
+        assert!(!baseline.contains(&"ui.registerActivityBarItem".to_string()));
 
         let terminal = allowed_host_apis_for_capabilities([
             NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ,
@@ -1479,6 +1488,9 @@ mod tests {
         assert!(product.contains(&"ide.replaceActiveText".to_string()));
         assert!(product.contains(&"cloudSync.applyPreview".to_string()));
         assert!(!product.contains(&"hostTools.terminate".to_string()));
+
+        let ui = allowed_host_apis_for_capabilities([NATIVE_PLUGIN_CAPABILITY_UI_WRITE]);
+        assert!(ui.contains(&"ui.registerActivityBarItem".to_string()));
 
         let forward =
             allowed_host_apis_for_capabilities([NATIVE_PLUGIN_CAPABILITY_NETWORK_FORWARD]);

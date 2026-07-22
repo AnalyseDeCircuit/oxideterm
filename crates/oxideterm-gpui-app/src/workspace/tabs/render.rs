@@ -3,7 +3,7 @@ use super::*;
 
 use gpui::StatefulInteractiveElement;
 
-fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
+fn tab_kind_icon(workspace: &WorkspaceApp, kind: &TabKind) -> LucideIcon {
     match kind {
         TabKind::LocalTerminal => LucideIcon::Square,
         TabKind::SshTerminal => LucideIcon::Terminal,
@@ -17,7 +17,14 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::Ide => LucideIcon::Code2,
         TabKind::Forwards => LucideIcon::ArrowLeftRight,
         TabKind::SessionManager => LucideIcon::LayoutList,
-        TabKind::PluginManager | TabKind::Plugin { .. } => LucideIcon::Puzzle,
+        TabKind::PluginManager => LucideIcon::Puzzle,
+        TabKind::Plugin { plugin_id, tab_id } => workspace
+            .native_plugin_runtime
+            .registry
+            .contributions()
+            .tab_contribution(plugin_id, tab_id)
+            .map(|contribution| LucideIcon::from_plugin_name(&contribution.definition.icon))
+            .unwrap_or(LucideIcon::Puzzle),
         TabKind::CloudSync => LucideIcon::Cloud,
         TabKind::Settings => LucideIcon::Settings,
     }
@@ -124,7 +131,7 @@ impl WorkspaceApp {
                 .and_then(|node_id| self.reconnect_orchestrator.job(&node_id.0))
                 .filter(|job| job.ended_at.is_none());
             let show_reconnect_progress = reconnect_job.is_some();
-            let icon = tab_kind_icon(&tab.kind);
+            let icon = tab_kind_icon(self, &tab.kind);
             let tab_text = self.tab_display_title(tab);
             let tab_tooltip_label = tab_text.clone();
             let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
@@ -336,7 +343,7 @@ impl WorkspaceApp {
             .bg(rgba((accent << 8) | 0x18))
             .text_color(rgba((theme.text << 8) | 0xcc))
             .child(Self::render_lucide_icon(
-                tab_kind_icon(&tab.kind),
+                tab_kind_icon(self, &tab.kind),
                 self.tokens.metrics.tab_icon_size,
                 rgba((accent << 8) | 0xcc),
             ))
@@ -531,7 +538,7 @@ impl WorkspaceApp {
                 )
             })
             .child(Self::render_lucide_icon(
-                tab_kind_icon(&exiting.kind),
+                tab_kind_icon(self, &exiting.kind),
                 self.tokens.metrics.tab_icon_size,
                 rgb(if exiting.was_active {
                     theme.text

@@ -4,8 +4,9 @@
 use serde_json::Value;
 
 use crate::manifest::{
-    NativePluginAiToolDef, NativePluginDeclarativeUiSchema, NativePluginHostMonitorDef,
-    NativePluginSettingDef, NativePluginShortcutDef, NativePluginSidebarDef, NativePluginTabDef,
+    NativePluginActivityBarItemDef, NativePluginAiToolDef, NativePluginDeclarativeUiSchema,
+    NativePluginHostMonitorDef, NativePluginSettingDef, NativePluginShortcutDef,
+    NativePluginSidebarDef, NativePluginTabDef,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -20,6 +21,13 @@ pub struct NativePluginSidebarContribution {
     pub plugin_id: String,
     pub plugin_name: String,
     pub definition: NativePluginSidebarDef,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativePluginActivityBarItemContribution {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub definition: NativePluginActivityBarItemDef,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -151,6 +159,18 @@ pub struct NativePluginRuntimeSidebarPanelContribution {
     pub icon: String,
     pub position: String,
     pub schema: NativePluginDeclarativeUiSchema,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativePluginRuntimeActivityBarItemContribution {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub registration_id: String,
+    pub item_id: String,
+    pub title: String,
+    pub icon: String,
+    pub command: String,
+    pub position: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]

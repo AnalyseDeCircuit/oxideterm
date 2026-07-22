@@ -13,6 +13,15 @@ const NATIVE_PLUGIN_MAX_HOST_MONITOR_OUTPUT_BYTES: usize = 1024 * 1024;
 const NATIVE_PLUGIN_MAX_HOST_MONITOR_TIMEOUT_SECONDS: u64 = 30;
 const NATIVE_PLUGIN_MAX_HOST_MONITOR_ROWS: usize = 2_000;
 const NATIVE_PLUGIN_MAX_HOST_MONITOR_COLUMNS: usize = 64;
+const NATIVE_PLUGIN_MAX_ACTIVITY_BAR_ITEMS: usize = 16;
+const NATIVE_PLUGIN_DECLARATIVE_UI_COMPONENT_VERSION: u8 = 1;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_DEPTH: usize = 8;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_CONTROLS: usize = 256;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_CHILDREN: usize = 64;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_OPTIONS: usize = 128;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_ROWS: usize = 2_000;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_COLUMNS: usize = 64;
+const NATIVE_PLUGIN_MAX_DECLARATIVE_UI_BYTES: usize = 2 * 1024 * 1024;
 
 pub(crate) fn validate_native_plugin_manifest(
     manifest: &NativePluginManifest,
@@ -66,6 +75,31 @@ pub(crate) fn validate_native_plugin_contributions(
                 &panel.position,
                 &["top", "bottom"],
             )?;
+        }
+    }
+    if let Some(activity_bar_items) = &contributes.activity_bar_items {
+        if activity_bar_items.len() > NATIVE_PLUGIN_MAX_ACTIVITY_BAR_ITEMS {
+            return Err(format!(
+                "Plugin contributes at most {NATIVE_PLUGIN_MAX_ACTIVITY_BAR_ITEMS} activity-bar items"
+            ));
+        }
+        let mut item_ids = HashSet::new();
+        for item in activity_bar_items {
+            validate_manifest_text_field("contributes.activityBarItems.id", &item.id)?;
+            validate_manifest_text_field("contributes.activityBarItems.title", &item.title)?;
+            validate_manifest_text_field("contributes.activityBarItems.icon", &item.icon)?;
+            validate_manifest_text_field("contributes.activityBarItems.command", &item.command)?;
+            validate_one_of(
+                "contributes.activityBarItems.position",
+                &item.position,
+                &["top", "bottom"],
+            )?;
+            if !item_ids.insert(item.id.as_str()) {
+                return Err(format!(
+                    "Duplicate contributes.activityBarItems id \"{}\"",
+                    item.id
+                ));
+            }
         }
     }
     if let Some(settings) = &contributes.settings {
@@ -477,6 +511,17 @@ pub(crate) fn manifest_declared_sidebar_panel<'a>(
         .and_then(|panels| panels.iter().find(|panel| panel.id == panel_id))
 }
 
+pub(crate) fn manifest_declared_activity_bar_item<'a>(
+    manifest: &'a NativePluginManifest,
+    item_id: &str,
+) -> Option<&'a NativePluginActivityBarItemDef> {
+    manifest
+        .contributes
+        .as_ref()
+        .and_then(|contributes| contributes.activity_bar_items.as_ref())
+        .and_then(|items| items.iter().find(|item| item.id == item_id))
+}
+
 pub(crate) fn runtime_declarative_ui_schema(
     metadata: &Value,
 ) -> Result<NativePluginDeclarativeUiSchema, String> {
@@ -488,6 +533,19 @@ pub(crate) fn runtime_declarative_ui_schema(
 pub(crate) fn validate_native_plugin_declarative_ui_schema(
     schema: &NativePluginDeclarativeUiSchema,
 ) -> Result<(), String> {
+    let encoded_size = serde_json::to_vec(schema)
+        .map_err(|error| format!("Runtime declarative UI schema cannot be encoded: {error}"))?
+        .len();
+    if encoded_size > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_BYTES {
+        return Err(format!(
+            "Runtime declarative UI schema exceeds {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_BYTES} bytes"
+        ));
+    }
+    if schema.component_version != NATIVE_PLUGIN_DECLARATIVE_UI_COMPONENT_VERSION {
+        return Err(format!(
+            "Runtime declarative UI componentVersion must be {NATIVE_PLUGIN_DECLARATIVE_UI_COMPONENT_VERSION}"
+        ));
+    }
     validate_one_of(
         "runtime.declarativeUi.kind",
         &schema.kind,
@@ -496,17 +554,61 @@ pub(crate) fn validate_native_plugin_declarative_ui_schema(
     if schema.sections.is_empty() && schema.controls.is_empty() {
         return Err("Runtime declarative UI schema requires sections or controls".to_string());
     }
+    let mut section_ids = HashSet::new();
+    let mut control_count = 0;
     for section in &schema.sections {
         validate_manifest_text_field("runtime.declarativeUi.sections.id", &section.id)?;
-        validate_native_plugin_declarative_controls(&section.controls)?;
+        if section.id == "root" {
+            return Err(
+                "Runtime declarative UI section id \"root\" is reserved by the host".to_string(),
+            );
+        }
+        if !section_ids.insert(section.id.as_str()) {
+            return Err(format!(
+                "Duplicate runtime declarative UI section id \"{}\"",
+                section.id
+            ));
+        }
+        let mut control_ids = HashSet::new();
+        validate_native_plugin_declarative_controls(
+            &section.controls,
+            1,
+            &mut control_count,
+            &mut control_ids,
+        )?;
     }
-    validate_native_plugin_declarative_controls(&schema.controls)
+    let mut root_control_ids = HashSet::new();
+    validate_native_plugin_declarative_controls(
+        &schema.controls,
+        1,
+        &mut control_count,
+        &mut root_control_ids,
+    )
 }
 
 pub(crate) fn validate_native_plugin_declarative_controls(
     controls: &[NativePluginDeclarativeUiControl],
+    depth: usize,
+    control_count: &mut usize,
+    control_ids: &mut HashSet<String>,
 ) -> Result<(), String> {
+    if depth > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_DEPTH {
+        return Err(format!(
+            "Runtime declarative UI supports at most {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_DEPTH} nested component levels"
+        ));
+    }
+    if controls.len() > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_CHILDREN {
+        return Err(format!(
+            "Runtime declarative UI containers support at most {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_CHILDREN} direct children"
+        ));
+    }
     for control in controls {
+        *control_count += 1;
+        if *control_count > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_CONTROLS {
+            return Err(format!(
+                "Runtime declarative UI supports at most {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_CONTROLS} controls"
+            ));
+        }
         validate_one_of(
             "runtime.declarativeUi.controls.kind",
             &control.kind,
@@ -520,7 +622,19 @@ pub(crate) fn validate_native_plugin_declarative_controls(
                 control.kind
             ));
         }
+        if let Some(control_id) = control.id.as_ref()
+            && !control_ids.insert(control_id.clone())
+        {
+            return Err(format!(
+                "Duplicate runtime declarative UI control id \"{control_id}\""
+            ));
+        }
         if let Some(options) = &control.options {
+            if options.len() > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_OPTIONS {
+                return Err(format!(
+                    "Runtime declarative UI controls support at most {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_OPTIONS} options"
+                ));
+            }
             for option in options {
                 validate_manifest_text_field(
                     "runtime.declarativeUi.controls.options.label",
@@ -528,6 +642,139 @@ pub(crate) fn validate_native_plugin_declarative_controls(
                 )?;
             }
         }
+        if control
+            .rows
+            .as_ref()
+            .is_some_and(|rows| rows.len() > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_ROWS)
+        {
+            return Err(format!(
+                "Runtime declarative UI controls support at most {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_ROWS} rows"
+            ));
+        }
+        let column_count = control
+            .column_defs
+            .as_ref()
+            .map(Vec::len)
+            .or_else(|| control.columns.as_ref().map(Vec::len))
+            .unwrap_or(0);
+        if column_count > NATIVE_PLUGIN_MAX_DECLARATIVE_UI_COLUMNS {
+            return Err(format!(
+                "Runtime declarative UI tables support at most {NATIVE_PLUGIN_MAX_DECLARATIVE_UI_COLUMNS} columns"
+            ));
+        }
+        if let Some(columns) = &control.column_defs {
+            for column in columns {
+                validate_manifest_text_field(
+                    "runtime.declarativeUi.controls.columnDefs.key",
+                    &column.key,
+                )?;
+                validate_manifest_text_field(
+                    "runtime.declarativeUi.controls.columnDefs.label",
+                    &column.label,
+                )?;
+                if let Some(style) = column.style.as_deref() {
+                    validate_one_of(
+                        "runtime.declarativeUi.controls.columnDefs.style",
+                        style,
+                        &["primary", "meta", "mono"],
+                    )?;
+                }
+            }
+        }
+        validate_native_plugin_declarative_control_options(control)?;
+        if !control.children.is_empty() {
+            validate_native_plugin_declarative_controls(
+                &control.children,
+                depth.saturating_add(1),
+                control_count,
+                control_ids,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_native_plugin_declarative_control_options(
+    control: &NativePluginDeclarativeUiControl,
+) -> Result<(), String> {
+    if let (Some(min), Some(max)) = (control.min, control.max)
+        && max < min
+    {
+        return Err(
+            "Runtime declarative UI control max must be greater than or equal to min".to_string(),
+        );
+    }
+    if control.step.is_some_and(|step| step <= 0.0) {
+        return Err("Runtime declarative UI control step must be greater than zero".to_string());
+    }
+    if control.kind == "password" && control.value.as_ref().is_some_and(|value| !value.is_null()) {
+        return Err(
+            "Runtime declarative UI password controls cannot declare an initial value".to_string(),
+        );
+    }
+    if let Some(variant) = control.variant.as_deref() {
+        let allowed = match control.kind.as_str() {
+            "button" | "iconButton" | "icon-button" => &[
+                "default",
+                "secondary",
+                "outline",
+                "ghost",
+                "destructive",
+                "link",
+            ][..],
+            "card" => &["panel", "inset", "inspector"][..],
+            _ => &["default"][..],
+        };
+        validate_one_of("runtime.declarativeUi.controls.variant", variant, allowed)?;
+    }
+    if let Some(tone) = control.tone.as_deref() {
+        validate_one_of(
+            "runtime.declarativeUi.controls.tone",
+            tone,
+            &["neutral", "accent", "success", "warning", "error", "info"],
+        )?;
+    }
+    if let Some(size) = control.size.as_deref() {
+        validate_one_of(
+            "runtime.declarativeUi.controls.size",
+            size,
+            &["small", "default", "large", "icon"],
+        )?;
+    }
+    if let Some(gap) = control.gap.as_deref() {
+        validate_one_of(
+            "runtime.declarativeUi.controls.gap",
+            gap,
+            &["none", "compact", "normal", "spacious"],
+        )?;
+    }
+    if matches!(control.kind.as_str(), "iconButton" | "icon-button")
+        && control.icon.as_deref().is_none_or(str::is_empty)
+    {
+        return Err("Runtime declarative UI iconButton requires icon".to_string());
+    }
+    if matches!(control.kind.as_str(), "iconButton" | "icon-button")
+        && control.label.as_deref().is_none_or(str::is_empty)
+    {
+        return Err("Runtime declarative UI iconButton requires label for its tooltip".to_string());
+    }
+    if matches!(
+        control.kind.as_str(),
+        "select" | "radioGroup" | "radio-group" | "segmentedControl" | "segmented-control"
+    ) && control.options.as_ref().is_none_or(Vec::is_empty)
+    {
+        return Err(format!(
+            "Runtime declarative UI control kind \"{}\" requires options",
+            control.kind
+        ));
+    }
+    if !control.children.is_empty()
+        && !matches!(control.kind.as_str(), "stack" | "row" | "card" | "toolbar")
+    {
+        return Err(format!(
+            "Runtime declarative UI control kind \"{}\" cannot contain children",
+            control.kind
+        ));
     }
     Ok(())
 }
@@ -535,13 +782,30 @@ pub(crate) fn validate_native_plugin_declarative_controls(
 pub fn native_plugin_declarative_control_is_actionable(
     control: &NativePluginDeclarativeUiControl,
 ) -> bool {
-    control.kind == "button" && !control.disabled && !control.loading && control.id.is_some()
+    matches!(
+        control.kind.as_str(),
+        "button" | "iconButton" | "icon-button"
+    ) && !control.disabled
+        && !control.loading
+        && control.id.is_some()
 }
 
 pub(crate) fn native_plugin_declarative_control_requires_id(kind: &str) -> bool {
     matches!(
         kind,
-        "text" | "password" | "number" | "checkbox" | "select" | "button"
+        "text"
+            | "password"
+            | "number"
+            | "checkbox"
+            | "select"
+            | "radioGroup"
+            | "radio-group"
+            | "slider"
+            | "segmentedControl"
+            | "segmented-control"
+            | "button"
+            | "iconButton"
+            | "icon-button"
     )
 }
 

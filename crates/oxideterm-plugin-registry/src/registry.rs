@@ -325,6 +325,13 @@ impl NativePluginRegistry {
                 &plugin.manifest,
             );
         }
+        if registration.kind == PluginRegistrationKind::ActivityBarItem {
+            return self.contributions.apply_runtime_activity_bar_item(
+                registration,
+                plugin_name,
+                &plugin.manifest,
+            );
+        }
         if matches!(
             registration.kind,
             PluginRegistrationKind::TerminalInputInterceptor

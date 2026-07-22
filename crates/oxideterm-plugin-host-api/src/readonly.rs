@@ -86,10 +86,17 @@ fn native_plugin_ui_registration_preflight_response(
                 "queued": true,
             }),
         ),
-        Err(error) => plugin_runtime::PluginResponse::error(
-            request_id,
-            plugin_runtime::PluginError::protocol("invalid_declarative_ui", error),
-        ),
+        Err(error) => {
+            let error_code = if kind == plugin_runtime::PluginRegistrationKind::ActivityBarItem {
+                "invalid_ui_registration"
+            } else {
+                "invalid_declarative_ui"
+            };
+            plugin_runtime::PluginResponse::error(
+                request_id,
+                plugin_runtime::PluginError::protocol(error_code, error),
+            )
+        }
     }
 }
 
@@ -137,6 +144,11 @@ pub fn native_plugin_ui_registration_from_args(
             .ok_or_else(|| {
                 "Native plugin ui.registerSidebarPanel requires args.panelId".to_string()
             })?,
+        plugin_runtime::PluginRegistrationKind::ActivityBarItem => {
+            native_plugin_ui_activity_item_id_arg(args).ok_or_else(|| {
+                "Native plugin ui.registerActivityBarItem requires args.itemId".to_string()
+            })?
+        }
         _ => return Err("Unsupported native plugin declarative UI registration kind".to_string()),
     };
     let registration_id = args
@@ -166,6 +178,13 @@ fn native_plugin_ui_panel_id_arg(args: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+fn native_plugin_ui_activity_item_id_arg(args: &Value) -> Option<String> {
+    args.get("itemId")
+        .or_else(|| args.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 fn native_plugin_ui_registration_id(
     kind: plugin_runtime::PluginRegistrationKind,
     view_id: &str,
@@ -173,6 +192,7 @@ fn native_plugin_ui_registration_id(
     let namespace = match kind {
         plugin_runtime::PluginRegistrationKind::Tab => "tab",
         plugin_runtime::PluginRegistrationKind::SidebarPanel => "sidebar-panel",
+        plugin_runtime::PluginRegistrationKind::ActivityBarItem => "activity-bar-item",
         _ => "view",
     };
     format!("ctx.ui.{namespace}:{view_id}")
@@ -203,6 +223,14 @@ pub fn native_plugin_returnable_host_api_response(
             call,
             plugin_runtime::PluginRegistrationKind::SidebarPanel,
         )),
+        ("ui", "registerActivityBarItem") => {
+            Some(native_plugin_ui_registration_preflight_response(
+                snapshot,
+                plugin_id,
+                call,
+                plugin_runtime::PluginRegistrationKind::ActivityBarItem,
+            ))
+        }
         ("ui", "openTab") => Some(native_plugin_ui_open_tab_preflight_response(
             snapshot, plugin_id, call,
         )),
@@ -1013,6 +1041,33 @@ mod tests {
             method: method.to_string(),
             args,
         }
+    }
+
+    #[test]
+    fn activity_bar_registration_args_use_a_stable_host_owned_id() {
+        let registration = native_plugin_ui_registration_from_args(
+            "com.example.demo",
+            plugin_runtime::PluginRegistrationKind::ActivityBarItem,
+            &json!({ "itemId": "refresh" }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            registration.registration_id,
+            "ctx.ui.activity-bar-item:refresh"
+        );
+        assert_eq!(
+            registration.kind,
+            plugin_runtime::PluginRegistrationKind::ActivityBarItem
+        );
+        assert!(
+            native_plugin_ui_registration_from_args(
+                "com.example.demo",
+                plugin_runtime::PluginRegistrationKind::ActivityBarItem,
+                &Value::Null,
+            )
+            .is_err()
+        );
     }
 
     #[test]

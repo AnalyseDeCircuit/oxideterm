@@ -68,6 +68,7 @@ pub(super) enum WorkspaceImeTarget {
     AiInlinePrompt,
     AiChatInput,
     AiMessageEdit,
+    PluginControl(u64),
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
@@ -144,6 +145,7 @@ impl WorkspaceImeTarget {
             Self::AiInlinePrompt => 1_896,
             Self::AiChatInput => 1_897,
             Self::AiMessageEdit => 1_898,
+            Self::PluginControl(id) => id.wrapping_add(10_000),
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
@@ -658,6 +660,12 @@ impl WorkspaceApp {
             && self.ai.chat.editing_message_focused
         {
             return Some(WorkspaceImeTarget::AiMessageEdit);
+        }
+
+        if let Some(key) = self.native_plugin_ui.focused_input
+            && self.native_plugin_ui_control_is_visible(key)
+        {
+            return Some(WorkspaceImeTarget::PluginControl(key));
         }
 
         if self.terminal_command_bar_focused && self.active_tab().is_some_and(is_terminal_tab) {
@@ -1297,6 +1305,8 @@ impl WorkspaceApp {
             ) | WorkspaceImeTarget::KeyboardInteractive(_)
         ) || matches!(target, WorkspaceImeTarget::Settings(input) if input.is_secret())
             || matches!(target, WorkspaceImeTarget::SessionManager(input) if input.is_secret())
+            || matches!(target, WorkspaceImeTarget::PluginControl(key)
+                if self.native_plugin_ui.context(key).is_some_and(|context| context.control_kind == "password"))
     }
 
     fn text_for_ime_target(&self, target: WorkspaceImeTarget) -> Option<String> {
@@ -1467,6 +1477,10 @@ impl WorkspaceApp {
                 .chat
                 .editing_message_focused
                 .then(|| self.ai.chat.editing_message_draft.clone()),
+            WorkspaceImeTarget::PluginControl(key) => self
+                .native_plugin_ui_control_is_visible(key)
+                .then(|| self.native_plugin_ui.text(key).map(str::to_string))
+                .flatten(),
             WorkspaceImeTarget::Sftp(input) => {
                 if self.sftp_view.focused_input == Some(input) {
                     Some(self.sftp_input_value(input).to_string())
@@ -2394,6 +2408,18 @@ impl WorkspaceApp {
                         text,
                     );
                     self.new_connection_caret_visible = true;
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::PluginControl(key) => {
+                if self.native_plugin_ui.focused_input == Some(key)
+                    && self.native_plugin_ui_control_is_visible(key)
+                {
+                    if let Some(value) = self.native_plugin_ui.text_mut(key) {
+                        replace_utf16(value, replacement_range, text);
+                    }
+                    self.new_connection_caret_visible = true;
+                    self.dispatch_native_plugin_ui_input_event(key, cx);
                     cx.notify();
                 }
             }

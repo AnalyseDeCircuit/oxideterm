@@ -85,6 +85,8 @@ pub struct NativePluginContributes {
     #[serde(default)]
     pub sidebar_panels: Option<Vec<NativePluginSidebarDef>>,
     #[serde(default)]
+    pub activity_bar_items: Option<Vec<NativePluginActivityBarItemDef>>,
+    #[serde(default)]
     pub settings: Option<Vec<NativePluginSettingDef>>,
     #[serde(default)]
     pub terminal_hooks: Option<NativePluginTerminalHooksDef>,
@@ -98,6 +100,17 @@ pub struct NativePluginContributes {
     pub api_commands: Option<Vec<String>>,
     #[serde(default)]
     pub host_monitors: Option<Vec<NativePluginHostMonitorDef>>,
+}
+
+/// Declares one activity-bar action that dispatches a plugin runtime command.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct NativePluginActivityBarItemDef {
+    pub id: String,
+    pub title: String,
+    pub icon: String,
+    pub command: String,
+    #[serde(default = "default_activity_bar_position")]
+    pub position: String,
 }
 
 /// Declares one bounded Host Tools sampler backed by a static per-platform command.
@@ -204,6 +217,8 @@ pub struct NativePluginShortcutDef {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginDeclarativeUiSchema {
+    #[serde(default = "default_declarative_ui_component_version")]
+    pub component_version: u8,
     #[serde(default = "default_declarative_ui_kind")]
     pub kind: String,
     #[serde(default)]
@@ -239,6 +254,18 @@ pub struct NativePluginDeclarativeUiControl {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub placeholder: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub tone: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub gap: Option<String>,
+    #[serde(default)]
     pub value: Option<Value>,
     #[serde(default)]
     pub text: Option<String>,
@@ -251,6 +278,20 @@ pub struct NativePluginDeclarativeUiControl {
     #[serde(default)]
     pub columns: Option<Vec<String>>,
     #[serde(default)]
+    pub column_defs: Option<Vec<NativePluginDeclarativeUiColumn>>,
+    #[serde(default)]
+    pub children: Vec<NativePluginDeclarativeUiControl>,
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    #[serde(default)]
+    pub step: Option<f64>,
+    #[serde(default)]
+    pub indeterminate: bool,
+    #[serde(default)]
+    pub strong: bool,
+    #[serde(default)]
     pub disabled: bool,
     #[serde(default)]
     pub loading: bool,
@@ -261,6 +302,16 @@ pub struct NativePluginDeclarativeUiControl {
 pub struct NativePluginDeclarativeUiOption {
     pub label: String,
     pub value: Value,
+}
+
+/// Describes one host-rendered table column without exposing layout code.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginDeclarativeUiColumn {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub style: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -283,8 +334,16 @@ fn default_sidebar_position() -> String {
     "bottom".to_string()
 }
 
+fn default_activity_bar_position() -> String {
+    "top".to_string()
+}
+
 fn default_declarative_ui_kind() -> String {
     NATIVE_PLUGIN_DECLARATIVE_UI_FORM_KIND.to_string()
+}
+
+fn default_declarative_ui_component_version() -> u8 {
+    1
 }
 
 fn default_host_monitor_timeout_seconds() -> u64 {

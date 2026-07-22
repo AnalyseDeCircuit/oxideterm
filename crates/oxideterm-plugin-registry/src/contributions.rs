@@ -9,6 +9,7 @@ use super::*;
 pub struct NativePluginContributionStore {
     pub tabs: Vec<NativePluginTabContribution>,
     pub sidebar_panels: Vec<NativePluginSidebarContribution>,
+    pub activity_bar_items: Vec<NativePluginActivityBarItemContribution>,
     pub settings: Vec<NativePluginSettingContribution>,
     pub ai_tools: Vec<NativePluginAiToolContribution>,
     pub terminal_shortcuts: Vec<NativePluginShortcutContribution>,
@@ -22,6 +23,7 @@ pub struct NativePluginContributionStore {
     pub runtime_status_items: Vec<NativePluginRuntimeStatusItemContribution>,
     pub runtime_tab_views: Vec<NativePluginRuntimeTabViewContribution>,
     pub runtime_sidebar_panels: Vec<NativePluginRuntimeSidebarPanelContribution>,
+    pub runtime_activity_bar_items: Vec<NativePluginRuntimeActivityBarItemContribution>,
     pub runtime_event_subscriptions: Vec<NativePluginRuntimeEventSubscriptionContribution>,
     pub runtime_terminal_input_interceptors: Vec<NativePluginRuntimeTerminalHookContribution>,
     pub runtime_terminal_output_processors: Vec<NativePluginRuntimeTerminalHookContribution>,
@@ -61,6 +63,16 @@ impl NativePluginContributionStore {
             self.sidebar_panels
                 .extend(sidebar_panels.iter().cloned().map(|definition| {
                     NativePluginSidebarContribution {
+                        plugin_id: plugin_id.clone(),
+                        plugin_name: plugin_name.clone(),
+                        definition,
+                    }
+                }));
+        }
+        if let Some(activity_bar_items) = &contributes.activity_bar_items {
+            self.activity_bar_items
+                .extend(activity_bar_items.iter().cloned().map(|definition| {
+                    NativePluginActivityBarItemContribution {
                         plugin_id: plugin_id.clone(),
                         plugin_name: plugin_name.clone(),
                         definition,
@@ -145,6 +157,7 @@ impl NativePluginContributionStore {
     pub fn total_count(&self) -> usize {
         self.tabs.len()
             + self.sidebar_panels.len()
+            + self.activity_bar_items.len()
             + self.settings.len()
             + self.ai_tools.len()
             + self.terminal_shortcuts.len()
@@ -158,6 +171,7 @@ impl NativePluginContributionStore {
             + self.runtime_status_items.len()
             + self.runtime_tab_views.len()
             + self.runtime_sidebar_panels.len()
+            + self.runtime_activity_bar_items.len()
             + self.runtime_event_subscriptions.len()
             + self.runtime_terminal_input_interceptors.len()
             + self.runtime_terminal_output_processors.len()
@@ -277,6 +291,19 @@ impl NativePluginContributionStore {
         panels
     }
 
+    pub fn runtime_activity_bar_items(
+        &self,
+    ) -> Vec<NativePluginRuntimeActivityBarItemContribution> {
+        let mut items = self.runtime_activity_bar_items.clone();
+        items.sort_by(|left, right| {
+            native_plugin_sidebar_position_sort_key(&left.position)
+                .cmp(&native_plugin_sidebar_position_sort_key(&right.position))
+                .then_with(|| left.title.cmp(&right.title))
+                .then_with(|| left.item_id.cmp(&right.item_id))
+        });
+        items
+    }
+
     pub(crate) fn apply_runtime_tab_view(
         &mut self,
         registration: PluginRegistration,
@@ -345,6 +372,50 @@ impl NativePluginContributionStore {
                 icon: panel_def.icon.clone(),
                 position: panel_def.position.clone(),
                 schema,
+            });
+        Ok(())
+    }
+
+    pub(crate) fn apply_runtime_activity_bar_item(
+        &mut self,
+        registration: PluginRegistration,
+        plugin_name: String,
+        manifest: &NativePluginManifest,
+    ) -> Result<(), String> {
+        validate_manifest_text_field(
+            "runtime.activityBarItem.registrationId",
+            &registration.registration_id,
+        )?;
+        let item_id = runtime_metadata_string(&registration.metadata, "itemId")
+            .or_else(|| runtime_metadata_string(&registration.metadata, "id"))
+            .ok_or_else(|| {
+                "Runtime activity-bar item registration requires metadata.itemId".to_string()
+            })?;
+        validate_manifest_text_field("runtime.activityBarItem.itemId", &item_id)?;
+        let item_def = manifest_declared_activity_bar_item(manifest, &item_id).ok_or_else(|| {
+            format!(
+                "Activity-bar item \"{item_id}\" not declared in manifest contributes.activityBarItems"
+            )
+        })?;
+
+        // Runtime registration activates only a manifest-declared command and
+        // cannot replace its title, icon, placement, or command authority.
+        self.dispose_runtime_registration(&registration.plugin_id, &registration.registration_id);
+        // One manifest item owns at most one visible activity button even when
+        // a runtime retries registration with a different registration id.
+        self.runtime_activity_bar_items.retain(|entry| {
+            !(entry.plugin_id == registration.plugin_id && entry.item_id == item_id)
+        });
+        self.runtime_activity_bar_items
+            .push(NativePluginRuntimeActivityBarItemContribution {
+                plugin_id: registration.plugin_id,
+                plugin_name,
+                registration_id: registration.registration_id,
+                item_id,
+                title: item_def.title.clone(),
+                icon: item_def.icon.clone(),
+                command: item_def.command.clone(),
+                position: item_def.position.clone(),
             });
         Ok(())
     }
@@ -567,7 +638,9 @@ impl NativePluginContributionStore {
                             .and_then(serde_json::Value::as_i64),
                     });
             }
-            PluginRegistrationKind::Tab | PluginRegistrationKind::SidebarPanel => {
+            PluginRegistrationKind::Tab
+            | PluginRegistrationKind::SidebarPanel
+            | PluginRegistrationKind::ActivityBarItem => {
                 return Err(format!(
                     "Runtime registration kind {:?} must be validated against manifest declarations",
                     registration.kind
@@ -613,6 +686,7 @@ impl NativePluginContributionStore {
             + self.runtime_status_items.len()
             + self.runtime_tab_views.len()
             + self.runtime_sidebar_panels.len()
+            + self.runtime_activity_bar_items.len()
             + self.runtime_event_subscriptions.len()
             + self.runtime_terminal_input_interceptors.len()
             + self.runtime_terminal_output_processors.len();
@@ -634,6 +708,9 @@ impl NativePluginContributionStore {
         self.runtime_sidebar_panels.retain(|entry| {
             !(entry.plugin_id == plugin_id && entry.registration_id == registration_id)
         });
+        self.runtime_activity_bar_items.retain(|entry| {
+            !(entry.plugin_id == plugin_id && entry.registration_id == registration_id)
+        });
         self.runtime_event_subscriptions.retain(|entry| {
             !(entry.plugin_id == plugin_id && entry.registration_id == registration_id)
         });
@@ -649,6 +726,7 @@ impl NativePluginContributionStore {
             + self.runtime_status_items.len()
             + self.runtime_tab_views.len()
             + self.runtime_sidebar_panels.len()
+            + self.runtime_activity_bar_items.len()
             + self.runtime_event_subscriptions.len()
             + self.runtime_terminal_input_interceptors.len()
             + self.runtime_terminal_output_processors.len();
@@ -663,6 +741,7 @@ impl NativePluginContributionStore {
             + self.runtime_status_items.len()
             + self.runtime_tab_views.len()
             + self.runtime_sidebar_panels.len()
+            + self.runtime_activity_bar_items.len()
             + self.runtime_event_subscriptions.len()
             + self.runtime_terminal_input_interceptors.len()
             + self.runtime_terminal_output_processors.len();
@@ -678,6 +757,8 @@ impl NativePluginContributionStore {
             .retain(|entry| entry.plugin_id != plugin_id);
         self.runtime_sidebar_panels
             .retain(|entry| entry.plugin_id != plugin_id);
+        self.runtime_activity_bar_items
+            .retain(|entry| entry.plugin_id != plugin_id);
         self.runtime_event_subscriptions
             .retain(|entry| entry.plugin_id != plugin_id);
         self.runtime_terminal_input_interceptors
@@ -690,6 +771,7 @@ impl NativePluginContributionStore {
             + self.runtime_status_items.len()
             + self.runtime_tab_views.len()
             + self.runtime_sidebar_panels.len()
+            + self.runtime_activity_bar_items.len()
             + self.runtime_event_subscriptions.len()
             + self.runtime_terminal_input_interceptors.len()
             + self.runtime_terminal_output_processors.len();

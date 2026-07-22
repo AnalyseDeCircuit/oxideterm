@@ -263,6 +263,8 @@ This example demonstrates the important contract:
 - Runtime UI is not React. It is a declarative schema registered through a `sidebar-panel` or `tab` contribution.
 - A returnable host call is sent as an outbound `callHostApi` frame; the host writes the response back on stdin.
 
+For a complete repository example that registers both a tab and a left activity-bar panel, discovers an active node, and runs a manifest-declared custom Host Tools monitor, see [Host Tools Dashboard](../../../examples/plugins/host-tools-dashboard/README.md).
+
 ## Runtime Conversation
 
 The process runtime has one line-oriented conversation.
@@ -305,7 +307,8 @@ Activation request from host to plugin. The `manifest` and `allowedHostApis` val
           "app.getVersion",
           "connections.getSummaries",
           "settings.get",
-          "ui.registerSidebarPanel"
+          "ui.registerSidebarPanel",
+          "ui.registerActivityBarItem"
         ]
       }
     },
@@ -485,6 +488,7 @@ Register a tab view:
     "metadata": {
       "tabId": "hello-tab",
       "schema": {
+        "componentVersion": 1,
         "kind": "form",
         "title": "Hello",
         "controls": [
@@ -575,6 +579,13 @@ If UI does not appear:
 - `registration.pluginId` must match the manifest `id`.
 - `metadata.schema.kind` should be `form`.
 - Interactive controls such as `button`, `text`, `password`, `number`, `checkbox`, and `select` need stable `id` values.
+
+If a standalone activity-bar action does not appear or run:
+
+- `contributes.activityBarItems` must declare the item id, title, icon, command, and placement.
+- Runtime registration must use `kind: "activity-bar-item"` with the same `itemId`.
+- The plugin must request `ui.write` and handle the declared `dispatchCommand` value.
+- Runtime metadata cannot override the manifest-declared icon or command.
 
 If a Host API call fails:
 
@@ -709,6 +720,9 @@ A process plugin is an executable inside the plugin directory. The host starts i
     "sidebarPanels": [
       { "id": "dashboard-panel", "title": "Dashboard", "icon": "Activity", "position": "bottom" }
     ],
+    "activityBarItems": [
+      { "id": "refresh", "title": "Refresh Dashboard", "icon": "RefreshCw", "command": "dashboard.refresh", "position": "top" }
+    ],
     "terminalHooks": {
       "shortcuts": [
         { "key": "Ctrl+Shift+D", "command": "dashboard.refresh" }
@@ -815,6 +829,7 @@ Common registration kinds:
 | `status-bar` | Add a host-owned status item |
 | `tab` | Register declarative UI for a declared tab |
 | `sidebar-panel` | Register declarative UI for a declared panel |
+| `activity-bar-item` | Register a standalone left activity-bar action declared by the manifest |
 | `event-subscription` | Subscribe to host events |
 | `terminal-input-interceptor` | Transform or suppress terminal input |
 | `terminal-output-processor` | Process terminal output before parser input |
@@ -825,7 +840,11 @@ A registration must use the same plugin id as the plugin that emitted it. Dispos
 
 ## Declarative Native UI
 
-Native plugins render UI by registering schemas, not components.
+Native plugins select OxideTerm components through a versioned schema. The
+plugin supplies data and receives events; the host supplies the real shared
+components, theme tokens, density, typography, focus, IME behavior,
+accessibility semantics, and responsive layout. Plugin runtimes never receive
+raw GPUI objects and cannot inject HTML, CSS, closures, or drawing code.
 
 ```json
 {
@@ -840,6 +859,7 @@ Native plugins render UI by registering schemas, not components.
       "metadata": {
         "tabId": "dashboard",
         "schema": {
+          "componentVersion": 1,
           "kind": "form",
           "title": "Dashboard",
           "sections": [
@@ -865,18 +885,51 @@ Supported control kinds:
 
 | Kind | Notes |
 |---|---|
-| `text`, `password`, `number`, `checkbox`, `select` | Field controls; require `id` |
-| `button` | Actionable only when it has `id` and is not disabled/loading |
-| `markdown` | Host-rendered text block |
+| `stack`, `row`, `card`, `toolbar` | Layout components; render nested `children` using bounded host layouts |
+| `text`, `password`, `number`, `checkbox`, `select` | Shared field controls; require stable `id` values |
+| `radioGroup`, `radio-group`, `segmentedControl`, `segmented-control`, `slider` | Shared choice/range controls; require stable `id` values |
+| `button`, `iconButton`, `icon-button` | Shared actions; actionable only with `id` and while enabled/not loading; icon buttons also require `icon` and `label` |
+| `alert` | Semantic host notice with `tone`, optional icon, title, and description |
+| `markdown` | Parsed using OxideTerm's Markdown renderer; background images and local-file links are disabled |
 | `code`, `codeBlock`, `code-block` | Code block |
-| `statusBadge`, `status-badge` | Status indicator |
-| `progress` | Progress display |
-| `table`, `list` | Structured data display |
-| `emptyState`, `empty-state` | Empty state |
-| `divider` | Visual separator |
+| `statusBadge`, `status-badge`, `badge` | Shared status pill with semantic tone/strength |
+| `progress` | Shared progress display; values may be `0..1` or `0..100` |
+| `table`, `list` | Bounded, virtualized shared data components |
+| `emptyState`, `empty-state` | Shared empty state with optional icon/description |
+| `divider` | Shared separator |
 | `keyValue`, `key-value`, `keyValueRow`, `key-value-row` | Key/value row |
 
-Button clicks are delivered as plugin UI events. The host owns focus, layout, accessibility, theme, and control rendering.
+Component events are delivered only to the plugin that owns the surface:
+
+```json
+{
+  "name": "ui.event",
+  "payload": {
+    "type": "change",
+    "componentKind": "select",
+    "surfaceKind": "tab",
+    "surfaceId": "dashboard",
+    "sectionId": "overview",
+    "controlId": "environment",
+    "value": "production"
+  }
+}
+```
+
+Buttons emit `click`, text fields emit `input`, and choice/range controls emit
+`change`. Password drafts are zeroized by the host. Without an explicitly
+approved `credentials.raw.read` capability, password events contain only
+`{ "present": boolean, "redacted": true }`; raw text is sent only to the
+owning plugin after that sensitive-content approval. Password controls cannot
+declare an initial `value`, so a credential is never retained in a registered
+schema.
+
+For safety and predictable performance, component version 1 accepts at most 8
+nested levels, 256 controls, 64 children per container, 128 options per choice,
+2,000 rows per data control, and 64 table columns. Control IDs must be unique
+within their root or section, and `root` is reserved as a section ID. Unknown
+versions, variants, tones, sizes, gaps, or child placements are rejected during
+registration. The complete encoded schema is limited to 2 MiB.
 
 ## Host API Calls
 
@@ -1093,6 +1146,7 @@ interface NativePluginRuntime {
 interface NativePluginContributes {
   tabs?: NativePluginTabDef[];
   sidebarPanels?: NativePluginSidebarDef[];
+  activityBarItems?: NativePluginActivityBarItemDef[];
   settings?: NativePluginSettingDef[];
   terminalHooks?: NativePluginTerminalHooksDef;
   terminalTransports?: string[];
@@ -1129,6 +1183,14 @@ interface NativePluginSidebarDef {
   position?: 'top' | 'bottom';
 }
 
+interface NativePluginActivityBarItemDef {
+  id: string;
+  title: string;
+  icon: string;
+  command: string;
+  position?: 'top' | 'bottom';
+}
+
 interface NativePluginSettingDef {
   id: string;
   type: 'string' | 'number' | 'boolean' | 'select';
@@ -1158,6 +1220,8 @@ interface NativePluginAiToolDef {
 Validation rules:
 
 - `id`, `name`, `version`, contribution ids, titles, and icons must be non-empty text.
+- Activity-bar item commands must be non-empty, item ids must be unique within the plugin, and `position` accepts only `top` or `bottom`.
+- Tab, sidebar-panel, and activity-bar-item icons resolve against OxideTerm's bundled Lucide icons. Matching ignores ASCII case, hyphens, and underscores; unsupported names fall back to `Puzzle`.
 - Relative paths must stay inside the plugin directory.
 - `terminalTransports` currently accepts `telnet`.
 - `apiCommands` entries are compatibility-adapter commands such as `get_app_version` or `plugin_http_request`; direct host APIs are not listed there.
@@ -1234,6 +1298,7 @@ interface PluginRegistration {
     | 'status-bar'
     | 'tab'
     | 'sidebar-panel'
+    | 'activity-bar-item'
     | 'terminal-input-interceptor'
     | 'terminal-output-processor'
     | 'terminal-shortcut'
@@ -1253,6 +1318,7 @@ interface PluginRegistration {
 | `status-bar` | `text` | `alignment`, `icon`, `tooltip` |
 | `tab` | `tabId`, `schema` | `title` in schema |
 | `sidebar-panel` | `panelId`, `schema` | `position`, `title` in schema |
+| `activity-bar-item` | `itemId` | none; title, icon, position, and command come from the manifest |
 | `event-subscription` | `event` or `namespace` + `method` | `nodeId` filter for some event families |
 | `terminal-input-interceptor` | `command` or `id` | none |
 | `terminal-output-processor` | `command` or `id` | none |
@@ -1263,6 +1329,7 @@ interface PluginRegistration {
 
 ```ts
 interface NativePluginDeclarativeUiSchema {
+  componentVersion?: 1;
   kind?: 'form';
   title?: string;
   description?: string;
@@ -1284,13 +1351,26 @@ interface NativePluginDeclarativeUiControl {
     | 'number'
     | 'checkbox'
     | 'select'
+    | 'radioGroup'
+    | 'radio-group'
+    | 'slider'
+    | 'segmentedControl'
+    | 'segmented-control'
     | 'button'
+    | 'iconButton'
+    | 'icon-button'
+    | 'stack'
+    | 'row'
+    | 'card'
+    | 'toolbar'
+    | 'alert'
     | 'markdown'
     | 'code'
     | 'codeBlock'
     | 'code-block'
     | 'statusBadge'
     | 'status-badge'
+    | 'badge'
     | 'progress'
     | 'table'
     | 'list'
@@ -1304,18 +1384,35 @@ interface NativePluginDeclarativeUiControl {
   id?: string;
   label?: string;
   description?: string;
+  placeholder?: string;
+  icon?: string;
+  variant?: 'default' | 'secondary' | 'outline' | 'ghost' | 'destructive' | 'link' | 'panel' | 'inset' | 'inspector';
+  tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'error' | 'info';
+  size?: 'small' | 'default' | 'large' | 'icon';
+  gap?: 'none' | 'compact' | 'normal' | 'spacious';
   value?: unknown;
   text?: string;
   language?: string;
   options?: Array<{ label: string; value: unknown }>;
   rows?: unknown[];
   columns?: string[];
+  columnDefs?: Array<{ key: string; label: string; style?: 'primary' | 'meta' | 'mono' }>;
+  children?: NativePluginDeclarativeUiControl[];
+  min?: number;
+  max?: number;
+  step?: number;
+  indeterminate?: boolean;
+  strong?: boolean;
   disabled?: boolean;
   loading?: boolean;
 }
 ```
 
-Controls `text`, `password`, `number`, `checkbox`, `select`, and `button` require `id`. A button is actionable only when it has `id`, `disabled` is false, and `loading` is false.
+Interactive controls require a stable `id`: `text`, `password`, `number`,
+`checkbox`, `select`, radio groups, segmented controls, sliders, buttons, and
+icon buttons. Buttons are actionable only while `disabled` and `loading` are
+both false. `componentVersion` defaults to `1` for compatibility, but plugins
+should declare it explicitly so future component changes can be negotiated.
 
 ## Host API Reference
 
@@ -1386,6 +1483,7 @@ Calls must be allowed by `allowedHostApis`. Exact names and namespace wildcards 
 | `ui.getLayout` | `{}` | Layout snapshot |
 | `ui.registerTabView` | `{ tabId: string, schema: NativePluginDeclarativeUiSchema }` | Declarative tab registration result |
 | `ui.registerSidebarPanel` | `{ panelId: string, schema: NativePluginDeclarativeUiSchema }` | Declarative sidebar registration result |
+| `ui.registerActivityBarItem` | `{ itemId: string }` | Standalone activity-bar action registration result |
 | `ui.openTab` | `{ tabId: string }` | Opens/focuses declared plugin tab |
 | `ui.showToast` | `{ title?: string, description?: string, variant?: string }` | One-way toast effect |
 | `ui.showNotification` | `{ title?: string, body?: string, severity?: string }` | One-way notification effect |
@@ -1650,6 +1748,8 @@ If a process plugin activates but no UI appears, verify both sides:
 - The schema `kind` is `form`.
 - The schema contains at least one section or top-level control.
 - Required controls have `id`.
+
+For a standalone activity-bar action, verify `contributes.activityBarItems`, the runtime `itemId`, the `ui.write` capability, and the plugin's `dispatchCommand` handler instead of looking for a declarative UI schema.
 
 ## Migration Notes
 
