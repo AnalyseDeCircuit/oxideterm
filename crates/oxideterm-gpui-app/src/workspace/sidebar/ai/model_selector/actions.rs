@@ -1,4 +1,192 @@
 impl WorkspaceApp {
+    pub(in crate::workspace) fn ai_acp_model_options_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> Option<Vec<oxideterm_ai::AcpSessionConfigOption>> {
+        if let Some(state) = self.active_ai_acp_session_state(agent_id)
+            && oxideterm_ai::acp_model_config_option(&state.config_options)
+                .is_some_and(|option| !option.choices.is_empty())
+        {
+            return Some(state.config_options);
+        }
+        let conversation_id = self
+            .ai
+            .chat
+            .conversation_state
+            .active_conversation()
+            .map(|conversation| conversation.id.as_str())?;
+        self.ai
+            .models
+            .acp_model_options
+            .get(&(conversation_id.to_string(), agent_id.to_string()))
+            .cloned()
+    }
+
+    pub(in crate::workspace) fn ai_acp_model_discovery_is_pending(
+        &self,
+        agent_id: &str,
+    ) -> bool {
+        let Some(conversation_id) = self
+            .ai
+            .chat
+            .conversation_state
+            .active_conversation()
+            .map(|conversation| conversation.id.as_str())
+        else {
+            return false;
+        };
+        self.ai
+            .models
+            .acp_model_discovery_pending
+            .contains(&(conversation_id.to_string(), agent_id.to_string()))
+    }
+
+    pub(in crate::workspace) fn schedule_ai_acp_model_discovery(
+        &mut self,
+        agent_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ai_acp_model_options_for_agent(&agent_id).is_some() {
+            return;
+        }
+        let Some(conversation_id) = self
+            .ai
+            .chat
+            .conversation_state
+            .active_conversation()
+            .map(|conversation| conversation.id.clone())
+        else {
+            return;
+        };
+        let discovery_key = (conversation_id.clone(), agent_id.clone());
+        if self
+            .ai
+            .models
+            .acp_model_discovery_pending
+            .contains(&discovery_key)
+        {
+            return;
+        }
+        let Some(agent) = self
+            .settings_store
+            .settings()
+            .ai
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id && agent.enabled)
+            .cloned()
+        else {
+            return;
+        };
+        // Only the native Codex adapter promises model metadata during session/new.
+        // Other ACP agents keep their existing first-prompt or explicit-model behavior.
+        if !oxideterm_ai::acp_model_report_is_available_during_session_start(&agent.args) {
+            return;
+        }
+        if self.ai.models.acp_model_discovery_tx.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.ai.models.acp_model_discovery_tx = Some(tx);
+            self.ai.models.acp_model_discovery_rx = Some(rx);
+        }
+        let Some(ui_tx) = self.ai.models.acp_model_discovery_tx.as_ref().cloned() else {
+            return;
+        };
+        self.ai
+            .models
+            .acp_model_discovery_pending
+            .insert(discovery_key);
+        let launch_config = acp_launch_config_from_agent(&agent);
+        let capability_policy = acp_host_capability_policy_from_agent(&agent);
+        let session_cwd = acp_session_cwd_from_agent(&agent);
+        self.forwarding_runtime.spawn(async move {
+            let config_options = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
+                Ok(launcher) => oxideterm_ai::discover_acp_session_config_options(
+                    launcher,
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    capability_policy,
+                    session_cwd,
+                )
+                .await
+                .ok()
+                .filter(|options| {
+                    oxideterm_ai::acp_model_config_option(options)
+                        .is_some_and(|option| !option.choices.is_empty())
+                }),
+                Err(_) => None,
+            };
+            let _ = ui_tx.send(AcpModelDiscoveryDelivery {
+                conversation_id,
+                agent_id,
+                config_options,
+            });
+        });
+        self.schedule_ai_acp_model_discovery_poll(cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn poll_ai_acp_model_discovery_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(rx) = self.ai.models.acp_model_discovery_rx.take() else {
+            return;
+        };
+        let mut keep_rx = true;
+        loop {
+            match rx.try_recv() {
+                Ok(delivery) => {
+                    let key = (delivery.conversation_id.clone(), delivery.agent_id);
+                    self.ai.models.acp_model_discovery_pending.remove(&key);
+                    if let Some(options) = delivery.config_options
+                        && self
+                            .ai
+                            .chat
+                            .conversation_state
+                            .conversations
+                            .iter()
+                            .any(|conversation| conversation.id == delivery.conversation_id)
+                    {
+                        self.ai.models.acp_model_options.insert(key, options);
+                    }
+                    cx.notify();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    keep_rx = false;
+                    self.ai.models.acp_model_discovery_tx = None;
+                    self.ai.models.acp_model_discovery_pending.clear();
+                    break;
+                }
+            }
+        }
+        if keep_rx && !self.ai.models.acp_model_discovery_pending.is_empty() {
+            self.ai.models.acp_model_discovery_rx = Some(rx);
+        } else if self.ai.models.acp_model_discovery_pending.is_empty() {
+            self.ai.models.acp_model_discovery_tx = None;
+        }
+    }
+
+    pub(in crate::workspace) fn schedule_ai_acp_model_discovery_poll(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ai.models.acp_model_discovery_polling {
+            return;
+        }
+        self.ai.models.acp_model_discovery_polling = true;
+        cx.spawn(async move |weak, cx| {
+            Timer::after(Duration::from_millis(50)).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.ai.models.acp_model_discovery_polling = false;
+                this.poll_ai_acp_model_discovery_results(cx);
+                if !this.ai.models.acp_model_discovery_pending.is_empty() {
+                    this.schedule_ai_acp_model_discovery_poll(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(in crate::workspace) fn ensure_ai_model_selector_mount_statuses(
         &mut self,
         cx: &mut Context<Self>,
@@ -27,14 +215,20 @@ impl WorkspaceApp {
         self.ai.models.selector_scope = next_open.then_some(scope);
         if self.ai.models.selector_open {
             let providers = self.ai_model_selector_providers();
+            let mut active_acp_agent_id = None;
             if let Some(provider) = active_provider_view(
                 &providers,
                 self.ai_active_model_selector_provider_id().as_deref(),
             ) {
+                active_acp_agent_id =
+                    Self::ai_acp_agent_id_from_provider_id(&provider.id).map(str::to_string);
                 self.ai
                     .models
                     .selector_expanded_providers
                     .insert(provider.id.clone());
+            }
+            if let Some(agent_id) = active_acp_agent_id {
+                self.schedule_ai_acp_model_discovery(agent_id, cx);
             }
             self.ai.models.selector_search_focused = true;
             self.ai.models.selector_highlighted_model = None;
@@ -375,9 +569,9 @@ window.focus(&self.focus_handle, cx);
             Self::ai_acp_agent_id_from_provider_id(&provider_id).map(str::to_string)
         {
             let session_model_selection = self
-                .active_ai_acp_session_state(&agent_id)
-                .and_then(|state| {
-                    let option = oxideterm_ai::acp_model_config_option(&state.config_options)?;
+                .ai_acp_model_options_for_agent(&agent_id)
+                .and_then(|options| {
+                    let option = oxideterm_ai::acp_model_config_option(&options)?;
                     let choice = option.choices.iter().find(|choice| choice.label == model)?;
                     Some((option.config_id.clone(), choice.value_id.clone()))
                 });
@@ -451,12 +645,10 @@ window.focus(&self.focus_handle, cx);
         agent: &AcpAgentConfig,
     ) -> AiProviderView {
         let label = Self::ai_acp_agent_label(agent);
-        let agent_decides = self.i18n.t("ai.model_selector.agent_decides");
+        let fallback_model = self.ai_acp_agent_model_fallback_label(&agent.id);
         let models = self
-            .active_ai_acp_session_state(&agent.id)
-            .and_then(|state| {
-                oxideterm_ai::acp_model_config_option(&state.config_options).cloned()
-            })
+            .ai_acp_model_options_for_agent(&agent.id)
+            .and_then(|options| oxideterm_ai::acp_model_config_option(&options).cloned())
             .map(|option| {
                 option
                     .choices
@@ -465,13 +657,13 @@ window.focus(&self.focus_handle, cx);
                     .collect::<Vec<_>>()
             })
             .filter(|models| !models.is_empty())
-            .unwrap_or_else(|| vec![agent_decides.clone()]);
+            .unwrap_or_else(|| vec![fallback_model.clone()]);
         AiProviderView {
             id: Self::ai_acp_provider_id(&agent.id),
             provider_type: "acp".to_string(),
             name: format!("{label} (ACP)"),
             base_url: String::new(),
-            default_model: agent_decides,
+            default_model: fallback_model,
             models,
             enabled: agent.enabled,
             custom: false,
@@ -496,6 +688,38 @@ window.focus(&self.focus_handle, cx);
         }
     }
 
+    /// Reports explicit launch configuration without inventing unavailable ACP metadata.
+    pub(in crate::workspace) fn ai_acp_agent_model_fallback_label(
+        &self,
+        agent_id: &str,
+    ) -> String {
+        let agent = self
+            .settings_store
+            .settings()
+            .ai
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id);
+        let explicit_model = agent
+            .and_then(|agent| oxideterm_ai::acp_launch_model_hint(&agent.args))
+            .and_then(|hint| match hint {
+                oxideterm_ai::AcpLaunchModelHint::Fixed(model) => Some(model),
+                oxideterm_ai::AcpLaunchModelHint::Automatic => None,
+            });
+        explicit_model.unwrap_or_else(|| {
+            if self.ai_acp_model_discovery_is_pending(agent_id) {
+                self.i18n.t("ai.model_selector.agent_model_loading")
+            } else if agent.is_some_and(|agent| {
+                oxideterm_ai::acp_model_report_is_deferred_until_first_prompt(&agent.args)
+            }) {
+                self.i18n
+                    .t("ai.model_selector.agent_model_after_first_message")
+            } else {
+                self.i18n.t("ai.model_selector.agent_model_unavailable")
+            }
+        })
+    }
+
     pub(in crate::workspace) fn ai_acp_provider_ready(&self, provider_id: &str) -> bool {
         let Some(agent_id) = Self::ai_acp_agent_id_from_provider_id(provider_id) else {
             return false;
@@ -516,44 +740,20 @@ window.focus(&self.focus_handle, cx);
         value_id: String,
         cx: &mut Context<Self>,
     ) {
+        let Some(discovered_options) = self.ai_acp_model_options_for_agent(&agent_id) else {
+            return;
+        };
         let Some(conversation) = self.ai.chat.conversation_state.active_conversation_mut() else {
             return;
         };
-        let Some(mut state) = ai_acp_session_state(conversation)
-            .filter(|state| state.agent_id == agent_id && !state.session_id.is_empty())
-        else {
+        if !store_ai_acp_model_selection_in_conversation(
+            conversation,
+            &agent_id,
+            discovered_options,
+            &config_id,
+            &value_id,
+        ) {
             return;
-        };
-        let Some(option) = state
-            .config_options
-            .iter_mut()
-            .find(|option| option.config_id == config_id)
-        else {
-            return;
-        };
-        if !option
-            .choices
-            .iter()
-            .any(|choice| choice.value_id == value_id)
-        {
-            return;
-        }
-
-        // Keep the desired value with this ACP session and replay it after resume.
-        option.current_value_id = value_id.clone();
-        state.model_selection = Some(oxideterm_ai::AcpSessionConfigSelection {
-            config_id,
-            value_id,
-        });
-        let Some(metadata) = conversation
-            .session_metadata
-            .as_mut()
-            .and_then(serde_json::Value::as_object_mut)
-        else {
-            return;
-        };
-        if let Ok(value) = serde_json::to_value(state) {
-            metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
         }
         self.edit_settings(
             move |settings| {
@@ -594,6 +794,61 @@ window.focus(&self.focus_handle, cx);
     }
 }
 
+pub(in crate::workspace) fn store_ai_acp_model_selection_in_conversation(
+    conversation: &mut AiConversation,
+    agent_id: &str,
+    discovered_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+    config_id: &str,
+    value_id: &str,
+) -> bool {
+    let mut state = ai_acp_session_state(conversation)
+        .filter(|state| state.agent_id == agent_id)
+        .unwrap_or_else(|| AiAcpSessionState {
+            agent_id: agent_id.to_string(),
+            session_id: String::new(),
+            metadata: None,
+            config_options: discovered_options,
+            model_selection: None,
+        });
+    let Some(option) = state
+        .config_options
+        .iter_mut()
+        .find(|option| option.config_id == config_id)
+    else {
+        return false;
+    };
+    if !option
+        .choices
+        .iter()
+        .any(|choice| choice.value_id == value_id)
+    {
+        return false;
+    }
+
+    // An empty session id marks a pre-prompt choice. The prompt path creates a
+    // real session and applies this value before sending the user's message.
+    option.current_value_id = value_id.to_string();
+    state.model_selection = Some(oxideterm_ai::AcpSessionConfigSelection {
+        config_id: config_id.to_string(),
+        value_id: value_id.to_string(),
+    });
+    let conversation_id = conversation.id.clone();
+    let metadata = conversation.session_metadata.get_or_insert_with(|| {
+        serde_json::json!({
+            "conversationId": conversation_id,
+            "origin": "sidebar",
+        })
+    });
+    let Some(metadata) = metadata.as_object_mut() else {
+        return false;
+    };
+    let Ok(value) = serde_json::to_value(state) else {
+        return false;
+    };
+    metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
+    true
+}
+
 pub(in crate::workspace) struct AiModelSelectorProbeDelivery {
     pub(in crate::workspace) provider_id: String,
     pub(in crate::workspace) generation: u64,
@@ -612,6 +867,64 @@ pub(in crate::workspace) fn ai_model_selector_status_signature(
         provider.base_url.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+#[cfg(test)]
+mod acp_model_selection_tests {
+    use super::*;
+
+    #[test]
+    fn discovered_model_choice_is_stored_for_the_next_real_session() {
+        let mut conversation = AiConversation {
+            id: "conversation-1".to_string(),
+            title: "Conversation".to_string(),
+            messages: Vec::new(),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            origin: "sidebar".to_string(),
+            profile_id: None,
+            message_count: 0,
+            session_id: None,
+            session_metadata: None,
+            messages_loaded: true,
+        };
+        let options = vec![oxideterm_ai::AcpSessionConfigOption {
+            config_id: "model".to_string(),
+            name: "Model".to_string(),
+            category: Some("model".to_string()),
+            current_value_id: "gpt-5.6-sol".to_string(),
+            choices: vec![
+                oxideterm_ai::AcpSessionConfigChoice {
+                    value_id: "gpt-5.6-sol".to_string(),
+                    label: "gpt-5.6-sol".to_string(),
+                },
+                oxideterm_ai::AcpSessionConfigChoice {
+                    value_id: "gpt-5.6-terra".to_string(),
+                    label: "gpt-5.6-terra".to_string(),
+                },
+            ],
+        }];
+
+        assert!(store_ai_acp_model_selection_in_conversation(
+            &mut conversation,
+            "codex",
+            options,
+            "model",
+            "gpt-5.6-terra",
+        ));
+
+        let state = ai_acp_session_state(&conversation).expect("stored ACP model state");
+        assert_eq!(state.agent_id, "codex");
+        assert!(state.session_id.is_empty());
+        assert_eq!(
+            state.model_selection,
+            Some(oxideterm_ai::AcpSessionConfigSelection {
+                config_id: "model".to_string(),
+                value_id: "gpt-5.6-terra".to_string(),
+            })
+        );
+        assert_eq!(state.config_options[0].current_value_id, "gpt-5.6-terra");
+    }
 }
 
 #[cfg(test)]

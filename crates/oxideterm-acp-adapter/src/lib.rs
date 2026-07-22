@@ -15,13 +15,14 @@ use agent_client_protocol::{
     Agent, Client, ConnectionTo, Dispatch, Stdio,
     schema::{
         AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-        ContentBlock, ContentChunk, DeleteSessionRequest, DeleteSessionResponse, Implementation,
-        InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse,
-        PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse, ProtocolVersion,
-        RequestPermissionOutcome, RequestPermissionRequest, SessionConfigOption,
-        SessionConfigOptionCategory, SessionConfigSelectOption, SessionId, SessionNotification,
-        SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason,
-        ToolCall, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        ConfigOptionUpdate, ContentBlock, ContentChunk, DeleteSessionRequest,
+        DeleteSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+        NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
+        PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
+        RequestPermissionRequest, SessionConfigOption, SessionConfigOptionCategory,
+        SessionConfigSelectOption, SessionId, SessionNotification, SessionUpdate,
+        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, ToolCall,
+        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     },
 };
 use clap::{Parser, ValueEnum};
@@ -76,6 +77,8 @@ struct SessionState {
     codex_thread_id: Option<String>,
     models: Vec<AdapterModel>,
     selected_model: Option<String>,
+    observed_model: Option<String>,
+    accepts_unlisted_models: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,6 +103,7 @@ struct ProviderOutcome {
     stop_reason: StopReason,
     claude_session_id: Option<String>,
     codex_thread_id: Option<String>,
+    resolved_model: Option<String>,
 }
 
 #[derive(Clone)]
@@ -172,15 +176,11 @@ async fn run_adapter(cli: Cli) -> agent_client_protocol::Result<()> {
                         Uuid::new_v4()
                     ));
                     let catalog = if config.provider == AdapterProvider::Codex {
-                        // Discovery failure must not prevent the agent from choosing its default.
-                        timeout(
-                            Duration::from_secs(5),
-                            discover_codex_models(&config, &request.cwd),
-                        )
-                        .await
-                        .ok()
-                        .and_then(Result::ok)
-                        .unwrap_or_default()
+                        // Discovery owns staged timeouts so a slow optional model listing cannot
+                        // discard a current model already returned by Codex configuration.
+                        discover_codex_models(&config, &request.cwd)
+                            .await
+                            .unwrap_or_default()
                     } else {
                         CodexModelCatalog::default()
                     };
@@ -191,6 +191,8 @@ async fn run_adapter(cli: Cli) -> agent_client_protocol::Result<()> {
                         codex_thread_id: None,
                         models: catalog.models,
                         selected_model: catalog.selected_model,
+                        observed_model: None,
+                        accepts_unlisted_models: config.provider == AdapterProvider::ClaudeCode,
                     };
                     let config_options = session_config_options(&state);
                     sessions
@@ -338,6 +340,7 @@ fn session_config_options(state: &SessionState) -> Vec<SessionConfigOption> {
     let Some(selected_model) = state
         .selected_model
         .as_deref()
+        .or(state.observed_model.as_deref())
         .filter(|selected| state.models.iter().any(|model| model.id == *selected))
     else {
         return Vec::new();
@@ -361,6 +364,21 @@ fn session_config_options(state: &SessionState) -> Vec<SessionConfigOption> {
     ]
 }
 
+fn observed_model_config_options(model: &str) -> Vec<SessionConfigOption> {
+    vec![
+        SessionConfigOption::select(
+            ACP_MODEL_CONFIG_ID,
+            "Model",
+            model.to_string(),
+            vec![
+                SessionConfigSelectOption::new(model.to_string(), model.to_string())
+                    .description("Model reported by the agent for the current session."),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Model),
+    ]
+}
+
 fn set_session_config_option(
     sessions: &Sessions,
     request: SetSessionConfigOptionRequest,
@@ -376,9 +394,17 @@ fn set_session_config_option(
         .ok_or_else(|| agent_client_protocol::util::internal_error("ACP session was not found"))?;
     let value_id = request.value.to_string();
     if !session.models.iter().any(|model| model.id == value_id) {
-        return Err(agent_client_protocol::util::internal_error(
-            "ACP session config value was not found",
-        ));
+        if !session.accepts_unlisted_models {
+            return Err(agent_client_protocol::util::internal_error(
+                "ACP session config value was not found",
+            ));
+        }
+        // Claude Code cannot enumerate models, but it can pin a model observed from system/init.
+        session.models.push(AdapterModel {
+            id: value_id.clone(),
+            name: value_id.clone(),
+            description: Some("Model reported by Claude Code.".to_string()),
+        });
     }
     session.selected_model = Some(value_id);
     Ok(SetSessionConfigOptionResponse::new(session_config_options(
@@ -437,6 +463,25 @@ async fn handle_prompt(
             .get_mut(&request.session_id)
     {
         session.claude_session_id = Some(claude_session_id);
+    }
+    if let Some(resolved_model) = outcome.resolved_model.clone()
+        && let Some(session) = sessions
+            .lock()
+            .expect("session registry lock")
+            .get_mut(&request.session_id)
+    {
+        if !session
+            .models
+            .iter()
+            .any(|model| model.id == resolved_model)
+        {
+            session.models.push(AdapterModel {
+                id: resolved_model.clone(),
+                name: resolved_model.clone(),
+                description: Some("Model reported by Claude Code.".to_string()),
+            });
+        }
+        session.observed_model = Some(resolved_model);
     }
     Ok(PromptResponse::new(outcome.stop_reason))
 }
@@ -545,6 +590,8 @@ mod tests {
                     },
                 ],
                 selected_model: Some("model-a".to_string()),
+                observed_model: None,
+                accepts_unlisted_models: false,
             },
         );
 
@@ -573,6 +620,44 @@ mod tests {
                 ),
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn claude_session_can_pin_a_model_previously_reported_at_runtime() {
+        let session_id = SessionId::new("claude-session");
+        let sessions = Sessions::default();
+        sessions.lock().expect("session registry lock").insert(
+            session_id.clone(),
+            SessionState {
+                cwd: PathBuf::from("/workspace"),
+                claude_session_id: None,
+                codex_thread_id: None,
+                models: Vec::new(),
+                selected_model: None,
+                observed_model: None,
+                accepts_unlisted_models: true,
+            },
+        );
+
+        let response = set_session_config_option(
+            &sessions,
+            SetSessionConfigOptionRequest::new(
+                session_id.clone(),
+                ACP_MODEL_CONFIG_ID,
+                "claude-sonnet-4-6",
+            ),
+        )
+        .expect("observed Claude model selection");
+
+        assert_eq!(response.config_options.len(), 1);
+        assert_eq!(
+            sessions
+                .lock()
+                .expect("session registry lock")
+                .get(&session_id)
+                .and_then(|state| state.selected_model.as_deref()),
+            Some("claude-sonnet-4-6")
         );
     }
 }

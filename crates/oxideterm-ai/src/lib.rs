@@ -24,16 +24,19 @@ mod types;
 
 pub use acp::{
     AcpAgentRuntime, AcpClientEvent, AcpClientEventSender, AcpHostCapabilityPolicy,
-    AcpLaunchConfig, AcpLaunchConfigError, AcpPermissionOptionProjection,
+    AcpLaunchConfig, AcpLaunchConfigError, AcpLaunchModelHint, AcpPermissionOptionProjection,
     AcpPermissionRequestProjection, AcpPromptSessionOutcome, AcpRegisteredRuntimeHandle,
     AcpRuntimeHandleKey, AcpRuntimeRegistry, AcpSessionConfigChoice, AcpSessionConfigOption,
     AcpSessionConfigSelection, AcpStdioLauncher, AcpTerminalRegistry,
-    acp_client_event_to_ai_stream_events, acp_launch_command_available, acp_method_not_found,
-    acp_model_config_option, acp_permission_cancelled_response, acp_permission_request_projection,
-    acp_permission_response_for_decision, acp_selected_config_choice, acp_session_config_options,
+    acp_client_event_to_ai_stream_events, acp_launch_command_available, acp_launch_model_hint,
+    acp_method_not_found, acp_model_config_option,
+    acp_model_report_is_available_during_session_start,
+    acp_model_report_is_deferred_until_first_prompt, acp_permission_cancelled_response,
+    acp_permission_request_projection, acp_permission_response_for_decision,
+    acp_selected_config_choice, acp_session_config_options,
     acp_session_notification_to_ai_stream_events, build_acp_initialize_request,
-    build_acp_stdio_launcher, build_sdk_acp_agent, initialize_acp_agent,
-    resolve_acp_read_text_file_request, resolve_acp_write_text_file_request,
+    build_acp_stdio_launcher, build_sdk_acp_agent, discover_acp_session_config_options,
+    initialize_acp_agent, resolve_acp_read_text_file_request, resolve_acp_write_text_file_request,
     run_acp_prompt_session_events, with_acp_agent_runtime, with_acp_agent_runtime_events,
 };
 pub use chat::{apply_chat_request_overrides, generate_chat_title};

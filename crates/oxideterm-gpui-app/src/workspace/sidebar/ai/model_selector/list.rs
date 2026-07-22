@@ -96,7 +96,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if !this
+                    let expanded = if !this
                         .ai
                         .models
                         .selector_expanded_providers
@@ -106,6 +106,15 @@ impl WorkspaceApp {
                             .models
                             .selector_expanded_providers
                             .insert(provider_id.clone());
+                        true
+                    } else {
+                        false
+                    };
+                    if expanded
+                        && let Some(agent_id) =
+                            Self::ai_acp_agent_id_from_provider_id(&provider_id)
+                    {
+                        this.schedule_ai_acp_model_discovery(agent_id.to_string(), cx);
                     }
                     // Collapsing/expanding changes which model rows are
                     // focusable, so clear the active item like Radix does when

@@ -5,6 +5,9 @@
 
 use super::*;
 
+const CODEX_DISCOVERY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const CODEX_MODEL_LIST_RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
+
 pub(super) async fn discover_codex_models(
     config: &AdapterConfig,
     cwd: &PathBuf,
@@ -46,19 +49,25 @@ pub(super) async fn discover_codex_models(
             }),
         )
         .await?;
-    wait_for_discovery_response(&mut client, initialize_id).await?;
+    wait_for_discovery_response(&mut client, initialize_id, CODEX_DISCOVERY_RESPONSE_TIMEOUT)
+        .await?;
     client.send_notification("initialized", json!({})).await?;
 
     let config_id = client
         .send_request("config/read", json!({ "cwd": cwd, "includeLayers": false }))
         .await?;
-    let config_response = wait_for_discovery_response(&mut client, config_id).await?;
-    let configured_model = config_response
-        .get("config")
-        .and_then(|config| config.get("model"))
-        .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .map(str::to_string);
+    let configured_model =
+        wait_for_discovery_response(&mut client, config_id, CODEX_DISCOVERY_RESPONSE_TIMEOUT)
+            .await
+            .ok()
+            .and_then(|config_response| {
+                config_response
+                    .get("config")
+                    .and_then(|config| config.get("model"))
+                    .and_then(Value::as_str)
+                    .filter(|model| !model.trim().is_empty())
+                    .map(str::to_string)
+            });
 
     let mut model_values = Vec::new();
     let mut next_cursor = None;
@@ -66,7 +75,20 @@ pub(super) async fn discover_codex_models(
         let list_id = client
             .send_request("model/list", json!({ "cursor": next_cursor, "limit": 100 }))
             .await?;
-        let response = wait_for_discovery_response(&mut client, list_id).await?;
+        let response = match wait_for_discovery_response(
+            &mut client,
+            list_id,
+            CODEX_MODEL_LIST_RESPONSE_TIMEOUT,
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(_) => {
+                // The optional catalog can be slow or unavailable while config/read still
+                // provides a usable current model, so retain that verified fallback.
+                break;
+            }
+        };
         if let Some(models) = response.get("data").and_then(Value::as_array) {
             model_values.extend(models.iter().cloned());
         }
@@ -87,6 +109,23 @@ pub(super) async fn discover_codex_models(
 }
 
 async fn wait_for_discovery_response(
+    client: &mut CodexAppServerClient,
+    expected_id: u64,
+    response_timeout: Duration,
+) -> Result<Value, agent_client_protocol::Error> {
+    timeout(
+        response_timeout,
+        wait_for_discovery_response_inner(client, expected_id),
+    )
+    .await
+    .map_err(|_| {
+        agent_client_protocol::util::internal_error(
+            "codex app-server timed out during model discovery",
+        )
+    })?
+}
+
+async fn wait_for_discovery_response_inner(
     client: &mut CodexAppServerClient,
     expected_id: u64,
 ) -> Result<Value, agent_client_protocol::Error> {
@@ -402,6 +441,7 @@ async fn run_codex_app_server_turn(
         } else {
             None
         },
+        resolved_model: None,
     })
 }
 
@@ -888,6 +928,21 @@ mod tests {
                 .models
                 .iter()
                 .any(|model| model.id == "hidden-model")
+        );
+    }
+
+    #[test]
+    fn model_catalog_keeps_configured_model_when_listing_is_unavailable() {
+        let catalog = codex_model_catalog(&[], Some("gpt-5.6-sol"));
+
+        assert_eq!(catalog.selected_model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(
+            catalog.models,
+            vec![AdapterModel {
+                id: "gpt-5.6-sol".to_string(),
+                name: "gpt-5.6-sol".to_string(),
+                description: None,
+            }]
         );
     }
 

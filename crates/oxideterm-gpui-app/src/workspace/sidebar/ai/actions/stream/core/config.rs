@@ -76,7 +76,7 @@ impl WorkspaceApp {
                     )
                     .map(|choice| choice.label.clone())
                 })
-                .unwrap_or_else(|| self.i18n.t("ai.model_selector.agent_decides"));
+                .unwrap_or_else(|| self.ai_acp_agent_model_fallback_label(&acp_agent_id));
             return Ok(AiChatStreamConfig {
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,

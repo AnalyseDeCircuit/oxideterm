@@ -1075,6 +1075,292 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
     );
 }
 
+const ACP_VISIBLE_TERMINAL_TOOL_NAMES: &[&str] = &[
+    "list_targets",
+    "run_command",
+    "observe_terminal",
+    "send_terminal_input",
+];
+
+fn acp_visible_terminal_tool_definitions(
+    tool_use_enabled: bool,
+) -> Vec<oxideterm_acp_host_tools::AcpHostToolDefinition> {
+    if !tool_use_enabled {
+        return Vec::new();
+    }
+    oxideterm_ai::orchestrator_tool_definitions()
+        .into_iter()
+        .filter(|definition| {
+            ACP_VISIBLE_TERMINAL_TOOL_NAMES.contains(&definition.name.as_str())
+        })
+        .map(|definition| {
+            oxideterm_acp_host_tools::AcpHostToolDefinition::new(
+                definition.name,
+                definition.description,
+                definition.parameters,
+            )
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_acp_visible_terminal_tool_on_ui(
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    tool_call_id: String,
+    tool_name: String,
+    args: serde_json::Value,
+) -> AiExecutedToolResult {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    if send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::ToolExecutionRequested {
+            tool_call_id: tool_call_id.clone(),
+            name: tool_name.clone(),
+            args,
+            sender,
+        },
+    )
+    .is_err()
+    {
+        return rejected_ai_tool_result(
+            tool_call_id,
+            tool_name,
+            "ui_delivery_failed",
+            "The native UI executor is no longer available.",
+        );
+    }
+    receiver.await.unwrap_or_else(|_| {
+        rejected_ai_tool_result(
+            tool_call_id,
+            tool_name,
+            "ui_executor_cancelled",
+            "The native UI executor cancelled the tool call.",
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_acp_visible_terminal_tool_call(
+    call: oxideterm_acp_host_tools::AcpHostToolCall,
+    config: &AiChatStreamConfig,
+    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+) {
+    // Persist and display only a redacted projection while retaining raw arguments for execution.
+    let arguments = serde_json::to_string(&call.arguments)
+        .map(|arguments| oxideterm_ai::sanitize_for_ai(&arguments))
+        .unwrap_or_else(|_| "{}".to_string());
+    let status_call = AiToolCall {
+        id: call.id.clone(),
+        name: call.name.clone(),
+        arguments,
+    };
+    let decision = resolve_ai_policy_decision(
+        &call.name,
+        Some(&call.arguments),
+        &config.tool_policy,
+        config.safety_mode,
+        config.profile_id.clone(),
+    );
+    let risk = ai_policy_risk_label(decision.risk).to_string();
+    let policy_summary = decision.reason_code.clone();
+    let mut execution_args = call.arguments.clone();
+    let mut executed_after_policy = false;
+
+    let mut executed = match decision.decision {
+        oxideterm_ai::AiPolicyDecisionKind::Deny => {
+            send_ai_tool_status(
+                ui_tx,
+                generation,
+                conversation_id,
+                assistant_id,
+                &status_call,
+                "rejected",
+                None,
+                Some(risk.clone()),
+                Some(policy_summary.clone()),
+            )
+            .ok();
+            pre_execution_rejected_ai_tool_result(
+                call.id.clone(),
+                call.name.clone(),
+                "tool_disabled",
+                decision.reason_code.clone(),
+            )
+        }
+        oxideterm_ai::AiPolicyDecisionKind::RequireApproval => {
+            let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
+            let delivered = send_ai_stream_delivery(
+                ui_tx,
+                generation,
+                conversation_id,
+                assistant_id,
+                AiStreamDeliveryEvent::ToolApprovalRequested {
+                    tool_call_id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: status_call.arguments.clone(),
+                    risk: risk.clone(),
+                    summary: policy_summary.clone(),
+                    sender: approval_tx,
+                },
+            )
+            .is_ok();
+            let approved = delivered && approval_rx.await.unwrap_or(false);
+            if !approved {
+                send_ai_tool_status(
+                    ui_tx,
+                    generation,
+                    conversation_id,
+                    assistant_id,
+                    &status_call,
+                    "rejected",
+                    None,
+                    Some(risk.clone()),
+                    Some("Rejected by user.".to_string()),
+                )
+                .ok();
+                pre_execution_rejected_ai_tool_result(
+                    call.id.clone(),
+                    call.name.clone(),
+                    "user_rejected",
+                    "Tool call rejected by user.",
+                )
+            } else {
+                send_ai_tool_status(
+                    ui_tx,
+                    generation,
+                    conversation_id,
+                    assistant_id,
+                    &status_call,
+                    "approved",
+                    None,
+                    Some(risk.clone()),
+                    Some("Approved by user.".to_string()),
+                )
+                .ok();
+                send_ai_tool_status(
+                    ui_tx,
+                    generation,
+                    conversation_id,
+                    assistant_id,
+                    &status_call,
+                    "running",
+                    None,
+                    Some(risk.clone()),
+                    Some("Approved by user.".to_string()),
+                )
+                .ok();
+                if call.name == "run_command"
+                    && decision.risk == oxideterm_ai::AiActionRisk::Destructive
+                    && let Some(object) = execution_args.as_object_mut()
+                {
+                    // Preserve the executor's second approval bit after the user approves.
+                    object.insert(
+                        "dangerousCommandApproved".to_string(),
+                        serde_json::json!(true),
+                    );
+                }
+                executed_after_policy = true;
+                execute_acp_visible_terminal_tool_on_ui(
+                    ui_tx,
+                    generation,
+                    conversation_id,
+                    assistant_id,
+                    call.id.clone(),
+                    call.name.clone(),
+                    execution_args.clone(),
+                )
+                .await
+            }
+        }
+        oxideterm_ai::AiPolicyDecisionKind::Allow => {
+            send_ai_tool_status(
+                ui_tx,
+                generation,
+                conversation_id,
+                assistant_id,
+                &status_call,
+                "approved",
+                None,
+                Some(risk.clone()),
+                Some(policy_summary.clone()),
+            )
+            .ok();
+            send_ai_tool_status(
+                ui_tx,
+                generation,
+                conversation_id,
+                assistant_id,
+                &status_call,
+                "running",
+                None,
+                Some(risk.clone()),
+                Some(policy_summary.clone()),
+            )
+            .ok();
+            if call.name == "run_command"
+                && decision.risk == oxideterm_ai::AiActionRisk::Destructive
+                && let Some(object) = execution_args.as_object_mut()
+            {
+                // Bypass mode still requires the executor's explicit approval marker.
+                object.insert(
+                    "dangerousCommandApproved".to_string(),
+                    serde_json::json!(true),
+                );
+            }
+            executed_after_policy = true;
+            execute_acp_visible_terminal_tool_on_ui(
+                ui_tx,
+                generation,
+                conversation_id,
+                assistant_id,
+                call.id.clone(),
+                call.name.clone(),
+                execution_args.clone(),
+            )
+            .await
+        }
+    };
+
+    if executed_after_policy {
+        if call.name == "run_command" {
+            annotate_ai_run_command_execution_result(&mut executed, &execution_args);
+        }
+        annotate_executed_ai_tool_result_policy(&mut executed, &decision);
+    }
+    send_ai_tool_status(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        &status_call,
+        if executed.success { "completed" } else { "error" },
+        Some(executed.envelope.clone()),
+        Some(risk),
+        Some(executed_summary(&executed)),
+    )
+    .ok();
+
+    // MCP responses bypass provider-message sanitation, so redact at this boundary.
+    let model_content = serde_json::to_string(&executed.envelope)
+        .map(|content| oxideterm_ai::sanitize_for_ai(&content))
+        .unwrap_or_else(|_| "OxideTerm could not serialize the tool result.".to_string());
+    let response = if executed.success {
+        oxideterm_acp_host_tools::AcpHostToolResponse::success(model_content)
+    } else {
+        oxideterm_acp_host_tools::AcpHostToolResponse::error(model_content)
+    };
+    let _ = call.respond(response);
+}
+
 pub(in crate::workspace) async fn run_acp_chat_loop(
     config: AiChatStreamConfig,
     history: Vec<AiChatMessage>,
@@ -1152,14 +1438,50 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
             return;
         }
     };
-    let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
-        agent
-            .cwd
-            .as_deref()
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-    });
+    let session_cwd = acp_session_cwd_from_agent(&agent);
     let host_policy = acp_host_capability_policy_from_agent(&agent);
+    let mut acp_mcp_servers = Vec::new();
+    let mut host_tools_server = None;
+    let mut host_tools_relay = None;
+    let host_tool_definitions =
+        acp_visible_terminal_tool_definitions(config.tool_policy.enabled && host_policy.terminal);
+    if !host_tool_definitions.is_empty() {
+        let (server, mut call_rx) =
+            match oxideterm_acp_host_tools::start_acp_host_tools_server(host_tool_definitions).await {
+                Ok(started) => started,
+                Err(error) => {
+                    let _ = send_ai_stream_delivery(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(format!(
+                            "Failed to start ACP host tools bridge: {error}"
+                        ))),
+                    );
+                    return;
+                }
+            };
+        acp_mcp_servers.push(server.mcp_server());
+        let tool_config = config.clone();
+        let tool_ui_tx = ui_tx.clone();
+        let tool_conversation_id = conversation_id.clone();
+        let tool_assistant_id = assistant_id.clone();
+        host_tools_relay = Some(tokio::spawn(async move {
+            while let Some(call) = call_rx.recv().await {
+                handle_acp_visible_terminal_tool_call(
+                    call,
+                    &tool_config,
+                    &tool_ui_tx,
+                    generation,
+                    &tool_conversation_id,
+                    &tool_assistant_id,
+                )
+                .await;
+            }
+        }));
+        host_tools_server = Some(server);
+    }
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let bridge_ui_tx = ui_tx.clone();
     let bridge_conversation_id = conversation_id.clone();
@@ -1290,6 +1612,7 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
         session_cwd,
         config.acp_session_id.clone(),
         config.acp_config_selection.clone(),
+        acp_mcp_servers,
         prompt,
         event_tx,
         snapshot.ai_acp_runtime_registry.clone(),
@@ -1298,6 +1621,14 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
     )
     .await;
     let _ = bridge.await;
+    if let Some(server) = host_tools_server {
+        server.shutdown().await;
+    }
+    if let Some(relay) = host_tools_relay {
+        // The ACP turn owns the relay; cancel any orphaned approval wait after the agent exits.
+        relay.abort();
+        let _ = relay.await;
+    }
     match result {
         Ok(outcome) => {
             // Persist the ACP session identity before the final Done event so a
@@ -1382,6 +1713,19 @@ pub(in crate::workspace) fn acp_host_capability_policy_from_agent(
         fs_write_text_file: agent.capability_policy.fs_write_text_file,
         terminal: agent.capability_policy.terminal,
     }
+}
+
+/// Resolves the same local ACP session directory for prompts and pre-prompt discovery.
+pub(in crate::workspace) fn acp_session_cwd_from_agent(
+    agent: &oxideterm_settings::AcpAgentConfig,
+) -> std::path::PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| {
+        agent
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    })
 }
 
 pub(in crate::workspace) fn flush_ai_required_tool_buffer(

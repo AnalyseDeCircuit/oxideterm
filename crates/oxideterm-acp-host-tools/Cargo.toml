@@ -1,0 +1,24 @@
+[package]
+name = "oxideterm-acp-host-tools"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+agent-client-protocol.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true

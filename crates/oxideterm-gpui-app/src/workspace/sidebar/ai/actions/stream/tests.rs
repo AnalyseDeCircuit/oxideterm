@@ -1,6 +1,21 @@
 #[cfg(test)]
 mod ai_turn_order_tests {
-    use super::*;
+use super::*;
+
+#[test]
+fn acp_bridge_exposes_only_visible_terminal_tools() {
+    let names = acp_visible_terminal_tool_definitions(true)
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    let expected = ACP_VISIBLE_TERMINAL_TOOL_NAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, expected);
+    assert!(acp_visible_terminal_tool_definitions(false).is_empty());
+}
 
     fn assistant_message() -> AiChatMessage {
         AiChatMessage {

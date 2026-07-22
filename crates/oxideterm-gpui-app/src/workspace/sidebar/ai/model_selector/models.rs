@@ -132,29 +132,34 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let mut panel = ai_model_selector_models_panel(&self.tokens);
         let session_state = self.active_ai_acp_session_state(&agent_id);
-        let model_option = session_state
+        let config_options = self.ai_acp_model_options_for_agent(&agent_id);
+        let model_option = config_options
             .as_ref()
-            .and_then(|state| oxideterm_ai::acp_model_config_option(&state.config_options));
+            .and_then(|options| oxideterm_ai::acp_model_config_option(options));
         let Some(option) = model_option.filter(|option| !option.choices.is_empty()) else {
             let provider_id = Self::ai_acp_provider_id(&agent_id);
-            let label = self.i18n.t("ai.model_selector.agent_decides");
+            let label = self.ai_acp_agent_model_fallback_label(&agent_id);
             let active = self.ai_active_model_selector_provider_id().as_deref()
                 == Some(provider_id.as_str());
+            let row = ai_model_selector_model_row(
+                &self.tokens,
+                label.clone(),
+                active,
+                false,
+                active.then(|| {
+                    Self::render_lucide_icon(
+                        LucideIcon::Check,
+                        12.0,
+                        rgb(self.tokens.ui.accent),
+                    )
+                }),
+            );
+            if self.ai_acp_model_discovery_is_pending(&agent_id) {
+                return panel.child(row.opacity(0.7)).into_any_element();
+            }
             return panel
                 .child(
-                    ai_model_selector_model_row(
-                        &self.tokens,
-                        label.clone(),
-                        active,
-                        false,
-                        active.then(|| {
-                            Self::render_lucide_icon(
-                                LucideIcon::Check,
-                                12.0,
-                                rgb(self.tokens.ui.accent),
-                            )
-                        }),
-                    )
+                    row
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {

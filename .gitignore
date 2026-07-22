@@ -29,6 +29,7 @@ __pycache__/
 .env.local
 /docs/local
 /docs/tauri
+/docs/NodeSeek/
 .codex-private/
 .deps
 AGENTS.md

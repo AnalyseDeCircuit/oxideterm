@@ -20,6 +20,7 @@ fs2.workspace = true
 gpui.workspace = true
 image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
+oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-acp-adapter = { path = "../oxideterm-acp-adapter" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }

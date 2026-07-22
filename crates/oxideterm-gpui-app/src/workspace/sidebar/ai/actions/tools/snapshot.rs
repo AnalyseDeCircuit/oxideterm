@@ -635,8 +635,10 @@ impl WorkspaceApp {
     ) -> AiExecutedToolResult {
         let started = std::time::Instant::now();
         let result = match tool_name.as_str() {
+            "list_targets" => self.ai_orchestrator_snapshot(cx).list_targets(&args),
             "connect_target" => self.execute_ai_connect_target(&args, window, cx),
             "run_command" => self.execute_ai_terminal_run_command(&args, window, cx),
+            "observe_terminal" => self.ai_orchestrator_snapshot(cx).observe_terminal(&args),
             "send_terminal_input" => self.execute_ai_send_terminal_input(&args, window, cx),
             "write_resource" => self.execute_ai_write_settings_resource(&args, window, cx),
             "open_app_surface" => self.execute_ai_open_app_surface(&args, window, cx),

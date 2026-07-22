@@ -151,6 +151,12 @@ pub struct AcpSessionConfigSelection {
     pub value_id: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AcpLaunchModelHint {
+    Automatic,
+    Fixed(String),
+}
+
 /// Projects protocol configuration into stable, serializable application state.
 pub fn acp_session_config_options(options: &[SessionConfigOption]) -> Vec<AcpSessionConfigOption> {
     options
@@ -199,9 +205,49 @@ pub fn acp_session_config_options(options: &[SessionConfigOption]) -> Vec<AcpSes
 pub fn acp_model_config_option(
     options: &[AcpSessionConfigOption],
 ) -> Option<&AcpSessionConfigOption> {
-    options
-        .iter()
-        .find(|option| option.category.as_deref() == Some("model"))
+    options.iter().find(|option| {
+        option.category.as_deref() == Some("model")
+            || (option.category.is_none()
+                && (option.config_id.eq_ignore_ascii_case("model")
+                    || option.name.eq_ignore_ascii_case("model")))
+    })
+}
+
+/// Reads an explicit model flag without assuming that an ACP agent exposes model metadata.
+pub fn acp_launch_model_hint(args: &[String]) -> Option<AcpLaunchModelHint> {
+    let mut args = args.iter();
+    while let Some(argument) = args.next() {
+        let value = if argument == "--model" {
+            args.next().map(String::as_str)
+        } else {
+            argument.strip_prefix("--model=")
+        };
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        return Some(if value.eq_ignore_ascii_case("auto") {
+            AcpLaunchModelHint::Automatic
+        } else {
+            AcpLaunchModelHint::Fixed(value.to_string())
+        });
+    }
+    None
+}
+
+/// Detects OxideTerm's native Claude Code adapter, which learns the resolved model from the
+/// first prompt's stream instead of during ACP session creation.
+pub fn acp_model_report_is_deferred_until_first_prompt(args: &[String]) -> bool {
+    args.windows(2).any(|arguments| {
+        arguments[0] == "--acp-adapter" && arguments[1].eq_ignore_ascii_case("claude-code")
+    })
+}
+
+/// Detects OxideTerm's native Codex adapter, which publishes its model choices during
+/// ACP session creation without requiring a user prompt.
+pub fn acp_model_report_is_available_during_session_start(args: &[String]) -> bool {
+    args.windows(2).any(|arguments| {
+        arguments[0] == "--acp-adapter" && arguments[1].eq_ignore_ascii_case("codex")
+    })
 }
 
 /// Resolves a stored choice only while it remains valid in the latest snapshot.
@@ -1040,6 +1086,24 @@ pub async fn with_acp_agent_runtime<R>(
         .await
 }
 
+/// Starts a disposable ACP session and returns only its serializable configuration snapshot.
+/// The session identifier is intentionally discarded because the backing stdio process exits
+/// when this discovery operation completes.
+pub async fn discover_acp_session_config_options(
+    transport: impl ConnectTo<Client> + 'static,
+    client_version: String,
+    policy: AcpHostCapabilityPolicy,
+    cwd: PathBuf,
+) -> Result<Vec<AcpSessionConfigOption>, agent_client_protocol::Error> {
+    with_acp_agent_runtime(transport, client_version, policy, async move |runtime| {
+        let session = runtime
+            .start_or_resume_session(None, cwd, Vec::new())
+            .await?;
+        Ok(acp_session_config_options(session.config_options()))
+    })
+    .await
+}
+
 pub async fn with_acp_agent_runtime_events<R>(
     transport: impl ConnectTo<Client> + 'static,
     client_version: String,
@@ -1196,6 +1260,7 @@ pub async fn run_acp_prompt_session_events(
     session_cwd: PathBuf,
     existing_session_id: Option<String>,
     config_selection: Option<AcpSessionConfigSelection>,
+    mcp_servers: Vec<McpServer>,
     prompt: String,
     event_tx: AcpClientEventSender,
     registry: AcpRuntimeRegistry,
@@ -1229,7 +1294,7 @@ pub async fn run_acp_prompt_session_events(
         runtime_event_tx,
         async move |runtime| {
             let mut session = runtime
-                .start_or_resume_session(existing_session_id, session_cwd)
+                .start_or_resume_session(existing_session_id, session_cwd, mcp_servers)
                 .await?;
             let session_id = session.session_id().to_string();
             let session_metadata = session.meta().clone().map(serde_json::Value::Object);
@@ -1338,6 +1403,7 @@ impl AcpAgentRuntime {
         &self,
         existing_session_id: Option<String>,
         cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
     ) -> Result<AcpActiveSession, agent_client_protocol::Error> {
         if let Some(session_id) = existing_session_id.filter(|id| !id.trim().is_empty()) {
             if self
@@ -1348,7 +1414,10 @@ impl AcpAgentRuntime {
                 .is_some()
             {
                 if let Ok(response) = self
-                    .resume_session(ResumeSessionRequest::new(session_id.clone(), cwd.clone()))
+                    .resume_session(
+                        ResumeSessionRequest::new(session_id.clone(), cwd.clone())
+                            .mcp_servers(mcp_servers.clone()),
+                    )
                     .await
                 {
                     return self.attach_existing_session(
@@ -1361,7 +1430,10 @@ impl AcpAgentRuntime {
             }
             if self.initialize_response.agent_capabilities.load_session {
                 if let Ok(response) = self
-                    .load_session(LoadSessionRequest::new(session_id.clone(), cwd.clone()))
+                    .load_session(
+                        LoadSessionRequest::new(session_id.clone(), cwd.clone())
+                            .mcp_servers(mcp_servers.clone()),
+                    )
                     .await
                 {
                     return self.attach_existing_session(
@@ -1374,7 +1446,8 @@ impl AcpAgentRuntime {
             }
         }
 
-        self.start_session(NewSessionRequest::new(cwd)).await
+        self.start_session(NewSessionRequest::new(cwd).mcp_servers(mcp_servers))
+            .await
     }
 
     fn attach_existing_session(
@@ -2009,6 +2082,66 @@ mod tests {
     }
 
     #[test]
+    fn model_config_compatibility_accepts_missing_category_only_for_model_identity() {
+        let model = AcpSessionConfigOption {
+            config_id: "model".to_string(),
+            name: "Model".to_string(),
+            category: None,
+            current_value_id: "model-a".to_string(),
+            choices: Vec::new(),
+        };
+        let mode = AcpSessionConfigOption {
+            config_id: "mode".to_string(),
+            name: "Mode".to_string(),
+            category: None,
+            current_value_id: "agent".to_string(),
+            choices: Vec::new(),
+        };
+
+        assert_eq!(
+            acp_model_config_option(&[mode, model.clone()]),
+            Some(&model)
+        );
+    }
+
+    #[test]
+    fn launch_model_hint_supports_split_and_inline_flags() {
+        assert_eq!(
+            acp_launch_model_hint(&["--model".to_string(), "gpt-5.4".to_string()]),
+            Some(AcpLaunchModelHint::Fixed("gpt-5.4".to_string()))
+        );
+        assert_eq!(
+            acp_launch_model_hint(&["--model=auto".to_string()]),
+            Some(AcpLaunchModelHint::Automatic)
+        );
+        assert_eq!(acp_launch_model_hint(&["--acp".to_string()]), None);
+    }
+
+    #[test]
+    fn native_claude_adapter_defers_model_report_until_first_prompt() {
+        assert!(acp_model_report_is_deferred_until_first_prompt(&[
+            "--acp-adapter".to_string(),
+            "claude-code".to_string(),
+        ]));
+        assert!(!acp_model_report_is_deferred_until_first_prompt(&[
+            "--acp".to_string(),
+            "--stdio".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn native_codex_adapter_reports_models_during_session_start() {
+        assert!(acp_model_report_is_available_during_session_start(&[
+            "--acp-adapter".to_string(),
+            "codex".to_string(),
+        ]));
+        assert!(!acp_model_report_is_available_during_session_start(&[
+            "--acp-adapter".to_string(),
+            "claude-code".to_string(),
+        ]));
+    }
+
+    #[test]
     fn launch_config_debug_redacts_args_and_env_values() {
         let debug = format!("{:?}", launch_config());
 
@@ -2292,6 +2425,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_config_discovery_starts_session_without_sending_prompt() {
+        let fake_agent = Agent
+            .builder()
+            .on_receive_request(
+                async move |request: InitializeRequest, responder, _connection| {
+                    responder.respond(
+                        InitializeResponse::new(request.protocol_version)
+                            .agent_capabilities(AgentCapabilities::new()),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: NewSessionRequest, responder, _connection| {
+                    assert_eq!(request.cwd, PathBuf::from("/workspace"));
+                    responder.respond(NewSessionResponse::new("discovery-session").config_options(
+                        vec![SessionConfigOption::select(
+                            "model",
+                            "Model",
+                            "gpt-5.6-sol",
+                            vec![SessionConfigSelectOption::new(
+                                "gpt-5.6-sol",
+                                "gpt-5.6-sol",
+                            )],
+                        )
+                        .category(SessionConfigOptionCategory::Model)],
+                    ))
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+
+        let options = discover_acp_session_config_options(
+            fake_agent,
+            "2.0.0-test".to_string(),
+            AcpHostCapabilityPolicy::default(),
+            PathBuf::from("/workspace"),
+        )
+        .await
+        .expect("session config discovery");
+
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].category.as_deref(), Some("model"));
+        assert_eq!(options[0].current_value_id, "gpt-5.6-sol");
+    }
+
+    #[tokio::test]
     async fn runtime_runs_initialize_auth_session_prompt_cancel_close_logout() {
         let fake_agent = Agent
             .builder()
@@ -2404,6 +2583,11 @@ mod tests {
                 async move |request: ResumeSessionRequest, responder, _connection| {
                     assert_eq!(request.session_id.to_string(), "session-existing");
                     assert_eq!(request.cwd, PathBuf::from("/workspace"));
+                    assert_eq!(request.mcp_servers.len(), 1);
+                    let McpServer::Stdio(server) = &request.mcp_servers[0] else {
+                        panic!("expected test MCP stdio server");
+                    };
+                    assert_eq!(server.name, "OxideTerm Host Tools");
                     responder.respond(ResumeSessionResponse::new())
                 },
                 agent_client_protocol::on_receive_request!(),
@@ -2424,6 +2608,10 @@ mod tests {
             PathBuf::from("/workspace"),
             Some("session-existing".to_string()),
             None,
+            vec![McpServer::Stdio(McpServerStdio::new(
+                "OxideTerm Host Tools",
+                "test-mcp-server",
+            ))],
             "hello".to_string(),
             event_tx,
             AcpRuntimeRegistry::new(),
@@ -2533,6 +2721,7 @@ mod tests {
                 config_id: "model".to_string(),
                 value_id: "model-b".to_string(),
             }),
+            Vec::new(),
             "hello".to_string(),
             event_tx,
             AcpRuntimeRegistry::new(),

@@ -53,7 +53,16 @@ impl WorkspaceApp {
                     )
                         .map(|choice| choice.label.clone())
                 })
-                .unwrap_or_else(|| self.i18n.t("ai.model_selector.agent_decides"))
+                .unwrap_or_else(|| {
+                    settings
+                        .ai
+                        .active_acp_agent_id
+                        .as_deref()
+                        .map(|agent_id| self.ai_acp_agent_model_fallback_label(agent_id))
+                        .unwrap_or_else(|| {
+                            self.i18n.t("ai.model_selector.agent_model_unavailable")
+                        })
+                })
         } else {
             model_selector_display_name(active_provider, active_model)
         };

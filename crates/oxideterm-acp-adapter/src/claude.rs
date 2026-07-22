@@ -90,6 +90,7 @@ async fn read_claude_stream_json_stdout(
     let mut stdout = BufReader::new(stdout);
     let mut line = String::new();
     let mut claude_session_id = None;
+    let mut resolved_model = None;
 
     loop {
         line.clear();
@@ -101,6 +102,7 @@ async fn read_claude_stream_json_stdout(
                     stop_reason: StopReason::Cancelled,
                     claude_session_id,
                     codex_thread_id: None,
+                    resolved_model,
                 });
             }
             read_result = stdout.read_line(&mut line) => {
@@ -110,6 +112,9 @@ async fn read_claude_stream_json_stdout(
                 }
                 let value = serde_json::from_str::<Value>(line.trim_end())
                     .map_err(agent_client_protocol::Error::into_internal_error)?;
+                if let Some(model) = claude_system_init_model(&value) {
+                    resolved_model = Some(model.to_string());
+                }
                 if let Some(session_id) = handle_claude_stream_json_message(connection, session_id, &value)? {
                     claude_session_id = Some(session_id);
                 }
@@ -126,6 +131,7 @@ async fn read_claude_stream_json_stdout(
             stop_reason: StopReason::EndTurn,
             claude_session_id,
             codex_thread_id: None,
+            resolved_model,
         })
     } else {
         Err(agent_client_protocol::util::internal_error(format!(
@@ -205,6 +211,17 @@ fn handle_claude_system_event(
         .and_then(Value::as_str)
         .unwrap_or("system");
     match subtype {
+        "init" => {
+            if let Some(model) = claude_system_init_model(value) {
+                // Claude Code reports the resolved runtime model only after the process starts.
+                connection.send_notification(SessionNotification::new(
+                    session_id.clone(),
+                    SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+                        observed_model_config_options(model),
+                    )),
+                ))?;
+            }
+        }
         "api_retry" => {
             let attempt = value.get("attempt").and_then(Value::as_u64).unwrap_or(0);
             let max_retries = value
@@ -225,6 +242,15 @@ fn handle_claude_system_event(
         _ => {}
     }
     Ok(())
+}
+
+fn claude_system_init_model(value: &Value) -> Option<&str> {
+    (value.get("type").and_then(Value::as_str) == Some("system")
+        && value.get("subtype").and_then(Value::as_str) == Some("init"))
+    .then(|| value.get("model").and_then(Value::as_str))
+    .flatten()
+    .map(str::trim)
+    .filter(|model| !model.is_empty())
 }
 
 fn emit_claude_content_block_start(
@@ -311,5 +337,30 @@ fn claude_tool_kind(name: &str) -> ToolKind {
         "Grep" | "Glob" | "WebSearch" => ToolKind::Search,
         "Read" | "LS" => ToolKind::Read,
         _ => ToolKind::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_init_reports_the_resolved_claude_model() {
+        assert_eq!(
+            claude_system_init_model(&json!({
+                "type": "system",
+                "subtype": "init",
+                "model": "claude-sonnet-4-6",
+            })),
+            Some("claude-sonnet-4-6")
+        );
+        assert_eq!(
+            claude_system_init_model(&json!({
+                "type": "system",
+                "subtype": "api_retry",
+                "model": "claude-sonnet-4-6",
+            })),
+            None
+        );
     }
 }
