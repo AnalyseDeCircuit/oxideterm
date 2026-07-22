@@ -367,6 +367,8 @@ pub(in crate::workspace) fn form_from_saved_connection(
         upstream_proxy_remote_dns: upstream_proxy_form.remote_dns,
         upstream_proxy_no_proxy: upstream_proxy_form.no_proxy,
         agent_forwarding: conn.options.agent_forwarding,
+        // Preserve compatibility settings when an existing connection enters edit mode.
+        legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         save_connection: true,
         error,
         ..NewConnectionForm::default()

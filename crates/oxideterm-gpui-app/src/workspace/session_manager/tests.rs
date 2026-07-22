@@ -362,6 +362,19 @@ pub(super) fn edit_properties_saved_keychain_password_starts_unloaded() {
 }
 
 #[test]
+pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
+    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
+    saved_connection.options.legacy_ssh_compatibility = true;
+
+    // Editing and saving an existing connection must round-trip its transport policy.
+    let form = form_from_saved_connection(&saved_connection, None);
+    let request = save_request_from_form(&form, Some(saved_connection.id)).unwrap();
+
+    assert!(form.legacy_ssh_compatibility);
+    assert!(request.legacy_ssh_compatibility);
+}
+
+#[test]
 pub(super) fn duplicate_template_name_uses_unique_tauri_copy_suffix() {
     let name = duplicate_connection_template_name(
         "Prod Copy",

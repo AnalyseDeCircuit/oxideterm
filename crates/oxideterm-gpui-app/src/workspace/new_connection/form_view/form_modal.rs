@@ -650,6 +650,81 @@ impl WorkspaceApp {
                                         ))
                                         .child(self.render_edit_color_field(&form.color, cx))
                                 })
+                                // Legacy compatibility is a persisted connection property, so it
+                                // remains editable for both new and existing saved connections.
+                                .when(!prompt_mode, |content| {
+                                    content.child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(self.tokens.spacing.two))
+                                            .child(self.render_connection_checkbox(
+                                                self.i18n
+                                                    .t("ssh.form.legacy_ssh_compatibility"),
+                                                form.legacy_ssh_compatibility,
+                                                |form| {
+                                                    form.legacy_ssh_compatibility =
+                                                        !form.legacy_ssh_compatibility
+                                                },
+                                                cx,
+                                            ))
+                                            .child(
+                                                div()
+                                                    .id(
+                                                        "new-connection-legacy-ssh-compatibility-help",
+                                                    )
+                                                    .size(px(18.0))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .cursor_pointer()
+                                                    .child(Self::render_lucide_icon(
+                                                        LucideIcon::Info,
+                                                        14.0,
+                                                        rgb(self.tokens.ui.warning),
+                                                    ))
+                                                    .on_mouse_move(cx.listener(
+                                                        |this,
+                                                         event: &MouseMoveEvent,
+                                                         _window,
+                                                         cx| {
+                                                            this.queue_workspace_tooltip(
+                                                                "new-connection-legacy-ssh-compatibility",
+                                                                this.i18n.t("ssh.form.legacy_ssh_compatibility_hint"),
+                                                                f32::from(event.position.x) + 12.0,
+                                                                f32::from(event.position.y) + 16.0,
+                                                                cx,
+                                                            );
+                                                        },
+                                                    ))
+                                                    .on_mouse_down(
+                                                        MouseButton::Left,
+                                                        cx.listener(
+                                                            |this, _event, _window, cx| {
+                                                                this.clear_workspace_tooltip(
+                                                                    "new-connection-legacy-ssh-compatibility",
+                                                                    cx,
+                                                                );
+                                                                cx.stop_propagation();
+                                                            },
+                                                        ),
+                                                    )
+                                                    .on_hover(cx.listener(
+                                                        |this, hovered: &bool, _window, cx| {
+                                                            if !*hovered {
+                                                                // TooltipContent is rendered in a
+                                                                // portal, so the trigger must clear
+                                                                // ownership explicitly on leave.
+                                                                this.clear_workspace_tooltip(
+                                                                    "new-connection-legacy-ssh-compatibility",
+                                                                    cx,
+                                                                );
+                                                            }
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                })
                                 .when(!prompt_mode && !edit_properties_mode, |content| {
                                     content
                                         .child(
@@ -713,77 +788,6 @@ impl WorkspaceApp {
                                                                     // ownership explicitly on leave.
                                                                     this.clear_workspace_tooltip(
                                                                         "new-connection-agent-forwarding",
-                                                                        cx,
-                                                                    );
-                                                                }
-                                                            },
-                                                        )),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap(px(self.tokens.spacing.two))
-                                                .child(self.render_connection_checkbox(
-                                                    self.i18n
-                                                        .t("ssh.form.legacy_ssh_compatibility"),
-                                                    form.legacy_ssh_compatibility,
-                                                    |form| {
-                                                        form.legacy_ssh_compatibility =
-                                                            !form.legacy_ssh_compatibility
-                                                    },
-                                                    cx,
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .id(
-                                                            "new-connection-legacy-ssh-compatibility-help",
-                                                        )
-                                                        .size(px(18.0))
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .cursor_pointer()
-                                                        .child(Self::render_lucide_icon(
-                                                            LucideIcon::Info,
-                                                            14.0,
-                                                            rgb(self.tokens.ui.warning),
-                                                        ))
-                                                        .on_mouse_move(cx.listener(
-                                                            |this,
-                                                             event: &MouseMoveEvent,
-                                                             _window,
-                                                             cx| {
-                                                                this.queue_workspace_tooltip(
-                                                                    "new-connection-legacy-ssh-compatibility",
-                                                                    this.i18n.t("ssh.form.legacy_ssh_compatibility_hint"),
-                                                                    f32::from(event.position.x) + 12.0,
-                                                                    f32::from(event.position.y) + 16.0,
-                                                                    cx,
-                                                                );
-                                                            },
-                                                        ))
-                                                        .on_mouse_down(
-                                                            MouseButton::Left,
-                                                            cx.listener(
-                                                                |this, _event, _window, cx| {
-                                                                    this.clear_workspace_tooltip(
-                                                                        "new-connection-legacy-ssh-compatibility",
-                                                                        cx,
-                                                                    );
-                                                                    cx.stop_propagation();
-                                                                },
-                                                            ),
-                                                        )
-                                                        .on_hover(cx.listener(
-                                                            |this, hovered: &bool, _window, cx| {
-                                                                if !*hovered {
-                                                                    // TooltipContent is rendered in a
-                                                                    // portal, so the trigger must clear
-                                                                    // ownership explicitly on leave.
-                                                                    this.clear_workspace_tooltip(
-                                                                        "new-connection-legacy-ssh-compatibility",
                                                                         cx,
                                                                     );
                                                                 }
