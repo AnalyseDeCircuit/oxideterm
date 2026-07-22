@@ -39,6 +39,7 @@ pub struct NativePluginHostApiSnapshot {
     pub pool_stats: Value,
     pub layout: Value,
     pub connections: Vec<Value>,
+    pub saved_connections: Vec<Value>,
     pub connection_states: HashMap<String, Value>,
     pub node_connection_ids: HashMap<String, String>,
     pub session_tree: Vec<Value>,
@@ -48,12 +49,22 @@ pub struct NativePluginHostApiSnapshot {
     pub terminal_nodes: HashMap<String, NativePluginTerminalNodeSnapshot>,
     /// Aggregate notification metadata; notification content never crosses this boundary.
     pub notification_summary: Value,
+    /// Complete notification projections, guarded by notifications.read.
+    pub notifications: Value,
     /// Quick-command discovery metadata without executable command text or host patterns.
     pub quick_command_metadata: Value,
+    /// Complete quick-command definitions, guarded by quick_commands.read.
+    pub quick_commands: Value,
     /// The complete, currently effective theme token set.
     pub theme_tokens: Value,
+    /// Built-in and custom theme identifiers without custom theme source values.
+    pub available_themes: Value,
     /// Allowlisted Cloud Sync status; destinations, credentials, errors, and payloads stay host-side.
     pub cloud_sync_summary: Value,
+    /// Sanitized Cloud Sync history without errors, revisions, destinations, or payloads.
+    pub cloud_sync_history: Value,
+    /// Cached Host Tools snapshots keyed by their stable node identifiers.
+    pub host_tools_snapshots: Value,
 }
 
 fn native_plugin_ui_registration_preflight_response(
@@ -250,6 +261,28 @@ pub fn native_plugin_returnable_host_api_response(
             call.request_id,
             native_plugin_connection_summaries(&snapshot.connections, &snapshot.connection_states),
         )),
+        ("connections", "getSavedSummaries") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            Value::Array(
+                snapshot
+                    .saved_connections
+                    .iter()
+                    .map(|connection| {
+                        json!({
+                            "id": connection.get("id").and_then(Value::as_str).unwrap_or_default(),
+                            "name": connection.get("name").and_then(Value::as_str).unwrap_or_default(),
+                            "group": connection.get("group").cloned().unwrap_or(Value::Null),
+                            "authType": connection.get("authType").cloned().unwrap_or(Value::Null),
+                            "lastUsedAt": connection.get("lastUsedAt").cloned().unwrap_or(Value::Null),
+                        })
+                    })
+                    .collect(),
+            ),
+        )),
+        ("connections", "getSaved") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            Value::Array(snapshot.saved_connections.clone()),
+        )),
         ("connections", "get") => {
             let Some(connection_id) = call.args.get("connectionId").and_then(Value::as_str) else {
                 return Some(plugin_runtime::PluginResponse::error(
@@ -356,18 +389,57 @@ pub fn native_plugin_returnable_host_api_response(
             call.request_id,
             snapshot.notification_summary.clone(),
         )),
+        ("notifications", "getAll") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            snapshot.notifications.clone(),
+        )),
         ("quickCommands", "getMetadata") => Some(plugin_runtime::PluginResponse::ok(
             call.request_id,
             snapshot.quick_command_metadata.clone(),
+        )),
+        ("quickCommands", "getAll") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            snapshot.quick_commands.clone(),
         )),
         ("theme", "getTokens") => Some(plugin_runtime::PluginResponse::ok(
             call.request_id,
             snapshot.theme_tokens.clone(),
         )),
+        ("theme", "getAvailable") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            snapshot.available_themes.clone(),
+        )),
         ("cloudSync", "getSummary") => Some(plugin_runtime::PluginResponse::ok(
             call.request_id,
             snapshot.cloud_sync_summary.clone(),
         )),
+        ("cloudSync", "getHistory") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            snapshot.cloud_sync_history.clone(),
+        )),
+        ("hostTools", "getSnapshot") => {
+            let Some(node_id) = call.args.get("nodeId").and_then(Value::as_str) else {
+                return Some(plugin_runtime::PluginResponse::error(
+                    call.request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_host_tools_node",
+                        "hostTools.getSnapshot requires args.nodeId",
+                    ),
+                ));
+            };
+            let snapshot = snapshot
+                .host_tools_snapshots
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|entry| entry.get("nodeId").and_then(Value::as_str) == Some(node_id))
+                .cloned()
+                .unwrap_or(Value::Null);
+            Some(plugin_runtime::PluginResponse::ok(
+                call.request_id,
+                snapshot,
+            ))
+        }
         ("terminal", "getActiveTarget") => Some(plugin_runtime::PluginResponse::ok(
             call.request_id,
             snapshot.active_terminal_target.clone(),
@@ -529,8 +601,148 @@ pub fn native_plugin_returnable_host_api_response(
                 .unwrap_or(serde_json::Value::Null);
             Some(plugin_runtime::PluginResponse::ok(call.request_id, value))
         }
+        ("connections", "connect") => {
+            let Some(connection_id) = call.args.get("connectionId").and_then(Value::as_str) else {
+                return Some(plugin_runtime::PluginResponse::error(
+                    call.request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_connection_id",
+                        "connections.connect requires non-empty args.connectionId",
+                    ),
+                ));
+            };
+            if snapshot.saved_connections.iter().any(|connection| {
+                connection.get("id").and_then(Value::as_str) == Some(connection_id)
+            }) {
+                Some(native_plugin_queued_response(call.request_id))
+            } else {
+                Some(plugin_runtime::PluginResponse::error(
+                    call.request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "saved_connection_not_found",
+                        "connections.connect requires an existing saved connection ID",
+                    ),
+                ))
+            }
+        }
+        ("connections", "reconnect" | "disconnect") => Some(
+            native_plugin_queued_string_arg_response(call, "nodeId", "invalid_node_id"),
+        ),
+        ("notifications", "markRead" | "remove") => Some(native_plugin_queued_u64_arg_response(
+            call,
+            "id",
+            "invalid_notification_id",
+        )),
+        ("notifications", "setDnd") => Some(native_plugin_queued_bool_arg_response(
+            call,
+            "enabled",
+            "invalid_notification_dnd",
+        )),
+        ("notifications", "markAllRead" | "clear")
+        | ("cloudSync", "check" | "upload" | "pullPreview" | "applyPreview") => {
+            Some(native_plugin_queued_response(call.request_id))
+        }
+        ("cloudSync", "setAutoUpload") => Some(native_plugin_queued_bool_arg_response(
+            call,
+            "enabled",
+            "invalid_cloud_sync_auto_upload",
+        )),
+        ("quickCommands", "execute" | "remove") => Some(native_plugin_queued_string_arg_response(
+            call,
+            "id",
+            "invalid_quick_command_id",
+        )),
+        ("quickCommands", "upsert") => {
+            let has_name = call.args.get("name").and_then(Value::as_str).is_some();
+            let has_command = call.args.get("command").and_then(Value::as_str).is_some();
+            if has_name && has_command {
+                Some(native_plugin_queued_response(call.request_id))
+            } else {
+                Some(plugin_runtime::PluginResponse::error(
+                    call.request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_quick_command",
+                        "quickCommands.upsert requires string args.name and args.command",
+                    ),
+                ))
+            }
+        }
+        ("theme", "setActive") => Some(native_plugin_queued_string_arg_response(
+            call,
+            "themeId",
+            "invalid_theme_id",
+        )),
         _ => None,
     }
+}
+
+fn native_plugin_queued_response(request_id: String) -> plugin_runtime::PluginResponse {
+    plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+}
+
+fn native_plugin_queued_string_arg_response(
+    call: plugin_runtime::PluginHostCall,
+    key: &str,
+    error_code: &str,
+) -> plugin_runtime::PluginResponse {
+    if call
+        .args
+        .get(key)
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return native_plugin_queued_response(call.request_id);
+    }
+    plugin_runtime::PluginResponse::error(
+        call.request_id,
+        plugin_runtime::PluginError::protocol(
+            error_code,
+            format!(
+                "{}.{} requires non-empty args.{key}",
+                call.namespace, call.method
+            ),
+        ),
+    )
+}
+
+fn native_plugin_queued_u64_arg_response(
+    call: plugin_runtime::PluginHostCall,
+    key: &str,
+    error_code: &str,
+) -> plugin_runtime::PluginResponse {
+    if call.args.get(key).and_then(Value::as_u64).is_some() {
+        return native_plugin_queued_response(call.request_id);
+    }
+    plugin_runtime::PluginResponse::error(
+        call.request_id,
+        plugin_runtime::PluginError::protocol(
+            error_code,
+            format!(
+                "{}.{} requires integer args.{key}",
+                call.namespace, call.method
+            ),
+        ),
+    )
+}
+
+fn native_plugin_queued_bool_arg_response(
+    call: plugin_runtime::PluginHostCall,
+    key: &str,
+    error_code: &str,
+) -> plugin_runtime::PluginResponse {
+    if call.args.get(key).and_then(Value::as_bool).is_some() {
+        return native_plugin_queued_response(call.request_id);
+    }
+    plugin_runtime::PluginResponse::error(
+        call.request_id,
+        plugin_runtime::PluginError::protocol(
+            error_code,
+            format!(
+                "{}.{} requires boolean args.{key}",
+                call.namespace, call.method
+            ),
+        ),
+    )
 }
 
 /// Projects terminal availability and sizing without terminal text or selection content.
@@ -707,6 +919,15 @@ mod tests {
                 "tabCount": 1,
             }),
             connections: Vec::new(),
+            saved_connections: vec![json!({
+                "id": "saved-1",
+                "name": "Production",
+                "group": "Servers",
+                "host": "private.example.test",
+                "port": 22,
+                "username": "secret-user",
+                "authType": "key",
+            })],
             connection_states: HashMap::new(),
             node_connection_ids: HashMap::new(),
             session_tree: vec![json!({
@@ -741,6 +962,7 @@ mod tests {
                 "bySeverity": { "critical": 1, "info": 1 },
                 "byStatus": { "read": 1, "unread": 1 },
             }),
+            notifications: json!([]),
             quick_command_metadata: json!({
                 "categories": [{ "id": "ops", "name": "Operations", "icon": "server" }],
                 "commands": [{
@@ -751,6 +973,7 @@ mod tests {
                     "hostRestricted": true,
                 }],
             }),
+            quick_commands: json!({ "categories": [], "commands": [] }),
             theme_tokens: json!({
                 "name": "default-dark",
                 "terminal": { "background": 0x101010 },
@@ -760,6 +983,11 @@ mod tests {
                 "spacing": { "one": 4.0 },
                 "density": "comfortable",
                 "motion": { "enabled": true },
+            }),
+            available_themes: json!({
+                "active": "default-dark",
+                "builtIn": ["default-dark"],
+                "custom": [],
             }),
             cloud_sync_summary: json!({
                 "enabled": true,
@@ -773,6 +1001,8 @@ mod tests {
                 "historyCount": 3,
                 "lastSuccessAt": "2026-07-22T08:00:00Z",
             }),
+            cloud_sync_history: json!([]),
+            host_tools_snapshots: json!([]),
         }
     }
 
@@ -962,6 +1192,59 @@ mod tests {
                 if value["total"] == 1
                     && value["bySeverity"]["info"] == 1
                     && value["byCategory"]["connection"] == 1
+        ));
+    }
+
+    #[test]
+    fn product_snapshots_and_mutations_use_formal_dispatch_paths() {
+        let mut snapshot = sample_snapshot();
+        snapshot.notifications = json!([{ "id": 7, "title": "Host warning" }]);
+        snapshot.quick_commands = json!({
+            "categories": [],
+            "commands": [{ "id": "deploy", "command": "deploy-safe" }],
+        });
+        snapshot.cloud_sync_history = json!([{ "id": "history-1", "success": true }]);
+        snapshot.host_tools_snapshots = json!([{
+            "nodeId": "node-1",
+            "metrics": { "cpuPercent": 20.0 },
+        }]);
+
+        for (namespace, method, args) in [
+            ("connections", "getSavedSummaries", Value::Null),
+            ("connections", "getSaved", Value::Null),
+            (
+                "connections",
+                "connect",
+                json!({ "connectionId": "saved-1" }),
+            ),
+            ("notifications", "getAll", Value::Null),
+            ("quickCommands", "getAll", Value::Null),
+            ("cloudSync", "getHistory", Value::Null),
+            ("hostTools", "getSnapshot", json!({ "nodeId": "node-1" })),
+            ("connections", "disconnect", json!({ "nodeId": "node-1" })),
+            ("theme", "setActive", json!({ "themeId": "default-dark" })),
+        ] {
+            let response = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "com.example.demo",
+                host_call(namespace, method, args),
+            )
+            .expect("formal product API should be returnable");
+            assert!(matches!(
+                response.result,
+                plugin_runtime::PluginResponseResult::Ok { .. }
+            ));
+        }
+
+        let invalid = native_plugin_returnable_host_api_response(
+            &snapshot,
+            "com.example.demo",
+            host_call("connections", "disconnect", json!({})),
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid.result,
+            plugin_runtime::PluginResponseResult::Error { .. }
         ));
     }
 

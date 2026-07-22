@@ -45,6 +45,40 @@ pub fn native_plugin_ide_response(
             request_id,
             native_plugin_ide_state_summary(snapshot),
         ),
+        "openFile" | "closeFile" => {
+            if call
+                .args
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| !path.trim().is_empty())
+            {
+                plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+            } else {
+                plugin_runtime::PluginResponse::error(
+                    request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_ide_path",
+                        format!("ide.{} requires non-empty args.path", call.method),
+                    ),
+                )
+            }
+        }
+        "replaceActiveText" | "insertActiveText" => {
+            if call.args.get("text").and_then(Value::as_str).is_some() {
+                plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+            } else {
+                plugin_runtime::PluginResponse::error(
+                    request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_ide_text",
+                        format!("ide.{} requires string args.text", call.method),
+                    ),
+                )
+            }
+        }
+        "saveActive" | "refreshProject" => {
+            plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+        }
         "onFileOpen" | "onFileClose" | "onActiveFileChange" => {
             plugin_runtime::PluginResponse::error(
                 request_id,

@@ -15,6 +15,7 @@ pub struct NativePluginContributionStore {
     pub terminal_transports: Vec<NativePluginTransportContribution>,
     pub connection_hooks: Vec<NativePluginConnectionHookContribution>,
     pub api_commands: Vec<NativePluginApiCommandContribution>,
+    pub host_monitors: Vec<NativePluginHostMonitorContribution>,
     pub runtime_commands: Vec<NativePluginRuntimeCommandContribution>,
     pub runtime_keybindings: Vec<NativePluginRuntimeKeybindingContribution>,
     pub runtime_context_menus: Vec<NativePluginRuntimeContextMenuContribution>,
@@ -128,6 +129,16 @@ impl NativePluginContributionStore {
                     }
                 }));
         }
+        if let Some(host_monitors) = &contributes.host_monitors {
+            self.host_monitors
+                .extend(host_monitors.iter().cloned().map(|definition| {
+                    NativePluginHostMonitorContribution {
+                        plugin_id: plugin_id.clone(),
+                        plugin_name: plugin_name.clone(),
+                        definition,
+                    }
+                }));
+        }
     }
 
     #[allow(dead_code)]
@@ -140,6 +151,7 @@ impl NativePluginContributionStore {
             + self.terminal_transports.len()
             + self.connection_hooks.len()
             + self.api_commands.len()
+            + self.host_monitors.len()
             + self.runtime_commands.len()
             + self.runtime_keybindings.len()
             + self.runtime_context_menus.len()
@@ -149,6 +161,30 @@ impl NativePluginContributionStore {
             + self.runtime_event_subscriptions.len()
             + self.runtime_terminal_input_interceptors.len()
             + self.runtime_terminal_output_processors.len()
+    }
+
+    /// Returns only monitors owned by the requesting plugin.
+    pub fn host_monitors_for_plugin(
+        &self,
+        plugin_id: &str,
+    ) -> Vec<NativePluginHostMonitorContribution> {
+        self.host_monitors
+            .iter()
+            .filter(|entry| entry.plugin_id == plugin_id)
+            .cloned()
+            .collect()
+    }
+
+    /// Resolves a monitor inside its declaring plugin namespace.
+    pub fn host_monitor(
+        &self,
+        plugin_id: &str,
+        monitor_id: &str,
+    ) -> Option<NativePluginHostMonitorContribution> {
+        self.host_monitors
+            .iter()
+            .find(|entry| entry.plugin_id == plugin_id && entry.definition.id == monitor_id)
+            .cloned()
     }
 
     pub fn ai_tool_definitions(&self) -> Vec<oxideterm_ai::AiToolDefinition> {

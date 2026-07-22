@@ -10,10 +10,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use gpui::Context;
 use oxideterm_notification_center::{
-    NotificationEntry, NotificationKind, NotificationSeverity, NotificationStatus,
+    NotificationEntry, NotificationKind, NotificationScope, NotificationSeverity,
+    NotificationStatus,
 };
 use oxideterm_quick_commands::{QuickCommand, QuickCommandCategory};
-use oxideterm_theme::ThemeTokens;
+use oxideterm_theme::{BUILT_IN_THEMES, ThemeTokens};
 use serde_json::json;
 
 use super::*;
@@ -34,6 +35,12 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
     let connections = connection_infos
         .iter()
         .map(native_plugin_connection_snapshot)
+        .collect::<Vec<_>>();
+    let saved_connections = workspace
+        .connection_store
+        .connection_infos()
+        .iter()
+        .map(native_plugin_saved_connection_snapshot)
         .collect::<Vec<_>>();
     let connection_states = connection_infos
         .iter()
@@ -69,17 +76,32 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
             .unread_critical_count,
         workspace.notification_center.notifications.dnd_enabled,
     );
+    let notifications =
+        native_plugin_notifications_snapshot(&workspace.notification_center.notifications.entries);
     let quick_command_metadata = native_plugin_quick_command_metadata(
         &workspace.quick_commands.categories,
         &workspace.quick_commands.commands,
     );
+    let quick_commands = json!({
+        "categories": &workspace.quick_commands.categories,
+        "commands": &workspace.quick_commands.commands,
+    });
     let theme_tokens =
         native_plugin_theme_tokens_snapshot(&workspace.tokens, &settings.terminal.theme);
+    let available_themes = native_plugin_available_themes(settings);
     let cloud_sync_summary = native_plugin_cloud_sync_summary(
         workspace.cloud_sync.controller.store.state(),
         workspace.cloud_sync.controller.active_action,
         workspace.cloud_sync.controller.progress.as_ref(),
     );
+    let cloud_sync_history = native_plugin_cloud_sync_history(
+        &workspace.cloud_sync.controller.store.state().sync_history,
+    );
+    let host_tools_snapshots =
+        oxideterm_plugin_host_api::host_tools::native_plugin_host_tools_snapshot_array(
+            &workspace.connection_monitor.profiler_registry,
+            &native_plugin_profiler_node_connection_ids(workspace),
+        );
 
     NativePluginHostApiSnapshot {
         registry: workspace.native_plugin_runtime.registry.clone(),
@@ -95,6 +117,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         }),
         layout: workspace.native_plugin_layout_snapshot(),
         connections,
+        saved_connections,
         connection_states,
         node_connection_ids,
         session_tree,
@@ -103,10 +126,140 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         active_terminal_target,
         terminal_nodes,
         notification_summary,
+        notifications,
         quick_command_metadata,
+        quick_commands,
         theme_tokens,
+        available_themes,
         cloud_sync_summary,
+        cloud_sync_history,
+        host_tools_snapshots,
     }
+}
+
+/// Projects saved connection configuration without credential or local-path fields.
+fn native_plugin_saved_connection_snapshot(
+    connection: &oxideterm_connections::ConnectionInfo,
+) -> Value {
+    let proxy_chain = connection
+        .proxy_chain
+        .iter()
+        .map(|hop| {
+            json!({
+                "host": &hop.host,
+                "port": hop.port,
+                "username": &hop.username,
+                "authType": &hop.auth_type,
+                "agentForwarding": hop.agent_forwarding,
+                "legacySshCompatibility": hop.legacy_ssh_compatibility,
+            })
+        })
+        .collect::<Vec<_>>();
+    let upstream_proxy = match &connection.upstream_proxy {
+        oxideterm_connections::SavedUpstreamProxyPolicy::UseGlobal => {
+            json!({ "mode": "use_global" })
+        }
+        oxideterm_connections::SavedUpstreamProxyPolicy::Direct => {
+            json!({ "mode": "direct" })
+        }
+        oxideterm_connections::SavedUpstreamProxyPolicy::Custom { proxy } => json!({
+            "mode": "custom",
+            "protocol": &proxy.protocol,
+            "host": &proxy.host,
+            "port": proxy.port,
+            "hasAuth": !matches!(
+                proxy.auth,
+                oxideterm_connections::SavedUpstreamProxyAuth::None
+            ),
+            "remoteDns": proxy.remote_dns,
+        }),
+    };
+    json!({
+        "id": &connection.id,
+        "name": oxideterm_ai::sanitize_for_ai(&connection.name),
+        "group": connection.group.as_deref().map(oxideterm_ai::sanitize_for_ai),
+        "host": &connection.host,
+        "port": connection.port,
+        "username": &connection.username,
+        "authType": &connection.auth_type,
+        "proxyChain": proxy_chain,
+        "upstreamProxy": upstream_proxy,
+        "createdAt": &connection.created_at,
+        "lastUsedAt": &connection.last_used_at,
+        "color": &connection.color,
+        "icon": &connection.icon,
+        "tags": &connection.tags,
+        "agentForwarding": connection.agent_forwarding,
+        "legacySshCompatibility": connection.legacy_ssh_compatibility,
+    })
+}
+
+/// Exposes notification content only through the capability-gated full snapshot.
+fn native_plugin_notifications_snapshot(
+    entries: &std::collections::VecDeque<NotificationEntry>,
+) -> Value {
+    Value::Array(
+        entries
+            .iter()
+            .map(|entry| {
+                let created_at = entry
+                    .created_at
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_millis() as u64)
+                    .unwrap_or_default();
+                let scope = match &entry.scope {
+                    NotificationScope::Global => json!({ "kind": "global" }),
+                    NotificationScope::Node(node_id) => {
+                        json!({ "kind": "node", "nodeId": node_id })
+                    }
+                    NotificationScope::Connection(connection_id) => {
+                        json!({ "kind": "connection", "connectionId": connection_id })
+                    }
+                };
+                json!({
+                    "id": entry.id,
+                    "createdAt": created_at,
+                    "kind": format!("{:?}", entry.kind).to_ascii_lowercase(),
+                    "severity": format!("{:?}", entry.severity).to_ascii_lowercase(),
+                    "status": format!("{:?}", entry.status).to_ascii_lowercase(),
+                    "title": &entry.title,
+                    "body": &entry.body,
+                    "scope": scope,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Returns discoverable theme identities without exposing custom theme source payloads.
+fn native_plugin_available_themes(settings: &oxideterm_settings::PersistedSettings) -> Value {
+    let mut custom_ids = settings.custom_themes.keys().cloned().collect::<Vec<_>>();
+    custom_ids.sort();
+    json!({
+        "active": &settings.terminal.theme,
+        "builtIn": BUILT_IN_THEMES.iter().map(|theme| theme.id).collect::<Vec<_>>(),
+        "custom": custom_ids,
+    })
+}
+
+/// Removes operational errors and remote revisions from Cloud Sync history.
+fn native_plugin_cloud_sync_history(
+    history: &[oxideterm_cloud_sync::state::CloudSyncHistoryEntry],
+) -> Value {
+    Value::Array(
+        history
+            .iter()
+            .map(|entry| {
+                json!({
+                    "id": &entry.id,
+                    "action": &entry.action,
+                    "timestamp": &entry.timestamp,
+                    "success": entry.success,
+                    "summary": &entry.summary,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Projects Cloud Sync state through an explicit allowlist so remote locations,
@@ -338,10 +491,82 @@ fn native_plugin_theme_tokens_snapshot(tokens: &ThemeTokens, theme_name: &str) -
 mod tests {
     use std::collections::VecDeque;
 
+    use oxideterm_connections::{
+        AuthType, ConnectionInfo, ProxyHopInfo, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+        SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol,
+    };
     use oxideterm_notification_center::NotificationScope;
     use oxideterm_quick_commands::QuickCommandIcon;
 
     use super::*;
+
+    #[test]
+    fn saved_connection_snapshot_omits_secret_refs_paths_and_commands() {
+        let connection = ConnectionInfo {
+            id: "saved-1".to_string(),
+            name: "Production".to_string(),
+            group: Some("Servers".to_string()),
+            host: "example.test".to_string(),
+            port: 22,
+            username: "operator".to_string(),
+            auth_type: AuthType::Key,
+            key_path: Some("/private/id_ed25519".to_string()),
+            cert_path: Some("/private/id_ed25519-cert.pub".to_string()),
+            managed_key_id: Some("managed-secret-ref".to_string()),
+            managed_key_name: Some("Managed key".to_string()),
+            proxy_chain: vec![ProxyHopInfo {
+                host: "jump.example.test".to_string(),
+                port: 22,
+                username: "jump-user".to_string(),
+                auth_type: AuthType::Key,
+                key_path: Some("/private/jump-key".to_string()),
+                cert_path: None,
+                managed_key_id: Some("jump-secret-ref".to_string()),
+                managed_key_name: None,
+                agent_forwarding: false,
+                legacy_ssh_compatibility: false,
+            }],
+            upstream_proxy: SavedUpstreamProxyPolicy::Custom {
+                proxy: SavedUpstreamProxyConfig {
+                    protocol: SavedUpstreamProxyProtocol::Socks5,
+                    host: "proxy.example.test".to_string(),
+                    port: 1080,
+                    auth: SavedUpstreamProxyAuth::Password {
+                        username: "proxy-user".to_string(),
+                        keychain_id: Some("proxy-secret-ref".to_string()),
+                        plaintext_password: None,
+                    },
+                    remote_dns: true,
+                    no_proxy: "internal.example.test".to_string(),
+                },
+            },
+            created_at: "2026-07-22T00:00:00Z".to_string(),
+            last_used_at: None,
+            color: None,
+            icon: None,
+            tags: vec!["production".to_string()],
+            agent_forwarding: false,
+            legacy_ssh_compatibility: false,
+            post_connect_command: Some("export TOKEN=private".to_string()),
+        };
+
+        let serialized = native_plugin_saved_connection_snapshot(&connection).to_string();
+        for private_value in [
+            "/private/id_ed25519",
+            "/private/id_ed25519-cert.pub",
+            "managed-secret-ref",
+            "/private/jump-key",
+            "jump-secret-ref",
+            "proxy-secret-ref",
+            "internal.example.test",
+            "export TOKEN=private",
+        ] {
+            assert!(!serialized.contains(private_value));
+        }
+        assert!(serialized.contains("jump.example.test"));
+        assert!(serialized.contains("proxy.example.test"));
+        assert!(serialized.contains("\"hasAuth\":true"));
+    }
 
     #[test]
     fn notification_summary_counts_entries_without_exposing_content() {

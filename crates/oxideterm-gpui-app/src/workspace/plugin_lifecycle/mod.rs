@@ -26,6 +26,7 @@ mod constants;
 mod forwarding;
 mod host_api_snapshot;
 mod ide;
+mod product_host_calls;
 mod profiler;
 mod secrets;
 mod settings_payload;
@@ -60,6 +61,7 @@ use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
 use oxideterm_plugin_host_api::{
     ai::*,
     catalog::{allowed_host_apis_for_capabilities, is_supported_host_api_capability},
+    host_tools::*,
     transfers::*,
 };
 
@@ -2087,6 +2089,21 @@ impl WorkspaceApp {
             if call.namespace == "transfers" {
                 return Some(native_plugin_transfers_response(call, &transfer_manager));
             }
+            if call.namespace == "hostTools"
+                && matches!(
+                    call.method.as_str(),
+                    "getExtensions" | "capture" | "execute" | "terminate" | "runExtension"
+                )
+            {
+                return Some(native_plugin_host_tools_response(
+                    &plugin_id,
+                    call,
+                    &permissions,
+                    snapshot.registry.contributions(),
+                    &sftp_router,
+                    &sftp_runtime,
+                ));
+            }
             if call.namespace == "profiler" {
                 return Some(native_plugin_profiler_response(
                     call,
@@ -2153,6 +2170,70 @@ impl WorkspaceApp {
         args: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
+        let is_product_effect = matches!(
+            (namespace, method),
+            ("connections", "connect" | "reconnect" | "disconnect")
+                | (
+                    "notifications",
+                    "markRead" | "markAllRead" | "setDnd" | "remove" | "clear"
+                )
+                | ("quickCommands", "execute" | "upsert" | "remove")
+                | ("theme", "setActive")
+                | (
+                    "ide",
+                    "openFile"
+                        | "replaceActiveText"
+                        | "insertActiveText"
+                        | "saveActive"
+                        | "closeFile"
+                        | "refreshProject"
+                )
+                | (
+                    "ai",
+                    "createConversation"
+                        | "selectConversation"
+                        | "sendMessage"
+                        | "cancelGeneration"
+                        | "deleteConversation"
+                        | "clearConversations"
+                )
+                | (
+                    "cloudSync",
+                    "check" | "upload" | "pullPreview" | "applyPreview" | "setAutoUpload"
+                )
+        );
+        if is_product_effect {
+            let _ =
+                self.handle_native_plugin_product_host_call(plugin_id, namespace, method, args, cx);
+            return;
+        }
+        if matches!(
+            namespace,
+            "connections"
+                | "sessions"
+                | "eventLog"
+                | "notifications"
+                | "cloudSync"
+                | "quickCommands"
+                | "theme"
+                | "terminal"
+                | "sftp"
+                | "forward"
+                | "transfers"
+                | "profiler"
+                | "hostTools"
+                | "ide"
+                | "ai"
+                | "secrets"
+                | "sync"
+        ) || (namespace == "app" && method != "refreshAfterExternalSync")
+            || (namespace == "storage" && method == "get")
+            || (namespace == "settings" && matches!(method, "get" | "exportSyncableSettings"))
+        {
+            // The synchronous resolver already completed these calls. Their
+            // retained outbound effects are audit records, not a second action.
+            return;
+        }
         match (namespace, method) {
             ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args),
             ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args),

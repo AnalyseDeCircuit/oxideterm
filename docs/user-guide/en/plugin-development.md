@@ -902,16 +902,21 @@ Common namespaces include:
 
 | Namespace | Typical use |
 |---|---|
-| `connections` | Read saved/live connection snapshots |
+| `connections` | Read and control saved/live connection lifecycle |
 | `sessions` | Read node tree and active node state |
 | `terminal` | Observe buffers or send approved input |
 | `sftp` | List/read/write remote files through node-owned SFTP |
 | `forward` | List/create/stop forwards |
 | `transfers` | Observe transfer state |
 | `profiler` | Read node metrics |
+| `hostTools` | Read cached host state, capture typed datasets, and run validated actions |
 | `eventLog` | Read app event log |
-| `ide` | Observe IDE project/open-file state |
-| `ai` | Read sanitized AI metadata |
+| `notifications` | Read or manage notification-center entries |
+| `quickCommands` | Read, manage, or execute saved quick commands |
+| `cloudSync` | Read safe sync status/history and control sync operations |
+| `theme` | Read full effective tokens and select an installed theme |
+| `ide` | Observe and edit the active IDE project |
+| `ai` | Read sanitized AI data and control conversations/generation |
 | `app` | Theme, platform, version, settings snapshots |
 | `settings` | Plugin and syncable settings |
 | `storage` | Plugin-scoped JSON KV |
@@ -919,7 +924,7 @@ Common namespaces include:
 | `secrets` | Plugin-scoped secret storage |
 | `ui` | Toasts, confirm dialogs, layout, progress |
 
-This table describes namespaces that are implemented today, not a promise that every OxideTerm product domain is already exposed. Call baseline `app.getApiCatalog` to discover the direct APIs supported by the running host, including each API's access tier, required capability, and introduction version. Product domains absent from that catalog remain planned work.
+This table describes implemented namespaces. Call baseline `app.getApiCatalog` to discover the exact direct APIs supported by the running host, including each API's access tier, required capability, and introduction version. The catalog is authoritative for version and capability negotiation.
 
 ## Permissions And Capabilities
 
@@ -947,6 +952,7 @@ Current capability names are:
 | `app.settings.read` | Read host settings categories |
 | `app.sync.refresh` | Refresh host state after external synchronization |
 | `connections.read` | Read full saved-connection and endpoint projections |
+| `connections.control` | Connect, reconnect, or explicitly disconnect existing product-owned nodes |
 | `sessions.read` | Read full session trees, active-node projections, and event logs |
 | `terminal.content.read` | Read terminal targets, selection, scrollback, or search results |
 | `terminal.write` | Write terminal input, clear a buffer, or open a Telnet transport |
@@ -957,7 +963,22 @@ Current capability names are:
 | `sync.write` | Refresh, apply, or import synchronization data |
 | `transfers.read` | Read and subscribe to transfer state |
 | `ide.read` | Read full IDE project and open-file projections |
+| `ide.write` | Open, edit, save, close, or refresh files in an existing IDE project |
 | `ai.content.read` | Read AI conversations and message content |
+| `ai.write` | Create/select/delete conversations, send text, or cancel generation |
+| `host_tools.read` | Read cached host state or capture typed Host Tools datasets |
+| `host_tools.write` | Run validated non-destructive process/container/service/tmux/task actions |
+| `host_tools.destructive` | Terminate processes or kill tmux resources |
+| `host_tools.custom.execute` | Run a static custom monitor command declared by this plugin |
+| `notifications.read` | Read notification title/body/scope projections |
+| `notifications.manage` | Mark, remove, clear, or change do-not-disturb state |
+| `quick_commands.read` | Read complete saved quick-command definitions |
+| `quick_commands.manage` | Create, update, or remove quick commands |
+| `quick_commands.execute` | Execute a saved quick command through normal risk confirmation |
+| `theme.write` | Select an installed built-in or custom theme |
+| `cloud_sync.read` | Read sanitized Cloud Sync history |
+| `cloud_sync.control` | Check, upload, preview pull, or configure automatic upload |
+| `cloud_sync.apply` | Apply the currently reviewed remote preview |
 | `legacy.invoke` | Call the compatibility `api.invoke` adapter |
 | `events.emit` | Emit a plugin-scoped custom event |
 | `plugin.settings.write` | Change plugin settings or plugin-scoped storage |
@@ -1078,6 +1099,21 @@ interface NativePluginContributes {
   connectionHooks?: Array<'onConnect' | 'onDisconnect' | 'onReconnect' | 'onLinkDown'>;
   aiTools?: NativePluginAiToolDef[];
   apiCommands?: string[];
+  hostMonitors?: NativePluginHostMonitorDef[];
+}
+
+interface NativePluginHostMonitorDef {
+  id: string;
+  title: string;
+  description?: string;
+  commands: Partial<Record<'linux' | 'macos' | 'bsd' | 'windows' | 'default', string>>;
+  output?: {
+    format?: 'json' | 'jsonLines' | 'tsv' | 'textLines';
+    columns?: string[]; // Required only for tsv.
+    maxRows?: number; // Default 1,000; maximum 2,000.
+  };
+  timeoutSeconds?: number; // Default 10; range 1-30.
+  maxOutputBytes?: number; // Default 262,144; range 1 KiB-1 MiB.
 }
 
 interface NativePluginTabDef {
@@ -1368,15 +1404,88 @@ Calls must be allowed by `allowedHostApis`. Exact names and namespace wildcards 
 | Host API | Args | Result |
 |---|---|---|
 | `connections.getSummaries` | `{}` | Redacted connection summaries; baseline |
+| `connections.getSavedSummaries` | `{}` | Redacted saved-connection IDs/names/groups for discovery; baseline |
 | `connections.getAll` | `{}` | Connection snapshots |
+| `connections.getSaved` | `{}` | Saved-connection projections without secrets, key paths, certificate paths, post-connect commands, or proxy credential references |
 | `connections.get` | `{ connectionId: string }` | Connection snapshot or `null` |
 | `connections.getState` | `{ connectionId: string }` | Connection state or `null` |
 | `connections.getByNode` | `{ nodeId: string }` | Connection snapshot or `null` |
+| `connections.connect` | `{ connectionId: string }` | `{ queued: true }`; uses the existing saved-connection and prompt flow |
+| `connections.reconnect` | `{ nodeId: string }` | `{ queued: true }`; reuses the existing node runtime |
+| `connections.disconnect` | `{ nodeId: string }` | `{ queued: true }`; opens the normal cascade confirmation before disconnecting the NodeRouter-owned subtree |
 | `sessions.getTree` | `{}` | Node tree snapshot |
 | `sessions.getSummary` | `{}` | Redacted session summary; baseline |
 | `sessions.getActiveNodes` | `{}` | Active/connected node snapshots |
 | `sessions.getNodeState` | `{ nodeId: string }` | Node state or `null` |
 | `eventLog.getEntries` | `{ severity?: string, category?: string, limit?: number }` | Event-log entries |
+
+### Product Data And Controls
+
+Workspace mutations return `{ queued: true }` after schema and permission preflight. They execute on the product owner and appear in subsequent snapshots/events. Host Tools calls are synchronous because they return typed remote results.
+
+| Host API | Capability | Args | Result |
+|---|---|---|---|
+| `notifications.getSummary` | baseline | `{}` | Counts and DND state without content |
+| `notifications.getAll` | `notifications.read` | `{}` | Notification title/body/status/scope projections |
+| `notifications.markRead` | `notifications.manage` | `{ id: number }` | `{ queued: true }` |
+| `notifications.markAllRead` | `notifications.manage` | `{}` | `{ queued: true }` |
+| `notifications.setDnd` | `notifications.manage` | `{ enabled: boolean }` | `{ queued: true }` |
+| `notifications.remove` / `notifications.clear` | `notifications.manage` | `{ id: number }` / `{}` | `{ queued: true }` |
+| `quickCommands.getMetadata` | baseline | `{}` | Discovery metadata without command bodies |
+| `quickCommands.getAll` | `quick_commands.read` | `{}` | Complete categories and command definitions |
+| `quickCommands.execute` | `quick_commands.execute` | `{ id: string }` | `{ queued: true }`; normal command-risk confirmation still applies |
+| `quickCommands.upsert` | `quick_commands.manage` | `{ id?, name, command, category?, description?, hostPattern? }` | `{ queued: true }` |
+| `quickCommands.remove` | `quick_commands.manage` | `{ id: string }` | `{ queued: true }` |
+| `theme.getTokens` | baseline | `{}` | Complete effective terminal/UI/metric/radius/spacing/motion tokens |
+| `theme.getAvailable` | baseline | `{}` | Active, built-in, and custom theme identifiers |
+| `theme.setActive` | `theme.write` | `{ themeId: string }` | `{ queued: true }` |
+| `hostTools.getSnapshot` | `host_tools.read` | `{ nodeId: string }` | Cached metrics, processes, Docker, and service state; no full process arguments |
+| `hostTools.getExtensions` | baseline | `{}` | This plugin's monitor metadata, with command strings omitted |
+| `hostTools.capture` | `host_tools.read` | `{ nodeId, osType, resource, preset?, limit? }` | Typed snapshot for `docker`, `services`, `logs`, `tmux`, `ports`, `filesystems`, `packages`, or `scheduledTasks` |
+| `hostTools.execute` | `host_tools.write` | `{ nodeId, osType, resource, action, target, ...actionArgs }` | `{ success, exitCode, truncated }` |
+| `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' | 'tmux', action, target }` | `{ success, exitCode, truncated }` |
+| `hostTools.runExtension` | `host_tools.custom.execute` | `{ nodeId, osType, monitorId }` | `{ monitorId, success, data, rowCount, exitCode, truncated }` |
+| `cloudSync.getSummary` | baseline | `{}` | Safe status/progress/dirty/conflict metadata |
+| `cloudSync.getHistory` | `cloud_sync.read` | `{}` | History without errors, remote revisions, destinations, credentials, or payloads |
+| `cloudSync.check` | `cloud_sync.control` | `{}` | `{ queued: true }` |
+| `cloudSync.upload` | `cloud_sync.control` | `{ force?: boolean }` | `{ queued: true }` |
+| `cloudSync.pullPreview` | `cloud_sync.control` | `{}` | `{ queued: true }`; does not apply data or persist unsaved panel drafts |
+| `cloudSync.applyPreview` | `cloud_sync.apply` | `{}` | `{ queued: true }`; applies only the currently reviewed preview |
+| `cloudSync.setAutoUpload` | `cloud_sync.control` | `{ enabled: boolean, intervalMinutes?: number }` | `{ queued: true }`; interval is clamped to at least five minutes |
+
+Host Tools never creates a second SSH transport. It resolves the current `nodeId` through `NodeRouter`, uses the existing connection, validates every command argument with product command builders, and omits raw standard error. Capture errors are redacted before serialization.
+
+Plugins can extend Host Tools beyond the built-in monitor set by declaring static monitor commands in `contributes.hostMonitors`:
+
+```json
+{
+  "permissions": {
+    "capabilities": ["host_tools.custom.execute"]
+  },
+  "contributes": {
+    "hostMonitors": [{
+      "id": "nginx-workers",
+      "title": "Nginx workers",
+      "description": "Reports worker PIDs and states",
+      "commands": {
+        "linux": "ps -C nginx -o pid=,stat= | awk '{printf \"{\\\"pid\\\":%s,\\\"state\\\":\\\"%s\\\"}\\n\", $1, $2}'"
+      },
+      "output": {
+        "format": "jsonLines",
+        "maxRows": 200
+      },
+      "timeoutSeconds": 10,
+      "maxOutputBytes": 262144
+    }]
+  }
+}
+```
+
+The command is selected from `linux`, `macos`, `bsd`, or `windows`, then falls back to `default`. Commands are static: runtime parameters and template substitution are intentionally unsupported, so a plugin cannot turn `runExtension` into an arbitrary-command endpoint. Manifest commands are plaintext package metadata and must never contain passwords, tokens, private keys, or other secrets. Because a shell command cannot be proven read-only, execution uses the separate high-risk `host_tools.custom.execute` capability even when the monitor is observational. The host limits execution time, captured bytes, and parsed rows; it never returns standard error or failed-command stdout. Successful output is parsed as `json`, `jsonLines`, `tsv`, or `textLines` before crossing the plugin boundary.
+
+A declaration does not automatically add a built-in Host Tools page. The plugin owns presentation and polling through its declarative tab or sidebar, calling `getExtensions` for discovery and `runExtension` when it needs a fresh sample.
+
+Host Tools action names are closed enums: `process` supports `stop`, `continue`, and `renice` (`nice`) through `execute`, plus `terminate` and `kill` through `terminate`; `docker` supports `start`, `stop`, and `restart`; `service` supports `start`, `stop`, `restart`, `reload`, `enable`, and `disable`; `tmux` supports `renameSession`, `renameWindow` (`name`), and `sendPaneCommand` (`command`), while `killSession`, `killWindow`, and `killPane` require `terminate`; `scheduledTask` supports `runNow` (`unit`), `enable`, and `disable` (`source`). `osType` selects the product's validated Linux, macOS/Darwin, BSD, or Windows command builder; it is not interpolated into a shell command.
 
 ### Terminal
 
@@ -1467,11 +1576,23 @@ Calls must be allowed by `allowedHostApis`. Exact names and namespace wildcards 
 | `ide.getProject` | `{}` | Project snapshot or `null` |
 | `ide.getOpenFiles` | `{}` | Open-file snapshots |
 | `ide.getActiveFile` | `{}` | Active file snapshot or `null` |
+| `ide.openFile` | `{ path: string, nodeId?: string }` | `{ queued: true }` |
+| `ide.replaceActiveText` | `{ text: string, nodeId?: string }` | `{ queued: true }` |
+| `ide.insertActiveText` | `{ text: string, nodeId?: string }` | `{ queued: true }` |
+| `ide.saveActive` | `{ nodeId?: string }` | `{ queued: true }`; preserves remote conflict checks |
+| `ide.closeFile` | `{ path: string, nodeId?: string }` | `{ queued: true }`; preserves dirty-buffer confirmation |
+| `ide.refreshProject` | `{ nodeId?: string }` | `{ queued: true }` |
 | `ai.getConversations` | `{}` | Sanitized conversation summaries |
 | `ai.getCatalog` | `{}` | Redacted provider and model catalog; baseline |
 | `ai.getMessages` | `{ conversationId: string }` | Sanitized messages |
 | `ai.getActiveProvider` | `{}` | Active provider summary or `null` |
 | `ai.getAvailableModels` | `{}` | Model names |
+| `ai.createConversation` | `{ title?: string }` | `{ queued: true }` |
+| `ai.selectConversation` | `{ conversationId: string }` | `{ queued: true }` |
+| `ai.sendMessage` | `{ content: string }` | `{ queued: true }`; credential-like text is redacted before model context is built |
+| `ai.cancelGeneration` | `{}` | `{ queued: true }` |
+| `ai.deleteConversation` | `{ conversationId: string }` | `{ queued: true }` |
+| `ai.clearConversations` | `{}` | `{ queued: true }` |
 | `profiler.getMetrics` | `{ nodeId: string }` | Metrics snapshot or `null` |
 | `profiler.getHistory` | `{ nodeId: string, limit?: number }` | Metrics history |
 | `profiler.isRunning` | `{ nodeId: string }` | `boolean` |

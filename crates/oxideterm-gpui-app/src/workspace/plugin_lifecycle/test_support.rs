@@ -39,6 +39,7 @@ pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
         }),
         layout: native_plugin_layout_snapshot(false, None, 0),
         connections: Vec::new(),
+        saved_connections: Vec::new(),
         connection_states: HashMap::new(),
         node_connection_ids: HashMap::new(),
         session_tree: Vec::new(),
@@ -68,10 +69,12 @@ pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
             },
             "byStatus": { "read": 0, "unread": 0 },
         }),
+        notifications: serde_json::json!([]),
         quick_command_metadata: serde_json::json!({
             "categories": [],
             "commands": [],
         }),
+        quick_commands: serde_json::json!({ "categories": [], "commands": [] }),
         theme_tokens: serde_json::json!({
             "name": "default",
             "terminal": {},
@@ -81,6 +84,11 @@ pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
             "spacing": {},
             "density": "comfortable",
             "motion": {},
+        }),
+        available_themes: serde_json::json!({
+            "active": "default",
+            "builtIn": ["default"],
+            "custom": [],
         }),
         cloud_sync_summary: serde_json::json!({
             "enabled": false,
@@ -94,6 +102,8 @@ pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
             "historyCount": 0,
             "lastSuccessAt": null,
         }),
+        cloud_sync_history: serde_json::json!([]),
+        host_tools_snapshots: serde_json::json!([]),
     }
 }
 

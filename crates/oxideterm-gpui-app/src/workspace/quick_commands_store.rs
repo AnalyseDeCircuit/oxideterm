@@ -50,13 +50,13 @@ impl QuickCommandsState {
         )
     }
 
-    pub(super) fn upsert_command(&mut self, draft: QuickCommandDraft) {
+    pub(in crate::workspace) fn upsert_command(&mut self, draft: QuickCommandDraft) {
         if upsert_quick_command(&mut self.commands, &self.categories, draft, now_ms()) {
             self.persist();
         }
     }
 
-    pub(super) fn delete_command(&mut self, id: &str) {
+    pub(in crate::workspace) fn delete_command(&mut self, id: &str) {
         if delete_quick_command(&mut self.commands, id) {
             self.persist();
         }

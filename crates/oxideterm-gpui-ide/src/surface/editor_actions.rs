@@ -127,6 +127,57 @@ impl IdeSurface {
         self.load_directory(IdeLocation::remote(node_id, root_path), cx);
     }
 
+    /// Opens a remote file through the surface's existing NodeRouter-backed project.
+    pub fn plugin_open_remote_file(&mut self, path: String, cx: &mut Context<Self>) -> bool {
+        let Some(node_id) = self.node_id.clone() else {
+            return false;
+        };
+        self.open_remote_file(IdeLocation::remote(node_id, path), cx);
+        true
+    }
+
+    /// Replaces the active editor buffer while preserving IDE dirty/save ownership.
+    pub fn plugin_replace_active_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
+        let Some(editor) = self.active_editor() else {
+            return false;
+        };
+        editor.update(cx, |editor, cx| editor.replace_text_external(text, cx));
+        true
+    }
+
+    /// Inserts text at the active editor selection using the normal editor transaction path.
+    pub fn plugin_insert_active_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
+        let Some(editor) = self.active_editor() else {
+            return false;
+        };
+        editor.update(cx, |editor, cx| editor.insert_text(text, cx));
+        true
+    }
+
+    /// Saves the active buffer through the existing remote-file conflict checks.
+    pub fn plugin_save_active(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(tab_id) = self.workspace.active_tab() else {
+            return false;
+        };
+        self.save_tab(tab_id, cx);
+        true
+    }
+
+    /// Closes a file through the normal dirty-buffer confirmation path.
+    pub fn plugin_close_remote_file(&mut self, path: &str, cx: &mut Context<Self>) -> bool {
+        let Some(tab_id) = self
+            .workspace
+            .tabs()
+            .iter()
+            .find(|tab| matches!(&tab.location, IdeLocation::Remote { path: tab_path, .. } if tab_path == path))
+            .map(|tab| tab.id)
+        else {
+            return false;
+        };
+        self.close_tab(tab_id, cx);
+        true
+    }
+
     pub fn copy_active_editor_selection(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(editor) = self.active_editor() else {
             return false;

@@ -9,6 +9,7 @@ pub mod backend;
 pub mod capabilities;
 pub mod catalog;
 pub mod forwarding;
+pub mod host_tools;
 pub mod ide;
 pub mod profiler;
 pub mod readonly;

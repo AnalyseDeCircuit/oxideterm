@@ -8,20 +8,7 @@ use std::collections::HashSet;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::capabilities::{
-    NATIVE_PLUGIN_CAPABILITY_AI_CONTENT_READ, NATIVE_PLUGIN_CAPABILITY_APP_SETTINGS_READ,
-    NATIVE_PLUGIN_CAPABILITY_APP_SYNC_REFRESH, NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_READ,
-    NATIVE_PLUGIN_CAPABILITY_CREDENTIALS_MANAGE, NATIVE_PLUGIN_CAPABILITY_CREDENTIALS_RAW_READ,
-    NATIVE_PLUGIN_CAPABILITY_EVENTS_EMIT, NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_DELETE,
-    NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_READ, NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_WRITE,
-    NATIVE_PLUGIN_CAPABILITY_IDE_READ, NATIVE_PLUGIN_CAPABILITY_LEGACY_INVOKE,
-    NATIVE_PLUGIN_CAPABILITY_NETWORK_FORWARD, NATIVE_PLUGIN_CAPABILITY_NETWORK_FORWARD_READ,
-    NATIVE_PLUGIN_CAPABILITY_NETWORK_HTTP, NATIVE_PLUGIN_CAPABILITY_PLUGIN_SETTINGS_WRITE,
-    NATIVE_PLUGIN_CAPABILITY_SESSIONS_READ, NATIVE_PLUGIN_CAPABILITY_SYNC_READ,
-    NATIVE_PLUGIN_CAPABILITY_SYNC_WRITE, NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ,
-    NATIVE_PLUGIN_CAPABILITY_TERMINAL_WRITE, NATIVE_PLUGIN_CAPABILITY_TRANSFERS_READ,
-    NATIVE_PLUGIN_CAPABILITY_UI_WRITE,
-};
+use crate::capabilities::*;
 
 /// Security classification applied before a direct host API is made available.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -83,6 +70,20 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         BaselineRead,
         None,
         "Returns the complete effective theme token set."
+    ),
+    api!(
+        "theme",
+        "getAvailable",
+        BaselineRead,
+        None,
+        "Returns built-in and custom theme metadata."
+    ),
+    api!(
+        "theme",
+        "setActive",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_THEME_WRITE),
+        "Changes the active application theme."
     ),
     api!(
         "app",
@@ -159,14 +160,28 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "getAll",
         SensitiveRead,
         Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_READ),
-        "Returns saved connection projections."
+        "Returns live connection projections."
     ),
     api!(
         "connections",
         "getSummaries",
         BaselineRead,
         None,
-        "Returns redacted saved-connection summaries."
+        "Returns redacted live-connection summaries."
+    ),
+    api!(
+        "connections",
+        "getSavedSummaries",
+        BaselineRead,
+        None,
+        "Returns redacted saved-connection identities for discovery and connect workflows."
+    ),
+    api!(
+        "connections",
+        "getSaved",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_READ),
+        "Returns saved-connection projections without credential material or local key paths."
     ),
     api!(
         "connections",
@@ -188,6 +203,27 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         SensitiveRead,
         Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_READ),
         "Returns the saved connection for a node."
+    ),
+    api!(
+        "connections",
+        "connect",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_CONTROL),
+        "Starts the existing saved-connection flow."
+    ),
+    api!(
+        "connections",
+        "reconnect",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_CONTROL),
+        "Schedules reconnect for an existing node."
+    ),
+    api!(
+        "connections",
+        "disconnect",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_CONTROL),
+        "Explicitly disconnects a node subtree through NodeRouter ownership."
     ),
     api!(
         "sessions",
@@ -260,6 +296,48 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "Returns notification counts without notification content."
     ),
     api!(
+        "notifications",
+        "getAll",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_NOTIFICATIONS_READ),
+        "Returns notification content and scopes."
+    ),
+    api!(
+        "notifications",
+        "markRead",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_NOTIFICATIONS_MANAGE),
+        "Marks one notification as read."
+    ),
+    api!(
+        "notifications",
+        "markAllRead",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_NOTIFICATIONS_MANAGE),
+        "Marks all notifications as read."
+    ),
+    api!(
+        "notifications",
+        "setDnd",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_NOTIFICATIONS_MANAGE),
+        "Changes notification do-not-disturb state."
+    ),
+    api!(
+        "notifications",
+        "remove",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_NOTIFICATIONS_MANAGE),
+        "Removes one notification."
+    ),
+    api!(
+        "notifications",
+        "clear",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_NOTIFICATIONS_MANAGE),
+        "Clears all notifications."
+    ),
+    api!(
         "cloudSync",
         "getSummary",
         BaselineRead,
@@ -267,11 +345,123 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "Returns Cloud Sync status without destinations, credentials, errors, or content."
     ),
     api!(
+        "cloudSync",
+        "getHistory",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_READ),
+        "Returns sanitized Cloud Sync operation history."
+    ),
+    api!(
+        "cloudSync",
+        "check",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_CONTROL),
+        "Checks the configured Cloud Sync backend."
+    ),
+    api!(
+        "cloudSync",
+        "upload",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_CONTROL),
+        "Uploads the current synchronized product state."
+    ),
+    api!(
+        "cloudSync",
+        "pullPreview",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_CONTROL),
+        "Loads a remote-state preview without applying it."
+    ),
+    api!(
+        "cloudSync",
+        "applyPreview",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_APPLY),
+        "Applies the currently reviewed remote preview."
+    ),
+    api!(
+        "cloudSync",
+        "setAutoUpload",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_CONTROL),
+        "Changes automatic upload state."
+    ),
+    api!(
         "quickCommands",
         "getMetadata",
         BaselineRead,
         None,
         "Returns quick-command discovery metadata without executable content."
+    ),
+    api!(
+        "quickCommands",
+        "getAll",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_QUICK_COMMANDS_READ),
+        "Returns complete quick-command definitions."
+    ),
+    api!(
+        "quickCommands",
+        "execute",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_QUICK_COMMANDS_EXECUTE),
+        "Executes a saved quick command through the active terminal workflow."
+    ),
+    api!(
+        "quickCommands",
+        "upsert",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_QUICK_COMMANDS_MANAGE),
+        "Creates or updates a quick command."
+    ),
+    api!(
+        "quickCommands",
+        "remove",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_QUICK_COMMANDS_MANAGE),
+        "Removes a quick command."
+    ),
+    api!(
+        "hostTools",
+        "getSnapshot",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_READ),
+        "Returns cached host metrics, processes, containers, and services for a node."
+    ),
+    api!(
+        "hostTools",
+        "getExtensions",
+        BaselineRead,
+        None,
+        "Returns the requesting plugin's declared Host Tools monitor metadata without command text."
+    ),
+    api!(
+        "hostTools",
+        "capture",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_READ),
+        "Captures one typed Host Tools dataset through the existing node connection."
+    ),
+    api!(
+        "hostTools",
+        "execute",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_WRITE),
+        "Runs a validated non-destructive Host Tools action."
+    ),
+    api!(
+        "hostTools",
+        "terminate",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_DESTRUCTIVE),
+        "Runs a validated destructive process or tmux action."
+    ),
+    api!(
+        "hostTools",
+        "runExtension",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_CUSTOM_EXECUTE),
+        "Runs one static Host Tools monitor command declared by the requesting plugin."
     ),
     api!(
         "terminal",
@@ -799,6 +989,48 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "Subscribes to active IDE file changes."
     ),
     api!(
+        "ide",
+        "openFile",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_IDE_WRITE),
+        "Opens a remote file in its existing IDE project."
+    ),
+    api!(
+        "ide",
+        "replaceActiveText",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_IDE_WRITE),
+        "Replaces the active editor buffer without bypassing normal save semantics."
+    ),
+    api!(
+        "ide",
+        "insertActiveText",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_IDE_WRITE),
+        "Inserts text at the active editor selection."
+    ),
+    api!(
+        "ide",
+        "saveActive",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_IDE_WRITE),
+        "Saves the active IDE buffer through the existing remote file owner."
+    ),
+    api!(
+        "ide",
+        "closeFile",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_IDE_WRITE),
+        "Closes an IDE file through the normal dirty-buffer confirmation flow."
+    ),
+    api!(
+        "ide",
+        "refreshProject",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_IDE_WRITE),
+        "Refreshes the active IDE project tree."
+    ),
+    api!(
         "ai",
         "getConversations",
         SensitiveRead,
@@ -839,6 +1071,48 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         BaselineRead,
         None,
         "Subscribes to AI message metadata without message content."
+    ),
+    api!(
+        "ai",
+        "createConversation",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_AI_WRITE),
+        "Creates a conversation in the existing AI workspace."
+    ),
+    api!(
+        "ai",
+        "selectConversation",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_AI_WRITE),
+        "Selects an existing AI conversation."
+    ),
+    api!(
+        "ai",
+        "sendMessage",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_AI_WRITE),
+        "Sends plugin-provided text through the configured AI workflow."
+    ),
+    api!(
+        "ai",
+        "cancelGeneration",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_AI_WRITE),
+        "Cancels the active AI generation."
+    ),
+    api!(
+        "ai",
+        "deleteConversation",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_AI_WRITE),
+        "Deletes one AI conversation."
+    ),
+    api!(
+        "ai",
+        "clearConversations",
+        Destructive,
+        Some(NATIVE_PLUGIN_CAPABILITY_AI_WRITE),
+        "Clears all AI conversations."
     ),
     api!(
         "api",
@@ -1084,10 +1358,12 @@ mod tests {
             .map(HostApiDescriptor::qualified_name)
             .collect::<HashSet<_>>();
 
-        assert_eq!(HOST_API_CATALOG.len(), 137);
+        assert_eq!(HOST_API_CATALOG.len(), 178);
         assert_eq!(names.len(), HOST_API_CATALOG.len());
         assert!(names.contains("api.invoke"));
         assert!(names.contains("connections.getSummaries"));
+        assert!(names.contains("connections.getSavedSummaries"));
+        assert!(names.contains("connections.getSaved"));
         assert!(names.contains("app.getApiCatalog"));
         assert!(names.contains("app.getSettingsSummary"));
         assert!(names.contains("eventLog.getSummary"));
@@ -1095,6 +1371,15 @@ mod tests {
         assert!(names.contains("cloudSync.getSummary"));
         assert!(names.contains("quickCommands.getMetadata"));
         assert!(names.contains("theme.getTokens"));
+        assert!(names.contains("theme.getAvailable"));
+        assert!(names.contains("connections.disconnect"));
+        assert!(names.contains("hostTools.capture"));
+        assert!(names.contains("hostTools.getExtensions"));
+        assert!(names.contains("hostTools.runExtension"));
+        assert!(names.contains("quickCommands.execute"));
+        assert!(names.contains("ide.replaceActiveText"));
+        assert!(names.contains("ai.sendMessage"));
+        assert!(names.contains("cloudSync.applyPreview"));
         assert!(names.contains("forward.getSummary"));
         assert!(names.contains("transfers.getSummary"));
         assert!(names.contains("sessions.getSummary"));
@@ -1150,6 +1435,7 @@ mod tests {
         assert!(baseline.contains(&"terminal.getBufferSize".to_string()));
         for api in [
             "connections.getSummaries",
+            "connections.getSavedSummaries",
             "sessions.getSummary",
             "terminal.getMetadata",
             "ai.getCatalog",
@@ -1160,6 +1446,7 @@ mod tests {
             "cloudSync.getSummary",
             "quickCommands.getMetadata",
             "theme.getTokens",
+            "hostTools.getExtensions",
             "forward.getSummary",
             "transfers.getSummary",
         ] {
@@ -1167,6 +1454,10 @@ mod tests {
         }
         assert!(!baseline.contains(&"terminal.getNodeBuffer".to_string()));
         assert!(!baseline.contains(&"terminal.writeToActive".to_string()));
+        assert!(!baseline.contains(&"hostTools.capture".to_string()));
+        assert!(!baseline.contains(&"hostTools.runExtension".to_string()));
+        assert!(!baseline.contains(&"ide.replaceActiveText".to_string()));
+        assert!(!baseline.contains(&"cloudSync.applyPreview".to_string()));
 
         let terminal = allowed_host_apis_for_capabilities([
             NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ,
@@ -1176,6 +1467,18 @@ mod tests {
         assert!(terminal.contains(&"terminal.getNodeBuffer".to_string()));
         assert!(terminal.contains(&"terminal.writeToActive".to_string()));
         assert!(!terminal.contains(&"secrets.get".to_string()));
+
+        let product = allowed_host_apis_for_capabilities([
+            NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_READ,
+            NATIVE_PLUGIN_CAPABILITY_IDE_WRITE,
+            NATIVE_PLUGIN_CAPABILITY_CLOUD_SYNC_APPLY,
+            NATIVE_PLUGIN_CAPABILITY_HOST_TOOLS_CUSTOM_EXECUTE,
+        ]);
+        assert!(product.contains(&"hostTools.capture".to_string()));
+        assert!(product.contains(&"hostTools.runExtension".to_string()));
+        assert!(product.contains(&"ide.replaceActiveText".to_string()));
+        assert!(product.contains(&"cloudSync.applyPreview".to_string()));
+        assert!(!product.contains(&"hostTools.terminate".to_string()));
 
         let forward =
             allowed_host_apis_for_capabilities([NATIVE_PLUGIN_CAPABILITY_NETWORK_FORWARD]);

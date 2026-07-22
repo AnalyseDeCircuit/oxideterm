@@ -46,10 +46,16 @@ fn native_plugin_permissions_keep_rich_baseline_and_gate_sensitive_calls() {
     for api in [
         "app.getApiCatalog",
         "connections.getSummaries",
+        "connections.getSavedSummaries",
         "sessions.getSummary",
         "terminal.getMetadata",
         "ai.getCatalog",
         "ide.getSummary",
+        "theme.getAvailable",
+        "notifications.getSummary",
+        "quickCommands.getMetadata",
+        "cloudSync.getSummary",
+        "hostTools.getExtensions",
     ] {
         assert!(baseline.allowed_host_apis.contains(&api.to_string()));
     }
@@ -89,6 +95,40 @@ fn native_plugin_permissions_keep_rich_baseline_and_gate_sensitive_calls() {
         terminal
             .capabilities
             .contains(&"runtime.process.trusted".to_string())
+    );
+
+    let product_manifest =
+        serde_json::from_value::<plugin_host::NativePluginManifest>(serde_json::json!({
+            "id": "com.example.product",
+            "name": "Product API",
+            "version": "1.0.0",
+            "permissions": {
+                "capabilities": [
+                    "connections.control",
+                    "host_tools.read",
+                    "host_tools.custom.execute",
+                    "ide.write",
+                    "ai.write",
+                    "cloud_sync.apply"
+                ]
+            }
+        }))
+        .unwrap();
+    let product = native_plugin_permissions(&product_manifest, false).unwrap();
+    for api in [
+        "connections.disconnect",
+        "hostTools.capture",
+        "hostTools.runExtension",
+        "ide.replaceActiveText",
+        "ai.sendMessage",
+        "cloudSync.applyPreview",
+    ] {
+        assert!(product.allowed_host_apis.contains(&api.to_string()));
+    }
+    assert!(
+        !product
+            .allowed_host_apis
+            .contains(&"hostTools.terminate".to_string())
     );
 }
 

@@ -22,7 +22,10 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn reschedule_cloud_sync_auto_upload(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn reschedule_cloud_sync_auto_upload(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         self.cloud_sync.controller.auto_upload_generation = self
             .cloud_sync
             .controller
@@ -278,7 +281,7 @@ impl WorkspaceApp {
             .spawn(deliver_cloud_sync_google_oauth(tx, client_id, hints));
     }
 
-    pub(super) fn start_cloud_sync_check_with_options(
+    pub(in crate::workspace) fn start_cloud_sync_check_with_options(
         &mut self,
         skip_if_busy: bool,
         cx: &mut Context<Self>,
@@ -314,7 +317,7 @@ impl WorkspaceApp {
         ));
     }
 
-    pub(super) fn start_cloud_sync_upload_with_options(
+    pub(in crate::workspace) fn start_cloud_sync_upload_with_options(
         &mut self,
         force: bool,
         automatic: bool,
@@ -523,12 +526,21 @@ impl WorkspaceApp {
             })
     }
 
-    pub(super) fn start_cloud_sync_pull_preview(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn start_cloud_sync_pull_preview(&mut self, cx: &mut Context<Self>) {
+        self.start_cloud_sync_pull_preview_with_options(true, cx);
+    }
+
+    /// Starts a pull preview without forcing non-UI callers to persist panel drafts.
+    pub(in crate::workspace) fn start_cloud_sync_pull_preview_with_options(
+        &mut self,
+        persist_configuration: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.cloud_sync.controller.delivery_rx.is_some() {
             self.mark_cloud_sync_operation_in_progress();
             return;
         }
-        if !self.persist_cloud_sync_configuration(false, cx) {
+        if persist_configuration && !self.persist_cloud_sync_configuration(false, cx) {
             return;
         }
         self.cloud_sync.controller.store.state_mut().status = CloudSyncStatus::Checking;
@@ -627,7 +639,7 @@ impl WorkspaceApp {
             ));
     }
 
-    pub(super) fn start_cloud_sync_apply_preview(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn start_cloud_sync_apply_preview(&mut self, cx: &mut Context<Self>) {
         if self.cloud_sync.controller.delivery_rx.is_some() {
             self.mark_cloud_sync_operation_in_progress();
             return;
@@ -1393,7 +1405,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn save_cloud_sync_state(&mut self) {
+    pub(in crate::workspace) fn save_cloud_sync_state(&mut self) {
         self.invalidate_cloud_sync_snapshot_caches();
         if let Err(error) = self.cloud_sync.controller.store.save() {
             self.cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());

@@ -125,6 +125,7 @@ impl Render for WorkspaceApp {
         self.poll_connection_trace_events(cx);
         self.poll_terminal_notices(cx);
         self.poll_native_plugin_terminal_ui_requests(window, cx);
+        self.poll_native_plugin_product_ui_effects(window, cx);
         self.poll_ai_chat_stream_events(Some(window), cx);
         self.poll_ai_compaction_results(cx);
         self.poll_ai_model_selector_probe_results(cx);

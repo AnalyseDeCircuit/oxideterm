@@ -342,7 +342,7 @@ impl WorkspaceApp {
         })
     }
 
-    fn active_ide_surface(&self) -> Option<gpui::Entity<IdeSurface>> {
+    pub(in crate::workspace) fn active_ide_surface(&self) -> Option<gpui::Entity<IdeSurface>> {
         let tab_id = self.main_window_tabs.active_tab_id?;
         let tab = self.tabs.iter().find(|tab| tab.id == tab_id)?;
         (tab.kind == TabKind::Ide)

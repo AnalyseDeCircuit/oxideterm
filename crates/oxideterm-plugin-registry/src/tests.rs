@@ -136,6 +136,67 @@ fn manifest_permissions_use_camel_case_and_round_trip() {
 }
 
 #[test]
+fn host_monitor_manifest_defaults_are_bounded_and_structured() {
+    let manifest: NativePluginManifest = serde_json::from_value(serde_json::json!({
+        "id": "com.example.demo",
+        "name": "Demo",
+        "version": "1.0.0",
+        "contributes": {
+            "hostMonitors": [{
+                "id": "workers",
+                "title": "Workers",
+                "commands": { "linux": "printf '[{\"pid\":1}]'" }
+            }]
+        }
+    }))
+    .unwrap();
+
+    validate_native_plugin_manifest(&manifest).unwrap();
+    let monitor = &manifest
+        .contributes
+        .as_ref()
+        .unwrap()
+        .host_monitors
+        .as_ref()
+        .unwrap()[0];
+    assert_eq!(monitor.timeout_seconds, 10);
+    assert_eq!(monitor.max_output_bytes, 256 * 1024);
+    assert_eq!(monitor.output.max_rows, 1_000);
+    assert_eq!(
+        monitor.output.format,
+        NativePluginHostMonitorOutputFormat::Json
+    );
+}
+
+#[test]
+fn host_monitor_manifest_rejects_unsafe_or_ambiguous_declarations() {
+    let monitor = NativePluginHostMonitorDef {
+        id: "workers".to_string(),
+        title: "Workers".to_string(),
+        description: None,
+        commands: HashMap::from([("unknown".to_string(), "status".to_string())]),
+        output: NativePluginHostMonitorOutputDef::default(),
+        timeout_seconds: 10,
+        max_output_bytes: 256 * 1024,
+    };
+    let mut contributes = NativePluginContributes {
+        host_monitors: Some(vec![monitor.clone()]),
+        ..NativePluginContributes::default()
+    };
+    assert!(validate_native_plugin_contributions(&contributes).is_err());
+
+    let mut valid_monitor = monitor;
+    valid_monitor.commands = HashMap::from([("linux".to_string(), "status".to_string())]);
+    valid_monitor.output.format = NativePluginHostMonitorOutputFormat::Tsv;
+    contributes.host_monitors = Some(vec![valid_monitor.clone()]);
+    assert!(validate_native_plugin_contributions(&contributes).is_err());
+
+    valid_monitor.output.columns = vec!["pid".to_string()];
+    contributes.host_monitors = Some(vec![valid_monitor.clone(), valid_monitor]);
+    assert!(validate_native_plugin_contributions(&contributes).is_err());
+}
+
+#[test]
 fn permission_capabilities_normalize_order_and_whitespace() {
     let capabilities = vec![
         " terminal.input.send ".to_string(),
@@ -768,6 +829,20 @@ fn manifest_only_contributions_are_indexed_without_runtime_execution() {
     assert_eq!(contributions.terminal_transports.len(), 1);
     assert_eq!(contributions.connection_hooks.len(), 1);
     assert_eq!(contributions.api_commands.len(), 1);
+    assert_eq!(contributions.host_monitors.len(), 1);
+    assert_eq!(
+        contributions
+            .host_monitor("com.example.demo", "workers")
+            .unwrap()
+            .definition
+            .title,
+        "Workers"
+    );
+    assert!(
+        contributions
+            .host_monitor("com.example.other", "workers")
+            .is_none()
+    );
     let _ = fs::remove_dir_all(temp_dir);
 }
 
@@ -783,7 +858,7 @@ fn disabling_plugin_removes_manifest_only_contributions() {
     write_manifest(&plugin_dir, &manifest);
 
     let mut registry = NativePluginRegistry::discover(&settings_path);
-    assert_eq!(registry.contributions().total_count(), 8);
+    assert_eq!(registry.contributions().total_count(), 9);
     registry
         .set_plugin_enabled("com.example.demo", false)
         .unwrap();
@@ -1704,6 +1779,15 @@ fn sample_contributes() -> NativePluginContributes {
             result_schema: None,
         }]),
         api_commands: Some(vec!["demo_command".to_string()]),
+        host_monitors: Some(vec![NativePluginHostMonitorDef {
+            id: "workers".to_string(),
+            title: "Workers".to_string(),
+            description: Some("Worker process metadata".to_string()),
+            commands: HashMap::from([("linux".to_string(), "printf '[{\"pid\":1}]'".to_string())]),
+            output: NativePluginHostMonitorOutputDef::default(),
+            timeout_seconds: 10,
+            max_output_bytes: 256 * 1024,
+        }]),
     }
 }
 

@@ -96,6 +96,57 @@ pub struct NativePluginContributes {
     pub ai_tools: Option<Vec<NativePluginAiToolDef>>,
     #[serde(default)]
     pub api_commands: Option<Vec<String>>,
+    #[serde(default)]
+    pub host_monitors: Option<Vec<NativePluginHostMonitorDef>>,
+}
+
+/// Declares one bounded Host Tools sampler backed by a static per-platform command.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginHostMonitorDef {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub commands: HashMap<String, String>,
+    #[serde(default)]
+    pub output: NativePluginHostMonitorOutputDef,
+    #[serde(default = "default_host_monitor_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_host_monitor_max_output_bytes")]
+    pub max_output_bytes: usize,
+}
+
+/// Describes how the host converts monitor stdout into plugin-facing data.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginHostMonitorOutputDef {
+    #[serde(default)]
+    pub format: NativePluginHostMonitorOutputFormat,
+    #[serde(default)]
+    pub columns: Vec<String>,
+    #[serde(default = "default_host_monitor_max_rows")]
+    pub max_rows: usize,
+}
+
+impl Default for NativePluginHostMonitorOutputDef {
+    fn default() -> Self {
+        Self {
+            format: NativePluginHostMonitorOutputFormat::default(),
+            columns: Vec::new(),
+            max_rows: default_host_monitor_max_rows(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NativePluginHostMonitorOutputFormat {
+    #[default]
+    Json,
+    JsonLines,
+    Tsv,
+    TextLines,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -234,4 +285,16 @@ fn default_sidebar_position() -> String {
 
 fn default_declarative_ui_kind() -> String {
     NATIVE_PLUGIN_DECLARATIVE_UI_FORM_KIND.to_string()
+}
+
+fn default_host_monitor_timeout_seconds() -> u64 {
+    10
+}
+
+fn default_host_monitor_max_output_bytes() -> usize {
+    256 * 1024
+}
+
+fn default_host_monitor_max_rows() -> usize {
+    1_000
 }

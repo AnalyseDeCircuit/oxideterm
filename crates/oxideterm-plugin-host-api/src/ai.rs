@@ -66,6 +66,45 @@ pub fn native_plugin_ai_response(
                 "AI subscriptions are registered through the runtime event bridge",
             ),
         ),
+        "createConversation" | "cancelGeneration" | "clearConversations" => {
+            plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+        }
+        "selectConversation" | "deleteConversation" => {
+            if call
+                .args
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.trim().is_empty())
+            {
+                plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+            } else {
+                plugin_runtime::PluginResponse::error(
+                    request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_ai_conversation",
+                        format!("ai.{} requires non-empty args.conversationId", call.method),
+                    ),
+                )
+            }
+        }
+        "sendMessage" => {
+            if call
+                .args
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|content| !content.trim().is_empty())
+            {
+                plugin_runtime::PluginResponse::ok(request_id, json!({ "queued": true }))
+            } else {
+                plugin_runtime::PluginResponse::error(
+                    request_id,
+                    plugin_runtime::PluginError::protocol(
+                        "invalid_ai_message",
+                        "ai.sendMessage requires non-empty args.content",
+                    ),
+                )
+            }
+        }
         method => plugin_runtime::PluginResponse::error(
             request_id,
             plugin_runtime::PluginError::protocol(

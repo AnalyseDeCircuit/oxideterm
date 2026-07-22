@@ -4,6 +4,15 @@
 //! Manifest, runtime metadata, and contribution validation rules.
 
 use super::*;
+use std::collections::HashSet;
+
+const NATIVE_PLUGIN_MAX_HOST_MONITORS: usize = 16;
+const NATIVE_PLUGIN_MAX_HOST_MONITOR_COMMAND_BYTES: usize = 16 * 1024;
+const NATIVE_PLUGIN_MIN_HOST_MONITOR_OUTPUT_BYTES: usize = 1024;
+const NATIVE_PLUGIN_MAX_HOST_MONITOR_OUTPUT_BYTES: usize = 1024 * 1024;
+const NATIVE_PLUGIN_MAX_HOST_MONITOR_TIMEOUT_SECONDS: u64 = 30;
+const NATIVE_PLUGIN_MAX_HOST_MONITOR_ROWS: usize = 2_000;
+const NATIVE_PLUGIN_MAX_HOST_MONITOR_COLUMNS: usize = 64;
 
 pub(crate) fn validate_native_plugin_manifest(
     manifest: &NativePluginManifest,
@@ -180,6 +189,117 @@ pub(crate) fn validate_native_plugin_contributions(
     if let Some(api_commands) = &contributes.api_commands {
         for command in api_commands {
             validate_manifest_text_field("contributes.apiCommands", command)?;
+        }
+    }
+    if let Some(host_monitors) = &contributes.host_monitors {
+        validate_native_plugin_host_monitors(host_monitors)?;
+    }
+    Ok(())
+}
+
+fn validate_native_plugin_host_monitors(
+    host_monitors: &[NativePluginHostMonitorDef],
+) -> Result<(), String> {
+    if host_monitors.len() > NATIVE_PLUGIN_MAX_HOST_MONITORS {
+        return Err(format!(
+            "Plugin contributes at most {NATIVE_PLUGIN_MAX_HOST_MONITORS} Host Tools monitors"
+        ));
+    }
+    let mut monitor_ids = HashSet::new();
+    for monitor in host_monitors {
+        validate_manifest_text_field("contributes.hostMonitors.id", &monitor.id)?;
+        validate_manifest_text_field("contributes.hostMonitors.title", &monitor.title)?;
+        if !monitor_ids.insert(monitor.id.as_str()) {
+            return Err(format!(
+                "Duplicate contributes.hostMonitors id \"{}\"",
+                monitor.id
+            ));
+        }
+        if monitor.commands.is_empty() {
+            return Err(format!(
+                "Host Tools monitor \"{}\" requires at least one platform command",
+                monitor.id
+            ));
+        }
+        for (platform, command) in &monitor.commands {
+            validate_one_of(
+                "contributes.hostMonitors.commands",
+                platform,
+                &["linux", "macos", "bsd", "windows", "default"],
+            )?;
+            if command.trim().is_empty() {
+                return Err(format!(
+                    "Host Tools monitor \"{}\" command for \"{platform}\" cannot be empty",
+                    monitor.id
+                ));
+            }
+            if command.len() > NATIVE_PLUGIN_MAX_HOST_MONITOR_COMMAND_BYTES {
+                return Err(format!(
+                    "Host Tools monitor \"{}\" command exceeds {NATIVE_PLUGIN_MAX_HOST_MONITOR_COMMAND_BYTES} bytes",
+                    monitor.id
+                ));
+            }
+            if command.contains('\0') {
+                return Err(format!(
+                    "Host Tools monitor \"{}\" command contains an invalid null byte",
+                    monitor.id
+                ));
+            }
+        }
+        if !(1..=NATIVE_PLUGIN_MAX_HOST_MONITOR_TIMEOUT_SECONDS).contains(&monitor.timeout_seconds)
+        {
+            return Err(format!(
+                "Host Tools monitor \"{}\" timeoutSeconds must be between 1 and {NATIVE_PLUGIN_MAX_HOST_MONITOR_TIMEOUT_SECONDS}",
+                monitor.id
+            ));
+        }
+        if !(NATIVE_PLUGIN_MIN_HOST_MONITOR_OUTPUT_BYTES
+            ..=NATIVE_PLUGIN_MAX_HOST_MONITOR_OUTPUT_BYTES)
+            .contains(&monitor.max_output_bytes)
+        {
+            return Err(format!(
+                "Host Tools monitor \"{}\" maxOutputBytes must be between {NATIVE_PLUGIN_MIN_HOST_MONITOR_OUTPUT_BYTES} and {NATIVE_PLUGIN_MAX_HOST_MONITOR_OUTPUT_BYTES}",
+                monitor.id
+            ));
+        }
+        if !(1..=NATIVE_PLUGIN_MAX_HOST_MONITOR_ROWS).contains(&monitor.output.max_rows) {
+            return Err(format!(
+                "Host Tools monitor \"{}\" output.maxRows must be between 1 and {NATIVE_PLUGIN_MAX_HOST_MONITOR_ROWS}",
+                monitor.id
+            ));
+        }
+        validate_native_plugin_host_monitor_columns(monitor)?;
+    }
+    Ok(())
+}
+
+fn validate_native_plugin_host_monitor_columns(
+    monitor: &NativePluginHostMonitorDef,
+) -> Result<(), String> {
+    let columns = &monitor.output.columns;
+    if monitor.output.format != NativePluginHostMonitorOutputFormat::Tsv {
+        if !columns.is_empty() {
+            return Err(format!(
+                "Host Tools monitor \"{}\" output.columns is only valid for tsv output",
+                monitor.id
+            ));
+        }
+        return Ok(());
+    }
+    if columns.is_empty() || columns.len() > NATIVE_PLUGIN_MAX_HOST_MONITOR_COLUMNS {
+        return Err(format!(
+            "Host Tools monitor \"{}\" tsv output requires 1 to {NATIVE_PLUGIN_MAX_HOST_MONITOR_COLUMNS} columns",
+            monitor.id
+        ));
+    }
+    let mut unique_columns = HashSet::new();
+    for column in columns {
+        validate_manifest_text_field("contributes.hostMonitors.output.columns", column)?;
+        if !unique_columns.insert(column.as_str()) {
+            return Err(format!(
+                "Host Tools monitor \"{}\" contains duplicate output column \"{column}\"",
+                monitor.id
+            ));
         }
     }
     Ok(())

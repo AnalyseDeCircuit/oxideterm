@@ -902,16 +902,21 @@ Native 插件通过注册界面结构渲染界面，不注册组件。
 
 | 命名空间 | 常见用途 |
 |---|---|
-| `connections` | 读取保存/在线连接快照 |
+| `connections` | 读取并控制保存/在线连接生命周期 |
 | `sessions` | 读取节点树和活跃节点状态 |
 | `terminal` | 观察缓冲区或发送已批准输入 |
 | `sftp` | 通过节点拥有的 SFTP 列出、读取、写入远端文件 |
 | `forward` | 列出、创建、停止转发 |
 | `transfers` | 观察传输状态 |
 | `profiler` | 读取节点指标 |
+| `hostTools` | 读取缓存宿主状态、采集类型化数据集并执行已验证动作 |
 | `eventLog` | 读取应用事件日志 |
-| `ide` | 观察 IDE 项目和打开文件状态 |
-| `ai` | 读取已脱敏 AI 元数据 |
+| `notifications` | 读取或管理通知中心条目 |
+| `quickCommands` | 读取、管理或执行保存的快捷命令 |
+| `cloudSync` | 读取安全同步状态/历史并控制同步操作 |
+| `theme` | 读取完整有效 token 并选择已安装主题 |
+| `ide` | 观察和编辑当前 IDE 项目 |
+| `ai` | 读取已脱敏 AI 数据并控制对话或生成 |
 | `app` | 主题、平台、版本和设置快照 |
 | `settings` | 插件设置和可同步设置 |
 | `storage` | 插件作用域 JSON KV |
@@ -919,7 +924,7 @@ Native 插件通过注册界面结构渲染界面，不注册组件。
 | `secrets` | 插件作用域凭据存储 |
 | `ui` | toast、确认对话框、布局和进度 |
 
-此表描述当前已实现的命名空间，不表示 OxideTerm 的每个产品领域都已经开放。调用默认可用的 `app.getApiCatalog` 可以发现当前宿主支持的直接 API，以及每个 API 的访问等级、所需能力和引入版本。目录中没有出现的产品领域仍属于规划工作。
+此表描述当前已实现的命名空间。调用默认可用的 `app.getApiCatalog` 可以发现当前宿主支持的准确直接 API，以及每个 API 的访问等级、所需能力和引入版本；版本与能力协商以该目录为准。
 
 ## 权限与能力
 
@@ -947,6 +952,7 @@ Native 插件通过注册界面结构渲染界面，不注册组件。
 | `app.settings.read` | 读取宿主设置分类 |
 | `app.sync.refresh` | 外部同步后刷新宿主状态 |
 | `connections.read` | 读取完整的保存连接和端点投影 |
+| `connections.control` | 连接、重连或显式断开产品拥有的现有节点 |
 | `sessions.read` | 读取完整会话树、活动节点投影和事件日志 |
 | `terminal.content.read` | 读取终端目标、选区、回滚缓冲或搜索结果 |
 | `terminal.write` | 写入终端输入、清空缓冲区或打开 Telnet 传输 |
@@ -957,7 +963,22 @@ Native 插件通过注册界面结构渲染界面，不注册组件。
 | `sync.write` | 刷新、应用或导入同步数据 |
 | `transfers.read` | 读取和订阅传输状态 |
 | `ide.read` | 读取完整 IDE 项目和打开文件投影 |
+| `ide.write` | 在现有 IDE 项目中打开、编辑、保存、关闭文件或刷新项目 |
 | `ai.content.read` | 读取 AI 对话和消息正文 |
+| `ai.write` | 创建、选择或删除对话，发送文本或取消生成 |
+| `host_tools.read` | 读取缓存宿主状态或采集类型化 Host Tools 数据 |
+| `host_tools.write` | 执行已验证的非破坏性进程、容器、服务、tmux 或任务动作 |
+| `host_tools.destructive` | 终止进程或销毁 tmux 资源 |
+| `host_tools.custom.execute` | 执行当前插件清单中预先声明的静态自定义监控命令 |
+| `notifications.read` | 读取通知标题、正文和作用域投影 |
+| `notifications.manage` | 标为已读、删除、清空或修改免打扰状态 |
+| `quick_commands.read` | 读取完整的保存快捷命令定义 |
+| `quick_commands.manage` | 创建、更新或删除快捷命令 |
+| `quick_commands.execute` | 通过常规风险确认执行保存的快捷命令 |
+| `theme.write` | 选择已安装的内置或自定义主题 |
+| `cloud_sync.read` | 读取已脱敏的云同步历史 |
+| `cloud_sync.control` | 检查、上传、预览拉取或配置自动上传 |
+| `cloud_sync.apply` | 应用当前已审阅的远端预览 |
 | `legacy.invoke` | 调用兼容层 `api.invoke` 适配器 |
 | `events.emit` | 发出插件作用域自定义事件 |
 | `plugin.settings.write` | 修改插件设置或插件作用域存储 |
@@ -1078,6 +1099,21 @@ interface NativePluginContributes {
   connectionHooks?: Array<'onConnect' | 'onDisconnect' | 'onReconnect' | 'onLinkDown'>;
   aiTools?: NativePluginAiToolDef[];
   apiCommands?: string[];
+  hostMonitors?: NativePluginHostMonitorDef[];
+}
+
+interface NativePluginHostMonitorDef {
+  id: string;
+  title: string;
+  description?: string;
+  commands: Partial<Record<'linux' | 'macos' | 'bsd' | 'windows' | 'default', string>>;
+  output?: {
+    format?: 'json' | 'jsonLines' | 'tsv' | 'textLines';
+    columns?: string[]; // 仅 tsv 必填。
+    maxRows?: number; // 默认 1,000，最大 2,000。
+  };
+  timeoutSeconds?: number; // 默认 10，范围 1-30。
+  maxOutputBytes?: number; // 默认 262,144，范围 1 KiB-1 MiB。
 }
 
 interface NativePluginTabDef {
@@ -1368,15 +1404,88 @@ interface HostCall {
 | 宿主 API | 参数 | 返回 |
 |---|---|---|
 | `connections.getSummaries` | `{}` | 脱敏连接摘要；默认可用 |
+| `connections.getSavedSummaries` | `{}` | 用于发现的脱敏保存连接 ID、名称和分组；默认可用 |
 | `connections.getAll` | `{}` | 连接快照 |
+| `connections.getSaved` | `{}` | 不含凭据、密钥路径、证书路径、连接后命令或代理凭据引用的保存连接投影 |
 | `connections.get` | `{ connectionId: string }` | 连接快照或 `null` |
 | `connections.getState` | `{ connectionId: string }` | 连接状态或 `null` |
 | `connections.getByNode` | `{ nodeId: string }` | 连接快照或 `null` |
+| `connections.connect` | `{ connectionId: string }` | `{ queued: true }`；使用现有保存连接和提示流程 |
+| `connections.reconnect` | `{ nodeId: string }` | `{ queued: true }`；复用现有节点运行时 |
+| `connections.disconnect` | `{ nodeId: string }` | `{ queued: true }`；先打开常规级联确认，再断开 NodeRouter 拥有的子树 |
 | `sessions.getTree` | `{}` | 节点树快照 |
 | `sessions.getSummary` | `{}` | 脱敏会话摘要；默认可用 |
 | `sessions.getActiveNodes` | `{}` | 活跃/已连接节点快照 |
 | `sessions.getNodeState` | `{ nodeId: string }` | 节点状态或 `null` |
 | `eventLog.getEntries` | `{ severity?: string, category?: string, limit?: number }` | 事件日志条目 |
+
+### 产品数据与控制
+
+工作区修改操作在完成参数和权限预检后返回 `{ queued: true }`，随后由对应产品所有者执行，并反映到后续快照或事件中。Host Tools 因为需要返回类型化远端结果，所以采用同步返回。
+
+| 宿主 API | 能力 | 参数 | 返回 |
+|---|---|---|---|
+| `notifications.getSummary` | 默认 | `{}` | 不含正文的计数和免打扰状态 |
+| `notifications.getAll` | `notifications.read` | `{}` | 通知标题、正文、状态和作用域投影 |
+| `notifications.markRead` | `notifications.manage` | `{ id: number }` | `{ queued: true }` |
+| `notifications.markAllRead` | `notifications.manage` | `{}` | `{ queued: true }` |
+| `notifications.setDnd` | `notifications.manage` | `{ enabled: boolean }` | `{ queued: true }` |
+| `notifications.remove` / `notifications.clear` | `notifications.manage` | `{ id: number }` / `{}` | `{ queued: true }` |
+| `quickCommands.getMetadata` | 默认 | `{}` | 不含命令正文的发现元数据 |
+| `quickCommands.getAll` | `quick_commands.read` | `{}` | 完整分类和命令定义 |
+| `quickCommands.execute` | `quick_commands.execute` | `{ id: string }` | `{ queued: true }`；仍执行常规命令风险确认 |
+| `quickCommands.upsert` | `quick_commands.manage` | `{ id?, name, command, category?, description?, hostPattern? }` | `{ queued: true }` |
+| `quickCommands.remove` | `quick_commands.manage` | `{ id: string }` | `{ queued: true }` |
+| `theme.getTokens` | 默认 | `{}` | 完整有效终端、界面、指标、圆角、间距和动效 token |
+| `theme.getAvailable` | 默认 | `{}` | 当前、内置和自定义主题标识 |
+| `theme.setActive` | `theme.write` | `{ themeId: string }` | `{ queued: true }` |
+| `hostTools.getSnapshot` | `host_tools.read` | `{ nodeId: string }` | 缓存指标、进程、Docker 和服务状态；不含完整进程参数 |
+| `hostTools.getExtensions` | 默认 | `{}` | 当前插件声明的监控元数据，不含命令字符串 |
+| `hostTools.capture` | `host_tools.read` | `{ nodeId, osType, resource, preset?, limit? }` | `docker`、`services`、`logs`、`tmux`、`ports`、`filesystems`、`packages` 或 `scheduledTasks` 的类型化快照 |
+| `hostTools.execute` | `host_tools.write` | `{ nodeId, osType, resource, action, target, ...actionArgs }` | `{ success, exitCode, truncated }` |
+| `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' | 'tmux', action, target }` | `{ success, exitCode, truncated }` |
+| `hostTools.runExtension` | `host_tools.custom.execute` | `{ nodeId, osType, monitorId }` | `{ monitorId, success, data, rowCount, exitCode, truncated }` |
+| `cloudSync.getSummary` | 默认 | `{}` | 安全状态、进度、脏状态和冲突元数据 |
+| `cloudSync.getHistory` | `cloud_sync.read` | `{}` | 不含错误、远端 revision、目标、凭据或载荷的历史 |
+| `cloudSync.check` | `cloud_sync.control` | `{}` | `{ queued: true }` |
+| `cloudSync.upload` | `cloud_sync.control` | `{ force?: boolean }` | `{ queued: true }` |
+| `cloudSync.pullPreview` | `cloud_sync.control` | `{}` | `{ queued: true }`；不会应用数据或保存未提交的面板草稿 |
+| `cloudSync.applyPreview` | `cloud_sync.apply` | `{}` | `{ queued: true }`；只应用当前已审阅预览 |
+| `cloudSync.setAutoUpload` | `cloud_sync.control` | `{ enabled: boolean, intervalMinutes?: number }` | `{ queued: true }`；间隔最小为五分钟 |
+
+Host Tools 不会创建第二条 SSH 连接。它通过 `NodeRouter` 解析当前 `nodeId`，复用现有连接，以产品命令构建器验证每个参数，并省略原始标准错误；采集错误会在序列化前脱敏。
+
+插件可以通过 `contributes.hostMonitors` 声明静态监控命令，把监控范围扩展到内置集合之外：
+
+```json
+{
+  "permissions": {
+    "capabilities": ["host_tools.custom.execute"]
+  },
+  "contributes": {
+    "hostMonitors": [{
+      "id": "nginx-workers",
+      "title": "Nginx 工作进程",
+      "description": "报告工作进程的 PID 和状态",
+      "commands": {
+        "linux": "ps -C nginx -o pid=,stat= | awk '{printf \"{\\\"pid\\\":%s,\\\"state\\\":\\\"%s\\\"}\\n\", $1, $2}'"
+      },
+      "output": {
+        "format": "jsonLines",
+        "maxRows": 200
+      },
+      "timeoutSeconds": 10,
+      "maxOutputBytes": 262144
+    }]
+  }
+}
+```
+
+宿主会按 `linux`、`macos`、`bsd` 或 `windows` 选择命令，未命中时再使用 `default`。命令必须是静态文本，刻意不支持运行时参数和模板替换，因此插件不能把 `runExtension` 变成任意命令入口。清单命令是插件包内的明文元数据，绝不能包含密码、令牌、私钥或其他凭据。宿主无法证明 Shell 命令一定只读，所以即使监控用途只是观察，执行仍需要独立的高风险能力 `host_tools.custom.execute`。宿主会限制执行时长、采集字节数和解析行数，不返回标准错误，也不返回失败命令的标准输出；成功输出会按 `json`、`jsonLines`、`tsv` 或 `textLines` 解析后再交给插件。
+
+声明监控器不会自动向内置 Host Tools 添加页面。插件负责通过自己的声明式标签页或侧边栏展示和轮询数据：用 `getExtensions` 发现自身监控器，需要新样本时调用 `runExtension`。
+
+Host Tools 动作名称是封闭枚举：`process` 通过 `execute` 支持 `stop`、`continue` 和 `renice`（`nice`），通过 `terminate` 支持 `terminate` 和 `kill`；`docker` 支持 `start`、`stop`、`restart`；`service` 支持 `start`、`stop`、`restart`、`reload`、`enable`、`disable`；`tmux` 支持 `renameSession`、`renameWindow`（`name`）和 `sendPaneCommand`（`command`），`killSession`、`killWindow`、`killPane` 则需要 `terminate`；`scheduledTask` 支持 `runNow`（`unit`）、`enable`、`disable`（`source`）。`osType` 只用于选择产品内已验证的 Linux、macOS/Darwin、BSD 或 Windows 命令构建器，不会直接插入 shell 命令。
 
 ### 终端
 
@@ -1467,11 +1576,23 @@ interface HostCall {
 | `ide.getProject` | `{}` | 项目快照或 `null` |
 | `ide.getOpenFiles` | `{}` | 打开文件快照 |
 | `ide.getActiveFile` | `{}` | 活跃文件快照或 `null` |
+| `ide.openFile` | `{ path: string, nodeId?: string }` | `{ queued: true }` |
+| `ide.replaceActiveText` | `{ text: string, nodeId?: string }` | `{ queued: true }` |
+| `ide.insertActiveText` | `{ text: string, nodeId?: string }` | `{ queued: true }` |
+| `ide.saveActive` | `{ nodeId?: string }` | `{ queued: true }`；保留远端冲突检查 |
+| `ide.closeFile` | `{ path: string, nodeId?: string }` | `{ queued: true }`；保留脏缓冲确认 |
+| `ide.refreshProject` | `{ nodeId?: string }` | `{ queued: true }` |
 | `ai.getConversations` | `{}` | 已脱敏对话摘要 |
 | `ai.getCatalog` | `{}` | 脱敏供应商与模型目录；默认可用 |
 | `ai.getMessages` | `{ conversationId: string }` | 已脱敏消息 |
 | `ai.getActiveProvider` | `{}` | 活跃供应商摘要或 `null` |
 | `ai.getAvailableModels` | `{}` | 模型名称 |
+| `ai.createConversation` | `{ title?: string }` | `{ queued: true }` |
+| `ai.selectConversation` | `{ conversationId: string }` | `{ queued: true }` |
+| `ai.sendMessage` | `{ content: string }` | `{ queued: true }`；构造模型上下文前会脱敏类似凭据的文本 |
+| `ai.cancelGeneration` | `{}` | `{ queued: true }` |
+| `ai.deleteConversation` | `{ conversationId: string }` | `{ queued: true }` |
+| `ai.clearConversations` | `{}` | `{ queued: true }` |
 | `profiler.getMetrics` | `{ nodeId: string }` | 指标快照或 `null` |
 | `profiler.getHistory` | `{ nodeId: string, limit?: number }` | 指标历史 |
 | `profiler.isRunning` | `{ nodeId: string }` | `boolean` |

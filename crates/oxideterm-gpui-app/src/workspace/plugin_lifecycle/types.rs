@@ -30,6 +30,7 @@ pub(in crate::workspace) struct NativePluginRuntimeState {
     pub(in crate::workspace) terminal_rx: mpsc::Receiver<NativePluginTerminalRequest>,
     pub(in crate::workspace) terminal_ui_requests: VecDeque<NativePluginTerminalRequest>,
     pub(in crate::workspace) terminal_polling: bool,
+    pub(in crate::workspace) product_ui_effects: VecDeque<NativePluginProductUiEffect>,
     pub(in crate::workspace) sync_tx: mpsc::Sender<NativePluginSyncRequest>,
     pub(in crate::workspace) sync_rx: mpsc::Receiver<NativePluginSyncRequest>,
     pub(in crate::workspace) sync_polling: bool,
@@ -75,6 +76,7 @@ impl NativePluginRuntimeState {
             terminal_rx,
             terminal_ui_requests: VecDeque::new(),
             terminal_polling: false,
+            product_ui_effects: VecDeque::new(),
             sync_tx,
             sync_rx,
             sync_polling: false,
@@ -166,6 +168,14 @@ pub(in crate::workspace) enum NativePluginTerminalAction {
     WriteNode { node_id: String, text: String },
     ClearBuffer { node_id: String },
     OpenTelnet { host: String, port: u16 },
+}
+
+/// Holds window-owned plugin effects until the next workspace render pass.
+pub(in crate::workspace) struct NativePluginProductUiEffect {
+    pub(super) plugin_id: String,
+    pub(super) namespace: String,
+    pub(super) method: String,
+    pub(super) args: Value,
 }
 
 pub(in crate::workspace) struct NativePluginSyncRequest {
