@@ -452,7 +452,7 @@ Read a remote file through SFTP:
 }
 ```
 
-That SFTP call also requires the `filesystem.read` capability. Write operations require `filesystem.write`. Port forwarding mutations require `network.forward`.
+That SFTP call also requires the `filesystem.read` capability. Write operations require `filesystem.write`. Legacy SCP transfers use the same capability pair and must target an online node. Port forwarding mutations require `network.forward`.
 
 Import an `.oxide` bundle:
 
@@ -959,6 +959,7 @@ Common namespaces include:
 | `sessions` | Read node tree and active node state |
 | `terminal` | Observe buffers or send approved input |
 | `sftp` | List/read/write remote files through node-owned SFTP |
+| `scp` | Transfer files through node-owned legacy SCP when SFTP is unavailable |
 | `forward` | List/create/stop forwards |
 | `transfers` | Observe transfer state |
 | `profiler` | Read node metrics |
@@ -1066,6 +1067,7 @@ Native plugins should target stable node ids where possible:
 - Use node/session snapshots rather than terminal tab assumptions.
 - Terminal input hooks must fail open on error or timeout.
 - SFTP mutating calls require file-write capability and an online node.
+- SCP calls share the node-owned SSH connection. They support live pause/cancel, but a failed or disconnected SCP transfer restarts from byte zero.
 - Forward calls require network-forward capability and should handle suspended nodes.
 - IDE APIs expose project/open-file metadata, not arbitrary editor internals.
 - AI APIs expose sanitized metadata and avoid tool message content.
@@ -1457,6 +1459,11 @@ Calls must be allowed by `allowedHostApis`. Exact names and namespace wildcards 
 | `node_sftp_tar_probe` | `sftp.tarProbe` adapter |
 | `node_sftp_tar_upload` | `sftp.tarUpload` adapter |
 | `node_sftp_tar_download` | `sftp.tarDownload` adapter |
+| `node_scp_probe` | `scp.capabilities` adapter |
+| `node_scp_download` | `scp.download` adapter |
+| `node_scp_upload` | `scp.upload` adapter |
+| `node_scp_download_dir` | `scp.downloadDirectory` adapter |
+| `node_scp_upload_dir` | `scp.uploadDirectory` adapter |
 | `list_port_forwards` | `forward.list` adapter |
 | `create_port_forward` | `forward.create` adapter |
 | `stop_port_forward` | `forward.stop` adapter |
@@ -1623,8 +1630,15 @@ Host Tools action names are closed enums: `process` supports `stop`, `continue`,
 | `sftp.delete` | `filesystem.write` | `{ nodeId: string, path: string }` | Delete result |
 | `sftp.deleteRecursive` | `filesystem.write` | `{ nodeId: string, path: string }` | Recursive delete result |
 | `sftp.rename` | `filesystem.write` | `{ nodeId: string, oldPath: string, newPath: string }` | Rename result |
+| `scp.capabilities` | `filesystem.read` | `{ nodeId: string }` | `{ supported, recursive, restartResume: false }` |
+| `scp.download` | `filesystem.read` | `{ nodeId: string, remotePath: string, localPath: string, transferId?: string }` | SCP transfer result |
+| `scp.downloadDirectory` | `filesystem.read` | `{ nodeId: string, remotePath: string, localPath: string, transferId?: string }` | SCP transfer result |
+| `scp.upload` | `filesystem.write` | `{ nodeId: string, localPath: string, remotePath: string, transferId?: string }` | SCP transfer result |
+| `scp.uploadDirectory` | `filesystem.write` | `{ nodeId: string, localPath: string, remotePath: string, transferId?: string }` | SCP transfer result |
 | `transfers.getAll` | read | `{}` | Transfer snapshots |
 | `transfers.getByNode` | read | `{ nodeId: string }` | Transfer snapshots for node |
+
+SCP is a POSIX compatibility transport, not a browsing API. Use `sftp.listDir`, `sftp.stat`, and previews when SFTP is available. A result reports `protocol: "scp"` and `restartResume: false`; a retry after channel or node loss starts the object again instead of continuing from a byte offset.
 
 ### Forwarding
 

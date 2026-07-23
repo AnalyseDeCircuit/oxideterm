@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "Jeton enregistré dans le trousseau"
     },
     "sftp": {
-      "title": "Transfert SFTP",
+      "title": "Transfert de fichiers",
       "description": "Configurer le comportement et les performances du transfert de fichiers.",
+      "protocol": "Protocole de transfert par défaut",
+      "protocol_hint": "Le mode automatique privilégie SFTP et utilise l'ancien SCP uniquement si le sous-système SFTP est indisponible.",
+      "protocol_auto": "Automatique (préférer SFTP)",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP (ancien)",
       "concurrent": "Transferts simultanés max",
       "concurrent_hint": "Nombre maximum de transferts de fichiers simultanés (1-10)",
       "directory_parallelism": "Parallélisme des transferts de dossiers",

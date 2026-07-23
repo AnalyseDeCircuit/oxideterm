@@ -1394,6 +1394,33 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Sftp, SettingsSelect::SftpProtocol) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for protocol in [
+                    oxideterm_settings::FileTransferProtocolPreference::Auto,
+                    oxideterm_settings::FileTransferProtocolPreference::Sftp,
+                    oxideterm_settings::FileTransferProtocolPreference::Scp,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            file_transfer_protocol_label(protocol, &self.i18n),
+                            protocol == settings.sftp.transfer_protocol,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.sftp.transfer_protocol = protocol,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Sftp, SettingsSelect::SftpConcurrent) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &count in sftp_concurrent_options() {

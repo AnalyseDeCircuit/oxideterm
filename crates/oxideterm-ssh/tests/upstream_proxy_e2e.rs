@@ -10,9 +10,14 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use oxideterm_sftp::{
+    SftpTransferManager, probe_scp_capabilities, scp_download_directory, scp_download_file,
+    scp_upload_directory, scp_upload_file,
+};
 use oxideterm_ssh::{
-    AuthMethod, ProxyHopConfig, SshConfig, SshTransportClient, UpstreamProxyAuth,
-    UpstreamProxyConfig, UpstreamProxyProtocol, upstream_proxy_from_env,
+    AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ProxyHopConfig, SshConfig,
+    SshConnectionRegistry, SshTransportClient, UpstreamProxyAuth, UpstreamProxyConfig,
+    UpstreamProxyProtocol, upstream_proxy_from_env,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -78,6 +83,99 @@ async fn local_sshd_upstream_proxy_e2e_matrix() {
         socks.accept_count(),
         no_proxy_count,
         "matching no_proxy rules must bypass the upstream proxy"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires local sshd, ssh-keygen, and the remote scp executable"]
+async fn local_sshd_legacy_scp_file_and_directory_round_trip() {
+    let sshd = SshdFixture::start();
+    let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+    let pty = SshTransportClient::new(target_config(&sshd))
+        .connect_shell_with_registry(
+            registry,
+            ConnectionConsumer::Terminal("scp-e2e".to_string()),
+        )
+        .await
+        .expect("connect local SSH shell");
+    let connection = pty
+        .ssh_connection_handle()
+        .expect("registry-backed shell exposes its connection handle");
+    let manager = Arc::new(SftpTransferManager::new());
+
+    let capabilities = probe_scp_capabilities(&connection).await;
+    assert!(capabilities.supports_scp);
+    assert!(capabilities.supports_recursive);
+
+    let upload_source = sshd.dir.join("upload-source.txt");
+    let uploaded_file = sshd.dir.join("uploaded-file.txt");
+    let downloaded_file = sshd.dir.join("downloaded-file.txt");
+    fs::write(&upload_source, b"OxideTerm SCP file round trip\n").expect("write upload source");
+    fs::write(&uploaded_file, b"stale").expect("seed existing remote file");
+    scp_upload_file(
+        &connection,
+        &upload_source.to_string_lossy(),
+        &uploaded_file.to_string_lossy(),
+        "scp-file-upload",
+        None,
+        Some(manager.clone()),
+    )
+    .await
+    .expect("upload file through SCP");
+    scp_download_file(
+        &connection,
+        &uploaded_file.to_string_lossy(),
+        &downloaded_file.to_string_lossy(),
+        "scp-file-download",
+        None,
+        Some(manager.clone()),
+    )
+    .await
+    .expect("download file through SCP");
+    assert_eq!(
+        fs::read(&downloaded_file).expect("read downloaded file"),
+        fs::read(&upload_source).expect("read upload source")
+    );
+
+    let upload_directory = sshd.dir.join("upload-directory");
+    let nested_upload_directory = upload_directory.join("nested");
+    let remote_directory = sshd.dir.join("remote-directory");
+    let downloaded_directory = sshd.dir.join("downloaded-directory");
+    fs::create_dir_all(&nested_upload_directory).expect("create upload directory");
+    fs::create_dir_all(&remote_directory).expect("seed existing remote directory");
+    fs::write(remote_directory.join("stale.txt"), b"stale")
+        .expect("write stale remote directory file");
+    fs::write(upload_directory.join("root.txt"), b"root").expect("write root file");
+    fs::write(nested_upload_directory.join("child.txt"), b"child").expect("write nested file");
+    scp_upload_directory(
+        &connection,
+        &upload_directory.to_string_lossy(),
+        &remote_directory.to_string_lossy(),
+        "scp-directory-upload",
+        None,
+        Some(manager.clone()),
+    )
+    .await
+    .expect("upload directory through SCP");
+    assert!(!remote_directory.join("stale.txt").exists());
+    scp_download_directory(
+        &connection,
+        &remote_directory.to_string_lossy(),
+        &downloaded_directory.to_string_lossy(),
+        "scp-directory-download",
+        None,
+        Some(manager),
+    )
+    .await
+    .expect("download directory through SCP");
+    assert_eq!(
+        fs::read(downloaded_directory.join("root.txt")).expect("read downloaded root file"),
+        b"root"
+    );
+    assert_eq!(
+        fs::read(downloaded_directory.join("nested/child.txt"))
+            .expect("read downloaded nested file"),
+        b"child"
     );
 }
 

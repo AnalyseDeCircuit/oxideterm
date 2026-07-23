@@ -14,6 +14,19 @@ impl WorkspaceApp {
             return self.sftp_settings_card(
                 vec![
                     self.sftp_settings_row(
+                        "settings_view.sftp.protocol",
+                        Some("settings_view.sftp.protocol_hint"),
+                        self.sftp_select_control(
+                            SettingsSelect::SftpProtocol,
+                            file_transfer_protocol_label(
+                                settings.sftp.transfer_protocol,
+                                &self.i18n,
+                            ),
+                            cx,
+                        ),
+                    ),
+                    self.card_separator(),
+                    self.sftp_settings_row(
                         "settings_view.sftp.concurrent",
                         Some("settings_view.sftp.concurrent_hint"),
                         self.sftp_select_control(

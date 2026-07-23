@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "トークンはキーチェーンに保存済みです"
     },
     "sftp": {
-      "title": "SFTP転送",
+      "title": "ファイル転送",
       "description": "ファイル転送の動作とパフォーマンスを設定します。",
+      "protocol": "既定の転送プロトコル",
+      "protocol_hint": "自動では SFTP を優先し、SFTP サブシステムが利用できない場合のみ旧式 SCP を使用します。",
+      "protocol_auto": "自動（SFTP 優先）",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP（旧式）",
       "concurrent": "最大同時転送数",
       "concurrent_hint": "同時ファイル転送の最大数（1-10）",
       "directory_parallelism": "ディレクトリ転送の並列度",

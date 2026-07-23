@@ -413,6 +413,17 @@ impl WorkspaceApp {
                         changed |= apply_tauri_transfer_progress(item, transferred, total, speed);
                     }
                 }
+                SftpWorkerResult::TransferProtocolResolved { id, protocol } => {
+                    if let Some(item) = self
+                        .sftp_view
+                        .transfers
+                        .iter_mut()
+                        .find(|item| item.id == id)
+                    {
+                        changed |= item.protocol != protocol;
+                        item.protocol = protocol;
+                    }
+                }
                 SftpWorkerResult::TransferComplete {
                     node_id,
                     transfer_id,
@@ -974,6 +985,7 @@ mod tests {
             local_path: "/tmp/file.txt".to_string(),
             remote_path: "/home/file.txt".to_string(),
             direction: SftpTransferDirection::Upload,
+            protocol: RemoteTransferProtocol::Sftp,
             size: 500,
             transferred: 0,
             speed: 0,

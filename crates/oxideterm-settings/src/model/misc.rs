@@ -32,6 +32,8 @@ impl Default for LocalTerminalSettings {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SftpSettings {
+    #[serde(default)]
+    pub transfer_protocol: FileTransferProtocolPreference,
     pub max_concurrent_transfers: i64,
     pub directory_parallelism: i64,
     pub speed_limit_enabled: bool,
@@ -45,6 +47,7 @@ pub struct SftpSettings {
 impl Default for SftpSettings {
     fn default() -> Self {
         Self {
+            transfer_protocol: FileTransferProtocolPreference::Auto,
             max_concurrent_transfers: 3,
             directory_parallelism: 4,
             speed_limit_enabled: false,
@@ -53,6 +56,15 @@ impl Default for SftpSettings {
             extra: ExtraFields::new(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileTransferProtocolPreference {
+    #[default]
+    Auto,
+    Sftp,
+    Scp,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

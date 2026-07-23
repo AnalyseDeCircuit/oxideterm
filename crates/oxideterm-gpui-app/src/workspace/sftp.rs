@@ -34,9 +34,10 @@ use oxideterm_sftp::{
     ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession, SftpTransferGuard,
     SortOrder as RemoteSortOrder, StoredTransferProgress, TarCapabilities,
     TransferDirection as SftpTransferDirection, TransferProgress,
-    TransferState as RemoteTransferState, TransferStrategy as RemoteTransferStrategy,
-    TransferType as RemoteTransferType, encode_to_encoding, tar_download_directory,
-    tar_upload_directory,
+    TransferProtocol as RemoteTransferProtocol, TransferState as RemoteTransferState,
+    TransferStrategy as RemoteTransferStrategy, TransferType as RemoteTransferType,
+    encode_to_encoding, scp_download_directory, scp_download_file, scp_upload_directory,
+    scp_upload_file, tar_download_directory, tar_upload_directory,
 };
 pub(in crate::workspace::sftp) use oxideterm_sftp::{
     TextDiffLine as SftpDiffLine, TextDiffLineKind as SftpDiffLineKind,
@@ -150,6 +151,16 @@ const SFTP_PREVIEW_DIALOG_HEIGHT_RATIO: f32 = 0.85; // Tauri SFTP preview/editor
 const SFTP_DIFF_DIALOG_HEIGHT_RATIO: f32 = 0.80; // Tauri FileDiffDialog h-[80vh]
 const SFTP_HEX_PREVIEW_CHUNK_SIZE: u64 = 16 * 1024; // Tauri nodeSftpPreviewHex load-more step
 
+fn configured_transfer_protocol(
+    preference: oxideterm_settings::FileTransferProtocolPreference,
+) -> RemoteTransferProtocol {
+    match preference {
+        oxideterm_settings::FileTransferProtocolPreference::Scp => RemoteTransferProtocol::Scp,
+        oxideterm_settings::FileTransferProtocolPreference::Auto
+        | oxideterm_settings::FileTransferProtocolPreference::Sftp => RemoteTransferProtocol::Sftp,
+    }
+}
+
 fn sftp_file_list_virtual_spec() -> TauriVirtualListSpec {
     // Tauri SFTP FileList uses the same row estimate and overscan for rendering
     // and keyboard reveal. Keep them as one named native spec so scrollIntoView
@@ -254,6 +265,10 @@ pub(super) enum SftpWorkerResult {
         state: SftpTransferState,
         error: Option<String>,
     },
+    TransferProtocolResolved {
+        id: u64,
+        protocol: RemoteTransferProtocol,
+    },
     TransferComplete {
         node_id: NodeId,
         transfer_id: String,
@@ -349,6 +364,7 @@ struct SftpPendingTransfer {
     name: String,
     direction: SftpTransferDirection,
     source: SftpFileEntry,
+    protocol_override: Option<RemoteTransferProtocol>,
 }
 
 #[derive(Clone, Debug)]
@@ -391,6 +407,7 @@ struct SftpTransferItem {
     local_path: String,
     remote_path: String,
     direction: SftpTransferDirection,
+    protocol: RemoteTransferProtocol,
     size: u64,
     transferred: u64,
     speed: u64,

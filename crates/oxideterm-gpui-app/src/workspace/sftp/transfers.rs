@@ -417,6 +417,10 @@ impl WorkspaceApp {
             RemoteTransferType::Upload => "Upload",
             RemoteTransferType::Download => "Download",
         };
+        let protocol = match transfer.protocol {
+            RemoteTransferProtocol::Sftp => "SFTP",
+            RemoteTransferProtocol::Scp => "SCP",
+        };
         let status = match transfer.status {
             oxideterm_sftp::TransferStatus::Paused => self.i18n.t("sftp.queue.status_paused"),
             oxideterm_sftp::TransferStatus::Failed => self.i18n.t("sftp.queue.status_error"),
@@ -430,6 +434,7 @@ impl WorkspaceApp {
                     local_path: String::new(),
                     remote_path: String::new(),
                     direction: SftpTransferDirection::Download,
+                    protocol: transfer.protocol,
                     size: transfer.total_bytes,
                     transferred: transfer.transferred_bytes,
                     state: SftpTransferState::Active,
@@ -495,7 +500,7 @@ impl WorkspaceApp {
                             .child(self.render_selectable_display_text(
                                 "sftp-transfer-type",
                                 &transfer.transfer_id,
-                                transfer_type,
+                                format!("{transfer_type} · {protocol}"),
                                 theme.text_muted,
                                 cx,
                             ))
@@ -639,9 +644,24 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w(px(192.0))
-                    .truncate()
-                    .text_color(rgb(theme.text))
-                    .child(transfer.name.clone()),
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_color(rgb(theme.text))
+                            .child(transfer.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(SFTP_TEXT_10))
+                            .text_color(rgb(theme.text_muted))
+                            .child(match transfer.protocol {
+                                RemoteTransferProtocol::Sftp => "SFTP",
+                                RemoteTransferProtocol::Scp => "SCP",
+                            }),
+                    ),
             )
             .child(
                 div()

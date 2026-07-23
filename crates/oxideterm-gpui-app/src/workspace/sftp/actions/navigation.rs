@@ -326,7 +326,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_sftp_path_edit(&mut self, pane: SftpPane) {
+    pub(in crate::workspace::sftp) fn start_sftp_path_edit(&mut self, pane: SftpPane) {
         self.sftp_view.active_pane = pane;
         match pane {
             SftpPane::Local => {

@@ -100,9 +100,12 @@ pub fn native_plugin_transfer_snapshot_array(
 }
 
 fn native_plugin_transfer_snapshot(snapshot: &BackgroundTransferSnapshot) -> Value {
-    // Match Tauri's TransferSnapshot projection and intentionally omit native
-    // implementation details such as transfer strategy, backend speed, and
-    // retained item counts.
+    // Protocol and restart semantics are stable product behavior; strategy,
+    // backend speed, and retained item counts remain native implementation details.
+    let protocol = match snapshot.protocol {
+        oxideterm_sftp::TransferProtocol::Sftp => "sftp",
+        oxideterm_sftp::TransferProtocol::Scp => "scp",
+    };
     json!({
         "id": &snapshot.id,
         "nodeId": &snapshot.node_id,
@@ -110,6 +113,8 @@ fn native_plugin_transfer_snapshot(snapshot: &BackgroundTransferSnapshot) -> Val
         "localPath": &snapshot.local_path,
         "remotePath": &snapshot.remote_path,
         "direction": native_plugin_transfer_direction_label(snapshot.direction),
+        "protocol": protocol,
+        "restartResume": snapshot.protocol.supports_restart_resume(),
         "size": snapshot.size,
         "transferred": snapshot.transferred,
         "state": native_plugin_transfer_state_label(snapshot.state),
@@ -231,7 +236,7 @@ pub fn native_plugin_transfer_progress_due(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxideterm_sftp::{BackgroundTransferKind, TransferStrategy};
+    use oxideterm_sftp::{BackgroundTransferKind, TransferProtocol, TransferStrategy};
 
     fn transfer_with_state(state: BackgroundTransferState) -> BackgroundTransferSnapshot {
         let mut transfer = BackgroundTransferSnapshot::new(
@@ -296,5 +301,16 @@ mod tests {
             plugin_runtime::PluginResponseResult::Ok { value }
                 if value["total"] == 1 && value["queued"] == 1
         ));
+    }
+
+    #[test]
+    fn scp_snapshot_exposes_protocol_without_claiming_restart_resume() {
+        let mut transfer = transfer_with_state(BackgroundTransferState::Error);
+        transfer.protocol = TransferProtocol::Scp;
+
+        let snapshot = native_plugin_transfer_snapshot(&transfer);
+
+        assert_eq!(snapshot["protocol"], "scp");
+        assert_eq!(snapshot["restartResume"], false);
     }
 }

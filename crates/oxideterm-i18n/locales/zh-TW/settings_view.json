@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "權杖已儲存到鑰匙圈"
     },
     "sftp": {
-      "title": "SFTP 傳輸",
+      "title": "檔案傳輸",
       "description": "設定檔案傳輸行為和效能。",
+      "protocol": "預設傳輸協定",
+      "protocol_hint": "自動模式優先使用 SFTP，僅在伺服器沒有 SFTP 子系統時使用舊版 SCP。",
+      "protocol_auto": "自動（優先 SFTP）",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP（舊版協定）",
       "concurrent": "最大同時傳輸數",
       "concurrent_hint": "同時進行的最大檔案傳輸數（1-10）",
       "directory_parallelism": "目錄傳輸平行度",

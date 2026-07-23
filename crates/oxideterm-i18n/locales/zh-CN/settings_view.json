@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "令牌已保存到钥匙串"
     },
     "sftp": {
-      "title": "SFTP 传输",
+      "title": "文件传输",
       "description": "配置文件传输行为和性能。",
+      "protocol": "默认传输协议",
+      "protocol_hint": "自动模式优先使用 SFTP，仅在服务器没有 SFTP 子系统时使用旧版 SCP。",
+      "protocol_auto": "自动（优先 SFTP）",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP（旧版协议）",
       "concurrent": "最大并发传输数",
       "concurrent_hint": "同时传输的最大文件数 (1-10)",
       "directory_parallelism": "目录传输并行度",

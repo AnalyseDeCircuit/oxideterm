@@ -13,6 +13,7 @@ flate2 = "1.1.9"
 futures-util.workspace = true
 glob = "0.3"
 mime_guess = "2"
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-preview = { path = "../oxideterm-preview" }
 parking_lot.workspace = true
 redb = "2.1"
@@ -26,3 +27,6 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 zstd = "0.13"
+
+[dev-dependencies]
+serde_json.workspace = true

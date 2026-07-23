@@ -2,9 +2,21 @@ use oxideterm_gpui_platform::vibrancy::NativeVibrancyMode;
 use oxideterm_i18n::I18n;
 use oxideterm_render_policy::RenderProfile;
 use oxideterm_settings::{
-    AiReasoningEffort, AiThinkingStyle, AnimationSpeed, ConflictAction, FontFamily,
-    FrostedGlassMode, IdeAgentMode, RemoteShellIntegrationMode, UiDensity,
+    AiReasoningEffort, AiThinkingStyle, AnimationSpeed, ConflictAction,
+    FileTransferProtocolPreference, FontFamily, FrostedGlassMode, IdeAgentMode,
+    RemoteShellIntegrationMode, UiDensity,
 };
+
+pub fn file_transfer_protocol_label(
+    protocol: FileTransferProtocolPreference,
+    i18n: &I18n,
+) -> String {
+    match protocol {
+        FileTransferProtocolPreference::Auto => i18n.t("settings_view.sftp.protocol_auto"),
+        FileTransferProtocolPreference::Sftp => i18n.t("settings_view.sftp.protocol_sftp"),
+        FileTransferProtocolPreference::Scp => i18n.t("settings_view.sftp.protocol_scp"),
+    }
+}
 
 pub fn conflict_label(action: ConflictAction, i18n: &I18n) -> String {
     match action {

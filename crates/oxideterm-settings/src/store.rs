@@ -628,6 +628,7 @@ mod tests {
         assert_eq!(value["appearance"]["windowOpacity"], 1.0);
         assert_eq!(value["sftp"]["conflictAction"], "ask");
         assert_eq!(value["sftp"]["speedLimitKBps"], 0);
+        assert_eq!(value["sftp"]["transferProtocol"], "auto");
         assert!(value["sftp"].get("speedLimitKbps").is_none());
         assert_eq!(value["ide"]["agentMode"], "ask");
         assert_eq!(value["reconnect"]["baseDelayMs"], 1000);

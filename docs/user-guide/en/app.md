@@ -84,6 +84,8 @@ Use SFTP or the file manager for remote file operations:
 - Start large transfers and track their progress.
 - Retry transfers after reconnecting an unstable host.
 
+File Transfer settings default to **Auto**: SFTP remains the browsing and preferred transfer protocol, while legacy SCP is used only when the connected POSIX host cannot open its SFTP subsystem. You can force SFTP or SCP for compatibility testing. SCP can pause and resume while its current channel is alive, but a retry after disconnect starts from the beginning because legacy SCP has no offset-resume protocol.
+
 Terminal-native modem transfers are separate from SFTP. Use them when the remote program expects X/Y/ZMODEM protocol bytes through the current terminal channel.
 
 Before overwriting important remote files, confirm the path and keep a backup. Remote file writes are real writes on the target system.

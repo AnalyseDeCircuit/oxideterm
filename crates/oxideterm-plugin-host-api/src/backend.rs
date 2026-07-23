@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::{
     app::native_plugin_platform_label, capabilities::NATIVE_PLUGIN_CAPABILITY_NETWORK_HTTP,
     forwarding::native_plugin_forward_response, readonly::NativePluginHostApiSnapshot,
-    sftp::native_plugin_sftp_response,
+    scp::native_plugin_scp_response, sftp::native_plugin_sftp_response,
 };
 
 pub const NATIVE_PLUGIN_HTTP_BODY_LIMIT: usize = 10 * 1024 * 1024;
@@ -46,6 +46,11 @@ pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_UPLOAD_DIR: &str = "node_sftp_uplo
 pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_PROBE: &str = "node_sftp_tar_probe";
 pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_UPLOAD: &str = "node_sftp_tar_upload";
 pub const NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_DOWNLOAD: &str = "node_sftp_tar_download";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SCP_PROBE: &str = "node_scp_probe";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD: &str = "node_scp_download";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD: &str = "node_scp_upload";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD_DIR: &str = "node_scp_download_dir";
+pub const NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD_DIR: &str = "node_scp_upload_dir";
 pub const NATIVE_PLUGIN_API_COMMAND_LIST_PORT_FORWARDS: &str = "list_port_forwards";
 pub const NATIVE_PLUGIN_API_COMMAND_CREATE_PORT_FORWARD: &str = "create_port_forward";
 pub const NATIVE_PLUGIN_API_COMMAND_STOP_PORT_FORWARD: &str = "stop_port_forward";
@@ -84,6 +89,11 @@ pub fn native_plugin_supported_backend_commands() -> &'static [&'static str] {
         NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_PROBE,
         NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_UPLOAD,
         NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_DOWNLOAD,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_PROBE,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD_DIR,
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD_DIR,
         NATIVE_PLUGIN_API_COMMAND_LIST_PORT_FORWARDS,
         NATIVE_PLUGIN_API_COMMAND_CREATE_PORT_FORWARD,
         NATIVE_PLUGIN_API_COMMAND_STOP_PORT_FORWARD,
@@ -218,6 +228,22 @@ fn native_plugin_backend_command_response(
             adapters.sftp_router,
             adapters.sftp_runtime,
             Some(adapters.transfer_manager),
+        ),
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_PROBE
+        | NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD
+        | NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD
+        | NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD_DIR
+        | NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD_DIR => native_plugin_scp_response(
+            plugin_runtime::PluginHostCall {
+                request_id,
+                namespace: "scp".to_string(),
+                method: native_plugin_scp_backend_method(command).to_string(),
+                args: backend_args,
+            },
+            adapters.permissions,
+            adapters.sftp_router,
+            adapters.sftp_runtime,
+            adapters.transfer_manager,
         ),
         NATIVE_PLUGIN_API_COMMAND_LIST_PORT_FORWARDS
         | NATIVE_PLUGIN_API_COMMAND_CREATE_PORT_FORWARD
@@ -508,6 +534,17 @@ fn native_plugin_sftp_backend_method(command: &str) -> &'static str {
         NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_PROBE => "tarProbe",
         NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_UPLOAD => "tarUpload",
         NATIVE_PLUGIN_API_COMMAND_NODE_SFTP_TAR_DOWNLOAD => "tarDownload",
+        _ => "unsupported",
+    }
+}
+
+fn native_plugin_scp_backend_method(command: &str) -> &'static str {
+    match command {
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_PROBE => "capabilities",
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD => "download",
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD => "upload",
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_DOWNLOAD_DIR => "downloadDirectory",
+        NATIVE_PLUGIN_API_COMMAND_NODE_SCP_UPLOAD_DIR => "uploadDirectory",
         _ => "unsupported",
     }
 }

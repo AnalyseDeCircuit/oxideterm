@@ -170,6 +170,7 @@ impl WorkspaceApp {
                         name,
                         direction,
                         source,
+                        protocol_override: None,
                     })
             })
             .collect::<Vec<_>>();
@@ -253,6 +254,7 @@ impl WorkspaceApp {
                     name,
                     direction: SftpTransferDirection::Upload,
                     source,
+                    protocol_override: None,
                 })
             })
             .collect::<Vec<_>>();
@@ -299,7 +301,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn execute_sftp_pending_transfers(
+    pub(in crate::workspace::sftp) fn execute_sftp_pending_transfers(
         &mut self,
         node_id: NodeId,
         pending_transfers: Vec<SftpPendingTransfer>,
@@ -390,6 +392,9 @@ impl WorkspaceApp {
             local_path: local_path.clone(),
             remote_path: remote_path.clone(),
             direction,
+            protocol: transfer.protocol_override.unwrap_or_else(|| {
+                configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol)
+            }),
             size,
             transferred: 0,
             speed: 0,
@@ -405,6 +410,7 @@ impl WorkspaceApp {
             local_path,
             remote_path,
             None,
+            transfer.protocol_override,
         );
     }
 

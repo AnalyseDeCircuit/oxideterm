@@ -96,6 +96,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::KnowledgeDocumentFormat => SelectAnchorId::SettingsKnowledgeDocumentFormat,
             Self::AiMcpTransport => SelectAnchorId::SettingsAiMcpTransport,
             Self::AiMcpAuthMode => SelectAnchorId::SettingsAiMcpAuthMode,
+            Self::SftpProtocol => SelectAnchorId::SettingsSftpProtocol,
             Self::SftpConcurrent => SelectAnchorId::SettingsSftpConcurrent,
             Self::SftpDirectoryParallelism => SelectAnchorId::SettingsSftpDirectoryParallelism,
             Self::SftpConflict => SelectAnchorId::SettingsSftpConflict,

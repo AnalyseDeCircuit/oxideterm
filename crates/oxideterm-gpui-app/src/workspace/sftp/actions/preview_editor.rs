@@ -298,6 +298,9 @@ impl WorkspaceApp {
             local_path: local_path.clone(),
             remote_path: remote_path.clone(),
             direction: SftpTransferDirection::Download,
+            protocol: configured_transfer_protocol(
+                self.settings_store.settings().sftp.transfer_protocol,
+            ),
             size,
             transferred: 0,
             speed: 0,
@@ -312,6 +315,7 @@ impl WorkspaceApp {
             false,
             local_path,
             remote_path,
+            None,
             None,
         );
     }

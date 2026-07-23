@@ -667,6 +667,41 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "Renames a remote path."
     ),
     api!(
+        "scp",
+        "capabilities",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_READ),
+        "Checks legacy SCP availability on a connected node."
+    ),
+    api!(
+        "scp",
+        "download",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_READ),
+        "Downloads one remote file through the legacy SCP protocol."
+    ),
+    api!(
+        "scp",
+        "downloadDirectory",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_READ),
+        "Downloads one remote directory recursively through legacy SCP."
+    ),
+    api!(
+        "scp",
+        "upload",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_WRITE),
+        "Uploads one local file through the legacy SCP protocol."
+    ),
+    api!(
+        "scp",
+        "uploadDirectory",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_FILESYSTEM_WRITE),
+        "Uploads one local directory recursively through legacy SCP."
+    ),
+    api!(
         "forward",
         "list",
         SensitiveRead,
@@ -1365,7 +1400,7 @@ mod tests {
             .map(HostApiDescriptor::qualified_name)
             .collect::<HashSet<_>>();
 
-        assert_eq!(HOST_API_CATALOG.len(), 179);
+        assert_eq!(HOST_API_CATALOG.len(), 184);
         assert_eq!(names.len(), HOST_API_CATALOG.len());
         assert!(names.contains("api.invoke"));
         assert!(names.contains("connections.getSummaries"));
@@ -1409,6 +1444,11 @@ mod tests {
             "sftp.uploadDir",
             "sftp.tarUpload",
             "sftp.deleteRecursive",
+            "scp.capabilities",
+            "scp.download",
+            "scp.downloadDirectory",
+            "scp.upload",
+            "scp.uploadDirectory",
             "forward.delete",
             "forward.restart",
             "forward.update",

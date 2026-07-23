@@ -98,6 +98,7 @@ pub enum SettingsSelect {
     KnowledgeDocumentFormat,
     AiMcpTransport,
     AiMcpAuthMode,
+    SftpProtocol,
     SftpConcurrent,
     SftpDirectoryParallelism,
     SftpConflict,

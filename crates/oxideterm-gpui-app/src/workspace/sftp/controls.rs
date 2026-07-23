@@ -19,31 +19,49 @@ impl WorkspaceApp {
             .py(px(8.0))
             .text_size(px(SFTP_TEXT_XS))
             .text_color(rgb(self.tokens.ui.text))
-            .child(self.render_selectable_text_scoped(
-                "sftp-init-error",
-                (),
-                format!("SFTP waiting for connection sync: {error}"),
-                self.tokens.ui.text,
-                cx,
-            ))
-            .child(self.render_sftp_text_button(
-                "Retry".to_string(),
-                false,
-                cx.listener(|this, _event, _window, cx| {
-                    this.sftp_view.init_error = None;
-                    if let Some(tab_id) = this.main_window_tabs.active_tab_id
-                        && let Some(node_id) = this.sftp_tab_nodes.get(&tab_id).cloned()
-                    {
-                        // Retry mirrors Tauri node_sftp_list_dir: it retries
-                        // through the node owner, so a tab with no terminal
-                        // pane can rebuild the SSH/SFTP path first.
-                        this.ensure_node_connection_started(&node_id);
-                        this.request_sftp_remote_load();
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ))
+            .child(
+                self.render_selectable_text_scoped(
+                    "sftp-init-error",
+                    (),
+                    self.i18n
+                        .t("sftp.errors.connection_sync")
+                        .replace("{{error}}", error),
+                    self.tokens.ui.text,
+                    cx,
+                ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(self.render_sftp_text_button(
+                        self.i18n.t("sftp.scp.download_path"),
+                        false,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.queue_quick_scp_download();
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ))
+                    .child(self.render_sftp_text_button(
+                        self.i18n.t("sftp.preview.retry"),
+                        false,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.sftp_view.init_error = None;
+                            if let Some(tab_id) = this.main_window_tabs.active_tab_id
+                                && let Some(node_id) = this.sftp_tab_nodes.get(&tab_id).cloned()
+                            {
+                                // Retry asks the node owner to rebuild SFTP; SCP remains an
+                                // explicit compatibility action beside this control.
+                                this.ensure_node_connection_started(&node_id);
+                                this.request_sftp_remote_load();
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )),
+            )
             .into_any_element()
     }
 

@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "Mã đã được lưu trong kho khóa"
     },
     "sftp": {
-      "title": "Truyền file SFTP",
+      "title": "Truyền tệp",
       "description": "Cấu hình hành vi và hiệu suất truyền file.",
+      "protocol": "Giao thức truyền mặc định",
+      "protocol_hint": "Chế độ tự động ưu tiên SFTP và chỉ dùng SCP cũ khi hệ thống con SFTP không khả dụng.",
+      "protocol_auto": "Tự động (ưu tiên SFTP)",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP (cũ)",
       "concurrent": "Số lượng truyền đồng thời tối đa",
       "concurrent_hint": "Số lượng file truyền đồng thời tối đa (1-10)",
       "directory_parallelism": "Độ song song khi truyền thư mục",

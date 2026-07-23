@@ -28,6 +28,7 @@ mod host_api_snapshot;
 mod ide;
 mod product_host_calls;
 mod profiler;
+mod scp;
 mod secrets;
 mod settings_payload;
 mod sftp;
@@ -44,6 +45,7 @@ use forwarding::*;
 use host_api_snapshot::*;
 use ide::*;
 use profiler::*;
+use scp::*;
 use secrets::*;
 use settings_payload::*;
 use sftp::*;
@@ -2063,6 +2065,15 @@ impl WorkspaceApp {
                     Some(&transfer_manager),
                 ));
             }
+            if call.namespace == "scp" {
+                return Some(native_plugin_scp_response(
+                    call,
+                    &permissions,
+                    &sftp_router,
+                    &sftp_runtime,
+                    &transfer_manager,
+                ));
+            }
             if call.namespace == "forward" {
                 return Some(native_plugin_forward_response(
                     call,
@@ -2218,6 +2229,7 @@ impl WorkspaceApp {
                 | "theme"
                 | "terminal"
                 | "sftp"
+                | "scp"
                 | "forward"
                 | "transfers"
                 | "profiler"

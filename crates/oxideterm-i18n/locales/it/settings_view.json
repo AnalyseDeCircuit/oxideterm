@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "Token salvato nel portachiavi"
     },
     "sftp": {
-      "title": "Trasferimento SFTP",
+      "title": "Trasferimento file",
       "description": "Configura comportamento e prestazioni del trasferimento file.",
+      "protocol": "Protocollo di trasferimento predefinito",
+      "protocol_hint": "La modalità automatica preferisce SFTP e usa SCP legacy solo quando il sottosistema SFTP non è disponibile.",
+      "protocol_auto": "Automatico (preferisci SFTP)",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP (legacy)",
       "concurrent": "Trasferimenti Simultanei Massimi",
       "concurrent_hint": "Trasferimenti file simultanei massimi (1-10)",
       "directory_parallelism": "Parallelismo Trasferimento Cartelle",

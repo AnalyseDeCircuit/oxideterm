@@ -664,7 +664,7 @@ Architecture rules:
 
 ## SFTP Architecture
 
-SFTP is a node-level file capability. It should not be treated as a terminal-pane feature.
+Remote file transfer is a node-level capability. SFTP remains the structured browsing and preferred transfer protocol; legacy SCP is a compatibility transport for connected POSIX hosts whose SFTP subsystem is unavailable. Neither protocol should be treated as a terminal-pane feature.
 
 ### Responsibilities
 
@@ -676,6 +676,8 @@ SFTP is a node-level file capability. It should not be treated as a terminal-pan
 - Manage transfer progress.
 - Retry or reacquire transport after reconnect when supported.
 
+SCP opens an exec channel from the existing `NodeRouter` connection handle. It never creates an independent SSH transport, follows node disconnect/cancel ownership, rejects unsafe control-record names, contains downloads under the chosen local target, and uses generated temporary siblings for single-file replacement. Capability probes are cached only for one live connection generation, including negative results.
+
 ### Directory Transfers
 
 Directory transfers use a different execution path than single-file transfers. The app must distinguish:
@@ -685,6 +687,8 @@ Directory transfers use a different execution path than single-file transfers. T
 - Directory upload.
 - Directory download.
 - Background transfer state.
+
+The transfer record stores the selected protocol. SFTP may restart from a saved byte offset. SCP can pause and resume only while the live channel remains open; after channel loss its persisted failed record is retryable from byte zero, not resumable from the recorded byte count.
 
 ### Safety Model
 
@@ -1260,19 +1264,20 @@ SFTP page
 
 Preview is separate from download. A preview may cap file size, choose a renderer, or refuse unsupported content while normal transfer remains available.
 
-### SFTP Upload And Download
+### SFTP And SCP Upload And Download
 
 ```text
 user starts transfer
   -> build transfer request
   -> enqueue in transfer manager
-  -> stream bytes through SFTP session
+  -> choose SFTP, or legacy SCP when configured/required
+  -> stream bytes through the node-owned session or exec channel
   -> emit progress events
   -> handle conflict/retry/cancel
   -> update transfer list and notification center
 ```
 
-Single-file transfers can stream directly. Directory transfers may use archive-based helpers where that preserves structure and progress semantics.
+Single-file transfers can stream directly. SFTP directory transfers may use archive-based helpers where that preserves structure and progress semantics. SCP directory transfers use bounded legacy `C`/`D`/`E` control records and do not provide offset restart.
 
 ```mermaid
 sequenceDiagram
@@ -1490,7 +1495,7 @@ stateDiagram-v2
 | Waiting for input | Process is prompting | AI observation and user controls can report this state |
 | Closed | Channel or PTY is gone | View can show exit state or close |
 
-### SFTP Transfer Lifecycle
+### File Transfer Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -1518,6 +1523,8 @@ stateDiagram-v2
 | Completed | Transfer finished | Result is visible in transfer history |
 | Failed | Transfer cannot continue | Error and retry options should be shown |
 | Canceled | User stopped the transfer | Partial output may require cleanup |
+
+For SCP, `Suspended --> Running` means a new retry from byte zero after the node recovers. It must not reuse the saved transferred-byte count as an SCP protocol offset.
 
 ### Modem Transfer Lifecycle
 

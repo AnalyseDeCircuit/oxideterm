@@ -19,6 +19,8 @@ pub struct StoredTransferProgress {
     pub transfer_id: String,
     pub transfer_type: TransferType,
     #[serde(default)]
+    pub protocol: TransferProtocol,
+    #[serde(default)]
     pub strategy: TransferStrategy,
     pub source_path: PathBuf,
     pub destination_path: PathBuf,
@@ -28,6 +30,32 @@ pub struct StoredTransferProgress {
     pub last_updated: DateTime<Utc>,
     pub session_id: String,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferProtocol {
+    #[default]
+    Sftp,
+    Scp,
+}
+
+impl TransferProtocol {
+    /// SCP can pause a live channel but cannot restart from a byte offset.
+    pub const fn supports_restart_resume(self) -> bool {
+        matches!(self, Self::Sftp)
+    }
+}
+
+#[cfg(test)]
+mod transfer_protocol_tests {
+    use super::TransferProtocol;
+
+    #[test]
+    fn only_sftp_supports_offset_restart_resume() {
+        assert!(TransferProtocol::Sftp.supports_restart_resume());
+        assert!(!TransferProtocol::Scp.supports_restart_resume());
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -66,6 +94,7 @@ impl StoredTransferProgress {
         Self {
             transfer_id,
             transfer_type,
+            protocol: TransferProtocol::Sftp,
             strategy: TransferStrategy::File,
             source_path,
             destination_path,

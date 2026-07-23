@@ -512,6 +512,7 @@ impl WorkspaceApp {
             },
             "sftp": {
                 "directoryParallelism": settings.sftp.directory_parallelism,
+                "transferProtocol": settings.sftp.transfer_protocol,
             }
         });
         let transfers = ai_transfers_state(&self.sftp_transfer_manager, &self.ai.runtime.epoch);

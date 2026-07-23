@@ -601,6 +601,8 @@ fn transfers_host_calls_return_tauri_snapshot_shape_and_filter_by_node() {
         .unwrap();
     assert_eq!(first["nodeId"], "node-a");
     assert_eq!(first["direction"], "upload");
+    assert_eq!(first["protocol"], "sftp");
+    assert_eq!(first["restartResume"], true);
     assert_eq!(first["state"], "active");
     assert!(first.get("strategy").is_none());
 
@@ -624,6 +626,8 @@ fn transfers_host_calls_return_tauri_snapshot_shape_and_filter_by_node() {
                     "localPath": "/local/report.txt",
                     "remotePath": "/remote/report.txt",
                     "direction": "download",
+                    "protocol": "sftp",
+                    "restartResume": true,
                     "size": 64,
                     "transferred": 64,
                     "state": "completed",

@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "Token ist im Schlüsselbund gespeichert"
     },
     "sftp": {
-      "title": "SFTP-Übertragung",
+      "title": "Dateiübertragung",
       "description": "Dateiübertragungsverhalten und Leistung konfigurieren.",
+      "protocol": "Standard-Übertragungsprotokoll",
+      "protocol_hint": "Automatisch bevorzugt SFTP und verwendet das ältere SCP nur, wenn das SFTP-Subsystem nicht verfügbar ist.",
+      "protocol_auto": "Automatisch (SFTP bevorzugen)",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP (Legacy)",
       "concurrent": "Maximale gleichzeitige Übertragungen",
       "concurrent_hint": "Maximale gleichzeitige Dateiübertragungen (1-10)",
       "directory_parallelism": "Parallelität für Ordnerübertragungen",

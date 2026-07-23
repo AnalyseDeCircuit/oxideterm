@@ -95,6 +95,7 @@ pub enum SelectAnchorId {
     SettingsKnowledgeDocumentFormat,
     SettingsAiMcpTransport,
     SettingsAiMcpAuthMode,
+    SettingsSftpProtocol,
     SettingsSftpConcurrent,
     SettingsSftpDirectoryParallelism,
     SettingsSftpConflict,
@@ -186,6 +187,7 @@ impl SelectAnchorId {
                 | Self::SettingsKnowledgeDocumentFormat
                 | Self::SettingsAiMcpTransport
                 | Self::SettingsAiMcpAuthMode
+                | Self::SettingsSftpProtocol
                 | Self::SettingsSftpConcurrent
                 | Self::SettingsSftpDirectoryParallelism
                 | Self::SettingsSftpConflict

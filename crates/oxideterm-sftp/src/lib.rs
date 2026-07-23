@@ -13,6 +13,7 @@ mod error;
 mod path_utils;
 mod progress;
 mod retry;
+mod scp;
 mod session;
 mod tar_transfer;
 mod text_diff;
@@ -34,12 +35,16 @@ pub use path_utils::{
 };
 pub use progress::{
     DummyProgressStore, LazyProgressStore, ProgressStore, RedbProgressStore,
-    StoredTransferProgress, TransferStatus, TransferStrategy, TransferType,
+    StoredTransferProgress, TransferProtocol, TransferStatus, TransferStrategy, TransferType,
 };
 pub use retry::{
     RetryConfig, calculate_backoff, error_is_auth_failure, error_is_connection_unavailable,
     error_is_not_found, error_is_permission_denied, error_should_retry_initialization,
     is_retryable_error,
+};
+pub use scp::{
+    ScpCapabilities, ScpTransferResult, probe_scp_capabilities, probe_scp_support,
+    scp_download_directory, scp_download_file, scp_upload_directory, scp_upload_file,
 };
 pub use session::{SftpChannelOpener, SftpSession, WriteContentResult};
 pub use tar_transfer::{

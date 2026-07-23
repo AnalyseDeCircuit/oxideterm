@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "토큰이 키체인에 저장됨"
     },
     "sftp": {
-      "title": "SFTP 전송",
+      "title": "파일 전송",
       "description": "파일 전송 동작 및 성능을 구성합니다.",
+      "protocol": "기본 전송 프로토콜",
+      "protocol_hint": "자동 모드는 SFTP를 우선 사용하며 SFTP 하위 시스템을 사용할 수 없을 때만 레거시 SCP를 사용합니다.",
+      "protocol_auto": "자동(SFTP 우선)",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP(레거시)",
       "concurrent": "최대 동시 전송 수",
       "concurrent_hint": "최대 동시 파일 전송 수 (1-10)",
       "directory_parallelism": "디렉터리 전송 병렬도",

@@ -982,8 +982,13 @@
       "acp_agent_auth_token_saved": "Token stored in keychain"
     },
     "sftp": {
-      "title": "SFTP Transfer",
+      "title": "File Transfer",
       "description": "Configure file transfer behavior and performance.",
+      "protocol": "Default Transfer Protocol",
+      "protocol_hint": "Auto prefers SFTP and uses legacy SCP only when the SFTP subsystem is unavailable.",
+      "protocol_auto": "Auto (prefer SFTP)",
+      "protocol_sftp": "SFTP",
+      "protocol_scp": "SCP (legacy)",
       "concurrent": "Max Concurrent Transfers",
       "concurrent_hint": "Maximum simultaneous file transfers (1-10)",
       "directory_parallelism": "Directory Transfer Parallelism",
