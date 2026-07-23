@@ -689,6 +689,17 @@ impl Render for WorkspaceApp {
                     this.copy(cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &Cut, _window, cx| {
+                if this.cut_active_text_input(cx) {
+                    return;
+                }
+                if this.cut_active_ide_selection(cx) {
+                    return;
+                }
+                if this.new_connection_form.is_none() {
+                    let _ = this.cut(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &Paste, _window, cx| {
                 if this.paste_active_text_input(cx) {
                     return;

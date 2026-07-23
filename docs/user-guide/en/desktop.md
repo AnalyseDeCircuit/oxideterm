@@ -41,11 +41,13 @@ Use the terminal context menu and command bar for explicit pane actions such as 
 Enable Settings → Terminal → Free Type Mode to edit the active ordinary shell command with the mouse:
 
 - Click inside the active command to move the remote line-editor cursor.
-- Select command text and press Backspace/Delete, type, or paste to replace it.
+- Select command text and press Backspace/Delete, type, paste, or use Copy/Cut to edit it.
 - Drag selected single-line text to insert it at another command position.
 - Alt-drag selected text to replace the current command.
 
 Toggle the mode with Command+Shift+F on macOS or Ctrl+Alt+F on Windows and Linux. The action is also available in the command palette and can be remapped under Settings → Keyboard Shortcuts.
+
+While the mode owns an ordinary command input, Command+C/X/V on macOS and Ctrl+C/X/V on Windows and Linux perform editor-style copy, cut, and paste. The configurable terminal actions also default to Ctrl+Shift+C/X/V on Windows and Linux. Outside a verified command input or selection, these keys keep their existing terminal behavior.
 
 OxideTerm sends ordinary terminal key and text sequences; the remote shell remains the source of truth. The mode is limited to the normal command screen. Full-screen and mouse-tracking programs such as Vim, tmux, and htop keep their own input and are not intercepted.
 

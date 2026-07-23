@@ -128,6 +128,9 @@ impl TerminalPane {
         }
 
         let mode = self.terminal.lock().mode();
+        if self.handle_free_type_clipboard_shortcut(event, mode, cx) {
+            return true;
+        }
         if is_legacy_terminal_copy_shortcut(key, modifiers) {
             // Preserve the long-standing terminal convention without consuming plain Insert.
             self.copy_current_selection_or_snapshot(cx);
@@ -393,12 +396,16 @@ impl TerminalPane {
     }
 
     pub(super) fn copy_from_platform_shortcut(&mut self, cx: &mut Context<Self>) {
+        let mode = self.terminal.lock().mode();
+        if self.copy_free_type_selection_to_clipboard_if_active(mode, cx) {
+            return;
+        }
+
         if cfg!(target_os = "macos") {
             self.copy_current_selection_or_snapshot(cx);
             return;
         }
 
-        let mode = self.terminal.lock().mode();
         if self.settings.smart_copy
             && smart_copy_selection_is_owned_by_terminal_ui(mode)
             && self.copy_selection_to_clipboard_if_present(cx)
@@ -407,6 +414,125 @@ impl TerminalPane {
         }
 
         self.send_user_protocol_bytes(&[0x03], cx);
+    }
+
+    fn handle_free_type_clipboard_shortcut(
+        &mut self,
+        event: &KeyDownEvent,
+        mode: TermMode,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(shortcut) = free_type_clipboard_shortcut(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers,
+            cfg!(target_os = "macos"),
+        ) else {
+            return false;
+        };
+
+        match shortcut {
+            FreeTypeClipboardShortcut::Copy => {
+                self.copy_free_type_selection_to_clipboard_if_active(mode, cx)
+            }
+            FreeTypeClipboardShortcut::Cut => self.cut_free_type_selection_to_clipboard(mode, cx),
+            FreeTypeClipboardShortcut::Paste => {
+                if !self.free_type_active_command_accepts_clipboard_paste(mode) {
+                    return false;
+                }
+                // Clipboard paste keeps the existing protection and bracketed-paste path.
+                self.paste_from_clipboard(cx);
+                true
+            }
+        }
+    }
+
+    fn copy_free_type_selection_to_clipboard_if_active(
+        &mut self,
+        mode: TermMode,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !free_type_mode_allows_command_edit(
+            self.settings.free_type_mode,
+            mode,
+            Modifiers::default(),
+        ) {
+            return false;
+        }
+        let Some(selection) = self.selection else {
+            return false;
+        };
+        let input_state = self.input_tracker.state();
+        let Some(text) = free_type_selected_command_text(&self.snapshot, selection, &input_state)
+        else {
+            return false;
+        };
+
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        if !self.settings.keep_selection_on_copy {
+            self.selection = None;
+            cx.notify();
+        }
+        true
+    }
+
+    pub fn cut_to_clipboard(&mut self, cx: &mut Context<Self>) -> bool {
+        let mode = self.terminal.lock().mode();
+        self.cut_free_type_selection_to_clipboard(mode, cx)
+    }
+
+    fn cut_free_type_selection_to_clipboard(
+        &mut self,
+        mode: TermMode,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.terminal_accepts_input()
+            || !free_type_mode_allows_command_edit(
+                self.settings.free_type_mode,
+                mode,
+                Modifiers::default(),
+            )
+        {
+            return false;
+        }
+        let Some(selection) = self.selection else {
+            return false;
+        };
+        let input_state = self.input_tracker.state();
+        let Some((text, bytes)) =
+            free_type_selection_cut_payload(&self.snapshot, selection, &input_state, mode)
+        else {
+            return false;
+        };
+
+        // The clipboard receives the exact editable command slice, while the
+        // remote line editor remains responsible for applying the deletion.
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.selection = None;
+        self.selecting = false;
+        self.selection_autoscroll_position = None;
+        self.send_user_protocol_bytes(&bytes, cx);
+        true
+    }
+
+    fn free_type_active_command_accepts_clipboard_paste(&self, mode: TermMode) -> bool {
+        if !self.terminal_accepts_input()
+            || !free_type_mode_allows_command_edit(
+                self.settings.free_type_mode,
+                mode,
+                Modifiers::default(),
+            )
+        {
+            return false;
+        }
+        let input_state = self.input_tracker.state();
+        let cursor_row_is_active = self
+            .snapshot
+            .lines
+            .get(self.snapshot.cursor_row)
+            .is_some_and(|row| row.active_input);
+        cursor_row_is_active
+            && input_state.cursor_index <= input_state.value.len()
+            && input_state.value.is_char_boundary(input_state.cursor_index)
     }
 
     fn copy_selection_after_select_if_configured(&mut self, cx: &mut Context<Self>) {
@@ -1478,6 +1604,35 @@ fn free_type_delete_key_requests_selection_delete(key: &str, modifiers: Modifier
         && !modifiers.alt
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FreeTypeClipboardShortcut {
+    Copy,
+    Cut,
+    Paste,
+}
+
+fn free_type_clipboard_shortcut(
+    key: &str,
+    modifiers: Modifiers,
+    uses_platform_modifier: bool,
+) -> Option<FreeTypeClipboardShortcut> {
+    let has_edit_modifier = if uses_platform_modifier {
+        modifiers.platform && !modifiers.control
+    } else {
+        modifiers.control && !modifiers.platform
+    };
+    if !has_edit_modifier || modifiers.shift || modifiers.alt {
+        return None;
+    }
+
+    match key.to_ascii_lowercase().as_str() {
+        "c" => Some(FreeTypeClipboardShortcut::Copy),
+        "x" => Some(FreeTypeClipboardShortcut::Cut),
+        "v" => Some(FreeTypeClipboardShortcut::Paste),
+        _ => None,
+    }
+}
+
 fn free_type_selected_text_can_be_command_input(text: &str) -> bool {
     !text.is_empty() && !text.contains(['\r', '\n'])
 }
@@ -1795,6 +1950,27 @@ fn free_type_selection_delete_bytes(
         bytes.extend_from_slice(b"\x1b[3~");
     }
     Some(bytes)
+}
+
+fn free_type_selected_command_text(
+    snapshot: &TerminalSnapshot,
+    selection: TerminalSelection,
+    input_state: &TerminalAutosuggestInputState,
+) -> Option<String> {
+    let (start_index, end_index) =
+        free_type_selection_command_range(snapshot, selection, input_state)?;
+    (start_index < end_index).then(|| input_state.value[start_index..end_index].to_string())
+}
+
+fn free_type_selection_cut_payload(
+    snapshot: &TerminalSnapshot,
+    selection: TerminalSelection,
+    input_state: &TerminalAutosuggestInputState,
+    mode: TermMode,
+) -> Option<(String, Vec<u8>)> {
+    let text = free_type_selected_command_text(snapshot, selection, input_state)?;
+    let bytes = free_type_selection_delete_bytes(snapshot, selection, input_state, mode)?;
+    Some((text, bytes))
 }
 
 fn free_type_current_command_delete_bytes(
@@ -2127,6 +2303,47 @@ mod tests {
                 ..Modifiers::default()
             }
         ));
+    }
+
+    #[test]
+    fn free_type_clipboard_shortcuts_follow_platform_edit_modifiers() {
+        let mac_modifiers = Modifiers {
+            platform: true,
+            ..Modifiers::default()
+        };
+        let other_modifiers = Modifiers {
+            control: true,
+            ..Modifiers::default()
+        };
+
+        assert_eq!(
+            free_type_clipboard_shortcut("c", mac_modifiers, true),
+            Some(FreeTypeClipboardShortcut::Copy)
+        );
+        assert_eq!(
+            free_type_clipboard_shortcut("x", other_modifiers, false),
+            Some(FreeTypeClipboardShortcut::Cut)
+        );
+        assert_eq!(
+            free_type_clipboard_shortcut("v", other_modifiers, false),
+            Some(FreeTypeClipboardShortcut::Paste)
+        );
+        assert_eq!(
+            free_type_clipboard_shortcut("c", other_modifiers, true),
+            None
+        );
+        assert_eq!(
+            free_type_clipboard_shortcut(
+                "v",
+                Modifiers {
+                    control: true,
+                    shift: true,
+                    ..Modifiers::default()
+                },
+                false
+            ),
+            None
+        );
     }
 
     #[test]
@@ -2853,6 +3070,32 @@ mod tests {
             .as_deref(),
             Some(b"\x1b[D\x1b[D\x1b[3~".as_slice())
         );
+    }
+
+    #[test]
+    fn free_type_cut_payload_copies_only_the_editable_command_slice() {
+        let snapshot = test_snapshot_with_cursor(vec![test_row("$ 你好abc", true)], 0, 9, 20);
+        let selection = TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 2 },
+            head: TerminalGridPoint { line: 0, col: 5 },
+            mode: TerminalSelectionMode::Simple,
+        };
+        let input_state = TerminalAutosuggestInputState {
+            value: "你好abc".to_string(),
+            cursor_index: "你好abc".len(),
+            is_cursor_at_end: true,
+        };
+
+        let (text, bytes) = free_type_selection_cut_payload(
+            &snapshot,
+            selection,
+            &input_state,
+            TermMode::default(),
+        )
+        .expect("command selection should be cuttable");
+
+        assert_eq!(text, "你好");
+        assert_eq!(bytes, b"\x1b[H\x1b[3~\x1b[3~");
     }
 
     #[test]

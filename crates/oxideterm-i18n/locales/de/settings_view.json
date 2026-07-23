@@ -1403,6 +1403,8 @@
         "app.fontReset": "Schriftgröße zurücksetzen",
         "app.showShortcuts": "Tastenkürzel anzeigen",
         "terminal.search": "Im Terminal suchen",
+        "terminal.copy": "Aus Terminal kopieren",
+        "terminal.cut": "Terminalauswahl ausschneiden",
         "terminal.paste": "In Terminal einfügen",
         "terminal.aiPanel": "OxideSens-Panel",
         "terminal.recording": "Aufnahme umschalten",

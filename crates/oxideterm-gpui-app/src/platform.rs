@@ -4,7 +4,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::PersistedSettings;
 
 use crate::{
-    CloseOtherTabs, ClosePane, CloseTab, CommandPalette, Copy, Find, FindNext, FindPrev,
+    CloseOtherTabs, ClosePane, CloseTab, CommandPalette, Copy, Cut, Find, FindNext, FindPrev,
     FontDecrease, FontIncrease, FontReset, NewConnection, NewTerminal, NextTab, OpenSettings,
     PaletteAiSidebar, PaletteBroadcast, PaletteCancelReconnect, PaletteCleanupDead,
     PaletteDetachTerminal, PaletteDisconnectAll, PaletteEventLog, PaletteHealthCheck,
@@ -31,6 +31,7 @@ pub(crate) fn app_menus(i18n: &I18n) -> Vec<Menu> {
             disabled: false,
             name: i18n.t("menu.edit").into(),
             items: vec![
+                MenuItem::action(i18n.t("menu.cut"), Cut),
                 MenuItem::action(i18n.t("menu.copy"), Copy),
                 MenuItem::action(i18n.t("menu.paste"), Paste),
                 MenuItem::separator(),

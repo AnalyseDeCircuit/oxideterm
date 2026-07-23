@@ -1403,6 +1403,8 @@
         "app.fontReset": "Reset Font Size",
         "app.showShortcuts": "Show Keyboard Shortcuts",
         "terminal.search": "Find in Terminal",
+        "terminal.copy": "Copy from Terminal",
+        "terminal.cut": "Cut Terminal Selection",
         "terminal.paste": "Paste into Terminal",
         "terminal.aiPanel": "OxideSens Panel",
         "terminal.recording": "Toggle Recording",

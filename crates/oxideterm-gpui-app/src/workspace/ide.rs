@@ -334,6 +334,13 @@ impl WorkspaceApp {
         surface.update(cx, |surface, cx| surface.copy_active_editor_selection(cx))
     }
 
+    pub(super) fn cut_active_ide_selection(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(surface) = self.active_ide_surface() else {
+            return false;
+        };
+        surface.update(cx, |surface, cx| surface.cut_active_editor_selection(cx))
+    }
+
     pub(super) fn paste_into_active_ide_editor(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(surface) = self.active_ide_surface() else {
             return false;

@@ -4,12 +4,12 @@ use serde_json::{Map, Value};
 use std::sync::LazyLock;
 
 use crate::{
-    CloseOtherTabs, CloseTab, CommandPalette, Find, FontDecrease, FontIncrease, FontReset,
-    GoToTab1, GoToTab2, GoToTab3, GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9,
-    NewConnection, NewTerminal, NextTab, OpenSettings, PaletteAiSidebar, PaletteBroadcast,
-    PaletteEventLog, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts, SplitHorizontal,
-    SplitNavLeft, SplitNavRight, SplitVertical, TerminalAiPanel, TerminalFreeTypeMode,
-    TerminalRecording, ToggleSidebar, ZenMode,
+    CloseOtherTabs, CloseTab, CommandPalette, Copy, Cut, Find, FontDecrease, FontIncrease,
+    FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4, GoToTab5, GoToTab6, GoToTab7, GoToTab8,
+    GoToTab9, NewConnection, NewTerminal, NextTab, OpenSettings, PaletteAiSidebar,
+    PaletteBroadcast, PaletteEventLog, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts,
+    SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical, TerminalAiPanel,
+    TerminalFreeTypeMode, TerminalRecording, ToggleSidebar, ZenMode,
 };
 
 const CONTEXT: &str = "Workspace";
@@ -311,6 +311,18 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             ActionScope::Terminal,
             KeyCombo::cmd("f"),
             KeyCombo::ctrl_shift("f"),
+        ),
+        def(
+            "terminal.copy",
+            ActionScope::Terminal,
+            KeyCombo::cmd("c"),
+            KeyCombo::ctrl_shift("c"),
+        ),
+        def(
+            "terminal.cut",
+            ActionScope::Terminal,
+            KeyCombo::cmd("x"),
+            KeyCombo::ctrl_shift("x"),
         ),
         def(
             "terminal.paste",
@@ -909,6 +921,8 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         "app.fontReset" => push_binding!(FontReset),
         "app.showShortcuts" => push_binding!(ShowShortcuts),
         "terminal.search" => push_binding!(Find),
+        "terminal.copy" => push_binding!(Copy),
+        "terminal.cut" => push_binding!(Cut),
         "terminal.paste" => push_binding!(Paste),
         "terminal.aiPanel" => push_binding!(TerminalAiPanel),
         "terminal.recording" => push_binding!(TerminalRecording),
@@ -934,7 +948,7 @@ mod tests {
 
     #[test]
     fn tauri_default_registry_contains_all_orchestrated_actions() {
-        assert_eq!(ACTION_DEFINITIONS.len(), 41);
+        assert_eq!(ACTION_DEFINITIONS.len(), 43);
         assert!(action_definition("app.commandPalette").is_some());
         assert_eq!(
             action_definition("app.quit")
@@ -942,6 +956,8 @@ mod tests {
             Some(&KeyCombo::cmd("q"))
         );
         assert!(action_definition("terminal.closePanel").is_some());
+        assert!(action_definition("terminal.copy").is_some());
+        assert!(action_definition("terminal.cut").is_some());
         assert!(action_definition("terminal.toggleFreeTypeMode").is_some());
         assert!(action_definition("palette.broadcast").is_some());
         assert_eq!(

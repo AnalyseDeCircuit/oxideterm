@@ -1403,6 +1403,8 @@
         "app.fontReset": "重設字體大小",
         "app.showShortcuts": "顯示快捷鍵",
         "terminal.search": "終端搜尋",
+        "terminal.copy": "從終端機複製",
+        "terminal.cut": "剪下終端機選取範圍",
         "terminal.paste": "貼入終端機",
         "terminal.aiPanel": "OxideSens 面板",
         "terminal.recording": "切換錄製",

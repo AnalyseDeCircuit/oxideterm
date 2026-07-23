@@ -1403,6 +1403,8 @@
         "app.fontReset": "Redefinir tamanho da fonte",
         "app.showShortcuts": "Mostrar atalhos",
         "terminal.search": "Pesquisar no terminal",
+        "terminal.copy": "Copiar do terminal",
+        "terminal.cut": "Recortar seleção do terminal",
         "terminal.paste": "Colar no terminal",
         "terminal.aiPanel": "Painel OxideSens",
         "terminal.recording": "Alternar gravação",

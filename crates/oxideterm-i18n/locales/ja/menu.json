@@ -8,6 +8,7 @@
     "hide_main_window": "メインウィンドウを非表示",
     "quit": "OxideTerm を終了",
     "edit": "編集",
+    "cut": "切り取り",
     "copy": "コピー",
     "paste": "貼り付け",
     "find": "検索",

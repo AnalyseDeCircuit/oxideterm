@@ -55,6 +55,7 @@ actions!(
         FontReset,
         ShowShortcuts,
         Copy,
+        Cut,
         Paste,
         Find,
         FindNext,

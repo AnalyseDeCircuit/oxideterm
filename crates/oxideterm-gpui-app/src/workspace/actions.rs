@@ -327,6 +327,13 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn cut(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(pane) = self.active_pane() else {
+            return false;
+        };
+        pane.update(cx, |pane, cx| pane.cut_to_clipboard(cx))
+    }
+
     pub(super) fn toggle_zen_mode(&mut self, cx: &mut Context<Self>) {
         let settings = self.settings_store.settings_mut();
         let entering = !settings.sidebar_ui.zen_mode;
@@ -497,6 +504,10 @@ impl WorkspaceApp {
             "app.fontReset" => self.reset_terminal_font_size(cx),
             "app.showShortcuts" => self.open_shortcuts_modal(cx),
             "terminal.search" => self.open_search(window, cx),
+            "terminal.copy" => self.copy(cx),
+            "terminal.cut" => {
+                let _ = self.cut(cx);
+            }
             "terminal.paste" => self.paste(cx),
             "terminal.aiPanel" => {
                 self.toggle_terminal_ai_inline_panel(window, cx);

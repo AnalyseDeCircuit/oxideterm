@@ -1403,6 +1403,8 @@
         "app.fontReset": "Đặt lại cỡ chữ",
         "app.showShortcuts": "Hiển thị phím tắt",
         "terminal.search": "Tìm trong terminal",
+        "terminal.copy": "Sao chép từ terminal",
+        "terminal.cut": "Cắt vùng chọn trong terminal",
         "terminal.paste": "Dán vào terminal",
         "terminal.aiPanel": "Bảng OxideSens",
         "terminal.recording": "Bật/tắt ghi hình",

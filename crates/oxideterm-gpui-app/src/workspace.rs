@@ -271,7 +271,7 @@ use self::sidebar::{
 };
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::{
-    CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Find, FindNext,
+    CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Cut, Find, FindNext,
     FindPrev, FontDecrease, FontIncrease, FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4,
     GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewConnection, NewTerminal, NextTab,
     OpenSettings, PaletteAiSidebar, PaletteBroadcast, PaletteCancelReconnect, PaletteCleanupDead,
