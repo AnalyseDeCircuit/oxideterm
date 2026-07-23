@@ -634,14 +634,16 @@
       },
       "importers": {
         "title": "Nhập từ client khác",
-        "description": "Xem trước và nhập tệp kết nối SecureCRT, Xshell, Termius, MobaXterm hoặc WindTerm. Mật khẩu và trường secret không bao giờ được nhập.",
+        "description": "Xem trước và nhập tệp kết nối từ SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm hoặc FinalShell. Mật khẩu và trường nhạy cảm không bao giờ được nhập.",
         "source": "Nguồn",
         "sources": {
-          "securecrt": "Tệp session SecureCRT",
+          "securecrt": "Tệp .ini/.xml SecureCRT",
           "xshell": "Tệp Xshell .xsh/.xts",
           "termius": "Bản xuất Termius",
           "mobaxterm": "Phiên MobaXterm",
-          "windterm": "Phiên WindTerm"
+          "windterm": "Phiên WindTerm",
+          "electerm": "JSON dấu trang Electerm",
+          "finalshell": "Thư mục conn FinalShell"
         },
         "paths": "Tệp hoặc thư mục",
         "choose_files": "Chọn tệp",

@@ -1,0 +1,9 @@
+{
+  "name": "Ignored RDP",
+  "host": "desktop.example.com",
+  "port": 3389,
+  "user_name": "admin",
+  "parent_id": "root",
+  "conection_type": 101,
+  "delete_time": 0
+}

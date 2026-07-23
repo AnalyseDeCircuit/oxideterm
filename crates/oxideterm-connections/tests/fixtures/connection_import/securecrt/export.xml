@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<VanDyke version="3.0">
+  <key name="Sessions">
+    <key name="Production">
+      <key name="Gateway">
+        <string name="Protocol Name">SSH2</string>
+        <string name="Hostname">gateway.example.com</string>
+        <dword name="[SSH2] Port">2202</dword>
+        <string name="Username">deploy</string>
+        <string name="Identity Filename V2">/Users/deploy/.ssh/id_ed25519</string>
+        <string name="Password V2">securecrt-secret-sentinel</string>
+      </key>
+    </key>
+    <key name="Ignored RDP">
+      <string name="Protocol Name">RDP</string>
+      <string name="Hostname">desktop.example.com</string>
+      <dword name="Port">3389</dword>
+    </key>
+  </key>
+</VanDyke>

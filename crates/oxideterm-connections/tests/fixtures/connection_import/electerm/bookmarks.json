@@ -1,0 +1,39 @@
+{
+  "bookmarkGroups": [
+    {
+      "id": "production",
+      "title": "Production",
+      "bookmarkIds": [],
+      "bookmarkGroupIds": ["edge"]
+    },
+    {
+      "id": "edge",
+      "title": "Edge",
+      "bookmarkIds": ["gateway"],
+      "bookmarkGroupIds": []
+    }
+  ],
+  "bookmarks": [
+    {
+      "id": "gateway",
+      "title": "Electerm Gateway",
+      "host": "electerm.example.com",
+      "username": "ops",
+      "authType": "privateKey",
+      "privateKey": "electerm-private-key-sentinel",
+      "passphrase": "electerm-passphrase-sentinel",
+      "port": 2223,
+      "type": "ssh",
+      "enableSsh": true,
+      "connectionHoppings": [{"password": "nested-secret-sentinel"}],
+      "sshTunnels": [{"sshTunnelLocalPort": 8080}]
+    },
+    {
+      "id": "ignored",
+      "title": "Ignored Telnet",
+      "host": "telnet.example.com",
+      "port": 23,
+      "type": "telnet"
+    }
+  ]
+}

@@ -7463,6 +7463,7 @@ dependencies = [
  "oxideterm-atomic-file",
  "oxideterm-portable-runtime",
  "oxideterm-secret-store",
+ "quick-xml 0.39.4",
  "rand 0.10.1",
  "rand 0.8.6",
  "rmp-serde",

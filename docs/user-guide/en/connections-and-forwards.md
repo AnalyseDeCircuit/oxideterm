@@ -10,6 +10,24 @@ Create and edit saved connections from the connection manager or Sessions view. 
 
 Use groups, colors, and tags for navigation. Do not put passwords, tokens, or environment secrets in names, groups, tags, notes, or post-connect labels.
 
+## Importing Connections
+
+Open Settings, go to Connections, and use **Import from Other Clients**. Select a source, choose its file or folder, review the preview, then import the selected connections. Existing names can be skipped or renamed, and an optional target group can override source groups.
+
+Supported sources and inputs:
+
+| Source | Input |
+|--------|-------|
+| SecureCRT | Session `.ini` files, a Sessions folder, or a SecureCRT `.xml` export |
+| Xshell | `.xsh` files, a Sessions folder, or an `.xts` archive |
+| Termius | Exported JSON |
+| MobaXterm | `.mxtsessions` export |
+| WindTerm | `user.sessions` JSON |
+| Electerm | Bookmarks JSON containing `bookmarkGroups` and `bookmarks`, or a legacy bookmark array |
+| FinalShell | The `conn` folder, or the FinalShell data folder that contains `conn` |
+
+OxideTerm imports safe connection metadata such as names, groups, hosts, ports, usernames, and supported key-file paths. Passwords, passphrases, embedded private keys, certificates, proxy credentials, and other secret values are not imported. Unsupported proxy, jump-host, and forwarding settings are shown as preview warnings. Configure authentication and review those advanced settings in OxideTerm after the metadata import.
+
 ## Connection Runtime
 
 Saved profiles and live runtime nodes are different things:

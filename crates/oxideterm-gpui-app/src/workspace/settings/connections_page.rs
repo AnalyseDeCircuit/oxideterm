@@ -862,9 +862,12 @@ impl WorkspaceApp {
             .flex_row()
             .flex_wrap()
             .gap(px(8.0))
-            .child(self.connection_import_pick_files_button(cx))
             .when(
-                self.settings_connection_import_source != ConnectionImportSource::Termius,
+                connection_import_supports_files(self.settings_connection_import_source),
+                |row| row.child(self.connection_import_pick_files_button(cx)),
+            )
+            .when(
+                connection_import_supports_directory(self.settings_connection_import_source),
                 |row| row.child(self.connection_import_pick_directory_button(cx)),
             )
             .child(self.connection_import_preview_button(has_paths, cx))
@@ -2770,6 +2773,8 @@ pub(in crate::workspace) fn connection_import_source_options() -> &'static [Conn
         ConnectionImportSource::Termius,
         ConnectionImportSource::MobaXterm,
         ConnectionImportSource::WindTerm,
+        ConnectionImportSource::Electerm,
+        ConnectionImportSource::FinalShell,
     ]
 }
 
@@ -2793,7 +2798,26 @@ pub(in crate::workspace) fn connection_import_source_label(
         ConnectionImportSource::WindTerm => {
             i18n.t("settings_view.connections.importers.sources.windterm")
         }
+        ConnectionImportSource::Electerm => {
+            i18n.t("settings_view.connections.importers.sources.electerm")
+        }
+        ConnectionImportSource::FinalShell => {
+            i18n.t("settings_view.connections.importers.sources.finalshell")
+        }
     }
+}
+
+fn connection_import_supports_files(source: ConnectionImportSource) -> bool {
+    source != ConnectionImportSource::FinalShell
+}
+
+fn connection_import_supports_directory(source: ConnectionImportSource) -> bool {
+    matches!(
+        source,
+        ConnectionImportSource::SecureCrt
+            | ConnectionImportSource::Xshell
+            | ConnectionImportSource::FinalShell
+    )
 }
 
 pub(in crate::workspace) fn connection_import_duplicate_strategy_label(

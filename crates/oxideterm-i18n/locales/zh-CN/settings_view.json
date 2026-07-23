@@ -634,14 +634,16 @@
       },
       "importers": {
         "title": "从其他客户端导入",
-        "description": "预览并导入 SecureCRT、Xshell、Termius、MobaXterm 或 WindTerm 的连接文件。密码和 secret 字段永远不会被导入。",
+        "description": "预览并导入 SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm 或 FinalShell 的连接文件。密码和敏感字段永远不会被导入。",
         "source": "来源",
         "sources": {
-          "securecrt": "SecureCRT session 文件",
+          "securecrt": "SecureCRT .ini/.xml 文件",
           "xshell": "Xshell .xsh/.xts 文件",
           "termius": "Termius 导出",
           "mobaxterm": "MobaXterm 会话",
-          "windterm": "WindTerm 会话"
+          "windterm": "WindTerm 会话",
+          "electerm": "Electerm 书签 JSON",
+          "finalshell": "FinalShell conn 文件夹"
         },
         "paths": "文件或文件夹",
         "choose_files": "选择文件",

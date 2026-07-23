@@ -175,6 +175,7 @@ proc-macro2 = "1.0.93"
 profiling = "1"
 proptest = { version = "1.10", features = ["attr-macro"] }
 quote = "1.0.9"
+quick-xml = "0.39"
 raw-window-handle = "0.6"
 refineable = { path = "crates/gpui-ce/gpui_refineable", version = "0.2.2", package = "gpui_refineable" }
 regex = "1.12"

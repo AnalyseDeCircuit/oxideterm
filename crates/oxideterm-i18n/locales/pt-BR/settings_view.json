@@ -634,14 +634,16 @@
       },
       "importers": {
         "title": "Importar de outros clientes",
-        "description": "Pré-visualize e importe arquivos de conexão do SecureCRT, Xshell, Termius, MobaXterm ou WindTerm. Senhas e campos secretos nunca são importados.",
+        "description": "Pré-visualize e importe arquivos de conexão do SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm ou FinalShell. Senhas e campos confidenciais nunca são importados.",
         "source": "Origem",
         "sources": {
-          "securecrt": "Arquivos session do SecureCRT",
+          "securecrt": "Arquivos .ini/.xml do SecureCRT",
           "xshell": "Arquivos Xshell .xsh/.xts",
           "termius": "Exportação do Termius",
           "mobaxterm": "Sessões do MobaXterm",
-          "windterm": "Sessões do WindTerm"
+          "windterm": "Sessões do WindTerm",
+          "electerm": "JSON de favoritos do Electerm",
+          "finalshell": "Pasta conn do FinalShell"
         },
         "paths": "Arquivos ou pasta",
         "choose_files": "Escolher arquivos",

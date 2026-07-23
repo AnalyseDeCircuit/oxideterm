@@ -1,0 +1,14 @@
+{
+  "name": "FinalShell Gateway",
+  "host": "finalshell.example.com",
+  "port": 2224,
+  "user_name": "admin",
+  "parent_id": "production",
+  "conection_type": 100,
+  "authentication_type": 1,
+  "password": "finalshell-password-sentinel",
+  "secret_key_id": "private-key-reference",
+  "proxy_id": "proxy-reference",
+  "port_forwarding_list": [{"local_port": 8080}],
+  "delete_time": 0
+}

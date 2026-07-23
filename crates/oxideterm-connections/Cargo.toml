@@ -12,6 +12,7 @@ chacha20poly1305.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 encoding_rs.workspace = true
+quick-xml.workspace = true
 rand.workspace = true
 rmp-serde.workspace = true
 serde.workspace = true
