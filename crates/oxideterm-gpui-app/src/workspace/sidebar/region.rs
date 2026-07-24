@@ -1588,7 +1588,7 @@ mod sidebar_resize_region_tests {
         });
         cx.simulate_resize(size(px(700.0), px(180.0)));
         cx.update(|window, cx| {
-            window.draw(cx).clear();
+            window.draw(cx).clear(cx);
         });
 
         let frame = cx.debug_bounds("context-frame").expect("frame bounds");
@@ -1650,7 +1650,7 @@ mod sidebar_resize_region_tests {
             "root capture should continue the frame-local hotzone drag"
         );
         cx.update(|window, cx| {
-            window.draw(cx).clear();
+            window.draw(cx).clear(cx);
         });
         let resized_frame = cx
             .debug_bounds("context-frame")

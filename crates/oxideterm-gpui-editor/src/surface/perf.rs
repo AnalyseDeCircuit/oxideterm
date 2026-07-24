@@ -75,7 +75,7 @@ fn scroll_once(cx: &mut gpui::VisualTestContext) {
 
 fn draw(cx: &mut gpui::VisualTestContext) {
     cx.update(|window, cx| {
-        window.draw(cx).clear();
+        window.draw(cx).clear(cx);
     });
 }
 

@@ -725,7 +725,7 @@ mod tab_scroll_tests {
         });
         cx.simulate_resize(size(px(400.0), px(100.0)));
         cx.update(|window, cx| {
-            window.draw(cx).clear();
+            window.draw(cx).clear(cx);
         });
 
         let max_offset_x = view.read_with(cx, |view, _| {

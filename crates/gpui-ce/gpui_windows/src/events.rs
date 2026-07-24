@@ -1,4 +1,4 @@
-// OxideTerm modification: distinguish completed and deferred WGPU recovery polls.
+// OxideTerm modification: coordinates non-reentrant draws and deferred GPU recovery frames.
 #[cfg(feature = "wgpu")]
 use crate::window::RawWindow;
 use ::util::ResultExt;
@@ -32,6 +32,52 @@ pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
+
+/// Serializes window drawing across all windows on the UI thread.
+pub(crate) struct WindowDrawCoordinator {
+    draw_active: Cell<bool>,
+}
+
+impl WindowDrawCoordinator {
+    pub(crate) fn new() -> Self {
+        Self {
+            draw_active: Cell::new(false),
+        }
+    }
+
+    fn acquire(&self) -> Option<WindowDrawLease<'_>> {
+        if self.draw_active.replace(true) {
+            None
+        } else {
+            Some(WindowDrawLease { coordinator: self })
+        }
+    }
+}
+
+struct WindowDrawLease<'a> {
+    coordinator: &'a WindowDrawCoordinator,
+}
+
+impl Drop for WindowDrawLease<'_> {
+    fn drop(&mut self) {
+        self.coordinator.draw_active.set(false);
+    }
+}
+
+#[cfg(test)]
+mod draw_coordinator_tests {
+    use super::*;
+
+    #[test]
+    fn coordinator_rejects_nested_draws_until_lease_drops() {
+        let coordinator = WindowDrawCoordinator::new();
+        let lease = coordinator.acquire().expect("first draw should start");
+
+        assert!(coordinator.acquire().is_none());
+        drop(lease);
+        assert!(coordinator.acquire().is_some());
+    }
+}
 
 impl WindowsWindowInner {
     pub(crate) fn handle_msg(
@@ -1227,7 +1273,7 @@ impl WindowsWindowInner {
                 hwnd: self.platform_window_handle,
             }) {
                 Ok(gpui_wgpu::WgpuRecoveryStatus::Recovered) => {
-                    self.state.force_render_after_recovery.set(true);
+                    self.state.force_render_pending.set(true);
                 }
                 Ok(gpui_wgpu::WgpuRecoveryStatus::Deferred) => {
                     // VSync invalidation will poll recovery again after the cooldown.
@@ -1245,7 +1291,7 @@ impl WindowsWindowInner {
         // between) is treated as a forced render so it both clears
         // `skip_draws` and bypasses the view cache.
         #[cfg(not(feature = "wgpu"))]
-        self.state.force_render_after_recovery.set(true);
+        self.state.force_render_pending.set(true);
         Some(0)
     }
 
@@ -1256,6 +1302,16 @@ impl WindowsWindowInner {
 
     #[inline]
     fn draw_window(&self, handle: HWND, force_render: bool) -> Option<isize> {
+        let Some(_draw_lease) = self.state.draw_coordinator.acquire() else {
+            if force_render {
+                self.state.force_render_pending.set(true);
+            }
+            log::debug!("deferring a re-entrant Windows draw for {handle:?}");
+            // A nested message loop would repeatedly deliver WM_PAINT while the update
+            // region stays invalid. Vsync invalidates every window again after this draw.
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            return Some(0);
+        };
         let mut request_frame = self.state.callbacks.request_frame.take()?;
         self.state.direct_manipulation.update();
 
@@ -1268,7 +1324,7 @@ impl WindowsWindowInner {
                 self.state.callbacks.input.set(Some(func));
             }
         }
-        let force_render = force_render || self.state.force_render_after_recovery.take();
+        let force_render = force_render || self.state.force_render_pending.take();
         #[cfg(not(feature = "wgpu"))]
         {
             if force_render {

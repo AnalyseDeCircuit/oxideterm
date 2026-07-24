@@ -1,4 +1,9 @@
+// OxideTerm modification: dispatches background work through the native Win32 thread pool.
+
 use std::{
+    ffi::c_void,
+    mem::size_of,
+    ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
     thread::{ThreadId, current},
     time::{Duration, Instant},
@@ -6,16 +11,16 @@ use std::{
 
 use anyhow::Context;
 use util::ResultExt;
-use windows::{
+use windows::Win32::{
+    Foundation::{FILETIME, LPARAM, WPARAM},
+    Media::{timeBeginPeriod, timeEndPeriod},
     System::Threading::{
-        ThreadPool, ThreadPoolTimer, TimerElapsedHandler, WorkItemHandler, WorkItemPriority,
+        CloseThreadpoolTimer, CreateThreadpoolTimer, GetCurrentThread, PTP_CALLBACK_INSTANCE,
+        PTP_TIMER, SetThreadPriority, SetThreadpoolTimer, THREAD_PRIORITY_TIME_CRITICAL,
+        TP_CALLBACK_ENVIRON_V3, TP_CALLBACK_PRIORITY, TP_CALLBACK_PRIORITY_HIGH,
+        TP_CALLBACK_PRIORITY_LOW, TP_CALLBACK_PRIORITY_NORMAL, TrySubmitThreadpoolCallback,
     },
-    Win32::{
-        Foundation::{LPARAM, WPARAM},
-        Media::{timeBeginPeriod, timeEndPeriod},
-        System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL},
-        UI::WindowsAndMessaging::PostMessageW,
-    },
+    UI::WindowsAndMessaging::PostMessageW,
 };
 
 use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
@@ -50,29 +55,49 @@ impl WindowsDispatcher {
         }
     }
 
-    fn dispatch_on_threadpool(&self, priority: WorkItemPriority, runnable: RunnableVariant) {
-        let handler = {
-            let mut task_wrapper = Some(runnable);
-            WorkItemHandler::new(move |_| {
-                let runnable = task_wrapper.take().unwrap();
-                Self::execute_runnable(runnable);
-                Ok(())
-            })
+    fn dispatch_on_threadpool(&self, priority: TP_CALLBACK_PRIORITY, runnable: RunnableVariant) {
+        let callback_environment = TP_CALLBACK_ENVIRON_V3 {
+            Version: 3,
+            Size: size_of::<TP_CALLBACK_ENVIRON_V3>() as u32,
+            CallbackPriority: priority,
+            ..Default::default()
         };
-
-        ThreadPool::RunWithPriorityAsync(&handler, priority).log_err();
+        let runnable_pointer = runnable.into_raw();
+        let result = unsafe {
+            TrySubmitThreadpoolCallback(
+                Some(run_work_callback),
+                Some(runnable_pointer.as_ptr().cast::<c_void>()),
+                Some(&callback_environment),
+            )
+        };
+        if let Err(error) = result {
+            // SAFETY: Submission failed, so the callback cannot consume this unique raw pointer.
+            drop(unsafe { RunnableVariant::from_raw(runnable_pointer) });
+            log::error!("failed to submit Win32 thread-pool work: {error}");
+        }
     }
 
     fn dispatch_on_threadpool_after(&self, runnable: RunnableVariant, duration: Duration) {
-        let handler = {
-            let mut task_wrapper = Some(runnable);
-            TimerElapsedHandler::new(move |_| {
-                let runnable = task_wrapper.take().unwrap();
-                Self::execute_runnable(runnable);
-                Ok(())
-            })
+        let runnable_pointer = runnable.into_raw();
+        let timer = match unsafe {
+            CreateThreadpoolTimer(
+                Some(run_timer_callback),
+                Some(runnable_pointer.as_ptr().cast::<c_void>()),
+                None,
+            )
+        } {
+            Ok(timer) => timer,
+            Err(error) => {
+                // SAFETY: Timer creation failed, so no callback owns this unique raw pointer.
+                drop(unsafe { RunnableVariant::from_raw(runnable_pointer) });
+                log::error!("failed to create Win32 thread-pool timer: {error}");
+                return;
+            }
         };
-        ThreadPoolTimer::CreateTimer(&handler, duration.into()).log_err();
+        let due_time = relative_threadpool_due_time(duration);
+        unsafe {
+            SetThreadpoolTimer(timer, Some(&due_time), 0, None);
+        }
     }
 
     #[inline(always)]
@@ -115,9 +140,9 @@ impl PlatformDispatcher for WindowsDispatcher {
             Priority::RealtimeAudio => {
                 panic!("RealtimeAudio priority should use spawn_realtime, not dispatch")
             }
-            Priority::High => WorkItemPriority::High,
-            Priority::Medium => WorkItemPriority::Normal,
-            Priority::Low => WorkItemPriority::Low,
+            Priority::High => TP_CALLBACK_PRIORITY_HIGH,
+            Priority::Medium => TP_CALLBACK_PRIORITY_NORMAL,
+            Priority::Low => TP_CALLBACK_PRIORITY_LOW,
         };
         self.dispatch_on_threadpool(priority, runnable);
     }
@@ -176,5 +201,59 @@ impl PlatformDispatcher for WindowsDispatcher {
         util::defer(Box::new(|| unsafe {
             timeEndPeriod(1);
         }))
+    }
+}
+
+/// Converts a Rust duration to the negative 100-nanosecond interval used by Win32 timers.
+fn relative_threadpool_due_time(duration: Duration) -> FILETIME {
+    let tick_count = duration
+        .as_nanos()
+        .saturating_add(99)
+        .div_euclid(100)
+        .min(i64::MAX as u128) as i64;
+    let encoded_interval = tick_count.saturating_neg() as u64;
+    FILETIME {
+        dwLowDateTime: encoded_interval as u32,
+        dwHighDateTime: (encoded_interval >> 32) as u32,
+    }
+}
+
+unsafe extern "system" fn run_work_callback(
+    _instance: PTP_CALLBACK_INSTANCE,
+    context: *mut c_void,
+) {
+    let runnable_pointer =
+        NonNull::new(context.cast::<()>()).expect("Win32 work callback received null context");
+    // SAFETY: Each successful submission transfers exactly one raw runnable to one callback.
+    let runnable = unsafe { RunnableVariant::from_raw(runnable_pointer) };
+    WindowsDispatcher::execute_runnable(runnable);
+}
+
+unsafe extern "system" fn run_timer_callback(
+    _instance: PTP_CALLBACK_INSTANCE,
+    context: *mut c_void,
+    timer: PTP_TIMER,
+) {
+    let runnable_pointer =
+        NonNull::new(context.cast::<()>()).expect("Win32 timer callback received null context");
+    // SAFETY: Each timer transfers exactly one raw runnable to its one-shot callback.
+    let runnable = unsafe { RunnableVariant::from_raw(runnable_pointer) };
+    WindowsDispatcher::execute_runnable(runnable);
+    unsafe {
+        CloseThreadpoolTimer(timer);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_due_time_uses_negative_hundred_nanosecond_ticks() {
+        let due_time = relative_threadpool_due_time(Duration::from_micros(25));
+        let encoded =
+            u64::from(due_time.dwLowDateTime) | (u64::from(due_time.dwHighDateTime) << 32);
+
+        assert_eq!(encoded as i64, -250);
     }
 }

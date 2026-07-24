@@ -1,6 +1,6 @@
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::Inspector;
-// OxideTerm modification: exposes validated dynamic texture uploads and lifecycle state.
+// OxideTerm modification: exposes dynamic textures and hardens draw scheduling and arena lifetimes.
 
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
@@ -253,6 +253,11 @@ thread_local! {
     static CURRENT_ELEMENT_ARENA: Cell<Option<*const RefCell<Arena>>> = const { Cell::new(None) };
 }
 
+/// Returns whether this thread is currently executing a GPUI draw.
+fn draw_in_progress() -> bool {
+    CURRENT_ELEMENT_ARENA.with(|current| current.get().is_some())
+}
+
 /// Allocates an element in the current arena. Uses the app-specific arena if one
 /// is active (during draw), otherwise falls back to the thread-local ELEMENT_ARENA.
 pub(crate) fn with_element_arena<R>(f: impl FnOnce(&mut Arena) -> R) -> R {
@@ -268,21 +273,37 @@ pub(crate) fn with_element_arena<R>(f: impl FnOnce(&mut Arena) -> R) -> R {
     })
 }
 
-/// RAII guard that sets CURRENT_ELEMENT_ARENA for the duration of a draw operation.
-/// When dropped, restores the previous arena (supporting nested draws).
+/// Keeps one arena active for a draw and balances its nested lifetime scope.
 pub(crate) struct ElementArenaScope {
+    entered_arena: *const RefCell<Arena>,
     previous: Option<*const RefCell<Arena>>,
+    finished: bool,
 }
 
 impl ElementArenaScope {
     /// Enter a scope where element allocations use the given arena.
     pub(crate) fn enter(arena: &RefCell<Arena>) -> Self {
+        arena.borrow_mut().begin_scope();
         let previous = CURRENT_ELEMENT_ARENA.with(|current| {
             let prev = current.get();
             current.set(Some(arena as *const RefCell<Arena>));
             prev
         });
-        Self { previous }
+        Self {
+            entered_arena: arena as *const RefCell<Arena>,
+            previous,
+            finished: false,
+        }
+    }
+
+    /// Finishes this draw scope and returns its arena-clear obligation.
+    pub(crate) fn finish(mut self, arena: &RefCell<Arena>) -> ArenaClearNeeded {
+        assert!(
+            std::ptr::eq(self.entered_arena, arena),
+            "ElementArenaScope::finish called with a different arena"
+        );
+        self.finished = true;
+        ArenaClearNeeded::new(arena)
     }
 }
 
@@ -291,6 +312,16 @@ impl Drop for ElementArenaScope {
         CURRENT_ELEMENT_ARENA.with(|current| {
             current.set(self.previous);
         });
+        // SAFETY: The pointer comes from the App-owned arena passed to `enter`, which
+        // outlives this stack guard on both normal return and panic unwinding.
+        unsafe { &*self.entered_arena }.borrow_mut().end_scope();
+        if !self.finished && !std::thread::panicking() {
+            debug_assert!(
+                false,
+                "ElementArenaScope dropped without producing a clear token"
+            );
+            log::error!("element arena scope ended without requesting its final clear");
+        }
     }
 }
 
@@ -302,18 +333,19 @@ pub struct ArenaClearNeeded {
 
 impl ArenaClearNeeded {
     /// Create a new ArenaClearNeeded that will clear the given arena.
-    pub(crate) fn new(arena: &RefCell<Arena>) -> Self {
+    fn new(arena: &RefCell<Arena>) -> Self {
         Self {
             arena: arena as *const RefCell<Arena>,
         }
     }
 
-    /// Clear the element arena.
-    pub fn clear(self) {
-        // SAFETY: The arena pointer is valid because ArenaClearNeeded is created
-        // at the end of draw() and must be cleared before the next draw.
-        let arena_cell = unsafe { &*self.arena };
-        arena_cell.borrow_mut().clear();
+    /// Clears the arena used by this draw after validating its owning App.
+    pub fn clear(self, cx: &mut App) {
+        assert!(
+            std::ptr::eq(self.arena, &cx.element_arena),
+            "ArenaClearNeeded::clear called with a different App"
+        );
+        cx.element_arena.borrow_mut().clear();
     }
 }
 
@@ -1490,7 +1522,19 @@ impl Window {
             let needs_present = needs_present.clone();
             let next_frame_callbacks = next_frame_callbacks.clone();
             let input_rate_tracker = input_rate_tracker.clone();
+            let mut deferred_force_render = false;
             move |request_frame_options| {
+                // Windows can re-enter its window procedure while a draw is on the stack.
+                // Touching the App or starting another draw here would violate both borrow
+                // and element-arena lifetimes, so let the next platform frame retry it.
+                if draw_in_progress() {
+                    deferred_force_render |= request_frame_options.force_render;
+                    log::debug!("deferring a frame request received during an active draw");
+                    return;
+                }
+                let force_render =
+                    mem::take(&mut deferred_force_render) || request_frame_options.force_render;
+
                 let thermal_state = handle
                     .update(&mut cx, |_, _, cx| cx.thermal_state())
                     .log_err();
@@ -1498,7 +1542,7 @@ impl Window {
                 // Throttle frame rate based on conditions:
                 // - Thermal pressure (Serious/Critical): cap to ~60fps
                 // - Inactive window (not focused): cap to ~30fps to save energy
-                let min_frame_interval = if !request_frame_options.force_render
+                let min_frame_interval = if !force_render
                     && !request_frame_options.require_presentation
                     && next_frame_callbacks.borrow().is_empty()
                 {
@@ -1516,6 +1560,8 @@ impl Window {
                     if let Some(last_frame) = last_frame_time.get()
                         && now.duration_since(last_frame) < min_interval
                     {
+                        // A forced device-recovery frame must survive throttling.
+                        deferred_force_render |= force_render;
                         // Must still complete the frame on platforms that require it.
                         // On Wayland, `surface.frame()` was already called to request the
                         // next frame callback, so we must call `surface.commit()` (via
@@ -1546,18 +1592,18 @@ impl Window {
                     || needs_present.get()
                     || (active.get() && input_rate_tracker.borrow_mut().is_high_rate());
 
-                if invalidator.is_dirty() || request_frame_options.force_render {
+                if invalidator.is_dirty() || force_render {
                     measure("frame duration", || {
                         handle
                             .update(&mut cx, |_, window, cx| {
-                                if request_frame_options.force_render {
+                                if force_render {
                                     // Bypass cached view reuse so we don't replay stale
                                     // atlas tile references after a GPU device recovery.
                                     window.refresh();
                                 }
                                 let arena_clear_needed = window.draw(cx);
                                 window.present();
-                                arena_clear_needed.clear();
+                                arena_clear_needed.clear(cx);
                             })
                             .log_err();
                     })
@@ -1823,6 +1869,75 @@ impl ContentMask<Pixels> {
         let bounds = self.bounds.intersect(&other.bounds);
         ContentMask { bounds }
     }
+}
+
+/// Limits a transparent quad to four narrow border regions while preserving its original geometry.
+fn border_only_quad_fragments(quad: Quad) -> SmallVec<[Quad; 4]> {
+    let mut fragments = SmallVec::new();
+    if !quad.background.is_transparent() {
+        fragments.push(quad);
+        return fragments;
+    }
+
+    // The shader needs one device pixel beyond the mathematical border for antialiasing.
+    let antialias_margin = point(ScaledPixels(1.0), ScaledPixels(1.0));
+    let top_left_inset = point(
+        quad.border_widths.left,
+        quad.border_widths
+            .top
+            .max(quad.corner_radii.top_left)
+            .max(quad.corner_radii.top_right),
+    ) + antialias_margin;
+    let bottom_right_inset = point(
+        quad.border_widths.right,
+        quad.border_widths
+            .bottom
+            .max(quad.corner_radii.bottom_left)
+            .max(quad.corner_radii.bottom_right),
+    ) + antialias_margin;
+    let outer_bounds = quad.bounds;
+    let inner_bounds = Bounds::from_corners(
+        outer_bounds.origin + top_left_inset,
+        outer_bounds.bottom_right() - bottom_right_inset,
+    );
+
+    // Very small controls have no transparent interior worth excluding.
+    if inner_bounds.is_empty() {
+        fragments.push(quad);
+        return fragments;
+    }
+
+    let border_regions = [
+        Bounds::from_corners(
+            outer_bounds.origin,
+            point(outer_bounds.right(), inner_bounds.top()),
+        ),
+        Bounds::from_corners(
+            point(outer_bounds.left(), inner_bounds.bottom()),
+            outer_bounds.bottom_right(),
+        ),
+        Bounds::from_corners(
+            point(outer_bounds.left(), inner_bounds.top()),
+            inner_bounds.bottom_left(),
+        ),
+        Bounds::from_corners(
+            inner_bounds.top_right(),
+            point(outer_bounds.right(), inner_bounds.bottom()),
+        ),
+    ];
+
+    for border_region in border_regions {
+        let visible_region = quad.content_mask.bounds.intersect(&border_region);
+        if !visible_region.is_empty() {
+            fragments.push(Quad {
+                content_mask: ContentMask {
+                    bounds: visible_region,
+                },
+                ..quad
+            });
+        }
+    }
+    fragments
 }
 
 impl Window {
@@ -2649,7 +2764,7 @@ impl Window {
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
         // Set up the per-App arena for element allocation during this draw.
         // This ensures that multiple test Apps have isolated arenas.
-        let _arena_scope = ElementArenaScope::enter(&cx.element_arena);
+        let arena_scope = ElementArenaScope::enter(&cx.element_arena);
 
         self.invalidate_entities();
         cx.entities.clear_accessed();
@@ -2740,7 +2855,7 @@ impl Window {
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
 
-        ArenaClearNeeded::new(&cx.element_arena)
+        arena_scope.finish(&cx.element_arena)
     }
 
     fn record_entities_accessed(&mut self, cx: &mut App) {
@@ -3873,7 +3988,7 @@ impl Window {
         let opacity = self.element_opacity();
         let snapped_bounds = self.snap_bounds(quad.bounds);
         let snapped_border_widths = self.snap_border_widths(quad.border_widths);
-        self.next_frame.scene.insert_primitive(Quad {
+        let quad = Quad {
             order: 0,
             bounds: snapped_bounds,
             content_mask: self.snapped_content_mask(),
@@ -3882,7 +3997,10 @@ impl Window {
             corner_radii: quad.corner_radii.scale(self.scale_factor()),
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
-        });
+        };
+        for fragment in border_only_quad_fragments(quad) {
+            self.next_frame.scene.insert_primitive(fragment);
+        }
     }
 
     /// Paint the given `Path` into the scene for the next frame at the current z-index.
@@ -4945,7 +5063,7 @@ impl Window {
 
     fn dispatch_key_event(&mut self, event: &dyn Any, cx: &mut App) {
         if self.invalidator.is_dirty() {
-            self.draw(cx).clear();
+            self.draw(cx).clear(cx);
         }
 
         let node_id = self.focus_node_id_in_rendered_frame(self.focus);
@@ -6585,5 +6703,113 @@ mod oxideterm_dynamic_texture_tests {
             validate_dynamic_texture_update(texture_size, overflowing_bounds, &[0; 4]).is_err()
         );
         assert!(validate_dynamic_texture_update(texture_size, valid_bounds, &[0; 15]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod oxideterm_draw_safety_tests {
+    use super::*;
+    use crate::{Context, IntoElement, ParentElement, TestAppContext, canvas, div, rgb};
+
+    fn sample_quad(background: Background, bounds: Bounds<ScaledPixels>) -> Quad {
+        Quad {
+            order: 0,
+            bounds,
+            content_mask: ContentMask { bounds },
+            background,
+            border_color: rgb(0xffffff).into(),
+            corner_radii: Corners {
+                top_left: ScaledPixels(8.0),
+                top_right: ScaledPixels(8.0),
+                bottom_right: ScaledPixels(8.0),
+                bottom_left: ScaledPixels(8.0),
+            },
+            border_widths: Edges {
+                top: ScaledPixels(2.0),
+                right: ScaledPixels(2.0),
+                bottom: ScaledPixels(2.0),
+                left: ScaledPixels(2.0),
+            },
+            border_style: BorderStyle::Solid,
+        }
+    }
+
+    #[test]
+    fn transparent_quad_excludes_its_interior_from_fragment_work() {
+        let bounds = Bounds::new(
+            point(ScaledPixels(0.0), ScaledPixels(0.0)),
+            size(ScaledPixels(100.0), ScaledPixels(80.0)),
+        );
+        let fragments = border_only_quad_fragments(sample_quad(transparent_black().into(), bounds));
+        let center = point(ScaledPixels(50.0), ScaledPixels(40.0));
+
+        assert_eq!(fragments.len(), 4);
+        assert!(fragments.iter().all(|fragment| fragment.bounds == bounds));
+        assert!(
+            fragments
+                .iter()
+                .all(|fragment| !fragment.content_mask.bounds.contains(&center))
+        );
+    }
+
+    #[test]
+    fn opaque_quad_remains_one_full_primitive() {
+        let bounds = Bounds::new(
+            point(ScaledPixels(0.0), ScaledPixels(0.0)),
+            size(ScaledPixels(100.0), ScaledPixels(80.0)),
+        );
+        let fragments = border_only_quad_fragments(sample_quad(rgb(0x101010).into(), bounds));
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(fragments[0].content_mask.bounds, bounds);
+    }
+
+    struct EmptyNestedWindow;
+
+    impl Render for EmptyNestedWindow {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    struct OpensNestedWindow {
+        opened: Rc<Cell<bool>>,
+    }
+
+    impl Render for OpensNestedWindow {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let opened = self.opened.clone();
+            div()
+                .child(canvas(
+                    |_, _, _| {},
+                    move |_, _, _, cx| {
+                        if !opened.replace(true) {
+                            cx.open_window(WindowOptions::default(), |_, cx| {
+                                cx.new(|_| EmptyNestedWindow)
+                            })
+                            .unwrap();
+                        }
+                    },
+                ))
+                // This sibling is allocated before the nested draw and dereferenced after it.
+                .child(div().child("painted after nested draw"))
+        }
+    }
+
+    #[test]
+    fn nested_window_draw_does_not_clear_outer_elements() {
+        let mut cx = TestAppContext::single();
+        let opened = Rc::new(Cell::new(false));
+        let outer_window = cx.add_window({
+            let opened = opened.clone();
+            move |_, _| OpensNestedWindow { opened }
+        });
+
+        assert!(opened.get());
+        assert_eq!(cx.windows().len(), 2);
+        cx.update_window(outer_window.into(), |_, window, cx| {
+            window.draw(cx).clear(cx)
+        })
+        .unwrap();
     }
 }

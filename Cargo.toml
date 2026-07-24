@@ -260,7 +260,6 @@ windows = { version = "0.61", features = [
   "Globalization_DateTimeFormatting",
   "Storage_Search",
   "Storage_Streams",
-  "System_Threading",
   "UI_ViewManagement",
   "Wdk_System_SystemServices",
   "Win32_Foundation",

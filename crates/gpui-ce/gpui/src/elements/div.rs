@@ -1,3 +1,5 @@
+// OxideTerm modification: exercises draw-scoped arena clearing in element tests.
+
 //! Div is the central, reusable element that most GPUI trees will be built from.
 //! It functions as a container for other elements, and provides a number of
 //! useful features for laying out and styling its children as well as binding
@@ -4083,7 +4085,7 @@ mod tests {
 
         test_app
             .update_window(any_window, |_, window, cx| {
-                window.draw(cx).clear();
+                window.draw(cx).clear(cx);
             })
             .unwrap();
 
@@ -4103,7 +4105,7 @@ mod tests {
 
         test_app
             .update_window(any_window, |_, window, cx| {
-                window.draw(cx).clear();
+                window.draw(cx).clear(cx);
             })
             .unwrap();
 

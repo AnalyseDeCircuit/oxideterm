@@ -1,3 +1,5 @@
+// OxideTerm modification: keeps element allocations alive across nested draw scopes.
+
 use std::{
     alloc::{self, handle_alloc_error},
     cell::Cell,
@@ -53,11 +55,15 @@ impl Chunk {
     }
 
     fn allocate(&mut self, layout: alloc::Layout) -> Option<NonNull<u8>> {
-        let aligned = unsafe { self.offset.add(self.offset.align_offset(layout.align())) };
-        let next = unsafe { aligned.add(layout.size()) };
+        // Do bounds arithmetic on addresses before constructing a pointer. Creating an
+        // out-of-bounds pointer is undefined behavior even when the spill path never dereferences it.
+        let base_address = self.offset.addr();
+        let aligned_address = base_address.checked_add(self.offset.align_offset(layout.align()))?;
+        let next_address = aligned_address.checked_add(layout.size())?;
 
-        if next <= self.end {
-            self.offset = next;
+        if next_address <= self.end.addr() {
+            let aligned = self.offset.with_addr(aligned_address);
+            self.offset = self.offset.with_addr(next_address);
             NonNull::new(aligned)
         } else {
             None
@@ -75,11 +81,12 @@ pub struct Arena {
     valid: Rc<Cell<bool>>,
     current_chunk_index: usize,
     chunk_size: NonZeroUsize,
+    active_scopes: usize,
 }
 
 impl Drop for Arena {
     fn drop(&mut self) {
-        self.clear();
+        self.clear_allocations();
     }
 }
 
@@ -92,6 +99,7 @@ impl Arena {
             valid: Rc::new(Cell::new(true)),
             current_chunk_index: 0,
             chunk_size,
+            active_scopes: 0,
         }
     }
 
@@ -99,7 +107,35 @@ impl Arena {
         self.chunks.len() * self.chunk_size.get()
     }
 
+    /// Starts a lifetime scope whose allocations may still be referenced.
+    pub fn begin_scope(&mut self) {
+        self.active_scopes = self
+            .active_scopes
+            .checked_add(1)
+            .expect("Arena draw scope depth overflowed");
+    }
+
+    /// Ends the innermost active allocation lifetime scope.
+    pub fn end_scope(&mut self) {
+        self.active_scopes = self
+            .active_scopes
+            .checked_sub(1)
+            .expect("Arena::end_scope called without a matching begin_scope");
+    }
+
+    /// Clears allocations only when no enclosing draw still references them.
     pub fn clear(&mut self) {
+        if self.active_scopes != 0 {
+            log::debug!(
+                "deferring element arena clear while {} draw scope(s) remain active",
+                self.active_scopes
+            );
+            return;
+        }
+        self.clear_allocations();
+    }
+
+    fn clear_allocations(&mut self) {
         self.valid.set(false);
         self.valid = Rc::new(Cell::new(true));
         self.elements.clear();
@@ -285,5 +321,30 @@ mod tests {
 
         arena.clear();
         let _read_value = *value;
+    }
+
+    #[test]
+    fn clear_waits_for_all_nested_scopes() {
+        let mut arena = Arena::new(32);
+        arena.begin_scope();
+        let outer_value = arena.alloc(|| 7u64);
+        arena.begin_scope();
+        let nested_value = arena.alloc(|| 9u64);
+
+        arena.end_scope();
+        arena.clear();
+        assert_eq!(*outer_value, 7);
+        assert_eq!(*nested_value, 9);
+
+        arena.end_scope();
+        arena.clear();
+        let replacement = arena.alloc(|| 11u64);
+        assert_eq!(*replacement, 11);
+    }
+
+    #[test]
+    #[should_panic(expected = "Arena::end_scope called without a matching begin_scope")]
+    fn ending_an_inactive_scope_panics() {
+        Arena::new(16).end_scope();
     }
 }

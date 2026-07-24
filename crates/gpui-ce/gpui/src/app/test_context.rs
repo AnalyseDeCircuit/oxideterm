@@ -1,3 +1,5 @@
+// OxideTerm modification: balances nested element-arena draw scopes in visual tests.
+
 use crate::{
     Action, AnyView, AnyWindowHandle, App, AppCell, AppContext, AsyncApp, AvailableSpace,
     BackgroundExecutor, BorrowAppContext, Bounds, Capslock, ClipboardItem, DrawPhase, Drawable,
@@ -873,7 +875,7 @@ impl VisualTestContext {
         E: Element,
     {
         self.update(|window, cx| {
-            let _arena_scope = ElementArenaScope::enter(&cx.element_arena);
+            let arena_scope = ElementArenaScope::enter(&cx.element_arena);
 
             window.invalidator.set_phase(DrawPhase::Prepaint);
             let mut element = Drawable::new(f(window, cx));
@@ -887,7 +889,7 @@ impl VisualTestContext {
             window.refresh();
 
             drop(element);
-            cx.element_arena.borrow_mut().clear();
+            arena_scope.finish(&cx.element_arena).clear(cx);
 
             (request_layout_state, prepaint_state)
         })

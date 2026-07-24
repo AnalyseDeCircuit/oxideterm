@@ -102,6 +102,83 @@ Every source file changed by OxideTerm should retain an English modification
 notice near the top. The sections below define the behavior to preserve; line
 numbers are intentionally omitted because upstream refreshes move code.
 
+### Transparent border-only quad overdraw
+
+`crates/gpui-ce/gpui/src/window.rs` limits transparent, border-only quads to four clipped
+border regions before inserting them into the scene:
+
+- the quad retains its original bounds, corner radii, border widths, and border style so the
+  shader still evaluates rounded and dashed borders against the correct geometry;
+- only each primitive's rectangular content mask is narrowed to one edge;
+- the masks include one device pixel of antialiasing margin;
+- opaque quads remain one primitive, and controls too small to contain a removable interior
+  retain the original primitive;
+- an existing ancestor content mask is intersected with every edge mask, and empty
+  intersections are omitted.
+
+OxideTerm has many large bordered panels. Rendering one transparent quad for each panel would
+run the quad fragment shader across its entire transparent interior. Preserving the geometry
+while excluding that interior reduces GPU overdraw without changing layout or border appearance.
+The behavior is covered by tests for transparent and opaque quads and is an independent
+implementation informed by `zed-industries/zed#61274`.
+
+### Native Windows thread-pool dispatch
+
+`crates/gpui-ce/gpui_windows/src/dispatcher.rs` schedules background work with the native
+Win32 thread-pool API instead of the WinRT `Windows::System::Threading` projection:
+
+- immediate tasks use `TrySubmitThreadpoolCallback` with the requested Win32 callback priority;
+- delayed tasks use a one-shot `CreateThreadpoolTimer` deadline expressed as a negative
+  100-nanosecond interval;
+- exactly one callback reconstructs and runs each raw `RunnableVariant`;
+- failed submission or timer creation reconstructs and drops the runnable immediately so raw
+  task ownership is never leaked;
+- timer callbacks close their native timer after execution;
+- the existing GPUI task timing records and main-thread priority queue remain unchanged.
+
+The unused workspace `System_Threading` feature is removed from `Cargo.toml`;
+`Win32_System_Threading` remains required. This avoids the extra WinRT work-item wrapper and its
+internal synchronization on the Windows hot path. Preserve these ownership and priority rules
+during vendor refreshes. The behavior is an independent implementation informed by
+`zed-industries/zed#60917`.
+
+### Re-entrant draw and element-arena lifetime
+
+Windows can synchronously re-enter its window procedure while GPUI is drawing, including through
+cross-thread messages and nested COM/OLE loops used by clipboard and drag-and-drop operations.
+OxideTerm therefore carries one coordinated draw-lifetime patch across the generic GPUI and
+Windows platform layers:
+
+- `crates/gpui-ce/gpui/src/arena.rs` counts active draw scopes. `clear` defers while any
+  enclosing scope remains active, and `Drop` force-clears only when the arena itself is destroyed.
+  Allocation bounds are checked in address space before a pointer is constructed, avoiding an
+  out-of-bounds pointer on chunk spill.
+- `crates/gpui-ce/gpui/src/window.rs` enters and exits the App-owned arena scope for every draw.
+  Scope teardown is a guard operation so normal return and panic unwinding both balance the
+  nesting count. The resulting clear token validates the owning App before clearing.
+- The generic `on_request_frame` callback rejects a request received while a GPUI draw is already
+  on the current thread's stack. A deferred forced render remains pending across both re-entry
+  and frame throttling.
+- `crates/gpui-ce/gpui_windows/src/events.rs`,
+  `crates/gpui-ce/gpui_windows/src/platform.rs`, and
+  `crates/gpui-ce/gpui_windows/src/window.rs` share one platform-owned draw coordinator across all
+  windows. A nested Windows paint validates the update region to prevent a `WM_PAINT` busy loop;
+  the existing vsync thread invalidates all windows again on the next tick. Forced device-recovery
+  renders remain pending until a draw acquires the coordinator.
+- Synchronous draw helpers in `crates/gpui-ce/gpui/src/app.rs`,
+  `crates/gpui-ce/gpui/src/app/test_app.rs`,
+  `crates/gpui-ce/gpui/src/app/test_context.rs`, and
+  `crates/gpui-ce/gpui/src/elements/div.rs` clear through the same App-validated token. Product
+  benchmark and test helpers in `oxideterm-gpui-ui`, `oxideterm-gpui-editor`,
+  `oxideterm-gpui-ide`, and `oxideterm-gpui-app` pass their App context through the same API.
+
+Arena unit tests cover nested clear deferral and unbalanced scopes. A GPUI integration test opens
+a second window during the outer window's paint and proves that elements allocated before the
+nested draw remain valid afterward. A Windows-only unit test covers coordinator lease release.
+The behavior is an independent implementation informed by `zed-industries/zed#60295`; do not
+reduce it to a window-local boolean because the safety invariant spans arena allocation, generic
+frame dispatch, presentation, IME updates, and multiple windows.
+
 ### Metal intermediate texture lifetime
 
 `crates/gpui-ce/gpui_macos/src/metal_renderer.rs` allocates its full-window intermediate

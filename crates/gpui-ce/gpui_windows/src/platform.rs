@@ -1,3 +1,5 @@
+// OxideTerm modification: shares one draw coordinator across all Windows windows.
+
 use std::{
     cell::{Cell, RefCell},
     ffi::OsStr,
@@ -68,6 +70,7 @@ pub(crate) struct WindowsPlatformState {
     pub(crate) current_cursor: Cell<Option<HCURSOR>>,
     /// Shared with each window so `WM_SETCURSOR` can read it directly.
     pub(crate) cursor_visible: Arc<AtomicBool>,
+    pub(crate) draw_coordinator: Rc<WindowDrawCoordinator>,
     #[cfg(not(feature = "wgpu"))]
     directx_devices: RefCell<Option<DirectXDevices>>,
 }
@@ -94,6 +97,7 @@ impl WindowsPlatformState {
             jump_list: RefCell::new(jump_list),
             current_cursor: Cell::new(current_cursor),
             cursor_visible: Arc::new(AtomicBool::new(true)),
+            draw_coordinator: Rc::new(WindowDrawCoordinator::new()),
             #[cfg(not(feature = "wgpu"))]
             directx_devices: RefCell::new(directx_devices),
             menus: RefCell::new(Vec::new()),
@@ -237,6 +241,7 @@ impl WindowsPlatform {
             executor: self.foreground_executor.clone(),
             current_cursor: self.inner.state.current_cursor.get(),
             cursor_visible: self.inner.state.cursor_visible.clone(),
+            draw_coordinator: self.inner.state.draw_coordinator.clone(),
             drop_target_helper: self.drop_target_helper.clone().unwrap(),
             validation_number: self.inner.validation_number,
             main_receiver: self.inner.main_receiver.clone(),
@@ -1079,6 +1084,7 @@ pub(crate) struct WindowCreationInfo {
     pub(crate) executor: ForegroundExecutor,
     pub(crate) current_cursor: Option<HCURSOR>,
     pub(crate) cursor_visible: Arc<AtomicBool>,
+    pub(crate) draw_coordinator: Rc<WindowDrawCoordinator>,
     pub(crate) drop_target_helper: IDropTargetHelper,
     pub(crate) validation_number: usize,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,

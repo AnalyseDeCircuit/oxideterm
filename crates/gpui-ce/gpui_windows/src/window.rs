@@ -1,4 +1,4 @@
-// OxideTerm modification: initializes and polls non-blocking WGPU device recovery.
+// OxideTerm modification: coordinates Windows draws and polls non-blocking GPU recovery.
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
@@ -77,7 +77,7 @@ pub struct WindowsWindowState {
     /// re-enables drawing (via `mark_drawable`) and bypasses the GPUI view
     /// cache, which would otherwise replay stale atlas tile references from
     /// the previous frame and panic in `DirectXAtlasState::texture`.
-    pub force_render_after_recovery: Cell<bool>,
+    pub force_render_pending: Cell<bool>,
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
@@ -90,6 +90,8 @@ pub struct WindowsWindowState {
     /// as resizing them has failed, causing us to have lost at least the render target.
     #[cfg(not(feature = "wgpu"))]
     pub invalidate_devices: Arc<AtomicBool>,
+    /// Shared across every window to prevent nested Win32 paint dispatch.
+    pub(crate) draw_coordinator: Rc<WindowDrawCoordinator>,
     fullscreen: Cell<Option<StyleAndBounds>>,
     initial_placement: Cell<Option<WindowOpenStatus>>,
     hwnd: HWND,
@@ -123,6 +125,7 @@ impl WindowsWindowState {
         appearance: WindowAppearance,
         #[cfg(not(feature = "wgpu"))] disable_direct_composition: bool,
         #[cfg(not(feature = "wgpu"))] invalidate_devices: Arc<AtomicBool>,
+        draw_coordinator: Rc<WindowDrawCoordinator>,
     ) -> Result<Self> {
         let scale_factor = {
             let monitor_dpi = unsafe { GetDpiForWindow(hwnd) } as f32;
@@ -188,7 +191,7 @@ impl WindowsWindowState {
             last_reported_capslock: Cell::new(last_reported_capslock),
             hovered: Cell::new(hovered),
             renderer: RefCell::new(renderer),
-            force_render_after_recovery: Cell::new(false),
+            force_render_pending: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
@@ -199,6 +202,7 @@ impl WindowsWindowState {
             hwnd,
             #[cfg(not(feature = "wgpu"))]
             invalidate_devices,
+            draw_coordinator,
             direct_manipulation,
             a11y: RefCell::new(None),
         })
@@ -279,6 +283,7 @@ impl WindowsWindowInner {
             context.disable_direct_composition,
             #[cfg(not(feature = "wgpu"))]
             context.invalidate_devices.clone(),
+            context.draw_coordinator.clone(),
         )?;
 
         Ok(Rc::new(Self {
@@ -425,6 +430,7 @@ struct WindowCreateContext {
     directx_devices: DirectXDevices,
     #[cfg(not(feature = "wgpu"))]
     invalidate_devices: Arc<AtomicBool>,
+    draw_coordinator: Rc<WindowDrawCoordinator>,
     parent_hwnd: Option<HWND>,
 }
 
@@ -447,6 +453,7 @@ impl WindowsWindow {
             #[cfg(not(feature = "wgpu"))]
             directx_devices,
             invalidate_devices,
+            draw_coordinator,
         } = creation_info;
         #[cfg(feature = "wgpu")]
         {
@@ -536,6 +543,7 @@ impl WindowsWindow {
             directx_devices,
             #[cfg(not(feature = "wgpu"))]
             invalidate_devices,
+            draw_coordinator,
             parent_hwnd,
         };
         let creation_result = unsafe {
@@ -1034,7 +1042,7 @@ impl PlatformWindow for WindowsWindow {
                     hwnd: self.platform_window_handle,
                 }) {
                     Ok(WgpuRecoveryStatus::Recovered) => {
-                        self.state.force_render_after_recovery.set(true);
+                        self.state.force_render_pending.set(true);
                     }
                     Ok(WgpuRecoveryStatus::Deferred) => {
                         // VSync invalidation will poll recovery again after the cooldown.
@@ -1054,7 +1062,7 @@ impl PlatformWindow for WindowsWindow {
             }
 
             if renderer.needs_redraw() {
-                self.state.force_render_after_recovery.set(true);
+                self.state.force_render_pending.set(true);
             }
         }
     }

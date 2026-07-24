@@ -1,3 +1,5 @@
+// OxideTerm modification: clears draw-scoped element arenas through their owning App.
+
 //! A clean testing API for GPUI applications.
 //!
 //! `TestApp` provides a simpler alternative to `TestAppContext` with:
@@ -486,7 +488,7 @@ impl<V: 'static + Render> TestAppWindow<V> {
         let mut app = self.app.borrow_mut();
         let any_handle: AnyWindowHandle = self.handle.into();
         app.update_window(any_handle, |_, window, cx| {
-            window.draw(cx).clear();
+            window.draw(cx).clear(cx);
         })
         .unwrap();
     }

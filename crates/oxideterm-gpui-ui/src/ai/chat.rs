@@ -786,7 +786,7 @@ mod tests {
         });
         cx.simulate_resize(size(px(420.0), px(600.0)));
         cx.update(|window, cx| {
-            window.draw(cx).clear();
+            window.draw(cx).clear(cx);
         });
 
         let scroll = cx.debug_bounds("scroll").expect("scroll bounds");
