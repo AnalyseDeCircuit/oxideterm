@@ -3,7 +3,7 @@
 use crate::window::RawWindow;
 use ::util::ResultExt;
 use anyhow::Context as _;
-use std::{rc::Rc, sync::atomic::Ordering};
+use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 use windows::{
     Win32::{
         Foundation::*,
