@@ -43,12 +43,7 @@ jobs:
         with:
           client-id: ${{ vars.OXIDETERM_AUTOMATION_CLIENT_ID }}
           private-key: ${{ secrets.OXIDETERM_AUTOMATION_PRIVATE_KEY }}
-          permission-actions: read
-          permission-checks: read
           permission-contents: read
-          permission-issues: read
-          permission-pull-requests: read
-          permission-statuses: read
 
       - name: Verify repository installation
         shell: bash
@@ -72,7 +67,7 @@ jobs:
             echo
             echo "- App identity: \`${APP_SLUG}[bot]\`"
             echo "- Exclusive repository access: \`${repositories[0]}\`"
-            echo "- Token scope used by this job: Actions, checks, contents, issues, pull requests, and statuses read"
+            echo "- Token scope used by this job: contents read"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   shadow-triage:
