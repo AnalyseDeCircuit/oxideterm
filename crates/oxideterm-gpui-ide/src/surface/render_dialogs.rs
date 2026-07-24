@@ -1229,44 +1229,55 @@ impl IdeSurface {
 
     fn render_folder_path_input(&self, cx: &mut Context<Self>) -> AnyElement {
         let tokens = &self.tokens;
-        let border = if self.folder_picker.path_input_focused {
-            tokens.ui.accent
-        } else {
-            tokens.ui.border
-        };
+        let surface = cx.entity();
         div()
             .flex_1()
             .min_w_0()
-            .h(px(tokens.metrics.form_input_height))
-            .px(px(tokens.metrics.form_input_padding_x))
-            .flex()
-            .items_center()
-            .rounded(px(tokens.radii.md))
-            .border_1()
-            .border_color(rgb(border))
-            .bg(rgb(tokens.ui.bg_sunken))
-            .font_family(SharedString::from(tokens.metrics.markdown_code_font_family))
-            .text_size(px(tokens.metrics.ui_text_sm))
-            .text_color(rgb(tokens.ui.text))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle, cx);
-                    this.folder_picker.path_input_focused = true;
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(
-                div()
+            .child(text_input_anchor_probe(
+                IDE_FOLDER_PATH_INPUT_ANCHOR_ID,
+                IdeSurfaceInputElement::new(
+                    text_input_control(
+                        tokens,
+                        TextInputView {
+                            value: &self.folder_picker.path_input,
+                            placeholder: "/".to_string(),
+                            focused: self.folder_picker.path_input_focused,
+                            caret_visible: true,
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.folder_picker.path_selection_range.clone(),
+                            marked_text: self
+                                .folder_picker
+                                .path_marked_text
+                                .as_ref()
+                                .map(|marked| marked.text.as_str()),
+                        },
+                    )
+                    .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .child(if self.folder_picker.path_input.is_empty() {
-                        "/".to_string()
-                    } else {
-                        self.folder_picker.path_input.clone()
-                    }),
-            )
+                    .h(px(tokens.metrics.form_input_height))
+                    .bg(rgb(tokens.ui.bg_sunken))
+                    .font_family(SharedString::from(
+                        tokens.metrics.markdown_code_font_family,
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                            window.focus(&this.focus_handle, cx);
+                            this.begin_folder_picker_path_selection(event, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                    cx.entity(),
+                    self.focus_handle.clone(),
+                )
+                .into_any_element(),
+                move |anchor, _window, cx| {
+                    let _ = surface.update(cx, |this, cx| {
+                        this.update_folder_picker_path_anchor(anchor, cx);
+                    });
+                },
+            ))
             .into_any_element()
     }
 

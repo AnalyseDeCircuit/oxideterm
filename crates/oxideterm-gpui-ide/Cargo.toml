@@ -14,6 +14,7 @@ oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 tokio.workspace = true
+unicode-segmentation.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

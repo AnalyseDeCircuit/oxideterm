@@ -13,8 +13,8 @@ use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Bounds, ClipboardItem, Context,
     Entity, EventEmitter, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled,
-    UniformListScrollHandle, Window, anchored, deferred, div, prelude::*, px, rgb, rgba, svg,
+    Point, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, TextRun,
+    UniformListScrollHandle, Window, anchored, deferred, div, font, prelude::*, px, rgb, rgba, svg,
     uniform_list,
 };
 use oxideterm_editor_syntax::LanguageId;
@@ -29,7 +29,10 @@ use oxideterm_gpui_ui::{
     },
     select::{SelectAnchorId, select_anchor_probe},
     tauri_ui_font_family,
-    text_input::{TextInputView, text_input as text_input_control},
+    text_input::{
+        TextInputAnchor, TextInputAnchorId, TextInputView, text_input as text_input_control,
+        text_input_anchor_probe,
+    },
 };
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
@@ -40,6 +43,7 @@ use oxideterm_ide_core::{
 use oxideterm_ide_fs::{AgentStatus, IdeSearchMatch, NodeAgentIdeFileSystem, NodeAgentMode};
 use oxideterm_ssh::ReconnectIdeSnapshot;
 use oxideterm_theme::ThemeTokens;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{file_icons, labels::IdeLabels};
 
@@ -82,6 +86,7 @@ const IDE_FOLDER_DIALOG_ROW_PADDING_X: f32 = 8.0;
 const IDE_FOLDER_DIALOG_ROW_PADDING_Y: f32 = 6.0;
 const IDE_FOLDER_DIALOG_ICON_SIZE: f32 = 16.0;
 const IDE_FOLDER_DIALOG_SELECTED_ALPHA: u32 = 0x33;
+const IDE_FOLDER_PATH_INPUT_ANCHOR_ID: TextInputAnchorId = TextInputAnchorId(1);
 const IDE_TAB_CONTEXT_MENU_WIDTH: f32 = 140.0;
 const IDE_TAB_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
 const IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
@@ -162,6 +167,11 @@ struct FolderPickerState {
     error: Option<String>,
     selected_folder: Option<String>,
     path_input_focused: bool,
+    path_selection_range: Option<Range<usize>>,
+    path_selection_reversed: bool,
+    path_selection_drag_anchor: Option<usize>,
+    path_marked_text: Option<IdeMarkedText>,
+    path_input_anchor: Option<TextInputAnchor>,
     generation: u64,
 }
 

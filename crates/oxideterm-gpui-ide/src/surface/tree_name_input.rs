@@ -115,17 +115,23 @@ impl gpui::EntityInputHandler for IdeSurface {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<gpui::UTF16Selection> {
-        let (value, selection_range) = if let Some(input) = self.tree_name_input.as_ref() {
-            (&input.value, input.selection_range.clone())
+        let (value, selection_range, reversed) = if let Some(input) = self.tree_name_input.as_ref() {
+            (&input.value, input.selection_range.clone(), false)
         } else if self.search.open {
-            (&self.search.query, self.search.selection_range.clone())
+            (&self.search.query, self.search.selection_range.clone(), false)
+        } else if self.folder_picker.open && self.folder_picker.path_input_focused {
+            (
+                &self.folder_picker.path_input,
+                self.folder_picker.path_selection_range.clone(),
+                self.folder_picker.path_selection_reversed,
+            )
         } else {
             return None;
         };
         let end = value.encode_utf16().count();
         Some(gpui::UTF16Selection {
             range: selection_range.unwrap_or(end..end),
-            reversed: false,
+            reversed,
         })
     }
 
@@ -138,6 +144,8 @@ impl gpui::EntityInputHandler for IdeSurface {
             input.marked_text.as_ref()
         } else if self.search.open {
             self.search.marked_text.as_ref()
+        } else if self.folder_picker.open && self.folder_picker.path_input_focused {
+            self.folder_picker.path_marked_text.as_ref()
         } else {
             None
         }?;
@@ -151,6 +159,11 @@ impl gpui::EntityInputHandler for IdeSurface {
         {
             cx.notify();
         } else if self.search.open && self.search.marked_text.take().is_some() {
+            cx.notify();
+        } else if self.folder_picker.open
+            && self.folder_picker.path_input_focused
+            && self.folder_picker.path_marked_text.take().is_some()
+        {
             cx.notify();
         }
     }
@@ -179,21 +192,34 @@ impl gpui::EntityInputHandler for IdeSurface {
             cx.notify();
             return;
         }
-        if !self.search.open {
+        if self.search.open {
+            let fallback_end = self.search.query.encode_utf16().count();
+            let range = self
+                .search
+                .marked_text
+                .take()
+                .map(|marked| marked.replacement_range)
+                .or(range_utf16)
+                .or_else(|| self.search.selection_range.clone())
+                .unwrap_or(fallback_end..fallback_end);
+            replace_project_search_range(&mut self.search, range, text);
+            self.schedule_project_search(cx);
+            cx.notify();
             return;
         }
-        let fallback_end = self.search.query.encode_utf16().count();
-        let range = self
-            .search
-            .marked_text
-            .take()
-            .map(|marked| marked.replacement_range)
-            .or(range_utf16)
-            .or_else(|| self.search.selection_range.clone())
-            .unwrap_or(fallback_end..fallback_end);
-        replace_project_search_range(&mut self.search, range, text);
-        self.schedule_project_search(cx);
-        cx.notify();
+        if self.folder_picker.open && self.folder_picker.path_input_focused {
+            let fallback_end = self.folder_picker.path_input.encode_utf16().count();
+            let range = self
+                .folder_picker
+                .path_marked_text
+                .take()
+                .map(|marked| marked.replacement_range)
+                .or(range_utf16)
+                .or_else(|| self.folder_picker.path_selection_range.clone())
+                .unwrap_or(fallback_end..fallback_end);
+            replace_folder_picker_range(&mut self.folder_picker, range, text);
+            cx.notify();
+        }
     }
 
     fn replace_and_mark_text_in_range(
@@ -230,39 +256,71 @@ impl gpui::EntityInputHandler for IdeSurface {
             cx.notify();
             return;
         }
-        if !self.search.open {
-            return;
-        }
-        if new_text.is_empty() {
-            if self.search.marked_text.take().is_some() {
-                cx.notify();
+        if self.search.open {
+            if new_text.is_empty() {
+                if self.search.marked_text.take().is_some() {
+                    cx.notify();
+                }
+                return;
             }
+            let fallback_end = self.search.query.encode_utf16().count();
+            let replacement_range = self
+                .search
+                .marked_text
+                .as_ref()
+                .map(|marked| marked.replacement_range.clone())
+                .or(range_utf16)
+                .or_else(|| self.search.selection_range.clone())
+                .unwrap_or(fallback_end..fallback_end);
+            self.search.selection_range = Some(replacement_range.clone());
+            self.search.marked_text = Some(IdeMarkedText {
+                replacement_range,
+                text: new_text.to_string(),
+            });
+            cx.notify();
             return;
         }
-        let fallback_end = self.search.query.encode_utf16().count();
-        let replacement_range = self
-            .search
-            .marked_text
-            .as_ref()
-            .map(|marked| marked.replacement_range.clone())
-            .or(range_utf16)
-            .or_else(|| self.search.selection_range.clone())
-            .unwrap_or(fallback_end..fallback_end);
-        self.search.selection_range = Some(replacement_range.clone());
-        self.search.marked_text = Some(IdeMarkedText {
-            replacement_range,
-            text: new_text.to_string(),
-        });
-        cx.notify();
+        if self.folder_picker.open && self.folder_picker.path_input_focused {
+            if new_text.is_empty() {
+                if self.folder_picker.path_marked_text.take().is_some() {
+                    cx.notify();
+                }
+                return;
+            }
+            let fallback_end = self.folder_picker.path_input.encode_utf16().count();
+            let replacement_range = self
+                .folder_picker
+                .path_marked_text
+                .as_ref()
+                .map(|marked| marked.replacement_range.clone())
+                .or(range_utf16)
+                .or_else(|| self.folder_picker.path_selection_range.clone())
+                .unwrap_or(fallback_end..fallback_end);
+            self.folder_picker.path_selection_range = Some(replacement_range.clone());
+            self.folder_picker.path_selection_reversed = false;
+            self.folder_picker.path_selection_drag_anchor = None;
+            self.folder_picker.path_marked_text = Some(IdeMarkedText {
+                replacement_range,
+                text: new_text.to_string(),
+            });
+            cx.notify();
+        }
     }
 
     fn bounds_for_range(
         &mut self,
-        _range_utf16: Range<usize>,
+        range_utf16: Range<usize>,
         element_bounds: Bounds<Pixels>,
-        _window: &mut Window,
+        window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        if self.folder_picker.open && self.folder_picker.path_input_focused {
+            return Some(self.folder_picker_path_bounds_for_range(
+                range_utf16,
+                element_bounds,
+                window,
+            ));
+        }
         Some(Bounds {
             origin: element_bounds.origin + gpui::point(px(0.0), element_bounds.size.height),
             size: element_bounds.size,
@@ -271,11 +329,15 @@ impl gpui::EntityInputHandler for IdeSurface {
 
     fn character_index_for_point(
         &mut self,
-        _point: Point<Pixels>,
-        _window: &mut Window,
+        point: Point<Pixels>,
+        window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        None
+        if self.folder_picker.open && self.folder_picker.path_input_focused {
+            self.folder_picker_path_index_for_position(point, window)
+        } else {
+            None
+        }
     }
 
     fn accepts_text_input(&self, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
@@ -283,6 +345,7 @@ impl gpui::EntityInputHandler for IdeSurface {
             .as_ref()
             .is_some_and(|input| !input.submitting)
             || self.search.open
+            || (self.folder_picker.open && self.folder_picker.path_input_focused)
     }
 }
 
@@ -292,6 +355,8 @@ impl IdeSurface {
             self.tree_name_text_with_marked()
         } else if self.search.open {
             Some(self.project_search_text_with_marked())
+        } else if self.folder_picker.open && self.folder_picker.path_input_focused {
+            Some(self.folder_picker_path_text_with_marked())
         } else {
             None
         }
@@ -318,6 +383,10 @@ impl IdeSurface {
         let end = utf16_offset_to_byte(&text, marked.replacement_range.end);
         text.replace_range(start..end, &marked.text);
         text
+    }
+
+    fn folder_picker_path_text_with_marked(&self) -> String {
+        folder_picker_path_text_with_marked(&self.folder_picker)
     }
 }
 

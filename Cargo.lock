@@ -7707,6 +7707,7 @@ dependencies = [
  "oxideterm-ssh",
  "oxideterm-theme",
  "tokio",
+ "unicode-segmentation",
 ]
 
 [[package]]

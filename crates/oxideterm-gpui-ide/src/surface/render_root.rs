@@ -32,6 +32,12 @@ impl Render for IdeSurface {
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
                     this.finish_tab_drag(cx);
+                    this.finish_folder_picker_path_selection_drag();
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                    this.update_folder_picker_path_selection_drag(event, window, cx);
                 }),
             )
             .on_key_down(cx.listener(|this, event, window, cx| {
