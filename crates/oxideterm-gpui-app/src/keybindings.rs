@@ -397,11 +397,12 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             KeyCombo::cmd_shift("a"),
             KeyCombo::ctrl_shift("a"),
         ),
+        // Keep Ctrl+B available as the tmux prefix on Windows and Linux.
         def(
             "palette.broadcast",
             ActionScope::Palette,
             KeyCombo::cmd("b"),
-            KeyCombo::ctrl("b"),
+            KeyCombo::ctrl_shift("b"),
         ),
     ]);
 
@@ -1099,6 +1100,37 @@ mod tests {
             true,
             false,
         ));
+    }
+
+    #[test]
+    fn broadcast_default_does_not_claim_tmux_prefix() {
+        let broadcast = action_definition("palette.broadcast").expect("broadcast action");
+        let tmux_prefix = Keystroke {
+            modifiers: Modifiers {
+                control: true,
+                ..Default::default()
+            },
+            key: "b".to_string(),
+            key_char: None,
+        };
+        let broadcast_shortcut = Keystroke {
+            modifiers: Modifiers {
+                control: true,
+                shift: true,
+                ..Default::default()
+            },
+            key: "b".to_string(),
+            key_char: None,
+        };
+
+        assert_ne!(
+            combo_from_keystroke(&tmux_prefix).as_ref(),
+            Some(&broadcast.other)
+        );
+        assert_eq!(
+            combo_from_keystroke(&broadcast_shortcut).as_ref(),
+            Some(&broadcast.other)
+        );
     }
 
     #[test]
