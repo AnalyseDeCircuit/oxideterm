@@ -1,0 +1,168 @@
+name: Maintenance Automation
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Optional issue number to analyze in shadow mode'
+        required: false
+        type: number
+      verify_app:
+        description: 'Verify the OxideTerm Maintainer GitHub App installation'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: >-
+    maintenance-${{
+      github.event.issue.number
+      || inputs.issue_number
+      || github.run_id
+    }}
+  cancel-in-progress: false
+
+jobs:
+  verify-app:
+    name: Verify maintenance app
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_app
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Create read-only installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.OXIDETERM_AUTOMATION_CLIENT_ID }}
+          private-key: ${{ secrets.OXIDETERM_AUTOMATION_PRIVATE_KEY }}
+          permission-actions: read
+          permission-checks: read
+          permission-contents: read
+          permission-issues: read
+          permission-pull-requests: read
+          permission-statuses: read
+
+      - name: Verify repository installation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          mapfile -t repositories < <(
+            gh api --paginate /installation/repositories \
+              --jq '.repositories[].full_name'
+          )
+          # The App must remain isolated to this repository before write scopes are used.
+          if [[ "${#repositories[@]}" -ne 1 || "${repositories[0]}" != "${GITHUB_REPOSITORY}" ]]; then
+            echo "The maintenance app repository scope is not exclusive." >&2
+            printf 'Visible repository: %s\n' "${repositories[@]}" >&2
+            exit 1
+          fi
+          {
+            echo "## Maintenance app verification"
+            echo
+            echo "- App identity: \`${APP_SLUG}[bot]\`"
+            echo "- Exclusive repository access: \`${repositories[0]}\`"
+            echo "- Token scope used by this job: Actions, checks, contents, issues, pull requests, and statuses read"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  shadow-triage:
+    name: Shadow issue triage
+    if: >-
+      vars.OXIDETERM_AUTOMATION_MODE != 'disabled'
+      && !endsWith(github.actor, '[bot]')
+      && (
+        github.event_name == 'issues'
+        || inputs.issue_number > 0
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted policy
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Test repository automation policies
+        run: >-
+          node --test
+          scripts/quality/tests/*.test.cjs
+          scripts/automation/tests/*.test.cjs
+
+      - name: Prepare ephemeral issue context
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          AUTOMATION_ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          AUTOMATION_RUNTIME: ${{ runner.temp }}/oxideterm-maintenance
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const issueNumber = Number(process.env.AUTOMATION_ISSUE_NUMBER);
+            if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+              core.setFailed('A positive issue number is required.');
+              return;
+            }
+            const issue = context.payload.issue?.number === issueNumber
+              ? context.payload.issue
+              : (await github.rest.issues.get({
+                  ...context.repo,
+                  issue_number: issueNumber,
+                })).data;
+            if (issue.pull_request) {
+              core.setFailed(`#${issueNumber} is a pull request, not an issue.`);
+              return;
+            }
+            const inputDirectory = path.join(process.env.AUTOMATION_RUNTIME, 'input');
+            fs.mkdirSync(inputDirectory, { recursive: true });
+            fs.writeFileSync(
+              path.join(inputDirectory, 'issue.json'),
+              JSON.stringify({
+                number: issue.number,
+                html_url: issue.html_url,
+                title: issue.title,
+                body: issue.body || '',
+                state: issue.state,
+                labels: issue.labels || [],
+                author_association: issue.author_association || 'NONE',
+              }),
+              { encoding: 'utf8', mode: 0o600 },
+            );
+
+      - name: Analyze without repository writes
+        shell: bash
+        env:
+          AUTOMATION_RUNTIME: ${{ runner.temp }}/oxideterm-maintenance
+        run: |
+          set -euo pipefail
+          node scripts/automation/shadow_triage.cjs \
+            --input "${AUTOMATION_RUNTIME}/input/issue.json" \
+            --output "${AUTOMATION_RUNTIME}/report.json" \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove raw issue context
+        if: always()
+        shell: bash
+        env:
+          AUTOMATION_INPUT_DIRECTORY: ${{ runner.temp }}/oxideterm-maintenance/input
+        run: rm -rf "${AUTOMATION_INPUT_DIRECTORY}"
+
+      - name: Upload sanitized shadow report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: >-
+            maintenance-shadow-${{
+              github.event.issue.number
+              || inputs.issue_number
+            }}
+          path: ${{ runner.temp }}/oxideterm-maintenance/report.json
+          if-no-files-found: error
+          retention-days: 14

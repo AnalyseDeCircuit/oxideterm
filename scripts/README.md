@@ -2,6 +2,7 @@
 
 Scripts are grouped by responsibility:
 
+- `automation/`: maintenance routing, safety policy, and shadow-analysis tools;
 - `build/`: local artifact builders for the CLI and remote agent;
 - `ci/`: shared CI environment setup;
 - `quality/`: repository and vendored-source audits;

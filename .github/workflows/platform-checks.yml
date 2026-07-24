@@ -1,0 +1,76 @@
+name: Native Platform Checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, experiment/rust-native-v2]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rustfmt.toml'
+      - '.github/workflows/platform-checks.yml'
+  pull_request:
+    branches: [main, experiment/rust-native-v2]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rustfmt.toml'
+      - '.github/workflows/platform-checks.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-platform-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows native check
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.94.1
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: native-check-windows-x64
+          cache-on-failure: false
+
+      - name: Check Windows GPUI backend
+        run: cargo check -p gpui_windows
+
+      - name: Check Windows application
+        run: cargo check -p oxideterm-gpui-app
+
+  macos:
+    name: macOS native check
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.94.1
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: native-check-macos-arm64
+          cache-on-failure: false
+
+      - name: Check macOS GPUI backend
+        run: cargo check -p gpui_macos
+
+      - name: Check macOS application
+        run: cargo check -p oxideterm-gpui-app
