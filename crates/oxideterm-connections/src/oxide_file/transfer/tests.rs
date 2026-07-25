@@ -4,9 +4,11 @@ mod tests {
     use std::fs;
 
     use crate::{
-        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SaveSerialProfileRequest,
-        SavedUpstreamProxyProtocol, SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
+        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SaveRemoteDesktopProfileRequest,
+        SaveSerialProfileRequest, SavedUpstreamProxyProtocol, SerialFlowControl, SerialProfile,
+        SerialProfilesSyncSnapshot,
     };
+    use oxideterm_remote_desktop::RemoteDesktopProtocol;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
     use russh::keys::ssh_key::LineEnding;
     use russh::keys::{Algorithm, PrivateKey};
@@ -379,6 +381,92 @@ mod tests {
         assert_eq!(skipped.imported_serial_profiles, 0);
         assert_eq!(skipped.skipped_serial_profiles, 1);
         assert!(skipped_target.serial_profiles().is_empty());
+    }
+
+    #[test]
+    fn export_import_roundtrip_preserves_remote_desktop_assets_without_credentials() {
+        const CREDENTIAL: &str = "oxide-remote-desktop-secret";
+        let mut source = temp_store("remote-desktop-profile-source");
+        source
+            .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some("remote-1".to_string()),
+                name: "Lab desktop".to_string(),
+                group: Some("Lab".to_string()),
+                protocol: RemoteDesktopProtocol::Vnc,
+                host: "vnc.example.com".to_string(),
+                port: 5900,
+                username: Some("operator".to_string()),
+                credential: Some(SecretString::from(CREDENTIAL)),
+                ..SaveRemoteDesktopProfileRequest::default()
+            })
+            .unwrap();
+        let snapshot_json = serde_json::to_string_pretty(
+            &source.export_remote_desktop_profiles_snapshot().unwrap(),
+        )
+        .unwrap();
+        assert!(!snapshot_json.contains(CREDENTIAL));
+        assert!(!snapshot_json.contains("remote-desktop:remote-1"));
+
+        let bytes = export_connections_to_oxide(
+            &source,
+            &[],
+            "secret!",
+            OxideExportOptions {
+                remote_desktop_profiles_json: Some(snapshot_json),
+                ..OxideExportOptions::default()
+            },
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert_eq!(file.metadata.remote_desktop_profiles_count, Some(1));
+        assert!(!serde_json::to_string(&file.metadata).unwrap().contains(CREDENTIAL));
+        let payload = decrypt_payload(&bytes, "secret!").unwrap();
+        assert!(
+            !payload
+                .remote_desktop_profiles_json
+                .as_deref()
+                .unwrap()
+                .contains(CREDENTIAL)
+        );
+
+        let preview = preview_oxide_import(
+            &temp_store("remote-desktop-profile-preview"),
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(preview.remote_desktop_profiles_count, 1);
+
+        let mut target = temp_store("remote-desktop-profile-target");
+        let imported = apply_oxide_import(
+            &mut target,
+            &bytes,
+            "secret!",
+            ImportConflictStrategy::Rename,
+        )
+        .unwrap();
+        assert_eq!(imported.imported_remote_desktop_profiles, 1);
+        let imported_profile = &target.remote_desktop_profiles()[0];
+        assert_eq!(imported_profile.id, "remote-1");
+        assert_eq!(imported_profile.protocol, RemoteDesktopProtocol::Vnc);
+        assert_eq!(imported_profile.host, "vnc.example.com");
+        assert!(imported_profile.credential_ref.is_none());
+
+        let mut skipped_target = temp_store("remote-desktop-profile-skip-target");
+        let skipped = apply_oxide_import_with_options(
+            &mut skipped_target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                import_remote_desktop_profiles: false,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(skipped.imported_remote_desktop_profiles, 0);
+        assert_eq!(skipped.skipped_remote_desktop_profiles, 1);
+        assert!(skipped_target.remote_desktop_profiles().is_empty());
     }
 
     #[test]

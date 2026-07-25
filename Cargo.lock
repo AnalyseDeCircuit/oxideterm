@@ -7512,6 +7512,7 @@ dependencies = [
  "encoding_rs",
  "oxideterm-atomic-file",
  "oxideterm-portable-runtime",
+ "oxideterm-remote-desktop",
  "oxideterm-secret-store",
  "quick-xml 0.39.4",
  "rand 0.10.1",

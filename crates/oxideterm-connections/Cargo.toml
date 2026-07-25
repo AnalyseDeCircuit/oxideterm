@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 russh = { path = "../russh" }
 sha2.workspace = true

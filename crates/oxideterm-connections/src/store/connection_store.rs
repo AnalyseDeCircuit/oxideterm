@@ -76,6 +76,17 @@ impl ConnectionStore {
         &self.data.telnet_profiles
     }
 
+    pub fn remote_desktop_profiles(&self) -> &[RemoteDesktopProfile] {
+        &self.data.remote_desktop_profiles
+    }
+
+    pub fn get_remote_desktop_profile(&self, id: &str) -> Option<&RemoteDesktopProfile> {
+        self.data
+            .remote_desktop_profiles
+            .iter()
+            .find(|profile| profile.id == id)
+    }
+
     pub fn groups(&self) -> &[String] {
         &self.data.groups
     }
@@ -321,6 +332,12 @@ impl ConnectionStore {
                 conn.group = None;
             }
         }
+        for profile in &mut self.data.remote_desktop_profiles {
+            if profile.group.as_deref() == Some(name) {
+                profile.group = None;
+                profile.updated_at = Utc::now();
+            }
+        }
         self.save()
     }
 
@@ -337,6 +354,13 @@ impl ConnectionStore {
             if connection.group.as_deref() == Some(old_name) {
                 connection.group = Some(new_name.clone());
                 connection.updated_at = Some(Utc::now());
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.remote_desktop_profiles {
+            if profile.group.as_deref() == Some(old_name) {
+                profile.group = Some(new_name.clone());
+                profile.updated_at = Utc::now();
                 updated += 1;
             }
         }
@@ -557,6 +581,178 @@ impl ConnectionStore {
         profile.updated_at = now;
         self.save()?;
         Ok(true)
+    }
+
+    pub fn upsert_remote_desktop_profile(
+        &mut self,
+        request: SaveRemoteDesktopProfileRequest,
+    ) -> Result<RemoteDesktopProfile> {
+        let group = normalize_optional_group_name(request.group.as_deref())?;
+        let now = Utc::now();
+        let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let existing = self.get_remote_desktop_profile(&id).cloned();
+        let old_credential_ref = existing
+            .as_ref()
+            .and_then(|profile| profile.credential_ref.clone());
+        let requested_credential_ref = normalize_optional_text(request.credential_ref);
+        let mut credential_ref =
+            requested_credential_ref.or_else(|| old_credential_ref.clone());
+        if request.credential.is_some() && credential_ref.is_none() {
+            credential_ref = Some(remote_desktop_credential_ref(&id));
+        }
+
+        let mut profile = existing.unwrap_or_else(|| {
+            let mut profile = RemoteDesktopProfile::new(
+                request.name.trim(),
+                request.protocol,
+                request.host.trim(),
+                request.port,
+            );
+            profile.id = id.clone();
+            profile
+        });
+        profile.name = request.name.trim().to_string();
+        profile.group = group.clone();
+        profile.protocol = request.protocol;
+        profile.host = request.host.trim().to_string();
+        profile.port = request.port;
+        profile.username = normalize_optional_text(request.username);
+        profile.domain = normalize_optional_text(request.domain);
+        profile.credential_ref = credential_ref.clone();
+        profile.read_only = request.read_only;
+        profile.session_options = request.session_options;
+        profile.updated_at = now;
+        profile.validate()?;
+
+        if let (Some(credential), Some(reference)) =
+            (request.credential.as_ref(), credential_ref.as_deref())
+        {
+            // Validation runs first; only the protected backend receives a valid asset's secret.
+            self.keychain.store(reference, credential)?;
+        }
+
+        if let Some(existing) = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|existing| existing.id == id)
+        {
+            *existing = profile.clone();
+        } else {
+            profile.created_at = now;
+            self.data.remote_desktop_profiles.push(profile.clone());
+        }
+        if let Some(group) = group {
+            self.ensure_group(group)?;
+        }
+        self.normalize();
+        self.save()?;
+
+        if old_credential_ref != credential_ref
+            && let Some(stale_reference) = old_credential_ref
+        {
+            self.delete_or_queue_connection_keychain_entry(stale_reference)?;
+        }
+        Ok(profile)
+    }
+
+    pub fn delete_remote_desktop_profile(&mut self, id: &str) -> Result<bool> {
+        let credential_ref = self
+            .get_remote_desktop_profile(id)
+            .and_then(|profile| profile.credential_ref.clone());
+        let before = self.data.remote_desktop_profiles.len();
+        self.data
+            .remote_desktop_profiles
+            .retain(|profile| profile.id != id);
+        let deleted = self.data.remote_desktop_profiles.len() != before;
+        if deleted {
+            self.save()?;
+            if let Some(reference) = credential_ref {
+                self.delete_or_queue_connection_keychain_entry(reference)?;
+            }
+        }
+        Ok(deleted)
+    }
+
+    pub fn mark_remote_desktop_profile_used(&mut self, id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let now = Utc::now();
+        profile.last_used_at = Some(now);
+        profile.updated_at = now;
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn save_remote_desktop_credential(
+        &mut self,
+        profile_id: &str,
+        credential: &SecretString,
+    ) -> Result<String> {
+        let existing_ref = self
+            .get_remote_desktop_profile(profile_id)
+            .ok_or_else(|| anyhow::anyhow!("Remote desktop profile not found"))?
+            .credential_ref
+            .clone();
+        let reference =
+            existing_ref.unwrap_or_else(|| remote_desktop_credential_ref(profile_id));
+        // Persist the secret before publishing its reference in profile metadata.
+        self.keychain.store(&reference, credential)?;
+        let profile = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+            .expect("remote desktop profile checked above");
+        profile.credential_ref = Some(reference.clone());
+        profile.updated_at = Utc::now();
+        self.save()?;
+        Ok(reference)
+    }
+
+    pub fn get_remote_desktop_credential(&self, profile_id: &str) -> Result<Option<SecretString>> {
+        let Some(reference) = self
+            .get_remote_desktop_profile(profile_id)
+            .and_then(|profile| profile.credential_ref.as_deref())
+        else {
+            return Ok(None);
+        };
+        self.keychain.get_optional(reference)
+    }
+
+    pub fn delete_remote_desktop_credential(&mut self, profile_id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+        else {
+            return Ok(false);
+        };
+        let Some(reference) = profile.credential_ref.take() else {
+            return Ok(false);
+        };
+        profile.updated_at = Utc::now();
+        self.save()?;
+        self.delete_or_queue_connection_keychain_entry(reference)?;
+        Ok(true)
+    }
+
+    fn delete_or_queue_connection_keychain_entry(&mut self, reference: String) -> Result<()> {
+        if self.keychain.delete(&reference).is_err()
+            && !self.data.pending_keychain_cleanup.contains(&reference)
+        {
+            // Durable cleanup metadata lets startup retry without storing the secret itself.
+            self.data.pending_keychain_cleanup.push(reference);
+            self.save()?;
+        }
+        Ok(())
     }
 
     pub fn import_ssh_connection(
@@ -1748,6 +1944,12 @@ impl ConnectionStore {
                     .iter()
                     .filter_map(|profile| profile.group.clone()),
             )
+            .chain(
+                self.data
+                    .remote_desktop_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
             .collect::<Vec<_>>();
         for group in implicit_local_groups {
             if !self.data.groups.contains(&group) {
@@ -1769,6 +1971,9 @@ impl ConnectionStore {
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
         self.data
             .telnet_profiles
+            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data
+            .remote_desktop_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     }
 

@@ -526,6 +526,50 @@ pub struct SaveTelnetProfileRequest {
     pub connect_on_open: Option<bool>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RemoteDesktopProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub protocol: RemoteDesktopProtocol,
+    pub host: String,
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// Stable protected-store reference; the credential value is never serialized here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub read_only: bool,
+    #[serde(default)]
+    pub session_options: RemoteDesktopSessionOptions,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SaveRemoteDesktopProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub protocol: RemoteDesktopProtocol,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub domain: Option<String>,
+    /// An explicit reference is primarily used by trusted import and sync paths.
+    pub credential_ref: Option<String>,
+    /// The store moves this secret into the protected credential backend.
+    pub credential: Option<SecretString>,
+    pub read_only: bool,
+    pub session_options: RemoteDesktopSessionOptions,
+}
+
 impl SerialProfile {
     pub fn new(name: impl Into<String>, port_path: impl Into<String>) -> Self {
         let now = Utc::now();
@@ -599,6 +643,56 @@ impl TelnetProfile {
     }
 }
 
+impl RemoteDesktopProfile {
+    pub fn new(
+        name: impl Into<String>,
+        protocol: RemoteDesktopProtocol,
+        host: impl Into<String>,
+        port: u16,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            group: None,
+            protocol,
+            host: host.into(),
+            port,
+            username: None,
+            domain: None,
+            credential_ref: None,
+            read_only: false,
+            session_options: RemoteDesktopSessionOptions::default(),
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            bail!("Remote desktop profile id is required");
+        }
+        if self.name.trim().is_empty() {
+            bail!("Remote desktop profile name is required");
+        }
+        if self.host.trim().is_empty() {
+            bail!("Remote desktop host is required");
+        }
+        if self.port == 0 {
+            bail!("Remote desktop port must be greater than zero");
+        }
+        if self
+            .credential_ref
+            .as_deref()
+            .is_some_and(|reference| reference.trim().is_empty())
+        {
+            bail!("Remote desktop credential reference cannot be empty");
+        }
+        Ok(())
+    }
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -641,6 +735,8 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telnet_profiles: Vec<TelnetProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_desktop_profiles: Vec<RemoteDesktopProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_keychain_cleanup: Vec<String>,
@@ -659,6 +755,7 @@ impl Default for ConnectionStoreData {
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
             telnet_profiles: Vec::new(),
+            remote_desktop_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
             pending_keychain_cleanup: Vec::new(),
             pending_privilege_keychain_cleanup: Vec::new(),
@@ -673,6 +770,15 @@ pub struct SerialProfilesSyncSnapshot {
     pub exported_at: String,
     #[serde(default)]
     pub records: Vec<SerialProfile>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopProfilesSyncSnapshot {
+    pub revision: String,
+    pub exported_at: String,
+    #[serde(default)]
+    pub records: Vec<RemoteDesktopProfile>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

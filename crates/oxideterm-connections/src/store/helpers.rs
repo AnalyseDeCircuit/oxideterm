@@ -100,6 +100,17 @@ fn non_empty<'a>(value: &'a str, label: &str) -> Result<&'a str> {
     Ok(value)
 }
 
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let value = value.trim().to_string();
+        (!value.is_empty()).then_some(value)
+    })
+}
+
+fn remote_desktop_credential_ref(profile_id: &str) -> String {
+    format!("remote-desktop:{profile_id}")
+}
+
 fn managed_key_display_name(name: Option<String>, fallback: &str) -> String {
     name.as_deref()
         .map(str::trim)

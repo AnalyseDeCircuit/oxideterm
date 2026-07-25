@@ -1955,4 +1955,119 @@ mod tests {
         assert!(info.key_path.is_none());
         assert!(info.cert_path.is_none());
     }
+
+    #[test]
+    fn remote_desktop_profile_persists_only_protected_credential_reference() {
+        const CREDENTIAL: &str = "remote-desktop-secret-value";
+        let mut store = load_empty_store("remote-desktop-secret-boundary");
+        let request = SaveRemoteDesktopProfileRequest {
+            id: Some("remote-1".to_string()),
+            name: "Lab desktop".to_string(),
+            group: Some("Lab".to_string()),
+            protocol: RemoteDesktopProtocol::Rdp,
+            host: "rdp.example.com".to_string(),
+            port: 3389,
+            username: Some("operator".to_string()),
+            credential: Some(SecretString::from(CREDENTIAL)),
+            ..SaveRemoteDesktopProfileRequest::default()
+        };
+
+        assert!(!format!("{request:?}").contains(CREDENTIAL));
+        let profile = store.upsert_remote_desktop_profile(request).unwrap();
+        let reference = profile.credential_ref.clone().unwrap();
+        assert_eq!(
+            store
+                .get_remote_desktop_credential(&profile.id)
+                .unwrap()
+                .unwrap(),
+            CREDENTIAL
+        );
+
+        let metadata = fs::read_to_string(store.path()).unwrap();
+        assert!(!metadata.contains(CREDENTIAL));
+        assert!(metadata.contains(&reference));
+        assert!(!metadata.contains("\"credential\""));
+
+        assert!(store.delete_remote_desktop_profile(&profile.id).unwrap());
+        assert!(store.keychain.get_optional(&reference).unwrap().is_none());
+
+        let invalid_result =
+            store.upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some("remote-invalid".to_string()),
+                name: String::new(),
+                protocol: RemoteDesktopProtocol::Vnc,
+                host: "vnc.example.com".to_string(),
+                port: 5900,
+                credential: Some(SecretString::from("rejected-secret")),
+                ..SaveRemoteDesktopProfileRequest::default()
+            });
+        assert!(invalid_result.is_err());
+        assert!(
+            store
+                .keychain
+                .get_optional("remote-desktop:remote-invalid")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn remote_desktop_snapshot_drops_device_local_credential_references() {
+        let mut store = load_empty_store("remote-desktop-snapshot-redaction");
+        let profile = store
+            .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some("remote-1".to_string()),
+                name: "VNC lab".to_string(),
+                protocol: RemoteDesktopProtocol::Vnc,
+                host: "vnc.example.com".to_string(),
+                port: 5900,
+                credential: Some(SecretString::from("not-in-snapshot")),
+                ..SaveRemoteDesktopProfileRequest::default()
+            })
+            .unwrap();
+
+        let snapshot = store.export_remote_desktop_profiles_snapshot().unwrap();
+        assert_eq!(snapshot.records.len(), 1);
+        assert!(snapshot.records[0].credential_ref.is_none());
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        assert!(!serialized.contains("not-in-snapshot"));
+        assert!(!serialized.contains("remote-desktop:remote-1"));
+
+        let mut imported = snapshot.records[0].clone();
+        imported.credential_ref = Some("foreign-device-reference".to_string());
+        imported.updated_at += Duration::seconds(1);
+        store
+            .apply_remote_desktop_profiles_snapshot(RemoteDesktopProfilesSyncSnapshot {
+                revision: "foreign".to_string(),
+                exported_at: Utc::now().to_rfc3339(),
+                records: vec![imported],
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .get_remote_desktop_profile(&profile.id)
+                .unwrap()
+                .credential_ref
+                .as_deref(),
+            profile.credential_ref.as_deref()
+        );
+
+        let mut fresh_store = load_empty_store("remote-desktop-snapshot-import");
+        let mut foreign_profile = snapshot.records[0].clone();
+        foreign_profile.credential_ref = Some("foreign-device-reference".to_string());
+        fresh_store
+            .apply_remote_desktop_profiles_snapshot(RemoteDesktopProfilesSyncSnapshot {
+                revision: "foreign".to_string(),
+                exported_at: Utc::now().to_rfc3339(),
+                records: vec![foreign_profile],
+            })
+            .unwrap();
+        assert!(
+            fresh_store
+                .get_remote_desktop_profile(&profile.id)
+                .unwrap()
+                .credential_ref
+                .is_none()
+        );
+    }
 }

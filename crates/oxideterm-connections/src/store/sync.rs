@@ -145,6 +145,12 @@ impl ConnectionStore {
         build_serial_profiles_sync_snapshot(&self.data)
     }
 
+    pub fn export_remote_desktop_profiles_snapshot(
+        &self,
+    ) -> Result<RemoteDesktopProfilesSyncSnapshot> {
+        build_remote_desktop_profiles_sync_snapshot(&self.data)
+    }
+
     pub fn local_sync_metadata(&self) -> Result<LocalSyncMetadata> {
         let snapshot = self.export_saved_connections_snapshot()?;
         let saved_connections_updated_at = snapshot
@@ -458,6 +464,42 @@ impl ConnectionStore {
         Ok(applied)
     }
 
+    pub fn apply_remote_desktop_profiles_snapshot(
+        &mut self,
+        snapshot: RemoteDesktopProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        // Validate the complete asset batch before changing the shared store file.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
+        let mut applied = 0usize;
+        for mut profile in snapshot.records {
+            // Protected-store references are device-local and cannot be imported as credentials.
+            profile.credential_ref = None;
+            if let Some(existing) = self
+                .data
+                .remote_desktop_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    // Updating portable metadata must not disconnect a valid local credential.
+                    profile.credential_ref = existing.credential_ref.clone();
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.remote_desktop_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        if applied > 0 {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
+
 }
 
 fn build_saved_connection_from_sync_payload(
@@ -565,6 +607,29 @@ fn build_serial_profiles_sync_snapshot(
     )?;
 
     Ok(SerialProfilesSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+    })
+}
+
+fn build_remote_desktop_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<RemoteDesktopProfilesSyncSnapshot> {
+    let mut records = data.remote_desktop_profiles.clone();
+    for profile in &mut records {
+        // Snapshots are portable asset metadata, never a transport for local credential handles.
+        profile.credential_ref = None;
+    }
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(
+        &records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok(RemoteDesktopProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,

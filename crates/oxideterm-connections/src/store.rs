@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Duration, Utc};
 use oxideterm_atomic_file::{durable_remove, durable_write_with_before_replace};
+use oxideterm_remote_desktop::{RemoteDesktopProtocol, RemoteDesktopSessionOptions};
 use russh::keys::{PrivateKey, PublicKeyBase64};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
