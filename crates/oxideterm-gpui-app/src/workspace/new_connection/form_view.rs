@@ -9,16 +9,17 @@ use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
         NewConnectionSelect, NewConnectionSubmitAction, NewConnectionTransport,
         NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT,
-        RemoteDesktopSessionFeature, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
-        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
-        VNC_DEFAULT_PORT_TEXT, apply_transport_default_port, apply_transport_default_username,
-        auth_family_from_tab, auth_tab_from_key_source, backspace_current_connection_field,
-        clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
-        current_connection_field, default_auth_tab_for_family,
-        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
-        next_connection_field, next_jump_connection_field, remote_desktop_feature_selected,
-        remote_desktop_feature_supported, select_current_connection_field, text_from_keystroke,
-        toggle_remote_desktop_feature,
+        RemoteDesktopSessionFeature, RemoteDesktopVncPreference, SSH_DEFAULT_PORT_TEXT,
+        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
+        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference,
+        apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
+        auth_tab_from_key_source, backspace_current_connection_field, clear_connection_selection,
+        clear_current_connection_field, connection_field_is_selected, current_connection_field,
+        default_auth_tab_for_family, insert_text_into_current_connection_field,
+        key_source_from_tab, new_connection_form_mode, next_connection_field,
+        next_jump_connection_field, remote_desktop_feature_selected,
+        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
+        select_current_connection_field, text_from_keystroke, toggle_remote_desktop_feature,
     },
     ssh_flow::SshConnectionIntent,
 };
@@ -46,6 +47,10 @@ use oxideterm_gpui_ui::{
         select_overlay_popup_with_max_height, select_trigger_with_focus_visible,
     },
     text_input, text_input_anchor_probe,
+};
+use oxideterm_remote_desktop::{
+    RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncSecurityPolicy,
+    RemoteDesktopVncSessionMode,
 };
 
 // Keep the modal, proxy-chain, and field-control implementations in explicit

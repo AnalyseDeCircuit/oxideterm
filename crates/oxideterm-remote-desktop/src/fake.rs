@@ -53,6 +53,7 @@ impl RemoteDesktopFakeBackend {
                 read_only,
                 session_options: _,
                 monitor_layout: _,
+                password_available: _,
             } => self.connect(protocol, endpoint, size, read_only),
             RemoteDesktopHelperRequest::Connect {
                 protocol,

@@ -5,6 +5,7 @@ members = [
   "crates/oxideterm-gpui-markdown",
   "crates/oxideterm-cli",
   "crates/oxideterm-rdp-helper",
+  "crates/oxideterm-pcm-audio",
   "crates/oxideterm-gpui-cloud-sync",
   "crates/oxideterm-gpui-remote-desktop",
   "crates/oxideterm-gpui-platform",

@@ -304,11 +304,34 @@ impl WorkspaceApp {
         let status = snapshot.status;
         let status_color = remote_desktop_status_color(&self.tokens, status);
         let reconnect_disabled = remote_desktop_reconnect_mode(status).is_none();
-        let resize_capability_label = if session.provider.capabilities.resize {
-            self.i18n.t("remote_desktop.resize_dynamic")
-        } else {
-            self.i18n.t("remote_desktop.resize_fixed")
+        let resize_capability_label = match snapshot
+            .negotiated_capabilities
+            .as_ref()
+            .map(|capabilities| capabilities.resize)
+        {
+            Some(NegotiatedCapabilityStatus::Supported) => {
+                self.i18n.t("remote_desktop.resize_dynamic")
+            }
+            Some(NegotiatedCapabilityStatus::Unsupported) => {
+                self.i18n.t("remote_desktop.resize_fixed")
+            }
+            Some(NegotiatedCapabilityStatus::Unknown) => {
+                self.i18n.t("remote_desktop.resize_unknown")
+            }
+            None if snapshot.protocol == RemoteDesktopProtocol::Vnc => {
+                self.i18n.t("remote_desktop.resize_unknown")
+            }
+            None if session.provider.capabilities.resize => {
+                self.i18n.t("remote_desktop.resize_dynamic")
+            }
+            None => self.i18n.t("remote_desktop.resize_fixed"),
         };
+        let vnc_capability_presentation =
+            (snapshot.protocol == RemoteDesktopProtocol::Vnc).then(|| {
+                self.remote_desktop_vnc_capability_presentation(
+                    snapshot.negotiated_capabilities.as_ref(),
+                )
+            });
         let label = format!(
             "{} · {}:{}",
             session.provider.name, session.profile.endpoint.host, session.profile.endpoint.port
@@ -348,6 +371,35 @@ impl WorkspaceApp {
                 &self.tokens,
                 resize_capability_label,
             ))
+            .when_some(
+                vnc_capability_presentation,
+                |footer, (capability_label, capability_tooltip)| {
+                    let tooltip_for_move = capability_tooltip.clone();
+                    footer.child(
+                        remote_desktop_capability_chip(&self.tokens, capability_label)
+                            .id("remote-desktop-vnc-capabilities")
+                            .on_mouse_move(cx.listener(
+                                move |this, event: &MouseMoveEvent, _window, cx| {
+                                    this.queue_workspace_tooltip(
+                                        "remote-desktop-vnc-capabilities",
+                                        tooltip_for_move.clone(),
+                                        f32::from(event.position.x) + 12.0,
+                                        f32::from(event.position.y) + 16.0,
+                                        cx,
+                                    );
+                                },
+                            ))
+                            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                                if !*hovered {
+                                    this.clear_workspace_tooltip(
+                                        "remote-desktop-vnc-capabilities",
+                                        cx,
+                                    );
+                                }
+                            })),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex()
@@ -428,6 +480,127 @@ impl WorkspaceApp {
                     )),
             )
             .into_any_element()
+    }
+
+    fn remote_desktop_vnc_capability_presentation(
+        &self,
+        capabilities: Option<&NegotiatedCapabilities>,
+    ) -> (String, String) {
+        let unknown_capabilities = NegotiatedCapabilities::default();
+        let is_pending = capabilities.is_none();
+        let capabilities = capabilities.unwrap_or(&unknown_capabilities);
+        let supported = self.i18n.t("remote_desktop.capability_supported");
+        let unsupported = self.i18n.t("remote_desktop.capability_unsupported");
+        let unknown = self.i18n.t("remote_desktop.capability_unknown");
+        let status = |value: NegotiatedCapabilityStatus| match value {
+            NegotiatedCapabilityStatus::Supported => supported.as_str(),
+            NegotiatedCapabilityStatus::Unsupported => unsupported.as_str(),
+            NegotiatedCapabilityStatus::Unknown => unknown.as_str(),
+        };
+        let feature_statuses = [
+            capabilities.resize,
+            capabilities.multi_monitor,
+            capabilities.extended_clipboard,
+            capabilities.tight,
+            capabilities.jpeg,
+            capabilities.continuous_updates,
+            capabilities.fence,
+            capabilities.last_rect,
+            capabilities.h264,
+            capabilities.qemu_audio,
+            capabilities.vendor_files,
+            capabilities.extended_key_events,
+            capabilities.extended_mouse_buttons,
+            capabilities.lock_key_sync,
+        ];
+        let supported_count = feature_statuses
+            .iter()
+            .filter(|value| value.is_supported())
+            .count();
+        let label = if is_pending {
+            self.i18n.t("remote_desktop.capabilities_pending")
+        } else {
+            self.i18n
+                .t("remote_desktop.capabilities_summary")
+                .replace("{{supported}}", &supported_count.to_string())
+                .replace("{{total}}", &feature_statuses.len().to_string())
+        };
+        let security_method = capabilities
+            .selected_security_method
+            .as_deref()
+            .or_else(|| capabilities.security_methods.first().map(String::as_str))
+            .unwrap_or(unknown.as_str());
+        let clipboard_formats = match capabilities.extended_clipboard {
+            NegotiatedCapabilityStatus::Supported
+                if !capabilities.extended_clipboard_formats.is_empty() =>
+            {
+                capabilities.extended_clipboard_formats.join(", ")
+            }
+            value => status(value).to_string(),
+        };
+        let lines = [
+            format!(
+                "{}: {security_method}",
+                self.i18n.t("remote_desktop.capability_security_method")
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_encryption"),
+                status(capabilities.encrypted)
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_identity_verified"),
+                status(capabilities.peer_identity_verified)
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_resize"),
+                status(capabilities.resize)
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_multi_monitor"),
+                status(capabilities.multi_monitor)
+            ),
+            format!(
+                "{}: {clipboard_formats}",
+                self.i18n.t("remote_desktop.capability_extended_clipboard")
+            ),
+            format!("Tight: {}", status(capabilities.tight)),
+            format!("JPEG: {}", status(capabilities.jpeg)),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_continuous_updates"),
+                status(capabilities.continuous_updates)
+            ),
+            format!("Fence: {}", status(capabilities.fence)),
+            format!("LastRect: {}", status(capabilities.last_rect)),
+            format!("H.264: {}", status(capabilities.h264)),
+            format!("QEMU Audio: {}", status(capabilities.qemu_audio)),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_vendor_files"),
+                status(capabilities.vendor_files)
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_extended_keys"),
+                status(capabilities.extended_key_events)
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_extended_mouse"),
+                status(capabilities.extended_mouse_buttons)
+            ),
+            format!(
+                "{}: {}",
+                self.i18n.t("remote_desktop.capability_lock_sync"),
+                status(capabilities.lock_key_sync)
+            ),
+        ];
+
+        (label, lines.join("\n"))
     }
 
     pub(in crate::workspace) fn force_recover_remote_desktop(

@@ -36,16 +36,18 @@ pub use helper_protocol::{
     RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopErrorCategory,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState,
     RemoteDesktopLockKeys, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
-    RemoteDesktopServerCertificate, RemoteDesktopWheelDelta,
+    RemoteDesktopServerCertificate, RemoteDesktopServerIdentityKind, RemoteDesktopWheelDelta,
 };
 pub use model::{
-    RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopConnectionProfile,
-    RemoteDesktopCursorShape, RemoteDesktopDisplayOptions, RemoteDesktopEndpoint,
-    RemoteDesktopFrame, RemoteDesktopFrameCompression, RemoteDesktopFrameFormat,
-    RemoteDesktopFrameUpdate, RemoteDesktopMonitor, RemoteDesktopMonitorLayout,
-    RemoteDesktopMonitorOrientation, RemoteDesktopProtocol, RemoteDesktopRect,
-    RemoteDesktopSessionId, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
-    RemoteDesktopSize,
+    NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopAudioOptions,
+    RemoteDesktopClipboardOptions, RemoteDesktopConnectionProfile, RemoteDesktopCursorShape,
+    RemoteDesktopDisplayOptions, RemoteDesktopEndpoint, RemoteDesktopFrame,
+    RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
+    RemoteDesktopMonitor, RemoteDesktopMonitorLayout, RemoteDesktopMonitorOrientation,
+    RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionId, RemoteDesktopSessionOptions,
+    RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopVncCompression,
+    RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy,
+    RemoteDesktopVncSessionMode,
 };
 pub use provider::{
     RemoteDesktopProviderCapabilities, RemoteDesktopProviderEntry, RemoteDesktopProviderError,

@@ -3,14 +3,13 @@
 
 use super::*;
 
-pub(super) fn vnc_button_mask(button: RemoteDesktopMouseButton) -> u8 {
+pub(super) fn vnc_button_mask(button: RemoteDesktopMouseButton) -> u16 {
     match button {
         RemoteDesktopMouseButton::Left => VNC_BUTTON_LEFT,
         RemoteDesktopMouseButton::Middle => VNC_BUTTON_MIDDLE,
         RemoteDesktopMouseButton::Right => VNC_BUTTON_RIGHT,
-        // The base RFB button mask only has reliable room for buttons 1-7,
-        // and 6/7 are commonly used for horizontal wheel events.
-        RemoteDesktopMouseButton::Back | RemoteDesktopMouseButton::Forward => 0,
+        RemoteDesktopMouseButton::Back => VNC_BUTTON_BACK,
+        RemoteDesktopMouseButton::Forward => VNC_BUTTON_FORWARD,
     }
 }
 
@@ -46,7 +45,7 @@ pub(super) fn vnc_keysym(key: &RemoteDesktopKey) -> Option<u32> {
         && let Some(character) = text.chars().next()
         && !character.is_control()
     {
-        return Some(character as u32);
+        return Some(vnc_unicode_keysym(character));
     }
 
     let normalized = normalize_vnc_key_code(&key.code);
@@ -55,6 +54,37 @@ pub(super) fn vnc_keysym(key: &RemoteDesktopKey) -> Option<u32> {
     }
 
     vnc_keysym_for_normalized_code(&normalized)
+}
+
+pub(super) fn vnc_unicode_keysym(character: char) -> u32 {
+    let codepoint = character as u32;
+    if codepoint <= 0xff {
+        codepoint
+    } else {
+        // X11 encodes non-Latin-1 Unicode characters in the 0x01xxxxxx range.
+        0x0100_0000 | codepoint
+    }
+}
+
+pub(super) fn vnc_text_key_events(text: &str) -> Vec<VncKeyEvent> {
+    text.chars()
+        .filter(|character| !character.is_control())
+        .flat_map(|character| {
+            let keysym = vnc_unicode_keysym(character);
+            [
+                VncKeyEvent {
+                    keysym,
+                    raw_keycode: None,
+                    down: true,
+                },
+                VncKeyEvent {
+                    keysym,
+                    raw_keycode: None,
+                    down: false,
+                },
+            ]
+        })
+        .collect()
 }
 
 pub(super) fn vnc_key_code_prefers_physical_keysym(code: &str) -> bool {
@@ -162,17 +192,43 @@ pub(super) fn single_ascii_vnc_keysym(code: &str) -> Option<u32> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) struct VncKeyEvent {
     pub(super) keysym: u32,
+    pub(super) raw_keycode: Option<u32>,
     pub(super) down: bool,
 }
 
 #[derive(Default)]
 pub(super) struct VncKeyboardInputMapper {
     physical_modifiers: HashSet<u32>,
-    pressed_keysyms: HashSet<u32>,
-    synthetic_modifiers_by_key: HashMap<u32, Vec<u32>>,
+    pressed_keys: HashSet<VncKeyIdentity>,
+    synthetic_modifiers_by_key: HashMap<VncKeyIdentity, Vec<VncKeyIdentity>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct VncKeyIdentity {
+    keysym: u32,
+    raw_keycode: Option<u32>,
+}
+
+impl VncKeyIdentity {
+    fn event(self, down: bool) -> VncKeyEvent {
+        VncKeyEvent {
+            keysym: self.keysym,
+            raw_keycode: self.raw_keycode,
+            down,
+        }
+    }
+}
+
+impl From<VncKeyEvent> for VncKeyIdentity {
+    fn from(event: VncKeyEvent) -> Self {
+        Self {
+            keysym: event.keysym,
+            raw_keycode: event.raw_keycode,
+        }
+    }
 }
 
 impl VncKeyboardInputMapper {
@@ -181,46 +237,42 @@ impl VncKeyboardInputMapper {
         key: &RemoteDesktopKey,
         state: RemoteDesktopKeyState,
     ) -> Vec<VncKeyEvent> {
-        let Some(keysym) = vnc_keysym(key) else {
+        let Some(key_event) = vnc_key_event(key, state == RemoteDesktopKeyState::Pressed) else {
             return Vec::new();
         };
         if vnc_modifier_keysym_for_code(&key.code).is_some() {
-            return self.modifier_events(keysym, state);
+            return self.modifier_events(key_event, state);
         }
+        let key_identity = VncKeyIdentity::from(key_event);
         match state {
             RemoteDesktopKeyState::Pressed => {
                 let synthetic_modifiers = vnc_modifier_keysyms(key)
                     .into_iter()
                     .filter(|modifier| !self.physical_modifier_equivalent_pressed(*modifier))
+                    .map(vnc_key_identity_for_keysym)
                     .collect::<Vec<_>>();
                 let mut events = synthetic_modifiers
                     .iter()
                     .copied()
-                    .map(|keysym| VncKeyEvent { keysym, down: true })
+                    .map(|modifier| modifier.event(true))
                     .collect::<Vec<_>>();
-                events.push(VncKeyEvent { keysym, down: true });
-                self.pressed_keysyms.insert(keysym);
+                events.push(key_event);
+                self.pressed_keys.insert(key_identity);
                 if !synthetic_modifiers.is_empty() {
                     // VNC does not have a client-side input database like
                     // IronRDP's primary path, so keep ownership for synthesized
                     // modifier presses locally and release only those later.
                     self.synthetic_modifiers_by_key
-                        .insert(keysym, synthetic_modifiers);
+                        .insert(key_identity, synthetic_modifiers);
                 }
                 events
             }
             RemoteDesktopKeyState::Released => {
-                let mut events = vec![VncKeyEvent {
-                    keysym,
-                    down: false,
-                }];
-                self.pressed_keysyms.remove(&keysym);
-                if let Some(mut modifiers) = self.synthetic_modifiers_by_key.remove(&keysym) {
+                let mut events = vec![key_event];
+                self.pressed_keys.remove(&key_identity);
+                if let Some(mut modifiers) = self.synthetic_modifiers_by_key.remove(&key_identity) {
                     modifiers.reverse();
-                    events.extend(modifiers.into_iter().map(|keysym| VncKeyEvent {
-                        keysym,
-                        down: false,
-                    }));
+                    events.extend(modifiers.into_iter().map(|modifier| modifier.event(false)));
                 }
                 events
             }
@@ -229,12 +281,9 @@ impl VncKeyboardInputMapper {
 
     pub(super) fn release_all_events(&mut self) -> Vec<VncKeyEvent> {
         let mut events = self
-            .pressed_keysyms
+            .pressed_keys
             .drain()
-            .map(|keysym| VncKeyEvent {
-                keysym,
-                down: false,
-            })
+            .map(|key| key.event(false))
             .collect::<Vec<_>>();
         let mut released_synthetic_modifiers = HashSet::new();
         for modifier in self
@@ -243,10 +292,7 @@ impl VncKeyboardInputMapper {
             .flat_map(|(_, modifiers)| modifiers)
         {
             if released_synthetic_modifiers.insert(modifier) {
-                events.push(VncKeyEvent {
-                    keysym: modifier,
-                    down: false,
-                });
+                events.push(modifier.event(false));
             }
         }
         self.physical_modifiers.clear();
@@ -255,22 +301,20 @@ impl VncKeyboardInputMapper {
 
     pub(super) fn modifier_events(
         &mut self,
-        keysym: u32,
+        key_event: VncKeyEvent,
         state: RemoteDesktopKeyState,
     ) -> Vec<VncKeyEvent> {
+        let key_identity = VncKeyIdentity::from(key_event);
         match state {
             RemoteDesktopKeyState::Pressed => {
-                self.physical_modifiers.insert(keysym);
-                self.pressed_keysyms.insert(keysym);
-                vec![VncKeyEvent { keysym, down: true }]
+                self.physical_modifiers.insert(key_event.keysym);
+                self.pressed_keys.insert(key_identity);
+                vec![key_event]
             }
             RemoteDesktopKeyState::Released => {
-                self.physical_modifiers.remove(&keysym);
-                self.pressed_keysyms.remove(&keysym);
-                vec![VncKeyEvent {
-                    keysym,
-                    down: false,
-                }]
+                self.physical_modifiers.remove(&key_event.keysym);
+                self.pressed_keys.remove(&key_identity);
+                vec![key_event]
             }
         }
     }
@@ -279,6 +323,23 @@ impl VncKeyboardInputMapper {
         self.physical_modifiers
             .iter()
             .any(|pressed| vnc_modifier_equivalent(*pressed, modifier))
+    }
+}
+
+pub(super) fn vnc_key_event(key: &RemoteDesktopKey, down: bool) -> Option<VncKeyEvent> {
+    let raw_keycode = vnc_raw_keycode_for_code(&key.code);
+    let keysym = vnc_keysym(key).or_else(|| raw_keycode.map(|_| 0))?;
+    Some(VncKeyEvent {
+        keysym,
+        raw_keycode,
+        down,
+    })
+}
+
+fn vnc_key_identity_for_keysym(keysym: u32) -> VncKeyIdentity {
+    VncKeyIdentity {
+        keysym,
+        raw_keycode: vnc_raw_keycode_for_keysym(keysym),
     }
 }
 
@@ -297,7 +358,7 @@ pub(super) fn vnc_key_events(
     key: &RemoteDesktopKey,
     state: RemoteDesktopKeyState,
 ) -> Vec<VncKeyEvent> {
-    let Some(keysym) = vnc_keysym(key) else {
+    let Some(key_event) = vnc_key_event(key, state == RemoteDesktopKeyState::Pressed) else {
         return Vec::new();
     };
     let modifiers = vnc_modifier_keysyms(key);
@@ -305,19 +366,18 @@ pub(super) fn vnc_key_events(
         RemoteDesktopKeyState::Pressed => modifiers
             .iter()
             .copied()
-            .map(|keysym| VncKeyEvent { keysym, down: true })
-            .chain([VncKeyEvent { keysym, down: true }])
+            .map(|keysym| vnc_key_identity_for_keysym(keysym).event(true))
+            .chain([key_event])
             .collect(),
-        RemoteDesktopKeyState::Released => [VncKeyEvent {
-            keysym,
-            down: false,
-        }]
-        .into_iter()
-        .chain(modifiers.into_iter().rev().map(|keysym| VncKeyEvent {
-            keysym,
-            down: false,
-        }))
-        .collect(),
+        RemoteDesktopKeyState::Released => [key_event]
+            .into_iter()
+            .chain(
+                modifiers
+                    .into_iter()
+                    .rev()
+                    .map(|keysym| vnc_key_identity_for_keysym(keysym).event(false)),
+            )
+            .collect(),
     }
 }
 

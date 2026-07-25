@@ -8,7 +8,11 @@ pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
     TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
 };
-use oxideterm_remote_desktop::{RemoteDesktopProviderCapabilities, RemoteDesktopSessionOptions};
+use oxideterm_remote_desktop::{
+    RemoteDesktopProviderCapabilities, RemoteDesktopSessionOptions, RemoteDesktopVncCompression,
+    RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy,
+    RemoteDesktopVncSessionMode,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshAuthTab {
@@ -198,6 +202,40 @@ pub(in crate::workspace) enum RemoteDesktopSessionFeature {
     AudioPlayback,
     AudioCapture,
     MultiMonitor,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum RemoteDesktopVncPreference {
+    Security(RemoteDesktopVncSecurityPolicy),
+    SessionMode(RemoteDesktopVncSessionMode),
+    ImageQuality(RemoteDesktopVncImageQuality),
+    Compression(RemoteDesktopVncCompression),
+}
+
+/// Reads one VNC preference for segmented-control rendering.
+pub(in crate::workspace) fn remote_desktop_vnc_preference_selected(
+    options: &RemoteDesktopVncOptions,
+    preference: RemoteDesktopVncPreference,
+) -> bool {
+    match preference {
+        RemoteDesktopVncPreference::Security(value) => options.security_policy == value,
+        RemoteDesktopVncPreference::SessionMode(value) => options.session_mode == value,
+        RemoteDesktopVncPreference::ImageQuality(value) => options.image_quality == value,
+        RemoteDesktopVncPreference::Compression(value) => options.compression == value,
+    }
+}
+
+/// Applies only the VNC preference represented by the selected segment.
+pub(in crate::workspace) fn apply_remote_desktop_vnc_preference(
+    options: &mut RemoteDesktopVncOptions,
+    preference: RemoteDesktopVncPreference,
+) {
+    match preference {
+        RemoteDesktopVncPreference::Security(value) => options.security_policy = value,
+        RemoteDesktopVncPreference::SessionMode(value) => options.session_mode = value,
+        RemoteDesktopVncPreference::ImageQuality(value) => options.image_quality = value,
+        RemoteDesktopVncPreference::Compression(value) => options.compression = value,
+    }
 }
 
 /// Keeps provider support separate from the user's per-session selection.
@@ -1059,14 +1097,17 @@ mod tests {
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
         NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
-        RemoteDesktopSessionOptions, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
+        RemoteDesktopSessionOptions, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
+        RemoteDesktopVncOptions, RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy,
+        RemoteDesktopVncSessionMode, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
         SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
-        VNC_DEFAULT_PORT_TEXT, apply_transport_default_port, apply_transport_default_username,
-        auth_family_from_tab, auth_tab_from_key_source, backspace_current_connection_field,
-        default_auth_tab_for_family, insert_text_into_current_connection_field,
-        key_source_from_tab, new_connection_form_mode, next_connection_field,
-        remote_desktop_feature_supported, select_current_connection_field, text_from_keystroke,
-        toggle_remote_desktop_feature,
+        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
+        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
+        backspace_current_connection_field, default_auth_tab_for_family,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, remote_desktop_feature_supported,
+        remote_desktop_vnc_preference_selected, select_current_connection_field,
+        text_from_keystroke, toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1231,6 +1272,22 @@ mod tests {
         assert!(form.remote_desktop_session_options.audio.playback);
         assert!(!form.remote_desktop_session_options.audio.capture);
         assert!(!form.remote_desktop_session_options.display.use_all_monitors);
+        assert_eq!(
+            form.remote_desktop_session_options.vnc.security_policy,
+            RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption
+        );
+        assert_eq!(
+            form.remote_desktop_session_options.vnc.session_mode,
+            RemoteDesktopVncSessionMode::Shared
+        );
+        assert_eq!(
+            form.remote_desktop_session_options.vnc.image_quality,
+            RemoteDesktopVncImageQuality::Balanced
+        );
+        assert_eq!(
+            form.remote_desktop_session_options.vnc.compression,
+            RemoteDesktopVncCompression::Balanced
+        );
     }
 
     #[test]
@@ -1282,6 +1339,27 @@ mod tests {
         assert!(options.audio.playback);
         assert!(!options.audio.capture);
         assert!(!options.display.use_all_monitors);
+    }
+
+    #[test]
+    fn vnc_preference_selection_changes_only_the_selected_policy() {
+        let mut options = RemoteDesktopVncOptions::default();
+
+        apply_remote_desktop_vnc_preference(
+            &mut options,
+            RemoteDesktopVncPreference::Security(RemoteDesktopVncSecurityPolicy::AllowLegacy),
+        );
+
+        assert!(remote_desktop_vnc_preference_selected(
+            &options,
+            RemoteDesktopVncPreference::Security(RemoteDesktopVncSecurityPolicy::AllowLegacy)
+        ));
+        assert_eq!(options.session_mode, RemoteDesktopVncSessionMode::Shared);
+        assert_eq!(
+            options.image_quality,
+            RemoteDesktopVncImageQuality::Balanced
+        );
+        assert_eq!(options.compression, RemoteDesktopVncCompression::Balanced);
     }
 
     #[test]

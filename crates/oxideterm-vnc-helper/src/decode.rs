@@ -3,16 +3,163 @@
 
 use super::*;
 
+const MAX_VNC_RECTS_PER_UPDATE: usize = 4096;
+const MAX_VNC_UPDATE_DECODED_BYTES: usize = MAX_VNC_FRAME_BYTES;
+
 pub(super) struct VncDecodeState {
     zrle_decompressor: Decompress,
+    tight: VncTightState,
+    h264: Option<VncH264State>,
+}
+
+#[derive(Default)]
+struct VncFramebufferUpdateBudget {
+    rectangles: usize,
+    decoded_bytes: usize,
+}
+
+impl VncFramebufferUpdateBudget {
+    fn consume(&mut self, encoding: i32, rect: RfbRect) -> Result<(), String> {
+        self.rectangles = self
+            .rectangles
+            .checked_add(1)
+            .ok_or_else(|| "VNC framebuffer rectangle count overflowed.".to_string())?;
+        if self.rectangles > MAX_VNC_RECTS_PER_UPDATE {
+            return Err(format!(
+                "VNC framebuffer update exceeds the {MAX_VNC_RECTS_PER_UPDATE}-rectangle limit."
+            ));
+        }
+        if is_vnc_pixel_encoding(encoding) {
+            self.decoded_bytes = self
+                .decoded_bytes
+                .checked_add(rect_byte_len(rect)?)
+                .ok_or_else(|| "VNC framebuffer update byte budget overflowed.".to_string())?;
+            if self.decoded_bytes > MAX_VNC_UPDATE_DECODED_BYTES {
+                return Err(format!(
+                    "VNC framebuffer update exceeds the {MAX_VNC_UPDATE_DECODED_BYTES}-byte decoded limit."
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_vnc_pixel_encoding(encoding: i32) -> bool {
+    matches!(
+        encoding,
+        VNC_ENCODING_RAW
+            | VNC_ENCODING_COPY_RECT
+            | VNC_ENCODING_HEXTILE
+            | VNC_ENCODING_TIGHT
+            | VNC_ENCODING_ZRLE
+            | VNC_ENCODING_OPEN_H264
+            | VNC_ENCODING_CURSOR
+            | VNC_ENCODING_X_CURSOR
+    )
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn framebuffer_update_budget_rejects_rectangle_and_aggregate_limits() {
+        let tiny = RfbRect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        };
+        let mut rectangle_budget = VncFramebufferUpdateBudget::default();
+        for _ in 0..MAX_VNC_RECTS_PER_UPDATE {
+            rectangle_budget
+                .consume(VNC_ENCODING_COPY_RECT, tiny)
+                .unwrap();
+        }
+        assert!(
+            rectangle_budget
+                .consume(VNC_ENCODING_COPY_RECT, tiny)
+                .unwrap_err()
+                .contains("rectangle limit")
+        );
+
+        let large = RfbRect {
+            x: 0,
+            y: 0,
+            width: 4096,
+            height: 4096,
+        };
+        let mut byte_budget = VncFramebufferUpdateBudget::default();
+        byte_budget.consume(VNC_ENCODING_RAW, large).unwrap();
+        byte_budget.consume(VNC_ENCODING_RAW, large).unwrap();
+        assert!(
+            byte_budget
+                .consume(VNC_ENCODING_RAW, large)
+                .unwrap_err()
+                .contains("decoded limit")
+        );
+
+        let mut cursor_budget = VncFramebufferUpdateBudget::default();
+        cursor_budget.consume(VNC_ENCODING_CURSOR, large).unwrap();
+        cursor_budget.consume(VNC_ENCODING_X_CURSOR, large).unwrap();
+        assert!(
+            cursor_budget
+                .consume(VNC_ENCODING_CURSOR, large)
+                .unwrap_err()
+                .contains("decoded limit")
+        );
+    }
+
+    #[test]
+    fn unknown_wire_count_can_end_early_with_last_rect() {
+        let mut wire = vec![0];
+        push_be_u16(&mut wire, u16::MAX);
+        wire.extend_from_slice(&[0; 8]);
+        push_be_i32(&mut wire, VNC_ENCODING_LAST_RECT);
+
+        let event = read_framebuffer_update(&mut Cursor::new(wire), &mut VncDecodeState::default())
+            .unwrap();
+        assert_eq!(
+            event,
+            VncServerEvent::Batch(vec![VncServerEvent::ObservedCapability(
+                VncObservedCapability::LastRect
+            )])
+        );
+    }
+
+    #[test]
+    fn unknown_wire_count_without_last_rect_is_bounded() {
+        let mut wire = vec![0];
+        push_be_u16(&mut wire, u16::MAX);
+        for _ in 0..MAX_VNC_RECTS_PER_UPDATE {
+            wire.extend_from_slice(&[0; 8]);
+            push_be_i32(&mut wire, VNC_ENCODING_DESKTOP_SIZE);
+        }
+
+        assert!(
+            read_framebuffer_update(&mut Cursor::new(wire), &mut VncDecodeState::default())
+                .unwrap_err()
+                .contains("LastRect")
+        );
+    }
 }
 
 impl Default for VncDecodeState {
     fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl VncDecodeState {
+    pub(super) fn new(h264: Option<VncH264State>) -> Self {
         Self {
             // ZRLE uses one zlib stream object for the lifetime of the RFB
             // connection, so keep the inflater in reader state.
             zrle_decompressor: Decompress::new(true),
+            tight: VncTightState::default(),
+            h264,
         }
     }
 }
@@ -89,6 +236,13 @@ pub(super) fn vnc_server_event_summary(event: &VncServerEvent) -> VncServerEvent
             dirty_pixels: u64::from(*width) * u64::from(*height),
             side_events: 0,
         },
+        VncServerEvent::ExtendedDesktopSize(update) if update.applies_layout() => {
+            VncServerEventSummary {
+                dirty_rects: 1,
+                dirty_pixels: u64::from(update.layout.width) * u64::from(update.layout.height),
+                side_events: 1,
+            }
+        }
         VncServerEvent::RawImage(rect, _) | VncServerEvent::CopyRect { dst: rect, .. } => {
             VncServerEventSummary {
                 dirty_rects: 1,
@@ -97,8 +251,18 @@ pub(super) fn vnc_server_event_summary(event: &VncServerEvent) -> VncServerEvent
             }
         }
         VncServerEvent::ClipboardText(_)
+        | VncServerEvent::ClipboardExtended(_)
         | VncServerEvent::CursorShape(_)
-        | VncServerEvent::CursorHidden => VncServerEventSummary {
+        | VncServerEvent::CursorHidden
+        | VncServerEvent::ExtendedDesktopSize(_)
+        | VncServerEvent::QemuAudioCapability
+        | VncServerEvent::QemuAudio(_)
+        | VncServerEvent::QemuExtendedKeyEvents
+        | VncServerEvent::ExtendedMouseButtons
+        | VncServerEvent::LockKeys(_)
+        | VncServerEvent::ObservedCapability(_)
+        | VncServerEvent::ServerFence(_)
+        | VncServerEvent::EndOfContinuousUpdates => VncServerEventSummary {
             dirty_rects: 0,
             dirty_pixels: 0,
             side_events: 1,
@@ -127,12 +291,11 @@ pub(super) fn rfb_rect_pixels(rect: RfbRect) -> u64 {
     u64::from(rect.width) * u64::from(rect.height)
 }
 
-pub(super) fn read_vnc_event(
-    reader: &mut TcpStream,
+pub(super) fn read_vnc_event_after_type(
+    reader: &mut impl Read,
     decode_state: &mut VncDecodeState,
+    message_type: u8,
 ) -> Result<VncServerEvent, String> {
-    let message_type =
-        read_u8(reader).map_err(|error| format!("VNC server message read failed: {error}"))?;
     match message_type {
         0 => read_framebuffer_update(reader, decode_state),
         1 => {
@@ -140,22 +303,43 @@ pub(super) fn read_vnc_event(
             Ok(VncServerEvent::Noop)
         }
         2 => Ok(VncServerEvent::Noop),
-        3 => read_server_cut_text(reader).map(VncServerEvent::ClipboardText),
+        3 => match read_server_cut_text(reader)? {
+            VncClipboardMessage::Legacy(text) => Ok(VncServerEvent::ClipboardText(text)),
+            VncClipboardMessage::Extended(message) => {
+                Ok(VncServerEvent::ClipboardExtended(message))
+            }
+        },
+        150 => Ok(VncServerEvent::EndOfContinuousUpdates),
+        248 => read_server_fence(reader).map(VncServerEvent::ServerFence),
+        255 => read_qemu_audio_server_message(reader).map(VncServerEvent::QemuAudio),
         other => Err(format!("Unsupported VNC server message type {other}.")),
     }
 }
 
 pub(super) fn read_framebuffer_update(
-    reader: &mut TcpStream,
+    reader: &mut impl Read,
     decode_state: &mut VncDecodeState,
 ) -> Result<VncServerEvent, String> {
     let _padding =
         read_u8(reader).map_err(|error| format!("VNC framebuffer padding read failed: {error}"))?;
     let rect_count = read_be_u16(reader)
         .map_err(|error| format!("VNC framebuffer rect count read failed: {error}"))?;
-    let mut events = Vec::with_capacity(rect_count as usize);
+    let count_is_unknown = rect_count == u16::MAX;
+    if !count_is_unknown && usize::from(rect_count) > MAX_VNC_RECTS_PER_UPDATE {
+        return Err(format!(
+            "VNC framebuffer update exceeds the {MAX_VNC_RECTS_PER_UPDATE}-rectangle limit."
+        ));
+    }
+    let actual_limit = if count_is_unknown {
+        MAX_VNC_RECTS_PER_UPDATE
+    } else {
+        usize::from(rect_count)
+    };
+    let mut events = Vec::with_capacity(actual_limit);
+    let mut budget = VncFramebufferUpdateBudget::default();
+    let mut found_last_rect = false;
 
-    for _ in 0..rect_count {
+    for _ in 0..actual_limit {
         let header = read_exact_array::<12, _>(reader)
             .map_err(|error| format!("VNC framebuffer rect header read failed: {error}"))?;
         let rect = RfbRect {
@@ -165,6 +349,7 @@ pub(super) fn read_framebuffer_update(
             height: be_u16(&header[6..8]),
         };
         let encoding = be_i32(&header[8..12]);
+        budget.consume(encoding, rect)?;
         match encoding {
             VNC_ENCODING_RAW => {
                 let byte_len = rect_byte_len(rect)?;
@@ -187,11 +372,35 @@ pub(super) fn read_framebuffer_update(
                     read_hextile_rect(reader, rect)?,
                 ));
             }
+            VNC_ENCODING_TIGHT => {
+                let tight = read_tight_rect(reader, rect, &mut decode_state.tight)?;
+                events.push(VncServerEvent::ObservedCapability(
+                    VncObservedCapability::Tight,
+                ));
+                if tight.used_jpeg {
+                    events.push(VncServerEvent::ObservedCapability(
+                        VncObservedCapability::Jpeg,
+                    ));
+                }
+                events.push(VncServerEvent::RawImage(rect, tight.bgra));
+            }
             VNC_ENCODING_ZRLE => {
                 events.push(VncServerEvent::RawImage(
                     rect,
                     read_zrle_rect(reader, rect, decode_state)?,
                 ));
+            }
+            VNC_ENCODING_OPEN_H264 => {
+                let h264 = decode_state.h264.as_mut().ok_or_else(|| {
+                    "VNC server selected Open H.264 without an available decoder.".to_string()
+                })?;
+                let decoded = h264.decode_rectangle(reader, rect)?;
+                events.push(VncServerEvent::ObservedCapability(
+                    VncObservedCapability::H264,
+                ));
+                if let Some(bgra) = decoded {
+                    events.push(VncServerEvent::RawImage(rect, bgra));
+                }
             }
             VNC_ENCODING_DESKTOP_SIZE => {
                 events.push(VncServerEvent::SetResolution {
@@ -199,20 +408,74 @@ pub(super) fn read_framebuffer_update(
                     height: rect.height,
                 });
             }
+            VNC_ENCODING_EXTENDED_DESKTOP_SIZE => {
+                events.push(VncServerEvent::ExtendedDesktopSize(
+                    read_extended_desktop_size(reader, rect)?,
+                ));
+            }
             VNC_ENCODING_CURSOR => {
                 events.push(read_rich_cursor(reader, rect)?);
             }
             VNC_ENCODING_X_CURSOR => {
                 events.push(read_x_cursor(reader, rect)?);
             }
+            VNC_ENCODING_QEMU_AUDIO => {
+                require_empty_vnc_extension_rect(rect, "QEMU Audio")?;
+                events.push(VncServerEvent::QemuAudioCapability);
+            }
+            VNC_ENCODING_QEMU_EXTENDED_KEY_EVENT => {
+                require_empty_vnc_extension_rect(rect, "QEMU extended key event")?;
+                events.push(VncServerEvent::QemuExtendedKeyEvents);
+            }
+            VNC_ENCODING_QEMU_LED_STATE => {
+                let state = read_u8(reader)
+                    .map_err(|error| format!("VNC QEMU LED state read failed: {error}"))?;
+                events.push(VncServerEvent::LockKeys(vnc_lock_keys_from_bits(state)));
+            }
+            VNC_ENCODING_VMWARE_LED_STATE => {
+                let state = read_be_u32(reader)
+                    .map_err(|error| format!("VNC VMware LED state read failed: {error}"))?;
+                events.push(VncServerEvent::LockKeys(vnc_lock_keys_from_bits(
+                    state as u8,
+                )));
+            }
+            VNC_ENCODING_EXTENDED_MOUSE_BUTTONS => {
+                require_empty_vnc_extension_rect(rect, "extended mouse buttons")?;
+                events.push(VncServerEvent::ExtendedMouseButtons);
+            }
+            VNC_ENCODING_LAST_RECT => {
+                events.push(VncServerEvent::ObservedCapability(
+                    VncObservedCapability::LastRect,
+                ));
+                found_last_rect = true;
+                break;
+            }
             other => return Err(format!("Unsupported VNC rectangle encoding {other}.")),
         }
+    }
+    if count_is_unknown && !found_last_rect {
+        return Err(format!(
+            "VNC framebuffer update with an unknown rectangle count did not send LastRect within {MAX_VNC_RECTS_PER_UPDATE} rectangles."
+        ));
     }
 
     Ok(VncServerEvent::Batch(events))
 }
 
-pub(super) fn skip_color_map_entries(reader: &mut TcpStream) -> Result<(), String> {
+pub(super) fn require_empty_vnc_extension_rect(
+    rect: RfbRect,
+    extension_name: &str,
+) -> Result<(), String> {
+    if rect.width == 0 && rect.height == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "VNC {extension_name} capability rectangle is not empty."
+        ))
+    }
+}
+
+pub(super) fn skip_color_map_entries(reader: &mut impl Read) -> Result<(), String> {
     let _padding =
         read_u8(reader).map_err(|error| format!("VNC color-map padding read failed: {error}"))?;
     let _first = read_be_u16(reader)

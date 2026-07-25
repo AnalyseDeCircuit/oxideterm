@@ -272,10 +272,11 @@ async fn wait_for_rdp_authentication(
             Some(RdpInputEvent::Authenticate {
                 challenge_id,
                 sha256_fingerprint,
-                mut username,
+                username,
                 password,
                 mut domain,
             }) => {
+                let mut username = username.unwrap_or_default();
                 if challenge_id != certificate.challenge_id
                     || sha256_fingerprint != certificate.sha256_fingerprint
                 {
@@ -287,6 +288,13 @@ async fn wait_for_rdp_authentication(
                         "RDP certificate challenge no longer matches the active TLS stream"
                     ));
                 }
+                let Some(password) = password else {
+                    username.zeroize();
+                    if let Some(domain) = domain.as_mut() {
+                        domain.zeroize();
+                    }
+                    return Err(connector::general_err!("RDP credentials are incomplete"));
+                };
                 if username.trim().is_empty() || password.is_empty() {
                     username.zeroize();
                     if let Some(domain) = domain.as_mut() {
@@ -330,7 +338,10 @@ fn rdp_server_certificate(
 
     Ok(oxideterm_remote_desktop::RemoteDesktopServerCertificate {
         challenge_id: uuid::Uuid::new_v4().to_string(),
+        protocol: RemoteDesktopProtocol::Rdp,
         endpoint: RemoteDesktopEndpoint::new(destination.host(), destination.port()),
+        identity_kind: oxideterm_remote_desktop::RemoteDesktopServerIdentityKind::X509Certificate,
+        security_method: "tls-credssp".to_string(),
         sha256_fingerprint: fingerprint,
         // native-tls exposes the authenticated certificate bytes but no
         // portable subject/validity parser. The fingerprint remains the

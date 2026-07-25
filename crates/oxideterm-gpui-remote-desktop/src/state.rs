@@ -10,10 +10,10 @@ use std::{
 use gpui::{DevicePixels, DynamicTexture, RenderImage, size};
 use image::{Frame as ImageFrame, RgbaImage};
 use oxideterm_remote_desktop::{
-    RemoteDesktopCursorShape, RemoteDesktopErrorCategory, RemoteDesktopFrame,
-    RemoteDesktopFrameCompression, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
-    RemoteDesktopHelperEvent, RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionStatus,
-    RemoteDesktopSize,
+    NegotiatedCapabilities, RemoteDesktopCursorShape, RemoteDesktopErrorCategory,
+    RemoteDesktopFrame, RemoteDesktopFrameCompression, RemoteDesktopFrameFormat,
+    RemoteDesktopFrameUpdate, RemoteDesktopHelperEvent, RemoteDesktopProtocol, RemoteDesktopRect,
+    RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
 
 const REMOTE_DESKTOP_MAX_TEXTURE_UPLOAD_RECTS: usize = 64;
@@ -51,6 +51,7 @@ pub struct RemoteDesktopViewSnapshot {
     pub has_frame: bool,
     pub read_only: bool,
     pub pending_resize: Option<RemoteDesktopSize>,
+    pub negotiated_capabilities: Option<NegotiatedCapabilities>,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +71,7 @@ pub struct RemoteDesktopViewState {
     retired_textures: Vec<Arc<DynamicTexture>>,
     read_only: bool,
     pending_resize: Option<RemoteDesktopSize>,
+    negotiated_capabilities: Option<NegotiatedCapabilities>,
 }
 
 impl PartialEq for RemoteDesktopViewState {
@@ -89,6 +91,7 @@ impl PartialEq for RemoteDesktopViewState {
                 == other.cursor_image.as_ref().map(|image| image.id)
             && self.read_only == other.read_only
             && self.pending_resize == other.pending_resize
+            && self.negotiated_capabilities == other.negotiated_capabilities
     }
 }
 
@@ -363,6 +366,7 @@ impl RemoteDesktopViewState {
             retired_textures: Vec::new(),
             read_only: false,
             pending_resize: None,
+            negotiated_capabilities: None,
         }
     }
 
@@ -374,6 +378,14 @@ impl RemoteDesktopViewState {
     pub fn apply_event(&mut self, event: RemoteDesktopHelperEvent) {
         match event {
             RemoteDesktopHelperEvent::Status { status, message } => {
+                if matches!(
+                    status,
+                    RemoteDesktopSessionStatus::Connecting
+                        | RemoteDesktopSessionStatus::Reconnecting
+                ) {
+                    // A new transport negotiation must not display the previous server report.
+                    self.negotiated_capabilities = None;
+                }
                 self.status = status;
                 self.message = message;
                 self.error_category = None;
@@ -384,6 +396,10 @@ impl RemoteDesktopViewState {
                 self.message = None;
                 self.error_category = None;
                 self.pending_resize = None;
+            }
+            RemoteDesktopHelperEvent::CapabilitiesNegotiated { capabilities } => {
+                // Negotiated support is session-specific and may change after reconnect.
+                self.negotiated_capabilities = Some(capabilities);
             }
             RemoteDesktopHelperEvent::Frame { frame } => {
                 self.status = RemoteDesktopSessionStatus::Connected;
@@ -572,6 +588,7 @@ impl RemoteDesktopViewState {
             has_frame: self.frame_image.is_some(),
             read_only: self.read_only,
             pending_resize: self.pending_resize,
+            negotiated_capabilities: self.negotiated_capabilities.clone(),
         }
     }
 
@@ -981,8 +998,8 @@ fn is_full_frame_rect(size: RemoteDesktopSize, rect: RemoteDesktopRect) -> bool 
 #[cfg(test)]
 mod tests {
     use oxideterm_remote_desktop::{
-        RemoteDesktopCursorShape, RemoteDesktopFrame, RemoteDesktopFrameFormat,
-        RemoteDesktopFrameUpdate, RemoteDesktopRect,
+        NegotiatedCapabilityStatus, RemoteDesktopCursorShape, RemoteDesktopFrame,
+        RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopRect,
     };
 
     use super::*;
@@ -1068,6 +1085,26 @@ mod tests {
             })
         );
         assert!(!snapshot.has_frame);
+    }
+
+    #[test]
+    fn negotiated_capabilities_are_exposed_by_the_view_snapshot() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Vnc);
+        let capabilities = NegotiatedCapabilities {
+            security_methods: vec!["TLS-X509".to_string()],
+            selected_security_method: Some("TLS-X509".to_string()),
+            encrypted: NegotiatedCapabilityStatus::Supported,
+            peer_identity_verified: NegotiatedCapabilityStatus::Supported,
+            resize: NegotiatedCapabilityStatus::Supported,
+            tight: NegotiatedCapabilityStatus::Supported,
+            ..NegotiatedCapabilities::default()
+        };
+
+        state.apply_event(RemoteDesktopHelperEvent::CapabilitiesNegotiated {
+            capabilities: capabilities.clone(),
+        });
+
+        assert_eq!(state.snapshot().negotiated_capabilities, Some(capabilities));
     }
 
     #[test]

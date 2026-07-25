@@ -7,5 +7,15 @@ version.workspace = true
 [dependencies]
 des = "0.9"
 flate2 = "1.1.9"
+image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
+ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "82c4acf89a173d38442f859e18963c39350ee74b" }
+native-tls = { version = "0.2", features = ["vendored"] }
+openh264 = { version = "0.9", default-features = false, features = ["libloading"] }
+oxideterm-pcm-audio = { path = "../oxideterm-pcm-audio" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+sha2.workspace = true
+uuid.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -6,21 +6,36 @@ use std::{fmt, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopFrameUpdate,
-    RemoteDesktopMonitorLayout, RemoteDesktopProtocol, RemoteDesktopSecret,
-    RemoteDesktopSessionOptions, RemoteDesktopSessionStatus, RemoteDesktopSize,
+    NegotiatedCapabilities, RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFrame,
+    RemoteDesktopFrameUpdate, RemoteDesktopMonitorLayout, RemoteDesktopProtocol,
+    RemoteDesktopSecret, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
+    RemoteDesktopSize,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktopServerCertificate {
     pub challenge_id: String,
+    #[serde(default)]
+    pub protocol: RemoteDesktopProtocol,
     pub endpoint: RemoteDesktopEndpoint,
+    #[serde(default)]
+    pub identity_kind: RemoteDesktopServerIdentityKind,
+    pub security_method: String,
     pub sha256_fingerprint: String,
     pub subject: Option<String>,
     pub issuer: Option<String>,
     pub valid_from: Option<String>,
     pub valid_to: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopServerIdentityKind {
+    #[default]
+    X509Certificate,
+    AnonymousTls,
+    InsecureLegacy,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -131,6 +146,10 @@ pub enum RemoteDesktopHelperRequest {
     StartConnect {
         protocol: RemoteDesktopProtocol,
         endpoint: RemoteDesktopEndpoint,
+        /// Indicates whether the UI can answer a later password challenge
+        /// without sending any credential material during preflight.
+        #[serde(default)]
+        password_available: bool,
         size: RemoteDesktopSize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale_factor: Option<u32>,
@@ -154,8 +173,8 @@ pub enum RemoteDesktopHelperRequest {
     Authenticate {
         challenge_id: String,
         sha256_fingerprint: String,
-        username: String,
-        password: RemoteDesktopSecret,
+        username: Option<String>,
+        password: Option<RemoteDesktopSecret>,
         domain: Option<String>,
     },
     Resize {
@@ -212,6 +231,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
             Self::StartConnect {
                 protocol,
                 endpoint,
+                password_available,
                 size,
                 scale_factor,
                 read_only,
@@ -221,6 +241,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .debug_struct("StartConnect")
                 .field("protocol", protocol)
                 .field("endpoint", endpoint)
+                .field("password_available", password_available)
                 .field("size", size)
                 .field("scale_factor", scale_factor)
                 .field("read_only", read_only)
@@ -251,7 +272,7 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 challenge_id,
                 sha256_fingerprint,
                 username,
-                password: _,
+                password,
                 domain,
             } => formatter
                 .debug_struct("Authenticate")
@@ -259,9 +280,11 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("sha256_fingerprint", sha256_fingerprint)
                 .field(
                     "username",
-                    &format_args!("<redacted:{}>", username.chars().count()),
+                    &username
+                        .as_ref()
+                        .map(|value| format!("<redacted:{}>", value.chars().count())),
                 )
-                .field("password", &"[redacted secret]")
+                .field("password", &password.as_ref().map(|_| "[redacted secret]"))
                 .field("domain", &domain.as_ref().map(|_| "<present>"))
                 .finish(),
             Self::Resize { size, scale_factor } => formatter
@@ -340,6 +363,9 @@ pub enum RemoteDesktopHelperEvent {
     Connected {
         size: RemoteDesktopSize,
     },
+    CapabilitiesNegotiated {
+        capabilities: NegotiatedCapabilities,
+    },
     ServerCertificate {
         certificate: RemoteDesktopServerCertificate,
     },
@@ -399,10 +425,17 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .debug_struct("Connected")
                 .field("size", size)
                 .finish(),
+            Self::CapabilitiesNegotiated { capabilities } => formatter
+                .debug_struct("CapabilitiesNegotiated")
+                .field("capabilities", capabilities)
+                .finish(),
             Self::ServerCertificate { certificate } => formatter
                 .debug_struct("ServerCertificate")
                 .field("challenge_id", &certificate.challenge_id)
+                .field("protocol", &certificate.protocol)
                 .field("endpoint", &certificate.endpoint)
+                .field("identity_kind", &certificate.identity_kind)
+                .field("security_method", &certificate.security_method)
                 .field("sha256_fingerprint", &certificate.sha256_fingerprint)
                 .field("subject", &certificate.subject)
                 .field("issuer", &certificate.issuer)
@@ -489,6 +522,7 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NegotiatedCapabilityStatus;
 
     #[test]
     fn connect_debug_redacts_secret_values() {
@@ -519,6 +553,7 @@ mod tests {
         let request = RemoteDesktopHelperRequest::StartConnect {
             protocol: RemoteDesktopProtocol::Rdp,
             endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
+            password_available: true,
             size: RemoteDesktopSize {
                 width: 1280,
                 height: 720,
@@ -532,8 +567,9 @@ mod tests {
         let encoded = serde_json::to_string(&request).unwrap();
 
         assert!(!encoded.contains("username"));
-        assert!(!encoded.contains("password"));
         assert!(!encoded.contains("domain"));
+        assert!(encoded.contains("\"passwordAvailable\":true"));
+        assert!(!encoded.contains("super-secret"));
     }
 
     #[test]
@@ -541,8 +577,8 @@ mod tests {
         let request = RemoteDesktopHelperRequest::Authenticate {
             challenge_id: "challenge".to_string(),
             sha256_fingerprint: "AA:BB".to_string(),
-            username: "admin".to_string(),
-            password: RemoteDesktopSecret::from("super-secret"),
+            username: Some("admin".to_string()),
+            password: Some(RemoteDesktopSecret::from("super-secret")),
             domain: Some("corp".to_string()),
         };
 
@@ -675,6 +711,32 @@ mod tests {
         let decoded: RemoteDesktopHelperEvent = serde_json::from_str(&encoded).unwrap();
 
         assert!(encoded.contains("\"category\":\"legacy-security\""));
+        assert_eq!(decoded, event);
+    }
+
+    #[test]
+    fn negotiated_capabilities_round_trip_server_report() {
+        let event = RemoteDesktopHelperEvent::CapabilitiesNegotiated {
+            capabilities: NegotiatedCapabilities {
+                security_methods: vec!["VeNCrypt".to_string(), "TLS-X509".to_string()],
+                selected_security_method: Some("TLS-X509".to_string()),
+                encrypted: NegotiatedCapabilityStatus::Supported,
+                peer_identity_verified: NegotiatedCapabilityStatus::Supported,
+                resize: NegotiatedCapabilityStatus::Supported,
+                extended_clipboard: NegotiatedCapabilityStatus::Supported,
+                extended_clipboard_formats: vec!["text/plain;charset=utf-8".to_string()],
+                tight: NegotiatedCapabilityStatus::Supported,
+                jpeg: NegotiatedCapabilityStatus::Supported,
+                fence: NegotiatedCapabilityStatus::Supported,
+                ..NegotiatedCapabilities::default()
+            },
+        };
+
+        let encoded = serde_json::to_string(&event).unwrap();
+        let decoded: RemoteDesktopHelperEvent = serde_json::from_str(&encoded).unwrap();
+
+        assert!(encoded.contains("\"type\":\"capabilitiesNegotiated\""));
+        assert!(encoded.contains("\"peerIdentityVerified\":\"supported\""));
         assert_eq!(decoded, event);
     }
 

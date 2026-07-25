@@ -5,7 +5,10 @@ use oxideterm_gpui_ui::{
     checkbox::{CheckboxOptions, checkbox_with},
     confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog},
 };
-use oxideterm_remote_desktop::{RemoteDesktopCertificateStore, RemoteDesktopServerCertificate};
+use oxideterm_remote_desktop::{
+    RemoteDesktopCertificateStore, RemoteDesktopServerCertificate, RemoteDesktopServerIdentityKind,
+    RemoteDesktopVncSecurityPolicy,
+};
 
 use super::*;
 
@@ -31,14 +34,45 @@ impl WorkspaceApp {
             RemoteDesktopCertificateStore::path_next_to_settings(self.settings_store.path());
         let persisted_fingerprint = RemoteDesktopCertificateStore::load(store_path)
             .ok()
-            .and_then(|store| store.fingerprint(&certificate.endpoint).map(str::to_owned));
+            .and_then(|store| {
+                store
+                    .fingerprint(certificate.protocol, &certificate.endpoint)
+                    .map(str::to_owned)
+            });
         let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
             return;
         };
-        if certificate.endpoint != session.profile.endpoint {
+        if certificate.endpoint != session.profile.endpoint
+            || certificate.protocol != session.profile.protocol
+        {
             // Never release credentials for a certificate challenge bound to a
             // different endpoint than the session the user opened.
             if let Some(sender) = session.request_tx.as_ref() {
+                let _ = sender.send(RemoteDesktopHelperRequest::Close);
+            }
+            return;
+        }
+        if certificate.identity_kind != RemoteDesktopServerIdentityKind::X509Certificate {
+            let policy = session.profile.session_options.vnc.security_policy;
+            let explicitly_allowed = match certificate.identity_kind {
+                RemoteDesktopServerIdentityKind::AnonymousTls => {
+                    policy != RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption
+                }
+                RemoteDesktopServerIdentityKind::InsecureLegacy => {
+                    policy == RemoteDesktopVncSecurityPolicy::AllowLegacy
+                }
+                RemoteDesktopServerIdentityKind::X509Certificate => true,
+            };
+            if explicitly_allowed {
+                // Weak transport modes still require an explicit per-session
+                // acknowledgement before the helper can receive credentials.
+                session.certificate_challenge = Some(RemoteDesktopCertificateChallengeState {
+                    certificate,
+                    expected_fingerprint: None,
+                    remember: false,
+                });
+                cx.notify();
+            } else if let Some(sender) = session.request_tx.as_ref() {
                 let _ = sender.send(RemoteDesktopHelperRequest::Close);
             }
             return;
@@ -105,12 +139,15 @@ impl WorkspaceApp {
             return;
         }
 
-        if challenge.remember {
+        let persistent_identity =
+            challenge.certificate.identity_kind == RemoteDesktopServerIdentityKind::X509Certificate;
+        if persistent_identity && challenge.remember {
             let store_path =
                 RemoteDesktopCertificateStore::path_next_to_settings(self.settings_store.path());
             let persist_result =
                 RemoteDesktopCertificateStore::load(store_path).and_then(|mut store| {
                     store.trust(
+                        challenge.certificate.protocol,
                         &challenge.certificate.endpoint,
                         challenge.certificate.sha256_fingerprint.clone(),
                     )
@@ -130,14 +167,14 @@ impl WorkspaceApp {
         let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
             return;
         };
-        if !challenge.remember {
+        if persistent_identity && !challenge.remember {
             session.session_trusted_certificate_fingerprint =
                 Some(challenge.certificate.sha256_fingerprint.clone());
         }
         let request = remote_desktop_authenticate_request(session, &challenge.certificate);
         session.certificate_challenge = None;
         if let Some(sender) = session.request_tx.as_ref() {
-            let _ = sender.send(request.unwrap_or(RemoteDesktopHelperRequest::Close));
+            let _ = sender.send(request);
         }
         cx.notify();
     }
@@ -176,6 +213,10 @@ impl WorkspaceApp {
         challenge: RemoteDesktopCertificateChallengeState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if challenge.certificate.identity_kind != RemoteDesktopServerIdentityKind::X509Certificate {
+            return self
+                .render_remote_desktop_weak_security_dialog(tab_id, generation, challenge, cx);
+        }
         let certificate_changed = challenge.expected_fingerprint.is_some();
         let title_key = if certificate_changed {
             "remote_desktop.certificate_changed_title"
@@ -299,19 +340,104 @@ impl WorkspaceApp {
             }),
         )
     }
+
+    fn render_remote_desktop_weak_security_dialog(
+        &self,
+        tab_id: TabId,
+        generation: u64,
+        challenge: RemoteDesktopCertificateChallengeState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (title_key, description_key) = match challenge.certificate.identity_kind {
+            RemoteDesktopServerIdentityKind::AnonymousTls => (
+                "remote_desktop.vnc_anonymous_tls_title",
+                "remote_desktop.vnc_anonymous_tls_description",
+            ),
+            RemoteDesktopServerIdentityKind::InsecureLegacy => (
+                "remote_desktop.vnc_legacy_security_title",
+                "remote_desktop.vnc_legacy_security_description",
+            ),
+            RemoteDesktopServerIdentityKind::X509Certificate => {
+                unreachable!("X.509 certificate challenges use the certificate trust dialog")
+            }
+        };
+        let endpoint = challenge.certificate.endpoint.format_authority();
+        let endpoint_label = self
+            .i18n
+            .t("remote_desktop.certificate_endpoint")
+            .replace("{{endpoint}}", &endpoint);
+        let method_label = self
+            .i18n
+            .t("remote_desktop.vnc_security_method")
+            .replace("{{method}}", &challenge.certificate.security_method);
+        let description = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(self.i18n.t(description_key))
+            .child(endpoint_label)
+            .child(method_label)
+            .into_any_element();
+        let challenge_id = challenge.certificate.challenge_id.clone();
+        let fingerprint = challenge.certificate.sha256_fingerprint.clone();
+        let reject_challenge_id = challenge_id.clone();
+
+        confirm_dialog(
+            &self.tokens,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div().child(self.i18n.t(title_key)).into_any_element(),
+                description: Some(description),
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t("remote_desktop.vnc_continue_anyway"))
+                    .into_any_element(),
+            },
+            cx.listener(move |this, _event, _window, cx| {
+                this.reject_remote_desktop_certificate(
+                    tab_id,
+                    generation,
+                    &reject_challenge_id,
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+            cx.listener(move |this, _event, _window, cx| {
+                this.accept_remote_desktop_certificate(
+                    tab_id,
+                    generation,
+                    &challenge_id,
+                    &fingerprint,
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+    }
 }
 
 fn remote_desktop_authenticate_request(
     session: &RemoteDesktopSession,
     certificate: &RemoteDesktopServerCertificate,
-) -> Option<RemoteDesktopHelperRequest> {
-    Some(RemoteDesktopHelperRequest::Authenticate {
+) -> RemoteDesktopHelperRequest {
+    let password = if matches!(
+        certificate.security_method.as_str(),
+        "none" | "tls-none" | "x509-none"
+    ) {
+        None
+    } else {
+        session.password.clone()
+    };
+    RemoteDesktopHelperRequest::Authenticate {
         challenge_id: certificate.challenge_id.clone(),
         sha256_fingerprint: certificate.sha256_fingerprint.clone(),
-        username: session.profile.username.clone()?,
-        password: session.password.clone()?,
+        username: session.profile.username.clone(),
+        password,
         domain: session.profile.domain.clone(),
-    })
+    }
 }
 
 fn send_remote_desktop_authentication(
@@ -321,9 +447,7 @@ fn send_remote_desktop_authentication(
     let Some(sender) = session.request_tx.as_ref() else {
         return;
     };
-    // Missing credentials must terminate the staged handshake instead of
-    // leaving a helper process waiting indefinitely behind the certificate gate.
-    let request = remote_desktop_authenticate_request(session, certificate)
-        .unwrap_or(RemoteDesktopHelperRequest::Close);
-    let _ = sender.send(request);
+    // The helper validates which optional credentials the negotiated security
+    // method requires without receiving them before this identity boundary.
+    let _ = sender.send(remote_desktop_authenticate_request(session, certificate));
 }

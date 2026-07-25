@@ -7934,6 +7934,13 @@ name = "oxideterm-notification-center"
 version = "2.0.11"
 
 [[package]]
+name = "oxideterm-pcm-audio"
+version = "2.0.11"
+dependencies = [
+ "cpal",
+]
+
+[[package]]
 name = "oxideterm-plugin-host-api"
 version = "2.0.11"
 dependencies = [
@@ -8086,6 +8093,7 @@ dependencies = [
  "ironrdp-tls",
  "ironrdp-tokio",
  "native-tls",
+ "oxideterm-pcm-audio",
  "oxideterm-remote-desktop",
  "semver",
  "sha2 0.10.9",
@@ -8352,7 +8360,15 @@ version = "2.0.11"
 dependencies = [
  "des",
  "flate2",
+ "image",
+ "ironrdp-cliprdr-format",
+ "native-tls",
+ "openh264",
+ "oxideterm-pcm-audio",
  "oxideterm-remote-desktop",
+ "sha2 0.10.9",
+ "tempfile",
+ "uuid",
  "zeroize",
 ]
 

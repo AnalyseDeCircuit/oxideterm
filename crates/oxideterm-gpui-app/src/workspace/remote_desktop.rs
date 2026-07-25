@@ -17,14 +17,15 @@ use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
 };
 use oxideterm_remote_desktop::{
-    RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopConnectionProfile,
-    RemoteDesktopEndpoint, RemoteDesktopErrorCategory, RemoteDesktopFrameDeliverySlot,
-    RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState,
-    RemoteDesktopLockKeys, RemoteDesktopMonitor, RemoteDesktopMonitorLayout,
-    RemoteDesktopMonitorOrientation, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
-    RemoteDesktopProtocol, RemoteDesktopProviderManifest, RemoteDesktopSecret,
-    RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta,
-    builtin_preview_provider_registry, builtin_provider_registry,
+    NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
+    RemoteDesktopClipboardFormat, RemoteDesktopConnectionProfile, RemoteDesktopEndpoint,
+    RemoteDesktopErrorCategory, RemoteDesktopFrameDeliverySlot, RemoteDesktopHelperEvent,
+    RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopLockKeys,
+    RemoteDesktopMonitor, RemoteDesktopMonitorLayout, RemoteDesktopMonitorOrientation,
+    RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
+    RemoteDesktopProviderManifest, RemoteDesktopSecret, RemoteDesktopSessionStatus,
+    RemoteDesktopSize, RemoteDesktopWheelDelta, builtin_preview_provider_registry,
+    builtin_provider_registry,
 };
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use tokio::sync::Notify;

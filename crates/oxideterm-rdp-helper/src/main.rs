@@ -187,6 +187,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     let RemoteDesktopHelperRequest::StartConnect {
         protocol,
         endpoint,
+        password_available: _,
         size,
         scale_factor,
         read_only,
@@ -492,8 +493,8 @@ enum RdpInputEvent {
     Authenticate {
         challenge_id: String,
         sha256_fingerprint: String,
-        username: String,
-        password: RemoteDesktopSecret,
+        username: Option<String>,
+        password: Option<RemoteDesktopSecret>,
         domain: Option<String>,
     },
     Resize {

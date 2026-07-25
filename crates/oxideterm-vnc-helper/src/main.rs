@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io::{self, BufRead, Read, Write},
     net::{Shutdown, TcpStream},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU16, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU64, Ordering},
+        mpsc::{Receiver, SyncSender},
     },
     thread,
     time::Duration,
@@ -19,36 +20,26 @@ use des::{
 };
 use flate2::{Decompress, FlushDecompress, Status};
 use oxideterm_remote_desktop::{
+    NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
     RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopErrorCategory,
     RemoteDesktopFakeBackend, RemoteDesktopFrame, RemoteDesktopFrameFormat,
     RemoteDesktopFrameUpdate, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
-    RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopMouseButton,
-    RemoteDesktopMouseButtonState, RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSecret,
-    RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta, read_request_line,
-    run_fake_backend_stdio, write_event_line,
+    RemoteDesktopKey, RemoteDesktopKeyState, RemoteDesktopLockKeys, RemoteDesktopMonitorLayout,
+    RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
+    RemoteDesktopRect, RemoteDesktopSecret, RemoteDesktopServerCertificate,
+    RemoteDesktopServerIdentityKind, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
+    RemoteDesktopSize, RemoteDesktopWheelDelta, read_request_line, run_fake_backend_stdio,
+    write_event_line,
 };
-use zeroize::Zeroizing;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+use zeroize::{Zeroize, Zeroizing};
 
 const VNC_PROTOCOL_VERSION_33: &[u8; 12] = b"RFB 003.003\n";
+const VNC_PROTOCOL_VERSION_37: &[u8; 12] = b"RFB 003.007\n";
 const VNC_PROTOCOL_VERSION_38: &[u8; 12] = b"RFB 003.008\n";
 const VNC_SECURITY_NONE: u8 = 1;
 const VNC_SECURITY_VNC_AUTH: u8 = 2;
-const VNC_ENCODING_RAW: i32 = 0;
-const VNC_ENCODING_COPY_RECT: i32 = 1;
-const VNC_ENCODING_HEXTILE: i32 = 5;
-const VNC_ENCODING_ZRLE: i32 = 16;
-const VNC_ENCODING_DESKTOP_SIZE: i32 = -223;
-const VNC_ENCODING_CURSOR: i32 = -239;
-const VNC_ENCODING_X_CURSOR: i32 = -240;
-const VNC_ADVERTISED_ENCODINGS: [i32; 7] = [
-    VNC_ENCODING_DESKTOP_SIZE,
-    VNC_ENCODING_CURSOR,
-    VNC_ENCODING_X_CURSOR,
-    VNC_ENCODING_COPY_RECT,
-    VNC_ENCODING_ZRLE,
-    VNC_ENCODING_HEXTILE,
-    VNC_ENCODING_RAW,
-];
 const VNC_HEXTILE_TILE_SIZE: u16 = 16;
 const VNC_HEXTILE_RAW: u8 = 1;
 const VNC_HEXTILE_BACKGROUND_SPECIFIED: u8 = 2;
@@ -59,24 +50,34 @@ const VNC_ZRLE_TILE_SIZE: u16 = 64;
 const VNC_TRLE_RAW: u8 = 0;
 const VNC_TRLE_SOLID: u8 = 1;
 const VNC_TRLE_PLAIN_RLE: u8 = 128;
-const VNC_BUTTON_LEFT: u8 = 1;
-const VNC_BUTTON_MIDDLE: u8 = 2;
-const VNC_BUTTON_RIGHT: u8 = 4;
+const VNC_BUTTON_LEFT: u16 = 1;
+const VNC_BUTTON_MIDDLE: u16 = 2;
+const VNC_BUTTON_RIGHT: u16 = 4;
+const VNC_BUTTON_BACK: u16 = 1 << 7;
+const VNC_BUTTON_FORWARD: u16 = 1 << 8;
 const VNC_WHEEL_UP: u8 = 8;
 const VNC_WHEEL_DOWN: u8 = 16;
 const VNC_WHEEL_LEFT: u8 = 32;
 const VNC_WHEEL_RIGHT: u8 = 64;
 const VNC_SCROLL_STEP: f32 = 120.0;
 const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
-const MAX_VNC_FRAME_BYTES: usize =
-    RemoteDesktopSize::MAX_DIMENSION as usize * RemoteDesktopSize::MAX_DIMENSION as usize * 4;
+const MAX_VNC_FRAME_BYTES: usize = 128 * 1024 * 1024;
 
 type SharedEventWriter = Arc<Mutex<io::Stdout>>;
-type SharedVncWriter = Arc<Mutex<TcpStream>>;
+type SharedVncWriter = SyncSender<VncIoCommand>;
 
 struct VncSessionConfig {
     endpoint: RemoteDesktopEndpoint,
-    password: Option<RemoteDesktopSecret>,
+    read_only: bool,
+    session_options: RemoteDesktopSessionOptions,
+    initial_size: RemoteDesktopSize,
+    monitor_layout: RemoteDesktopMonitorLayout,
+    password_available: bool,
+}
+
+enum VncIoCommand {
+    Write(Vec<u8>),
+    Shutdown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -96,6 +97,7 @@ struct VncDiagnostics {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum VncProtocolVersion {
     Rfb003003,
+    Rfb003007,
     Rfb003008,
 }
 
@@ -103,13 +105,10 @@ enum VncProtocolVersion {
 enum VncSecuritySelection {
     None,
     VncAuth,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct VncHandshakeInfo {
-    protocol_version: VncProtocolVersion,
-    security: VncSecuritySelection,
-    legacy_security: bool,
+    TlsNone,
+    TlsVnc,
+    X509None,
+    X509Vnc,
 }
 
 #[derive(Default)]
@@ -147,27 +146,29 @@ impl VncDiagnostics {
 }
 
 impl VncProtocolVersion {
-    fn as_str(self) -> &'static str {
+    fn banner(self) -> &'static [u8; 12] {
         match self {
-            Self::Rfb003003 => "RFB 003.003",
-            Self::Rfb003008 => "RFB 003.008",
+            Self::Rfb003003 => VNC_PROTOCOL_VERSION_33,
+            Self::Rfb003007 => VNC_PROTOCOL_VERSION_37,
+            Self::Rfb003008 => VNC_PROTOCOL_VERSION_38,
         }
     }
 }
 
 impl VncSecuritySelection {
-    fn code(self) -> u8 {
-        match self {
-            Self::None => VNC_SECURITY_NONE,
-            Self::VncAuth => VNC_SECURITY_VNC_AUTH,
-        }
-    }
-
     fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::VncAuth => "vnc-auth",
+            Self::TlsNone => "tls-none",
+            Self::TlsVnc => "tls-vnc",
+            Self::X509None => "x509-none",
+            Self::X509Vnc => "x509-vnc",
         }
+    }
+
+    fn requires_password(self) -> bool {
+        matches!(self, Self::VncAuth | Self::TlsVnc | Self::X509Vnc)
     }
 }
 
@@ -206,21 +207,21 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     let Some(first_request) = read_request_line(reader).map_err(|error| error.to_string())? else {
         return Ok(());
     };
-    let RemoteDesktopHelperRequest::Connect {
+    let RemoteDesktopHelperRequest::StartConnect {
         protocol,
         endpoint,
-        username: _username,
-        password,
-        domain: _domain,
-        size: _size,
+        password_available,
+        size,
         scale_factor: _scale_factor,
         read_only,
+        session_options,
+        monitor_layout,
     } = first_request
     else {
         send_event(
             &writer,
             RemoteDesktopHelperEvent::ConnectionFailure {
-                message: "VNC helper expected an initial connect request.".to_string(),
+                message: "VNC helper expected an initial preflight request.".to_string(),
                 category: Some(RemoteDesktopErrorCategory::Configuration),
             },
         )?;
@@ -238,124 +239,414 @@ fn run_real_vnc_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         return Ok(());
     }
 
-    send_event(
-        &writer,
-        RemoteDesktopHelperEvent::Status {
-            status: RemoteDesktopSessionStatus::Connecting,
-            message: Some("Opening VNC session.".to_string()),
-        },
-    )?;
-
-    let session_config = VncSessionConfig { endpoint, password };
-    let mut reconnect_count = 0_u64;
-    diagnostics.log(format!(
-        "connect attempt reconnects=0 read_only={read_only}"
-    ));
-    let mut connection = match VncConnection::connect(&session_config, writer.clone(), diagnostics)
-    {
-        Ok(connection) => connection,
-        Err(error) => {
-            diagnostics.log(format!(
-                "connect failed reconnects=0 category={:?}",
-                vnc_error_category_from_message(&error)
-            ));
-            send_event(
-                &writer,
-                RemoteDesktopHelperEvent::ConnectionFailure {
-                    category: Some(vnc_error_category_from_message(&error)),
-                    message: error,
-                },
-            )?;
-            return Ok(());
-        }
+    let session_config = VncSessionConfig {
+        endpoint,
+        read_only,
+        session_options,
+        initial_size: size,
+        monitor_layout,
+        password_available,
     };
+    let control = Arc::new(VncSessionControl::default());
+    let (request_tx, request_rx) = std::sync::mpsc::sync_channel(128);
+    let worker_writer = writer.clone();
+    let worker_control = control.clone();
+    let worker = thread::Builder::new()
+        .name("oxideterm-vnc-session".to_string())
+        .spawn(move || {
+            run_vnc_session(
+                session_config,
+                request_rx,
+                worker_writer,
+                diagnostics,
+                worker_control,
+            )
+        })
+        .map_err(|error| format!("VNC session worker start failed: {error}"))?;
 
-    send_event(
-        &writer,
-        RemoteDesktopHelperEvent::Connected {
-            size: RemoteDesktopSize {
-                width: connection.width as u32,
-                height: connection.height as u32,
-            },
-        },
-    )?;
-    diagnostics.log(format!(
-        "connect ok reconnects=0 framebuffer={}x{}",
-        connection.width, connection.height
-    ));
-    connection.start_reader();
-    connection.request_framebuffer_update(false)?;
-
-    let mut input_state = VncInputState::default();
     while let Some(request) = read_request_line(reader).map_err(|error| error.to_string())? {
-        match handle_real_vnc_request(
-            &writer,
-            &mut connection,
-            &mut input_state,
-            request,
-            read_only,
-        )? {
-            VncRequestAction::Continue => {}
-            VncRequestAction::Close => break,
-            VncRequestAction::Reconnect => {
-                send_event(
-                    &writer,
-                    RemoteDesktopHelperEvent::Status {
-                        status: RemoteDesktopSessionStatus::Reconnecting,
-                        message: Some("Reopening VNC session.".to_string()),
-                    },
-                )?;
-                connection.shutdown();
-                input_state = VncInputState::default();
-                reconnect_count = reconnect_count.saturating_add(1);
-                diagnostics.log(format!(
-                    "connect attempt reconnects={reconnect_count} read_only={read_only}"
-                ));
-                connection =
-                    match VncConnection::connect(&session_config, writer.clone(), diagnostics) {
-                        Ok(connection) => connection,
-                        Err(error) => {
-                            diagnostics.log(format!(
-                                "connect failed reconnects={reconnect_count} category={:?}",
-                                vnc_error_category_from_message(&error)
-                            ));
-                            send_event(
-                                &writer,
-                                RemoteDesktopHelperEvent::ConnectionFailure {
-                                    category: Some(vnc_error_category_from_message(&error)),
-                                    message: error,
-                                },
-                            )?;
-                            break;
-                        }
-                    };
-                send_event(
-                    &writer,
-                    RemoteDesktopHelperEvent::Connected {
-                        size: RemoteDesktopSize {
-                            width: connection.width as u32,
-                            height: connection.height as u32,
-                        },
-                    },
-                )?;
-                diagnostics.log(format!(
-                    "connect ok reconnects={reconnect_count} framebuffer={}x{}",
-                    connection.width, connection.height
-                ));
-                connection.start_reader();
-                connection.request_framebuffer_update(false)?;
+        match request {
+            RemoteDesktopHelperRequest::Close => {
+                control.request_close();
+                break;
             }
+            RemoteDesktopHelperRequest::Reconnect => {
+                control.request_reconnect();
+            }
+            request => request_tx.try_send(request).map_err(|error| {
+                format!("VNC session request queue rejected a request: {error}")
+            })?,
+        }
+    }
+    control.request_close();
+    drop(request_tx);
+    worker
+        .join()
+        .map_err(|_| "VNC session worker panicked.".to_string())?
+}
+
+#[derive(Default)]
+struct VncSessionControl {
+    close_requested: AtomicBool,
+    reconnect_requested: AtomicBool,
+    current_attempt: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl VncSessionControl {
+    fn install_attempt(&self, canceled: Arc<AtomicBool>) {
+        if let Ok(mut current) = self.current_attempt.lock() {
+            *current = Some(canceled);
         }
     }
 
-    connection.shutdown();
+    fn clear_attempt(&self) {
+        if let Ok(mut current) = self.current_attempt.lock() {
+            *current = None;
+        }
+    }
+
+    fn cancel_current_attempt(&self) {
+        if let Ok(current) = self.current_attempt.lock()
+            && let Some(canceled) = current.as_ref()
+        {
+            canceled.store(true, Ordering::Release);
+        }
+    }
+
+    fn request_close(&self) {
+        self.close_requested.store(true, Ordering::Release);
+        self.cancel_current_attempt();
+    }
+
+    fn request_reconnect(&self) {
+        self.reconnect_requested.store(true, Ordering::Release);
+        self.cancel_current_attempt();
+    }
+
+    fn take_reconnect(&self) -> bool {
+        self.reconnect_requested.swap(false, Ordering::AcqRel)
+    }
+
+    fn reconnect_requested(&self) -> bool {
+        self.reconnect_requested.load(Ordering::Acquire)
+    }
+}
+
+fn run_vnc_session(
+    mut config: VncSessionConfig,
+    request_rx: Receiver<RemoteDesktopHelperRequest>,
+    writer: SharedEventWriter,
+    diagnostics: VncDiagnostics,
+    control: Arc<VncSessionControl>,
+) -> Result<(), String> {
+    let active_generation = Arc::new(AtomicU64::new(0));
+    let mut generation = 0_u64;
+    let mut reconnect_count = 0_u64;
+    let mut deferred_requests = VecDeque::new();
+
+    loop {
+        if control.close_requested.load(Ordering::Acquire) {
+            break;
+        }
+        control.take_reconnect();
+        generation = generation.saturating_add(1);
+        active_generation.store(generation, Ordering::Release);
+        let canceled = Arc::new(AtomicBool::new(false));
+        control.install_attempt(canceled.clone());
+        send_event(
+            &writer,
+            RemoteDesktopHelperEvent::Status {
+                status: if reconnect_count == 0 {
+                    RemoteDesktopSessionStatus::Connecting
+                } else {
+                    RemoteDesktopSessionStatus::Reconnecting
+                },
+                message: Some(if reconnect_count == 0 {
+                    "Opening VNC session.".to_string()
+                } else {
+                    "Reopening VNC session.".to_string()
+                }),
+            },
+        )?;
+        diagnostics.log(format!(
+            "connect attempt reconnects={reconnect_count} read_only={}",
+            config.read_only
+        ));
+
+        let mut preflight = match connect_vnc_security_preflight(
+            &config.endpoint,
+            config.session_options.vnc.security_policy,
+            config.password_available,
+            canceled.clone(),
+        ) {
+            Ok(preflight) => preflight,
+            Err(_error) if control.close_requested.load(Ordering::Acquire) => break,
+            Err(error) if control.take_reconnect() => {
+                diagnostics.log(format!(
+                    "connect canceled for reconnect: {:?}",
+                    error.kind()
+                ));
+                reconnect_count = reconnect_count.saturating_add(1);
+                continue;
+            }
+            Err(error) => {
+                send_vnc_failure(&writer, &error)?;
+                break;
+            }
+        };
+        if control.close_requested.load(Ordering::Acquire) {
+            break;
+        }
+        if control.take_reconnect() {
+            reconnect_count = reconnect_count.saturating_add(1);
+            continue;
+        }
+        let certificate = vnc_identity_challenge(&config, &preflight);
+        send_event(
+            &writer,
+            RemoteDesktopHelperEvent::ServerCertificate {
+                certificate: certificate.clone(),
+            },
+        )?;
+        let password = match wait_for_vnc_authentication(
+            &request_rx,
+            &control,
+            &certificate,
+            preflight.requires_password(),
+            &mut deferred_requests,
+        ) {
+            Ok(password) => password,
+            Err(_error) if control.close_requested.load(Ordering::Acquire) => break,
+            Err(error) if control.take_reconnect() => {
+                diagnostics.log(format!("authentication canceled for reconnect: {error}"));
+                reconnect_count = reconnect_count.saturating_add(1);
+                continue;
+            }
+            Err(error) => {
+                send_vnc_failure(&writer, &error)?;
+                break;
+            }
+        };
+        if control.close_requested.load(Ordering::Acquire) {
+            break;
+        }
+        if control.take_reconnect() {
+            reconnect_count = reconnect_count.saturating_add(1);
+            continue;
+        }
+
+        let mut connection = match VncConnection::complete(
+            &config,
+            &mut preflight,
+            password.as_ref(),
+            writer.clone(),
+            diagnostics,
+            canceled,
+            generation,
+            active_generation.clone(),
+        ) {
+            Ok(connection) => connection,
+            Err(error) => {
+                send_vnc_failure(&writer, &error)?;
+                break;
+            }
+        };
+        control.clear_attempt();
+        send_event(
+            &writer,
+            RemoteDesktopHelperEvent::Connected {
+                size: RemoteDesktopSize {
+                    width: u32::from(connection.width),
+                    height: u32::from(connection.height),
+                },
+            },
+        )?;
+        send_event(&writer, connection.capabilities_event()?)?;
+        connection.start_reader()?;
+        connection.request_framebuffer_update(false)?;
+        let mut input_state = VncInputState::default();
+        let action = run_vnc_connected_requests(
+            &mut config,
+            &request_rx,
+            &control,
+            &writer,
+            &mut connection,
+            &mut input_state,
+            &mut deferred_requests,
+        )?;
+        connection.shutdown_and_join()?;
+        // Retire the generation only after its owner drained ordered shutdown
+        // messages and joined; the next connection cannot overlap it.
+        active_generation.fetch_add(1, Ordering::AcqRel);
+        match action {
+            VncRequestAction::Reconnect => {
+                reconnect_count = reconnect_count.saturating_add(1);
+            }
+            VncRequestAction::Close => break,
+            VncRequestAction::Continue => {}
+        }
+    }
+    control.clear_attempt();
     send_event(
         &writer,
         RemoteDesktopHelperEvent::Disconnected {
             reason: Some("VNC session closed.".to_string()),
         },
-    )?;
-    Ok(())
+    )
+}
+
+fn run_vnc_connected_requests(
+    config: &mut VncSessionConfig,
+    request_rx: &Receiver<RemoteDesktopHelperRequest>,
+    control: &VncSessionControl,
+    event_writer: &SharedEventWriter,
+    connection: &mut VncConnection,
+    input_state: &mut VncInputState,
+    deferred_requests: &mut VecDeque<RemoteDesktopHelperRequest>,
+) -> Result<VncRequestAction, String> {
+    loop {
+        if control.close_requested.load(Ordering::Acquire) {
+            return Ok(VncRequestAction::Close);
+        }
+        if control.take_reconnect() {
+            return Ok(VncRequestAction::Reconnect);
+        }
+        let request = if let Some(request) = deferred_requests.pop_front() {
+            request
+        } else {
+            match request_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(request) => request,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Ok(VncRequestAction::Close);
+                }
+            }
+        };
+        match handle_real_vnc_request(event_writer, connection, input_state, request, config)? {
+            VncRequestAction::Continue => {}
+            action => return Ok(action),
+        }
+    }
+}
+
+fn wait_for_vnc_authentication(
+    request_rx: &Receiver<RemoteDesktopHelperRequest>,
+    control: &VncSessionControl,
+    certificate: &RemoteDesktopServerCertificate,
+    password_required: bool,
+    deferred_requests: &mut VecDeque<RemoteDesktopHelperRequest>,
+) -> VncResult<Option<RemoteDesktopSecret>> {
+    loop {
+        if control.close_requested.load(Ordering::Acquire) || control.reconnect_requested() {
+            return Err(VncError::cancelled());
+        }
+        let request = match request_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(request) => request,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(VncError::cancelled());
+            }
+        };
+        match request {
+            RemoteDesktopHelperRequest::Authenticate {
+                challenge_id,
+                sha256_fingerprint,
+                mut username,
+                password,
+                mut domain,
+            } => {
+                if challenge_id != certificate.challenge_id
+                    || sha256_fingerprint != certificate.sha256_fingerprint
+                {
+                    if let Some(username) = username.as_mut() {
+                        username.zeroize();
+                    }
+                    if let Some(domain) = domain.as_mut() {
+                        domain.zeroize();
+                    }
+                    // A response can race with Reconnect and belong to the
+                    // retired challenge. Discard it without affecting the new
+                    // generation or releasing its secret.
+                    drop(password);
+                    continue;
+                }
+                if let Some(username) = username.as_mut() {
+                    username.zeroize();
+                }
+                if let Some(domain) = domain.as_mut() {
+                    domain.zeroize();
+                }
+                if password_required && password.as_ref().is_none_or(RemoteDesktopSecret::is_empty)
+                {
+                    return Err(VncError::authentication(
+                        "VNC server requires password authentication.",
+                    ));
+                }
+                return Ok(password_required.then_some(password).flatten());
+            }
+            RemoteDesktopHelperRequest::Close => return Err(VncError::cancelled()),
+            RemoteDesktopHelperRequest::Reconnect => return Err(VncError::cancelled()),
+            RemoteDesktopHelperRequest::StartConnect { .. }
+            | RemoteDesktopHelperRequest::Connect { .. } => {
+                return Err(VncError::configuration(
+                    "VNC helper received a second connection request.",
+                ));
+            }
+            request => deferred_requests.push_back(request),
+        }
+    }
+}
+
+fn vnc_identity_challenge(
+    config: &VncSessionConfig,
+    preflight: &VncSecurityPreflight,
+) -> RemoteDesktopServerCertificate {
+    let challenge_id = Uuid::new_v4().to_string();
+    let identity_kind = if preflight.peer_identity_verified() {
+        RemoteDesktopServerIdentityKind::X509Certificate
+    } else if preflight.encrypted() {
+        RemoteDesktopServerIdentityKind::AnonymousTls
+    } else {
+        RemoteDesktopServerIdentityKind::InsecureLegacy
+    };
+    let sha256_fingerprint = preflight
+        .peer_certificate_fingerprint
+        .clone()
+        .unwrap_or_else(|| {
+            let material = format!(
+                "{}|{}|{}",
+                config.endpoint.format_authority(),
+                preflight.security.as_str(),
+                challenge_id
+            );
+            Sha256::digest(material.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect::<Vec<_>>()
+                .join(":")
+        });
+    RemoteDesktopServerCertificate {
+        challenge_id,
+        protocol: RemoteDesktopProtocol::Vnc,
+        endpoint: config.endpoint.clone(),
+        identity_kind,
+        security_method: preflight.security.as_str().to_string(),
+        sha256_fingerprint,
+        subject: None,
+        issuer: None,
+        valid_from: None,
+        valid_to: None,
+    }
+}
+
+fn send_vnc_failure(writer: &SharedEventWriter, error: &VncError) -> Result<(), String> {
+    send_event(
+        writer,
+        RemoteDesktopHelperEvent::ConnectionFailure {
+            message: error.to_string(),
+            category: Some(error.category()),
+        },
+    )
 }
 
 fn handle_real_vnc_request(
@@ -363,22 +654,42 @@ fn handle_real_vnc_request(
     connection: &mut VncConnection,
     input_state: &mut VncInputState,
     request: RemoteDesktopHelperRequest,
-    read_only: bool,
+    config: &mut VncSessionConfig,
 ) -> Result<VncRequestAction, String> {
     match request {
         RemoteDesktopHelperRequest::Close => return Ok(VncRequestAction::Close),
         RemoteDesktopHelperRequest::Reconnect => {
             return Ok(VncRequestAction::Reconnect);
         }
-        RemoteDesktopHelperRequest::Resize { .. } => {
-            // RFB clients cannot resize arbitrary servers unless the server
-            // advertises a resize extension. The first helper slice keeps this
-            // as a no-op instead of lying about server-side support.
+        RemoteDesktopHelperRequest::Resize { size, .. } => {
+            config.initial_size = size;
+            // A viewport resize must not collapse an active multi-monitor
+            // topology into a synthetic single screen.
+            if !config.session_options.display.use_all_monitors {
+                match VncDesktopLayout::single(size) {
+                    Ok(layout) => connection.request_desktop_layout(layout)?,
+                    Err(message) => send_vnc_resize_status(event_writer, message)?,
+                }
+            }
         }
-        RemoteDesktopHelperRequest::Connect { .. } => {
+        RemoteDesktopHelperRequest::UpdateDisplayLayout { layout } => {
+            // Only opt-in sessions may replace the server screen topology.
+            if config.session_options.display.use_all_monitors {
+                match initial_vnc_desktop_layout(config.initial_size, true, &layout) {
+                    Ok(desktop_layout) => {
+                        config.monitor_layout = layout;
+                        connection.request_desktop_layout(desktop_layout)?;
+                    }
+                    Err(message) => send_vnc_resize_status(event_writer, message)?,
+                }
+            }
+        }
+        RemoteDesktopHelperRequest::StartConnect { .. }
+        | RemoteDesktopHelperRequest::Connect { .. }
+        | RemoteDesktopHelperRequest::Authenticate { .. } => {
             return Err("VNC helper received a second connect request.".to_string());
         }
-        RemoteDesktopHelperRequest::MouseMove { x, y } if !read_only => {
+        RemoteDesktopHelperRequest::MouseMove { x, y } if !config.read_only => {
             input_state.pointer.x = clamp_u32_to_u16(x);
             input_state.pointer.y = clamp_u32_to_u16(y);
             connection.send_pointer(
@@ -396,7 +707,7 @@ fn handle_real_vnc_request(
                 },
             )?;
         }
-        RemoteDesktopHelperRequest::MouseButton { button, state } if !read_only => {
+        RemoteDesktopHelperRequest::MouseButton { button, state } if !config.read_only => {
             let mask = vnc_button_mask(button);
             match state {
                 RemoteDesktopMouseButtonState::Pressed => input_state.pointer.buttons |= mask,
@@ -408,12 +719,12 @@ fn handle_real_vnc_request(
                 input_state.pointer.buttons,
             )?;
         }
-        RemoteDesktopHelperRequest::Wheel { delta } if !read_only => {
+        RemoteDesktopHelperRequest::Wheel { delta } if !config.read_only => {
             for mask in vnc_scroll_masks(delta) {
                 connection.send_pointer(
                     input_state.pointer.x,
                     input_state.pointer.y,
-                    input_state.pointer.buttons | mask,
+                    input_state.pointer.buttons | u16::from(mask),
                 )?;
                 connection.send_pointer(
                     input_state.pointer.x,
@@ -422,40 +733,59 @@ fn handle_real_vnc_request(
                 )?;
             }
         }
-        RemoteDesktopHelperRequest::Key { key, state } if !read_only => {
+        RemoteDesktopHelperRequest::Key { key, state } if !config.read_only => {
             for event in input_state.keyboard.operations(&key, state) {
-                connection.send_key(event.keysym, event.down)?;
+                connection.send_key_event(event)?;
             }
         }
-        RemoteDesktopHelperRequest::Text { text } if !read_only => {
-            for character in text.chars().filter(|character| !character.is_control()) {
-                let keysym = character as u32;
-                connection.send_key(keysym, true)?;
-                connection.send_key(keysym, false)?;
+        RemoteDesktopHelperRequest::Text { text } if !config.read_only => {
+            for event in vnc_text_key_events(&text) {
+                connection.send_key_event(event)?;
             }
         }
-        RemoteDesktopHelperRequest::ClipboardText { text } if !read_only => {
+        RemoteDesktopHelperRequest::ClipboardText { text } if !config.read_only => {
             connection.send_client_cut_text(&text)?;
         }
-        RemoteDesktopHelperRequest::ClipboardData { .. } => {
-            // Baseline RFB clipboard messages are text-only. Keep binary
-            // clipboard data as an RDP capability unless a VNC extension is
-            // negotiated explicitly.
+        RemoteDesktopHelperRequest::ClipboardData { data } if !config.read_only => {
+            if let Err(message) = connection.send_client_clipboard_data(&data) {
+                // Clipboard conversion or negotiation failures are scoped to
+                // the paste operation and must not tear down the desktop.
+                send_event(
+                    event_writer,
+                    RemoteDesktopHelperEvent::Status {
+                        status: RemoteDesktopSessionStatus::Connected,
+                        message: Some(message),
+                    },
+                )?;
+            }
         }
-        RemoteDesktopHelperRequest::SynchronizeLockKeys { .. } => {
-            // RFB has no equivalent lock-key synchronization message in the
-            // baseline protocol, so this request is RDP-only.
+        RemoteDesktopHelperRequest::ClipboardFiles { transfer_id, paths } if !config.read_only => {
+            if let Err(message) = connection.send_clipboard_files(&transfer_id, &paths) {
+                send_event(
+                    event_writer,
+                    RemoteDesktopHelperEvent::ClipboardTransferFailed {
+                        transfer_id,
+                        message,
+                    },
+                )?;
+            }
+        }
+        RemoteDesktopHelperRequest::CancelClipboardTransfer { transfer_id } => {
+            connection.cancel_clipboard_transfer(transfer_id)?;
+        }
+        RemoteDesktopHelperRequest::SynchronizeLockKeys { keys } if !config.read_only => {
+            connection.synchronize_lock_keys(keys)?;
         }
         RemoteDesktopHelperRequest::RequestFrame => {
             connection.request_full_frame_recovery()?;
         }
-        RemoteDesktopHelperRequest::ReleaseAllInputs if !read_only => {
+        RemoteDesktopHelperRequest::ReleaseAllInputs if !config.read_only => {
             if input_state.pointer.buttons != 0 {
                 input_state.pointer.buttons = 0;
                 connection.send_pointer(input_state.pointer.x, input_state.pointer.y, 0)?;
             }
             for event in input_state.keyboard.release_all_events() {
-                connection.send_key(event.keysym, event.down)?;
+                connection.send_key_event(event)?;
             }
         }
         _ => {}
@@ -474,16 +804,27 @@ struct VncInputState {
 struct VncPointerState {
     x: u16,
     y: u16,
-    buttons: u8,
+    buttons: u16,
 }
 
 struct VncConnection {
+    transport: Option<Box<dyn VncTransport>>,
     writer: SharedVncWriter,
-    reader: Option<TcpStream>,
+    io_rx: Option<Receiver<VncIoCommand>>,
     event_writer: SharedEventWriter,
     diagnostics: VncDiagnostics,
-    closed: Arc<AtomicBool>,
+    canceled: Arc<AtomicBool>,
+    generation: u64,
+    active_generation: Arc<AtomicU64>,
     session_state: Arc<VncSessionSharedState>,
+    audio: Arc<Mutex<QemuAudioSession>>,
+    clipboard: Arc<Mutex<VncClipboardSession>>,
+    vendor_files: Arc<Mutex<VncVendorFileSession>>,
+    capabilities: SharedVncCapabilities,
+    desktop_resize: SharedVncDesktopResize,
+    h264: Option<VncH264State>,
+    reader_handle: Option<thread::JoinHandle<()>>,
+    reader_done: Option<Receiver<()>>,
     width: u16,
     height: u16,
 }
@@ -492,6 +833,10 @@ struct VncSessionSharedState {
     width: AtomicU16,
     height: AtomicU16,
     force_next_base_frame: AtomicBool,
+    qemu_extended_key_events: AtomicU8,
+    extended_mouse_buttons: AtomicU8,
+    remote_lock_keys: AtomicU8,
+    pending_lock_keys: AtomicU8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -508,6 +853,7 @@ enum VncServerEvent {
         width: u16,
         height: u16,
     },
+    ExtendedDesktopSize(VncExtendedDesktopSize),
     RawImage(RfbRect, Vec<u8>),
     CopyRect {
         dst: RfbRect,
@@ -515,8 +861,17 @@ enum VncServerEvent {
         src_y: u16,
     },
     ClipboardText(String),
+    ClipboardExtended(ExtendedClipboardMessage),
     CursorShape(RemoteDesktopCursorShape),
     CursorHidden,
+    QemuAudioCapability,
+    QemuAudio(QemuAudioServerMessage),
+    QemuExtendedKeyEvents,
+    ExtendedMouseButtons,
+    LockKeys(RemoteDesktopLockKeys),
+    ObservedCapability(VncObservedCapability),
+    ServerFence(VncServerFence),
+    EndOfContinuousUpdates,
     Batch(Vec<VncServerEvent>),
     Noop,
 }
@@ -534,37 +889,69 @@ struct VncFramebuffer {
 }
 
 impl VncFramebuffer {
+    #[cfg(test)]
     fn new(width: u16, height: u16) -> Self {
-        let width = width as u32;
-        let height = height as u32;
-        Self {
-            width,
-            height,
-            bgra: opaque_bgra_buffer(width, height),
-        }
+        Self::try_new(width, height).expect("test framebuffer allocation should succeed")
     }
 
+    fn try_new(width: u16, height: u16) -> Result<Self, String> {
+        let width = width as u32;
+        let height = height as u32;
+        Ok(Self {
+            width,
+            height,
+            bgra: try_opaque_bgra_buffer(width, height)?,
+        })
+    }
+
+    #[cfg(test)]
     fn apply(&mut self, event: VncServerEvent) -> Option<VncFramebufferChange> {
+        self.try_apply(event)
+            .expect("test framebuffer update allocation should succeed")
+    }
+
+    fn try_apply(&mut self, event: VncServerEvent) -> Result<Option<VncFramebufferChange>, String> {
         match event {
             VncServerEvent::SetResolution { width, height } => {
+                let next = try_opaque_bgra_buffer(u32::from(width), u32::from(height))?;
                 self.width = width as u32;
                 self.height = height as u32;
-                self.bgra = opaque_bgra_buffer(self.width, self.height);
-                Some(VncFramebufferChange::Full)
+                self.bgra = next;
+                Ok(Some(VncFramebufferChange::Full))
             }
-            VncServerEvent::RawImage(rect, data) => self.draw_rect(rect, &data),
-            VncServerEvent::CopyRect { dst, src_x, src_y } => self.copy_rect(dst, src_x, src_y),
+            VncServerEvent::ExtendedDesktopSize(update) if update.applies_layout() => {
+                let next = try_opaque_bgra_buffer(
+                    u32::from(update.layout.width),
+                    u32::from(update.layout.height),
+                )?;
+                self.width = u32::from(update.layout.width);
+                self.height = u32::from(update.layout.height);
+                self.bgra = next;
+                Ok(Some(VncFramebufferChange::Full))
+            }
+            VncServerEvent::RawImage(rect, data) => Ok(self.draw_rect(rect, &data)),
+            VncServerEvent::CopyRect { dst, src_x, src_y } => Ok(self.copy_rect(dst, src_x, src_y)),
             VncServerEvent::Batch(events) => {
                 let mut change = None;
                 for event in events {
-                    change = merge_vnc_framebuffer_change(change, self.apply(event));
+                    change = merge_vnc_framebuffer_change(change, self.try_apply(event)?);
                 }
-                change
+                Ok(change)
             }
             VncServerEvent::ClipboardText(_)
+            | VncServerEvent::ClipboardExtended(_)
             | VncServerEvent::CursorShape(_)
             | VncServerEvent::CursorHidden
-            | VncServerEvent::Noop => None,
+            | VncServerEvent::ExtendedDesktopSize(_)
+            | VncServerEvent::QemuAudioCapability
+            | VncServerEvent::QemuAudio(_)
+            | VncServerEvent::QemuExtendedKeyEvents
+            | VncServerEvent::ExtendedMouseButtons
+            | VncServerEvent::LockKeys(_)
+            | VncServerEvent::ObservedCapability(_)
+            | VncServerEvent::ServerFence(_)
+            | VncServerEvent::EndOfContinuousUpdates
+            | VncServerEvent::Noop => Ok(None),
         }
     }
 
@@ -701,11 +1088,26 @@ impl VncFramebuffer {
     }
 }
 
-fn opaque_bgra_buffer(width: u32, height: u32) -> Vec<u8> {
-    let len = width as usize * height as usize * 4;
-    let mut bytes = vec![0; len];
-    set_bgra_alpha_opaque(&mut bytes);
+fn try_opaque_bgra_buffer(width: u32, height: u32) -> Result<Vec<u8>, String> {
+    if width == 0
+        || height == 0
+        || width > RemoteDesktopSize::MAX_DIMENSION
+        || height > RemoteDesktopSize::MAX_DIMENSION
+    {
+        return Err("VNC framebuffer dimensions exceed the helper limit.".to_string());
+    }
+    let len = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|len| *len <= MAX_VNC_FRAME_BYTES)
+        .ok_or_else(|| "VNC framebuffer allocation exceeds the helper limit.".to_string())?;
+    let mut bytes = Vec::new();
     bytes
+        .try_reserve_exact(len)
+        .map_err(|_| "VNC framebuffer allocation failed.".to_string())?;
+    bytes.resize(len, 0);
+    set_bgra_alpha_opaque(&mut bytes);
+    Ok(bytes)
 }
 
 fn set_bgra_alpha_opaque(bytes: &mut [u8]) {
@@ -749,15 +1151,39 @@ fn union_rfb_rect(left: RfbRect, right: RfbRect) -> Option<RfbRect> {
     })
 }
 
+mod audio;
+mod capabilities;
+mod clipboard_ext;
 mod connection;
 mod decode;
+mod desktop_size;
+mod encodings;
+mod error;
+mod h264;
 mod input;
+mod input_ext;
+mod performance;
 mod protocol;
+mod security;
+mod transport;
+mod vendor_files;
 
+use audio::*;
+use capabilities::*;
+use clipboard_ext::*;
 use connection::*;
 use decode::*;
+use desktop_size::*;
+use encodings::*;
+use error::*;
+use h264::*;
 use input::*;
+use input_ext::*;
+use performance::*;
 use protocol::*;
+use security::*;
+use transport::*;
+use vendor_files::*;
 
 #[cfg(test)]
 mod tests;

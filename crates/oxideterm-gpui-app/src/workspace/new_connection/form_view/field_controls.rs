@@ -38,6 +38,62 @@ const REMOTE_DESKTOP_DISPLAY_FEATURES: &[(RemoteDesktopSessionFeature, &str, &st
     "modals.new_connection.remote_desktop_multi_monitor",
     "modals.new_connection.remote_desktop_multi_monitor_hint",
 )];
+const VNC_SECURITY_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
+    (
+        RemoteDesktopVncPreference::Security(
+            RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption,
+        ),
+        "modals.new_connection.vnc_security_verified",
+    ),
+    (
+        RemoteDesktopVncPreference::Security(
+            RemoteDesktopVncSecurityPolicy::AllowUnverifiedEncryption,
+        ),
+        "modals.new_connection.vnc_security_unverified",
+    ),
+    (
+        RemoteDesktopVncPreference::Security(RemoteDesktopVncSecurityPolicy::AllowLegacy),
+        "modals.new_connection.vnc_security_legacy",
+    ),
+];
+const VNC_SESSION_MODE_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
+    (
+        RemoteDesktopVncPreference::SessionMode(RemoteDesktopVncSessionMode::Shared),
+        "modals.new_connection.vnc_session_shared",
+    ),
+    (
+        RemoteDesktopVncPreference::SessionMode(RemoteDesktopVncSessionMode::Exclusive),
+        "modals.new_connection.vnc_session_exclusive",
+    ),
+];
+const VNC_IMAGE_QUALITY_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
+    (
+        RemoteDesktopVncPreference::ImageQuality(RemoteDesktopVncImageQuality::Performance),
+        "modals.new_connection.vnc_quality_performance",
+    ),
+    (
+        RemoteDesktopVncPreference::ImageQuality(RemoteDesktopVncImageQuality::Balanced),
+        "modals.new_connection.vnc_quality_balanced",
+    ),
+    (
+        RemoteDesktopVncPreference::ImageQuality(RemoteDesktopVncImageQuality::BestQuality),
+        "modals.new_connection.vnc_quality_best",
+    ),
+];
+const VNC_COMPRESSION_PREFERENCES: &[(RemoteDesktopVncPreference, &str)] = &[
+    (
+        RemoteDesktopVncPreference::Compression(RemoteDesktopVncCompression::Low),
+        "modals.new_connection.vnc_compression_low",
+    ),
+    (
+        RemoteDesktopVncPreference::Compression(RemoteDesktopVncCompression::Balanced),
+        "modals.new_connection.vnc_compression_balanced",
+    ),
+    (
+        RemoteDesktopVncPreference::Compression(RemoteDesktopVncCompression::High),
+        "modals.new_connection.vnc_compression_high",
+    ),
+];
 
 fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
     match transport {
@@ -1758,7 +1814,116 @@ impl WorkspaceApp {
                 true,
                 cx,
             ))
+            .when(
+                protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
+                |section| section.child(self.render_vnc_connection_preferences(cx)),
+            )
             .child(self.render_remote_desktop_features(&capabilities, cx))
+            .into_any_element()
+    }
+
+    fn render_vnc_connection_preferences(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .pt(px(self.tokens.spacing.one))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.three))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("modals.new_connection.vnc_preferences_title")),
+                    )
+                    .child(self.render_connection_hint(
+                        self.i18n.t("modals.new_connection.vnc_preferences_hint"),
+                    )),
+            )
+            .child(self.render_vnc_preference_group(
+                "modals.new_connection.vnc_security_policy",
+                "modals.new_connection.vnc_security_policy_hint",
+                VNC_SECURITY_PREFERENCES,
+                cx,
+            ))
+            .child(self.render_vnc_preference_group(
+                "modals.new_connection.vnc_session_mode",
+                "modals.new_connection.vnc_session_mode_hint",
+                VNC_SESSION_MODE_PREFERENCES,
+                cx,
+            ))
+            .child(self.render_vnc_preference_group(
+                "modals.new_connection.vnc_image_quality",
+                "modals.new_connection.vnc_image_quality_hint",
+                VNC_IMAGE_QUALITY_PREFERENCES,
+                cx,
+            ))
+            .child(self.render_vnc_preference_group(
+                "modals.new_connection.vnc_compression",
+                "modals.new_connection.vnc_compression_hint",
+                VNC_COMPRESSION_PREFERENCES,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_vnc_preference_group(
+        &self,
+        title_key: &'static str,
+        hint_key: &'static str,
+        preferences: &'static [(RemoteDesktopVncPreference, &str)],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let current = self
+            .new_connection_form
+            .as_ref()
+            .map(|form| form.remote_desktop_session_options.vnc)
+            .unwrap_or_default();
+        let options = preferences
+            .iter()
+            .enumerate()
+            .map(|(index, (preference, label_key))| {
+                let preference = *preference;
+                segmented_tab(
+                    &self.tokens,
+                    self.i18n.t(label_key),
+                    remote_desktop_vnc_preference_selected(&current, preference),
+                )
+                .id(SharedString::from(format!(
+                    "vnc-preference-{title_key}-{index}"
+                )))
+                .whitespace_normal()
+                .text_align(gpui::TextAlign::Center)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if let Some(form) = this.new_connection_form.as_mut() {
+                            apply_remote_desktop_vnc_preference(
+                                &mut form.remote_desktop_session_options.vnc,
+                                preference,
+                            );
+                        }
+                        cx.notify();
+                    }),
+                )
+            });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.one))
+            .child(form_field(
+                &self.tokens,
+                self.i18n.t(title_key),
+                segmented_tabs(&self.tokens).children(options),
+            ))
+            .child(self.render_connection_hint(self.i18n.t(hint_key)))
             .into_any_element()
     }
 

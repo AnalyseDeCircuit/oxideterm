@@ -1,0 +1,8 @@
+[package]
+name = "oxideterm-pcm-audio"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+cpal = "0.16"

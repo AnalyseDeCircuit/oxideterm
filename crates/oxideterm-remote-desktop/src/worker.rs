@@ -6,9 +6,8 @@ use std::{io::BufReader, sync::mpsc, thread};
 use crate::{
     RemoteDesktopConnectionProfile, RemoteDesktopFakeBackend, RemoteDesktopFrameDeliverySlot,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopMonitorLayout,
-    RemoteDesktopProtocol, RemoteDesktopProviderManifest, RemoteDesktopSecret,
-    RemoteDesktopSessionId, RemoteDesktopSessionOptions, RemoteDesktopSize,
-    is_remote_desktop_frame_event, read_event_line,
+    RemoteDesktopProviderManifest, RemoteDesktopSecret, RemoteDesktopSessionId,
+    RemoteDesktopSessionOptions, RemoteDesktopSize, is_remote_desktop_frame_event, read_event_line,
 };
 use crate::{helper_process, request_writer};
 
@@ -177,9 +176,10 @@ pub fn initial_connect_request(
     scale_factor: Option<u32>,
     monitor_layout: RemoteDesktopMonitorLayout,
 ) -> RemoteDesktopHelperRequest {
-    if profile.protocol != RemoteDesktopProtocol::Rdp {
-        return connect_request(profile, password, initial_size, scale_factor);
-    }
+    let password_available = password.as_ref().is_some_and(|secret| !secret.is_empty());
+    // The password copy owned by worker startup is dropped here; helpers only
+    // receive the non-sensitive availability hint until Authenticate.
+    drop(password);
     let session_options = effective_session_options(profile.session_options, provider);
     let monitor_layout = if session_options.display.use_all_monitors {
         monitor_layout
@@ -190,6 +190,7 @@ pub fn initial_connect_request(
     RemoteDesktopHelperRequest::StartConnect {
         protocol: profile.protocol,
         endpoint: profile.endpoint.clone(),
+        password_available,
         size: RemoteDesktopSize::clamped(initial_size.width, initial_size.height),
         scale_factor,
         read_only: profile.read_only,
@@ -216,6 +217,8 @@ pub fn effective_session_options(
         display: crate::RemoteDesktopDisplayOptions {
             use_all_monitors: requested.display.use_all_monitors && capabilities.multi_monitor,
         },
+        // VNC connection preferences are policy inputs, not negotiated provider capabilities.
+        vnc: requested.vnc,
     }
 }
 
@@ -371,6 +374,32 @@ mod tests {
     }
 
     #[test]
+    fn staged_vnc_preflight_sends_only_password_availability() {
+        let mut vnc_profile = profile();
+        vnc_profile.protocol = RemoteDesktopProtocol::Vnc;
+        vnc_profile.endpoint =
+            RemoteDesktopEndpoint::for_protocol("preview.local", RemoteDesktopProtocol::Vnc);
+        let request = initial_connect_request(
+            &vnc_profile,
+            &builtin_provider_manifest(RemoteDesktopProtocol::Vnc),
+            Some(RemoteDesktopSecret::from("wire-secret")),
+            RemoteDesktopSize {
+                width: 1280,
+                height: 720,
+            },
+            None,
+            RemoteDesktopMonitorLayout::default(),
+        );
+
+        let encoded = serde_json::to_string(&request).unwrap();
+        assert!(encoded.contains("\"passwordAvailable\":true"));
+        assert!(!encoded.contains("wire-secret"));
+        assert!(!encoded.contains("\"password\":"));
+        assert!(!encoded.contains("\"username\":"));
+        assert!(!encoded.contains("\"domain\":"));
+    }
+
+    #[test]
     fn preview_provider_is_the_only_fake_backend() {
         let registry = builtin_preview_provider_registry().unwrap();
         let provider = registry
@@ -382,7 +411,10 @@ mod tests {
 
     #[test]
     fn effective_options_never_exceed_provider_capabilities() {
-        let provider = builtin_provider_manifest(RemoteDesktopProtocol::Vnc);
+        let mut provider = builtin_provider_manifest(RemoteDesktopProtocol::Vnc);
+        // A custom provider can still cap user options below built-in support.
+        provider.capabilities.clipboard_data = false;
+        provider.capabilities.clipboard_files = false;
         let requested = RemoteDesktopSessionOptions {
             clipboard: crate::RemoteDesktopClipboardOptions {
                 text: true,
@@ -396,6 +428,7 @@ mod tests {
             display: crate::RemoteDesktopDisplayOptions {
                 use_all_monitors: true,
             },
+            vnc: crate::RemoteDesktopVncOptions::default(),
         };
 
         let effective = effective_session_options(requested, &provider);
@@ -403,8 +436,8 @@ mod tests {
         assert!(effective.clipboard.text);
         assert!(!effective.clipboard.images);
         assert!(!effective.clipboard.files);
-        assert!(!effective.audio.playback);
+        assert!(effective.audio.playback);
         assert!(!effective.audio.capture);
-        assert!(!effective.display.use_all_monitors);
+        assert!(effective.display.use_all_monitors);
     }
 }

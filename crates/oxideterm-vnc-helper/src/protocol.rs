@@ -3,15 +3,33 @@
 
 use super::*;
 
-pub(super) fn read_server_cut_text(reader: &mut TcpStream) -> Result<String, String> {
-    let _padding = read_exact_array::<3, _>(reader)
-        .map_err(|error| format!("VNC clipboard padding read failed: {error}"))?;
-    let len = read_be_u32(reader)
-        .map_err(|error| format!("VNC clipboard length read failed: {error}"))?
-        as usize;
-    let bytes = read_exact_vec(reader, len)
-        .map_err(|error| format!("VNC clipboard text read failed: {error}"))?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+pub(super) fn decode_vnc_clipboard_text(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => bytes.iter().map(|byte| char::from(*byte)).collect(),
+    }
+}
+
+pub(super) fn encode_vnc_clipboard_text(text: &str) -> Vec<u8> {
+    text.chars()
+        .map(|character| {
+            // Baseline ClientCutText is Latin-1; unsupported codepoints use the
+            // conventional replacement byte until Extended Clipboard exists.
+            u8::try_from(character as u32).unwrap_or(b'?')
+        })
+        .collect()
+}
+
+pub(super) fn client_cut_text_message(text: &str) -> Result<Vec<u8>, String> {
+    let bytes = encode_vnc_clipboard_text(text);
+    let len = u32::try_from(bytes.len())
+        .map_err(|_| "VNC clipboard text is too large to send.".to_string())?;
+    let mut message = Vec::with_capacity(8 + bytes.len());
+    message.push(6);
+    message.extend_from_slice(&[0, 0, 0]);
+    push_be_u32(&mut message, len);
+    message.extend_from_slice(&bytes);
+    Ok(message)
 }
 
 pub(super) fn request_framebuffer_update(
@@ -42,12 +60,21 @@ pub(super) fn framebuffer_update_request_message(
 }
 
 pub(super) fn write_vnc_message(writer: &SharedVncWriter, message: &[u8]) -> Result<(), String> {
-    let mut stream = writer
-        .lock()
-        .map_err(|_| "VNC writer lock is poisoned.".to_string())?;
-    stream
-        .write_all(message)
-        .map_err(|error| format!("VNC message write failed: {error}"))
+    write_vnc_owned_message(writer, message.to_vec())
+}
+
+pub(super) fn write_vnc_owned_message(
+    writer: &SharedVncWriter,
+    message: Vec<u8>,
+) -> Result<(), String> {
+    writer
+        .try_send(VncIoCommand::Write(message))
+        .map_err(|error| match error {
+            std::sync::mpsc::TrySendError::Full(_) => "VNC I/O command queue is full.".to_string(),
+            std::sync::mpsc::TrySendError::Disconnected(_) => {
+                "VNC I/O command owner is unavailable.".to_string()
+            }
+        })
 }
 
 pub(super) fn send_event(
@@ -74,7 +101,7 @@ pub(super) fn rect_byte_len(rect: RfbRect) -> Result<usize, String> {
 }
 
 pub(super) fn read_rich_cursor(
-    reader: &mut TcpStream,
+    reader: &mut impl Read,
     rect: RfbRect,
 ) -> Result<VncServerEvent, String> {
     if rect.width == 0 || rect.height == 0 {
@@ -91,7 +118,7 @@ pub(super) fn read_rich_cursor(
 }
 
 pub(super) fn read_x_cursor(
-    reader: &mut TcpStream,
+    reader: &mut impl Read,
     rect: RfbRect,
 ) -> Result<VncServerEvent, String> {
     if rect.width == 0 || rect.height == 0 {
@@ -217,12 +244,6 @@ pub(super) fn cursor_pixel_offset(width: u16, x: u16, y: u16) -> Result<usize, S
         .ok_or_else(|| "VNC cursor pixel offset overflowed.".to_string())
 }
 
-pub(super) fn read_reason(stream: &mut TcpStream) -> io::Result<String> {
-    let len = read_be_u32(stream)? as usize;
-    let data = read_exact_vec(stream, len)?;
-    Ok(String::from_utf8_lossy(&data).into_owned())
-}
-
 pub(super) fn read_u8(reader: &mut impl Read) -> io::Result<u8> {
     let mut byte = [0; 1];
     reader.read_exact(&mut byte)?;
@@ -246,7 +267,14 @@ pub(super) fn read_exact_array<const N: usize, R: Read>(reader: &mut R) -> io::R
 }
 
 pub(super) fn read_exact_vec(reader: &mut impl Read, len: usize) -> io::Result<Vec<u8>> {
-    let mut bytes = vec![0; len];
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(len).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            "VNC payload allocation exceeds available memory",
+        )
+    })?;
+    bytes.resize(len, 0);
     reader.read_exact(&mut bytes)?;
     Ok(bytes)
 }

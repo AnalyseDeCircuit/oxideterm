@@ -1,35 +1,14 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError};
+
 use super::*;
 
-pub(super) fn vnc_error_category_from_message(message: &str) -> RemoteDesktopErrorCategory {
-    let normalized = message.to_ascii_lowercase();
-    if normalized.contains("expected an initial connect")
-        || normalized.contains("non-vnc connect")
-        || normalized.contains("second connect request")
-    {
-        RemoteDesktopErrorCategory::Configuration
-    } else if normalized.contains("password") || normalized.contains("authentication") {
-        RemoteDesktopErrorCategory::Authentication
-    } else if normalized.contains("tcp")
-        || normalized.contains("connection")
-        || normalized.contains("read failed")
-        || normalized.contains("write failed")
-    {
-        RemoteDesktopErrorCategory::Network
-    } else if normalized.contains("unsupported vnc security")
-        || normalized.contains("security type")
-        || normalized.contains("security types")
-        || normalized.contains("security negotiation")
-    {
-        RemoteDesktopErrorCategory::LegacySecurity
-    } else if normalized.contains("protocol") || normalized.contains("unsupported") {
-        RemoteDesktopErrorCategory::Protocol
-    } else {
-        RemoteDesktopErrorCategory::Unknown
-    }
-}
+pub(super) const VNC_IO_COMMAND_CAPACITY: usize = 128;
+const VNC_IO_MESSAGE_TIMEOUT: Duration = Duration::from_secs(30);
+const VNC_IO_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_VNC_DESKTOP_NAME_BYTES: usize = 1024 * 1024;
 
 impl VncSessionSharedState {
     pub(super) fn new(width: u16, height: u16) -> Self {
@@ -37,6 +16,10 @@ impl VncSessionSharedState {
             width: AtomicU16::new(width),
             height: AtomicU16::new(height),
             force_next_base_frame: AtomicBool::new(false),
+            qemu_extended_key_events: AtomicU8::new(VNC_CAPABILITY_UNKNOWN),
+            extended_mouse_buttons: AtomicU8::new(VNC_CAPABILITY_UNKNOWN),
+            remote_lock_keys: AtomicU8::new(0),
+            pending_lock_keys: AtomicU8::new(0),
         }
     }
 
@@ -68,79 +51,147 @@ impl VncSessionSharedState {
 }
 
 impl VncConnection {
-    pub(super) fn connect(
+    pub(super) fn complete(
         config: &VncSessionConfig,
+        preflight: &mut VncSecurityPreflight,
+        password: Option<&RemoteDesktopSecret>,
         event_writer: SharedEventWriter,
         diagnostics: VncDiagnostics,
-    ) -> Result<Self, String> {
-        let mut stream = TcpStream::connect((config.endpoint.host.as_str(), config.endpoint.port))
-            .map_err(|error| format!("VNC TCP connection failed: {error}"))?;
-        stream
-            .set_nodelay(true)
-            .map_err(|error| format!("VNC TCP option setup failed: {error}"))?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .map_err(|error| format!("VNC read timeout setup failed: {error}"))?;
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .map_err(|error| format!("VNC write timeout setup failed: {error}"))?;
-
-        let handshake = handshake_vnc(&mut stream, config.password.as_ref())?;
-        diagnostics.log(format!(
-            "handshake protocol={} legacy_security={} security={} security_type={}",
-            handshake.protocol_version.as_str(),
-            handshake.legacy_security,
-            handshake.security.as_str(),
-            handshake.security.code()
-        ));
-        let (width, height) = read_server_init(&mut stream)?;
+        canceled: Arc<AtomicBool>,
+        generation: u64,
+        active_generation: Arc<std::sync::atomic::AtomicU64>,
+    ) -> VncResult<Self> {
+        let desktop_layout = initial_vnc_desktop_layout(
+            config.initial_size,
+            config.session_options.display.use_all_monitors,
+            &config.monitor_layout,
+        )
+        .map_err(VncError::configuration)?;
+        let mut transport =
+            preflight.finish_authentication(password, config.session_options.vnc.session_mode)?;
+        transport.set_phase_timeout(Some(VNC_IO_MESSAGE_TIMEOUT));
+        let (width, height, tight_interaction) =
+            read_server_init(&mut transport, preflight.tight_active)?;
         diagnostics.log(format!("server_init framebuffer={width}x{height}"));
-        write_pixel_format(&mut stream)?;
-        write_encodings(&mut stream)?;
-        diagnostics.log(format!("encodings advertised={VNC_ADVERTISED_ENCODINGS:?}"));
+        write_pixel_format(&mut transport)?;
+        let encoding_preferences = VncEncodingPreferences::from_options(config.session_options.vnc);
+        let h264 = match VncH264State::from_env() {
+            Ok(h264) => h264,
+            Err(error) => {
+                diagnostics.log(format!("Open H.264 unavailable: {error}"));
+                None
+            }
+        };
+        write_encodings(&mut transport, encoding_preferences, h264.is_some())?;
+        diagnostics.log("encodings advertised from negotiated VNC preferences");
+        transport.set_phase_timeout(None);
 
-        let reader = stream
-            .try_clone()
-            .map_err(|error| format!("VNC stream clone failed: {error}"))?;
+        let (writer, io_rx) = std::sync::mpsc::sync_channel(VNC_IO_COMMAND_CAPACITY);
         let session_state = Arc::new(VncSessionSharedState::new(width, height));
+        let desktop_resize = Arc::new(Mutex::new(VncDesktopResizeState::new(desktop_layout)));
+        let file_capabilities = tight_interaction
+            .as_ref()
+            .map(TightFileCapabilities::from_interaction)
+            .unwrap_or_default();
+        let capabilities = Arc::new(Mutex::new(NegotiatedCapabilities {
+            security_methods: preflight.offered_security_methods.clone(),
+            selected_security_method: Some(preflight.security.as_str().to_string()),
+            encrypted: known_capability(preflight.encrypted()),
+            peer_identity_verified: known_capability(preflight.peer_identity_verified()),
+            tight: if preflight.tight_active {
+                NegotiatedCapabilityStatus::Supported
+            } else {
+                NegotiatedCapabilityStatus::Unknown
+            },
+            vendor_files: if preflight.tight_active {
+                known_capability(file_capabilities.upload)
+            } else {
+                NegotiatedCapabilityStatus::Unknown
+            },
+            ..NegotiatedCapabilities::default()
+        }));
         Ok(Self {
-            writer: Arc::new(Mutex::new(stream)),
-            reader: Some(reader),
+            transport: Some(transport),
+            writer,
+            io_rx: Some(io_rx),
             event_writer,
             diagnostics,
-            closed: Arc::new(AtomicBool::new(false)),
+            canceled,
+            generation,
+            active_generation,
             session_state,
+            audio: Arc::new(Mutex::new(QemuAudioSession::new(
+                config.session_options.audio.playback,
+            ))),
+            clipboard: Arc::new(Mutex::new(VncClipboardSession::default())),
+            vendor_files: Arc::new(Mutex::new(VncVendorFileSession::new(file_capabilities))),
+            capabilities,
+            desktop_resize,
+            h264,
+            reader_handle: None,
+            reader_done: None,
             width,
             height,
         })
     }
 
-    pub(super) fn start_reader(&mut self) {
-        let Some(reader) = self.reader.take() else {
-            return;
-        };
+    pub(super) fn start_reader(&mut self) -> Result<(), String> {
+        let transport = self
+            .transport
+            .take()
+            .ok_or_else(|| "VNC transport is unavailable.".to_string())?;
+        let io_rx = self
+            .io_rx
+            .take()
+            .ok_or_else(|| "VNC I/O command receiver is unavailable.".to_string())?;
         let writer = self.writer.clone();
         let event_writer = self.event_writer.clone();
         let diagnostics = self.diagnostics;
-        let closed = self.closed.clone();
+        let canceled = self.canceled.clone();
+        let generation = self.generation;
+        let active_generation = self.active_generation.clone();
         let session_state = self.session_state.clone();
+        let audio = self.audio.clone();
+        let clipboard = self.clipboard.clone();
+        let vendor_files = self.vendor_files.clone();
+        let capabilities = self.capabilities.clone();
+        let desktop_resize = self.desktop_resize.clone();
+        let h264 = self.h264.take();
         let width = self.width;
         let height = self.height;
-        thread::Builder::new()
-            .name("oxideterm-vnc-reader".to_string())
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+        let handle = thread::Builder::new()
+            .name(format!("oxideterm-vnc-io-{generation}"))
             .spawn(move || {
-                read_vnc_events(
-                    reader,
+                run_vnc_io_owner(
+                    transport,
+                    io_rx,
                     writer,
                     event_writer,
                     diagnostics,
-                    closed,
+                    canceled,
+                    generation,
+                    active_generation,
                     session_state,
+                    audio,
+                    clipboard,
+                    vendor_files,
+                    capabilities,
+                    desktop_resize,
+                    h264,
                     width,
                     height,
-                )
+                );
+                let _ = done_tx.send(());
             })
-            .ok();
+            .map_err(|error| format!("VNC I/O owner start failed: {error}"))?;
+        self.reader_handle = Some(handle);
+        self.reader_done = Some(done_rx);
+        Ok(())
+    }
+
+    pub(super) fn capabilities_event(&self) -> Result<RemoteDesktopHelperEvent, String> {
+        vnc_capabilities_event(&self.capabilities)
     }
 
     pub(super) fn request_framebuffer_update(&self, incremental: bool) -> Result<(), String> {
@@ -157,161 +208,823 @@ impl VncConnection {
         Ok(())
     }
 
-    pub(super) fn send_pointer(&self, x: u16, y: u16, buttons: u8) -> Result<(), String> {
-        let mut message = Vec::with_capacity(6);
-        message.push(5);
-        message.push(buttons);
-        push_be_u16(&mut message, x);
-        push_be_u16(&mut message, y);
+    pub(super) fn request_desktop_layout(&self, layout: VncDesktopLayout) -> Result<(), String> {
+        request_vnc_desktop_layout(
+            &self.desktop_resize,
+            &self.writer,
+            &self.event_writer,
+            layout,
+        )
+    }
+
+    pub(super) fn send_pointer(&self, x: u16, y: u16, buttons: u16) -> Result<(), String> {
+        let message = vnc_pointer_event_message(
+            x,
+            y,
+            buttons,
+            self.session_state.extended_mouse_button_support()
+                == NegotiatedCapabilityStatus::Supported,
+        );
         write_vnc_message(&self.writer, &message)
     }
 
     pub(super) fn send_key(&self, keysym: u32, down: bool) -> Result<(), String> {
-        let mut message = Vec::with_capacity(8);
-        message.push(4);
-        message.push(u8::from(down));
-        message.extend_from_slice(&[0, 0]);
-        push_be_u32(&mut message, keysym);
-        write_vnc_message(&self.writer, &message)
+        write_vnc_message(&self.writer, &vnc_standard_key_event_message(keysym, down))
+    }
+
+    pub(super) fn send_key_event(&self, event: VncKeyEvent) -> Result<(), String> {
+        if self.session_state.qemu_extended_key_event_support()
+            == NegotiatedCapabilityStatus::Supported
+            && let Some(message) = qemu_extended_key_event_message(event)
+        {
+            return write_vnc_message(&self.writer, &message);
+        }
+        self.send_key(event.keysym, event.down)
+    }
+
+    pub(super) fn synchronize_lock_keys(
+        &self,
+        target: RemoteDesktopLockKeys,
+    ) -> Result<(), String> {
+        // Preserve the desired state until the server supplies its first LED
+        // snapshot; toggling from an unknown state can invert a correct lock.
+        self.session_state.store_pending_lock_keys(target);
+        flush_pending_vnc_lock_key_sync(&self.session_state, &self.writer)
     }
 
     pub(super) fn send_client_cut_text(&self, text: &str) -> Result<(), String> {
-        let bytes = text.as_bytes();
-        let len = u32::try_from(bytes.len())
-            .map_err(|_| "VNC clipboard text is too large to send.".to_string())?;
-        let mut message = Vec::with_capacity(8 + bytes.len());
-        message.push(6);
-        message.extend_from_slice(&[0, 0, 0]);
-        push_be_u32(&mut message, len);
-        message.extend_from_slice(bytes);
-        write_vnc_message(&self.writer, &message)
-    }
-
-    pub(super) fn shutdown(&self) {
-        self.closed.store(true, Ordering::Release);
-        if let Ok(stream) = self.writer.lock() {
-            let _ = stream.shutdown(Shutdown::Both);
+        let messages = self
+            .clipboard
+            .lock()
+            .map_err(|_| "VNC clipboard state lock is poisoned.".to_string())?
+            .set_local_text(text.to_string())?;
+        for message in messages {
+            write_vnc_message(&self.writer, &message)?;
         }
-    }
-}
-
-pub(super) fn handshake_vnc(
-    stream: &mut TcpStream,
-    password: Option<&RemoteDesktopSecret>,
-) -> Result<VncHandshakeInfo, String> {
-    let server_version = read_exact_array::<12, _>(stream)
-        .map_err(|error| format!("VNC protocol banner read failed: {error}"))?;
-    if !server_version.starts_with(b"RFB ") {
-        return Err("VNC server did not send an RFB protocol banner.".to_string());
-    }
-
-    let legacy_security = server_version.starts_with(b"RFB 003.003");
-    let (client_version, protocol_version) = if legacy_security {
-        (VNC_PROTOCOL_VERSION_33, VncProtocolVersion::Rfb003003)
-    } else {
-        (VNC_PROTOCOL_VERSION_38, VncProtocolVersion::Rfb003008)
-    };
-    stream
-        .write_all(client_version)
-        .map_err(|error| format!("VNC protocol banner write failed: {error}"))?;
-
-    let security = if legacy_security {
-        negotiate_legacy_security(stream, password)
-    } else {
-        negotiate_modern_security(stream, password)
-    }?;
-    Ok(VncHandshakeInfo {
-        protocol_version,
-        security,
-        legacy_security,
-    })
-}
-
-pub(super) fn negotiate_legacy_security(
-    stream: &mut TcpStream,
-    password: Option<&RemoteDesktopSecret>,
-) -> Result<VncSecuritySelection, String> {
-    let security_type =
-        read_be_u32(stream).map_err(|error| format!("VNC security type read failed: {error}"))?;
-    match security_type {
-        0 => Err(read_reason(stream)
-            .unwrap_or_else(|_| "VNC server rejected security negotiation.".to_string())),
-        1 => write_client_init(stream).map(|_| VncSecuritySelection::None),
-        2 => authenticate_vnc_password(stream, password)
-            .and_then(|_| write_client_init(stream))
-            .map(|_| VncSecuritySelection::VncAuth),
-        other => Err(format!("Unsupported VNC security type {other}.")),
-    }
-}
-
-pub(super) fn negotiate_modern_security(
-    stream: &mut TcpStream,
-    password: Option<&RemoteDesktopSecret>,
-) -> Result<VncSecuritySelection, String> {
-    let count =
-        read_u8(stream).map_err(|error| format!("VNC security list read failed: {error}"))?;
-    if count == 0 {
-        return Err(read_reason(stream)
-            .unwrap_or_else(|_| "VNC server rejected security negotiation.".to_string()));
-    }
-
-    let mut security_types = vec![0; count as usize];
-    stream
-        .read_exact(&mut security_types)
-        .map_err(|error| format!("VNC security list read failed: {error}"))?;
-    if security_types.contains(&VNC_SECURITY_NONE)
-        && password.is_none_or(|secret| secret.is_empty())
-    {
-        stream
-            .write_all(&[VNC_SECURITY_NONE])
-            .map_err(|error| format!("VNC security selection failed: {error}"))?;
-        let result = read_be_u32(stream)
-            .map_err(|error| format!("VNC security result read failed: {error}"))?;
-        if result != 0 {
-            return Err(read_reason(stream)
-                .unwrap_or_else(|_| "VNC security negotiation failed.".to_string()));
-        }
-        return write_client_init(stream).map(|_| VncSecuritySelection::None);
-    }
-
-    if security_types.contains(&VNC_SECURITY_VNC_AUTH) {
-        stream
-            .write_all(&[VNC_SECURITY_VNC_AUTH])
-            .map_err(|error| format!("VNC security selection failed: {error}"))?;
-        authenticate_vnc_password(stream, password)?;
-        return write_client_init(stream).map(|_| VncSecuritySelection::VncAuth);
-    }
-
-    Err(format!(
-        "Unsupported VNC security types: {:?}.",
-        security_types
-    ))
-}
-
-pub(super) fn authenticate_vnc_password(
-    stream: &mut TcpStream,
-    password: Option<&RemoteDesktopSecret>,
-) -> Result<(), String> {
-    let password = password
-        .filter(|secret| !secret.is_empty())
-        .ok_or_else(|| "VNC server requires password authentication.".to_string())?;
-    let challenge = read_exact_array::<16, _>(stream)
-        .map_err(|error| format!("VNC password challenge read failed: {error}"))?;
-    // VNC authentication derives a request-scoped DES key from the configured
-    // password. Keep both the key and response zeroized after the handshake.
-    let key = vnc_auth_key(password);
-    let mut response = Zeroizing::new(challenge);
-    encrypt_vnc_challenge(&key, &mut response)?;
-    stream
-        .write_all(response.as_slice())
-        .map_err(|error| format!("VNC password response write failed: {error}"))?;
-    let result =
-        read_be_u32(stream).map_err(|error| format!("VNC security result read failed: {error}"))?;
-    if result == 0 {
         Ok(())
+    }
+
+    pub(super) fn send_client_clipboard_data(
+        &self,
+        data: &RemoteDesktopClipboardData,
+    ) -> Result<(), String> {
+        let messages = self
+            .clipboard
+            .lock()
+            .map_err(|_| "VNC clipboard state lock is poisoned.".to_string())?
+            .set_local_data(data)?;
+        for message in messages {
+            write_vnc_message(&self.writer, &message)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn send_clipboard_files(
+        &self,
+        transfer_id: &str,
+        paths: &[std::path::PathBuf],
+    ) -> Result<(), String> {
+        let payload = self
+            .vendor_files
+            .lock()
+            .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())?
+            .upload_payload(transfer_id, paths)?;
+        // Move the complete bounded transfer through one queue slot so a
+        // saturated owner cannot accept a partial sequence.
+        write_vnc_owned_message(&self.writer, payload)
+    }
+
+    pub(super) fn cancel_clipboard_transfer(&self, transfer_id: String) -> Result<(), String> {
+        let message = self
+            .vendor_files
+            .lock()
+            .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())?
+            .cancel(transfer_id);
+        if let Some(message) = message {
+            write_vnc_message(&self.writer, &message)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn shutdown_and_join(&mut self) -> Result<(), String> {
+        if let Ok(mut audio) = self.audio.lock() {
+            audio.shutdown(&self.writer);
+        }
+        if self.writer.try_send(VncIoCommand::Shutdown).is_err() {
+            // Cancellation remains the fallback if the bounded owner queue is saturated.
+            self.canceled.store(true, Ordering::Release);
+        }
+
+        let mut forced_shutdown = false;
+        if let Some(done) = self.reader_done.take() {
+            match done.recv_timeout(VNC_IO_JOIN_TIMEOUT) {
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => {}
+                Err(RecvTimeoutError::Timeout) => {
+                    // A partial server message can delay the graceful command.
+                    // Force the cancellable transport, whose read/write calls
+                    // have their own finite socket deadlines, before joining.
+                    forced_shutdown = true;
+                    self.canceled.store(true, Ordering::Release);
+                }
+            }
+        }
+        self.canceled.store(true, Ordering::Release);
+        if let Some(handle) = self.reader_handle.take() {
+            handle
+                .join()
+                .map_err(|_| "VNC I/O owner panicked during shutdown.".to_string())?;
+        }
+        if forced_shutdown {
+            self.diagnostics
+                .log("VNC I/O owner required forced bounded shutdown");
+        }
+        Ok(())
+    }
+}
+
+fn known_capability(supported: bool) -> NegotiatedCapabilityStatus {
+    if supported {
+        NegotiatedCapabilityStatus::Supported
     } else {
-        Err(read_reason(stream)
-            .unwrap_or_else(|_| "VNC password authentication failed.".to_string()))
+        NegotiatedCapabilityStatus::Unsupported
+    }
+}
+
+fn run_vnc_io_owner(
+    mut transport: Box<dyn VncTransport>,
+    io_rx: Receiver<VncIoCommand>,
+    writer: SyncSender<VncIoCommand>,
+    event_writer: SharedEventWriter,
+    diagnostics: VncDiagnostics,
+    canceled: Arc<AtomicBool>,
+    generation: u64,
+    active_generation: Arc<std::sync::atomic::AtomicU64>,
+    session_state: Arc<VncSessionSharedState>,
+    audio: Arc<Mutex<QemuAudioSession>>,
+    clipboard: Arc<Mutex<VncClipboardSession>>,
+    vendor_files: Arc<Mutex<VncVendorFileSession>>,
+    capabilities: SharedVncCapabilities,
+    desktop_resize: SharedVncDesktopResize,
+    h264: Option<VncH264State>,
+    width: u16,
+    height: u16,
+) {
+    let mut framebuffer = match VncFramebuffer::try_new(width, height) {
+        Ok(framebuffer) => framebuffer,
+        Err(error) => {
+            publish_vnc_disconnect(
+                &event_writer,
+                diagnostics,
+                &canceled,
+                generation,
+                &active_generation,
+                error,
+            );
+            transport.shutdown_transport();
+            return;
+        }
+    };
+    // Decoder contexts are owned by the one task that reads RFB messages and
+    // are dropped before the transport owner exits.
+    let mut decode_state = VncDecodeState::new(h264);
+    let mut performance_state = VncPerformanceState::default();
+    let mut counters = VncReaderDiagnosticsCounters::default();
+    let mut sent_initial_frame = false;
+
+    loop {
+        // Drain final protocol writes before observing cancellation so audio
+        // disable and the following shutdown command preserve channel order.
+        match drain_vnc_io_commands(&mut transport, &io_rx) {
+            Ok(true) => {
+                if let Some(message) = performance_state.disable_continuous_updates_message(
+                    framebuffer.width as u16,
+                    framebuffer.height as u16,
+                ) {
+                    let _ = transport.write_all(&message);
+                }
+                transport.shutdown_transport();
+                break;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        }
+        if canceled.load(Ordering::Acquire)
+            || active_generation.load(Ordering::Acquire) != generation
+        {
+            if let Some(message) = performance_state.disable_continuous_updates_message(
+                framebuffer.width as u16,
+                framebuffer.height as u16,
+            ) {
+                let _ = transport.write_all(&message);
+            }
+            transport.shutdown_transport();
+            break;
+        }
+
+        transport.set_phase_timeout(None);
+        let message_type = match read_u8(&mut transport) {
+            Ok(message_type) => message_type,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                continue;
+            }
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    format!("VNC server message read failed: {error}"),
+                );
+                break;
+            }
+        };
+        transport.set_phase_timeout(Some(VNC_IO_MESSAGE_TIMEOUT));
+        if message_type == FILE_UPLOAD_CANCEL.code as u8 {
+            let file_events = match vendor_files
+                .lock()
+                .map_err(|_| "VNC file transfer state lock is poisoned.".to_string())
+                .and_then(|mut files| files.observe_server_message(message_type, &mut transport))
+            {
+                Ok(events) => events,
+                Err(error) => {
+                    publish_vnc_disconnect(
+                        &event_writer,
+                        diagnostics,
+                        &canceled,
+                        generation,
+                        &active_generation,
+                        error,
+                    );
+                    break;
+                }
+            };
+            transport.set_phase_timeout(None);
+            if active_generation.load(Ordering::Acquire) == generation {
+                for event in file_events {
+                    let _ = send_event(&event_writer, event);
+                }
+            }
+            continue;
+        }
+        let event = match read_vnc_event_after_type(&mut transport, &mut decode_state, message_type)
+        {
+            Ok(event) => event,
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        };
+        transport.set_phase_timeout(None);
+
+        if let VncServerEvent::ClipboardExtended(message) = &event {
+            let outcome = match clipboard
+                .lock()
+                .map_err(|_| "VNC clipboard state lock is poisoned.".to_string())
+                .and_then(|mut clipboard| {
+                    clipboard.observe_server_message(VncClipboardMessage::Extended(message.clone()))
+                }) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    publish_vnc_disconnect(
+                        &event_writer,
+                        diagnostics,
+                        &canceled,
+                        generation,
+                        &active_generation,
+                        error,
+                    );
+                    break;
+                }
+            };
+            let mut clipboard_write_failed = None;
+            for message in outcome.messages {
+                if let Err(error) = transport.write_all(&message) {
+                    clipboard_write_failed =
+                        Some(format!("VNC clipboard control write failed: {error}"));
+                    break;
+                }
+            }
+            if let Some(error) = clipboard_write_failed {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+            if active_generation.load(Ordering::Acquire) == generation {
+                for helper_event in outcome.helper_events {
+                    let _ = send_event(&event_writer, helper_event);
+                }
+            }
+            if outcome.capabilities_changed {
+                let clipboard_formats = match clipboard.lock() {
+                    Ok(clipboard) => clipboard
+                        .server_capabilities()
+                        .map(ExtendedClipboardCapabilities::format_labels)
+                        .unwrap_or_default(),
+                    Err(_) => {
+                        publish_vnc_disconnect(
+                            &event_writer,
+                            diagnostics,
+                            &canceled,
+                            generation,
+                            &active_generation,
+                            "VNC clipboard state lock is poisoned.".to_string(),
+                        );
+                        break;
+                    }
+                };
+                match update_vnc_capabilities(&capabilities, |snapshot| {
+                    // Client advertisement is not evidence; only server caps
+                    // transition this value from Unknown to Supported.
+                    snapshot.extended_clipboard = NegotiatedCapabilityStatus::Supported;
+                    snapshot.extended_clipboard_formats = clipboard_formats;
+                }) {
+                    Ok(Some(event)) if active_generation.load(Ordering::Acquire) == generation => {
+                        let _ = send_event(&event_writer, event);
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        publish_vnc_disconnect(
+                            &event_writer,
+                            diagnostics,
+                            &canceled,
+                            generation,
+                            &active_generation,
+                            error,
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+
+        session_state.observe_input_extensions(&event);
+        if let Err(error) = flush_pending_vnc_lock_key_sync(&session_state, &writer) {
+            publish_vnc_disconnect(
+                &event_writer,
+                diagnostics,
+                &canceled,
+                generation,
+                &active_generation,
+                error,
+            );
+            break;
+        }
+        let qemu_audio_supported = match handle_qemu_audio_event(&event, &audio, &writer) {
+            Ok(supported) => supported,
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        };
+        let input_capabilities = session_state.input_extension_capabilities();
+        match update_vnc_capabilities(&capabilities, |snapshot| {
+            if qemu_audio_supported {
+                snapshot.qemu_audio = NegotiatedCapabilityStatus::Supported;
+            }
+            snapshot.extended_key_events = input_capabilities.extended_key_events;
+            snapshot.extended_mouse_buttons = input_capabilities.extended_mouse_buttons;
+            snapshot.lock_key_sync = input_capabilities.lock_key_sync;
+        }) {
+            Ok(Some(event)) if active_generation.load(Ordering::Acquire) == generation => {
+                let _ = send_event(&event_writer, event);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        }
+        if let Err(error) = handle_vnc_desktop_size_event(
+            &event,
+            &desktop_resize,
+            &capabilities,
+            &writer,
+            &event_writer,
+        ) {
+            publish_vnc_disconnect(
+                &event_writer,
+                diagnostics,
+                &canceled,
+                generation,
+                &active_generation,
+                error,
+            );
+            break;
+        }
+        match observe_vnc_performance_capabilities(&event, &capabilities) {
+            Ok(Some(event)) if active_generation.load(Ordering::Acquire) == generation => {
+                let _ = send_event(&event_writer, event);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        }
+        let mut performance_control_error = None;
+        for message in performance_state.observe_server_event(
+            &event,
+            framebuffer.width as u16,
+            framebuffer.height as u16,
+        ) {
+            if let Err(error) = transport.write_all(&message) {
+                performance_control_error =
+                    Some(format!("VNC extension control write failed: {error}"));
+                break;
+            }
+        }
+        if let Some(error) = performance_control_error {
+            publish_vnc_disconnect(
+                &event_writer,
+                diagnostics,
+                &canceled,
+                generation,
+                &active_generation,
+                error,
+            );
+            break;
+        }
+        // Flush extension responses before requesting the next framebuffer so
+        // SetDesktopSize and audio control messages preserve wire ordering.
+        match drain_vnc_io_commands(&mut transport, &io_rx) {
+            Ok(true) => {
+                if let Some(message) = performance_state.disable_continuous_updates_message(
+                    framebuffer.width as u16,
+                    framebuffer.height as u16,
+                ) {
+                    let _ = transport.write_all(&message);
+                }
+                transport.shutdown_transport();
+                break;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        }
+        let summary = vnc_server_event_summary(&event);
+        counters.server_messages = counters.server_messages.saturating_add(1);
+        counters.helper_side_events = counters
+            .helper_side_events
+            .saturating_add(summary.side_events);
+        counters.dirty_rects = counters.dirty_rects.saturating_add(summary.dirty_rects);
+        counters.dirty_pixels = counters.dirty_pixels.saturating_add(summary.dirty_pixels);
+
+        if active_generation.load(Ordering::Acquire) == generation {
+            for helper_event in vnc_helper_events(&event) {
+                let _ = send_event(&event_writer, helper_event);
+            }
+        }
+        let framebuffer_change = match framebuffer.try_apply(event) {
+            Ok(change) => change,
+            Err(error) => {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    error,
+                );
+                break;
+            }
+        };
+        if let Some(change) = framebuffer_change {
+            session_state.store_size(framebuffer.width as u16, framebuffer.height as u16);
+            let frame_event = vnc_frame_event_for_change(
+                &framebuffer,
+                change,
+                &mut sent_initial_frame,
+                session_state.take_base_frame_request(),
+            );
+            record_vnc_frame_diagnostics(&mut counters, diagnostics, &frame_event, summary);
+            if active_generation.load(Ordering::Acquire) == generation {
+                let _ = send_event(&event_writer, frame_event);
+            }
+            if change == VncFramebufferChange::Full
+                && let Some(message) = performance_state.framebuffer_resized_message(
+                    framebuffer.width as u16,
+                    framebuffer.height as u16,
+                )
+                && let Err(error) = transport.write_all(&message)
+            {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    format!("VNC continuous update resize failed: {error}"),
+                );
+                break;
+            }
+        }
+
+        if !performance_state.continuous_updates_active() {
+            let request = framebuffer_update_request_message(
+                true,
+                framebuffer.width as u16,
+                framebuffer.height as u16,
+            );
+            if let Err(error) = transport.write_all(&request) {
+                publish_vnc_disconnect(
+                    &event_writer,
+                    diagnostics,
+                    &canceled,
+                    generation,
+                    &active_generation,
+                    format!("VNC framebuffer request write failed: {error}"),
+                );
+                break;
+            }
+        }
+    }
+    transport.shutdown_transport();
+    if let Ok(mut audio) = audio.lock() {
+        audio.stop_local();
+    }
+}
+
+/// Queues a deferred lock-key synchronization after the server state is known.
+pub(super) fn flush_pending_vnc_lock_key_sync(
+    session_state: &VncSessionSharedState,
+    writer: &SharedVncWriter,
+) -> Result<(), String> {
+    let Some((current, target)) = session_state.take_pending_lock_key_sync() else {
+        return Ok(());
+    };
+    let mut message = Vec::new();
+    for event in vnc_lock_key_sync_events(current, target) {
+        let key_message = if session_state.qemu_extended_key_event_support()
+            == NegotiatedCapabilityStatus::Supported
+        {
+            qemu_extended_key_event_message(event)
+                .unwrap_or_else(|| vnc_standard_key_event_message(event.keysym, event.down))
+        } else {
+            vnc_standard_key_event_message(event.keysym, event.down)
+        };
+        message.extend_from_slice(&key_message);
+    }
+    if !message.is_empty()
+        && let Err(error) = write_vnc_message(writer, &message)
+    {
+        // Retain the desired state so a later request or LED observation
+        // can retry without guessing the server's current lock state.
+        session_state.store_pending_lock_keys(target);
+        return Err(error);
+    }
+    session_state.store_remote_lock_keys(target);
+    Ok(())
+}
+
+fn drain_vnc_io_commands(
+    transport: &mut Box<dyn VncTransport>,
+    io_rx: &Receiver<VncIoCommand>,
+) -> Result<bool, String> {
+    loop {
+        match io_rx.try_recv() {
+            Ok(VncIoCommand::Write(message)) => transport
+                .write_all(&message)
+                .map_err(|error| format!("VNC message write failed: {error}"))?,
+            Ok(VncIoCommand::Shutdown) => {
+                return Ok(true);
+            }
+            Err(TryRecvError::Empty) => return Ok(false),
+            Err(TryRecvError::Disconnected) => {
+                transport.shutdown_transport();
+                return Err("VNC command channel closed.".to_string());
+            }
+        }
+    }
+}
+
+fn publish_vnc_disconnect(
+    event_writer: &SharedEventWriter,
+    diagnostics: VncDiagnostics,
+    canceled: &Arc<AtomicBool>,
+    generation: u64,
+    active_generation: &Arc<std::sync::atomic::AtomicU64>,
+    error: String,
+) {
+    if canceled.load(Ordering::Acquire) || active_generation.load(Ordering::Acquire) != generation {
+        return;
+    }
+    diagnostics.log("VNC I/O owner reported a protocol or network disconnect");
+    let _ = send_event(
+        event_writer,
+        RemoteDesktopHelperEvent::Disconnected {
+            reason: Some(error),
+        },
+    );
+}
+
+#[cfg(test)]
+mod io_owner_tests {
+    use std::net::{TcpListener, TcpStream};
+
+    use super::*;
+
+    /// Captures owner writes without opening a network connection.
+    struct RecordingTransport {
+        bytes: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Read for RecordingTransport {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::WouldBlock))
+        }
+    }
+
+    impl Write for RecordingTransport {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl VncTransport for RecordingTransport {
+        fn shutdown_transport(&self) {}
+
+        fn set_phase_timeout(&mut self, _timeout: Option<Duration>) {}
+
+        fn peer_certificate_der(&self) -> VncResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn io_owner_drains_final_audio_write_before_shutdown() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let mut transport: Box<dyn VncTransport> = Box::new(RecordingTransport {
+            bytes: bytes.clone(),
+        });
+        let (writer, receiver) = std::sync::mpsc::sync_channel(2);
+        writer
+            .send(VncIoCommand::Write(vec![255, 1, 0, 1]))
+            .unwrap();
+        writer.send(VncIoCommand::Shutdown).unwrap();
+
+        assert!(drain_vnc_io_commands(&mut transport, &receiver).unwrap());
+        assert_eq!(*bytes.lock().unwrap(), vec![255, 1, 0, 1]);
+    }
+
+    #[test]
+    fn idle_socket_owner_accepts_write_and_shutdown_commands() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_millis(25)))
+            .unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let transport: Box<dyn VncTransport> =
+            Box::new(CancellableTcpStream::new(client, canceled.clone()));
+        let (writer, receiver) = std::sync::mpsc::sync_channel(4);
+        let active_generation = Arc::new(AtomicU64::new(1));
+        let owner_writer = writer.clone();
+        let owner = thread::spawn({
+            let active_generation = active_generation.clone();
+            move || {
+                run_vnc_io_owner(
+                    transport,
+                    receiver,
+                    owner_writer,
+                    Arc::new(Mutex::new(io::stdout())),
+                    VncDiagnostics::default(),
+                    canceled,
+                    1,
+                    active_generation,
+                    Arc::new(VncSessionSharedState::new(1, 1)),
+                    Arc::new(Mutex::new(QemuAudioSession::new(false))),
+                    Arc::new(Mutex::new(VncClipboardSession::default())),
+                    Arc::new(Mutex::new(VncVendorFileSession::default())),
+                    Arc::new(Mutex::new(NegotiatedCapabilities::default())),
+                    Arc::new(Mutex::new(VncDesktopResizeState::new(
+                        VncDesktopLayout::single(RemoteDesktopSize {
+                            width: 1,
+                            height: 1,
+                        })
+                        .unwrap(),
+                    ))),
+                    None,
+                    1,
+                    1,
+                );
+            }
+        });
+
+        writer.send(VncIoCommand::Write(vec![4, 1, 2, 3])).unwrap();
+        let mut received = [0; 4];
+        server.read_exact(&mut received).unwrap();
+        assert_eq!(received, [4, 1, 2, 3]);
+        writer.send(VncIoCommand::Shutdown).unwrap();
+        owner.join().unwrap();
+    }
+}
+
+fn record_vnc_frame_diagnostics(
+    counters: &mut VncReaderDiagnosticsCounters,
+    diagnostics: VncDiagnostics,
+    event: &RemoteDesktopHelperEvent,
+    summary: VncServerEventSummary,
+) {
+    match event {
+        RemoteDesktopHelperEvent::Frame { frame } => {
+            counters.helper_frames = counters.helper_frames.saturating_add(1);
+            diagnostics.log(format!(
+                "frame kind=base size={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
+                frame.size.width,
+                frame.size.height,
+                counters.helper_frames,
+                counters.helper_frame_updates,
+                counters.server_messages,
+                counters.dirty_rects,
+                summary.dirty_rects,
+                counters.dirty_pixels,
+                counters.helper_side_events
+            ));
+        }
+        RemoteDesktopHelperEvent::FrameUpdate { update } => {
+            counters.helper_frame_updates = counters.helper_frame_updates.saturating_add(1);
+            diagnostics.log(format!(
+                "frame kind=update rect={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
+                update.rect.width,
+                update.rect.height,
+                counters.helper_frames,
+                counters.helper_frame_updates,
+                counters.server_messages,
+                counters.dirty_rects,
+                summary.dirty_rects,
+                counters.dirty_pixels,
+                counters.helper_side_events
+            ));
+        }
+        _ => {}
     }
 }
 
@@ -341,28 +1054,52 @@ pub(super) fn encrypt_vnc_challenge(
     Ok(())
 }
 
-pub(super) fn write_client_init(stream: &mut TcpStream) -> Result<(), String> {
-    // Shared mode avoids disconnecting external viewers when the server allows
-    // multiple clients.
-    stream
-        .write_all(&[1])
-        .map_err(|error| format!("VNC client init failed: {error}"))
-}
-
-pub(super) fn read_server_init(stream: &mut TcpStream) -> Result<(u16, u16), String> {
+pub(super) fn read_server_init(
+    stream: &mut impl Read,
+    tight_active: bool,
+) -> VncResult<(u16, u16, Option<TightInteractionCapabilities>)> {
     let init = read_exact_array::<24, _>(stream)
-        .map_err(|error| format!("VNC init read failed: {error}"))?;
+        .map_err(|error| VncError::network(format!("VNC init read failed: {error}")))?;
     let width = be_u16(&init[0..2]);
     let height = be_u16(&init[2..4]);
+    validate_vnc_framebuffer_size(width, height)?;
     let name_len = be_u32(&init[20..24]) as usize;
+    if name_len > MAX_VNC_DESKTOP_NAME_BYTES {
+        return Err(VncError::protocol(
+            "VNC desktop name exceeds the helper limit.",
+        ));
+    }
     if name_len > 0 {
         read_exact_vec(stream, name_len)
-            .map_err(|error| format!("VNC desktop name read failed: {error}"))?;
+            .map_err(|error| VncError::network(format!("VNC desktop name read failed: {error}")))?;
     }
-    Ok((width, height))
+    let tight_interaction = if tight_active {
+        Some(read_tight_interaction_capabilities(stream).map_err(VncError::protocol)?)
+    } else {
+        None
+    };
+    Ok((width, height, tight_interaction))
 }
 
-pub(super) fn write_pixel_format(stream: &mut TcpStream) -> Result<(), String> {
+fn validate_vnc_framebuffer_size(width: u16, height: u16) -> VncResult<()> {
+    if width == 0 || height == 0 {
+        return Err(VncError::protocol(
+            "VNC framebuffer dimensions must be greater than zero.",
+        ));
+    }
+    let bytes = usize::from(width)
+        .checked_mul(usize::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| VncError::protocol("VNC framebuffer byte count overflowed."))?;
+    if bytes > MAX_VNC_FRAME_BYTES {
+        return Err(VncError::protocol(
+            "VNC framebuffer exceeds the helper memory limit.",
+        ));
+    }
+    Ok(())
+}
+
+fn write_pixel_format(stream: &mut impl Write) -> VncResult<()> {
     let mut message = Vec::with_capacity(20);
     message.extend_from_slice(&[0, 0, 0, 0]);
     message.extend_from_slice(&[
@@ -373,119 +1110,30 @@ pub(super) fn write_pixel_format(stream: &mut TcpStream) -> Result<(), String> {
     ]);
     stream
         .write_all(&message)
-        .map_err(|error| format!("VNC pixel format write failed: {error}"))
+        .map_err(|error| VncError::network(format!("VNC pixel format write failed: {error}")))
 }
 
-pub(super) fn write_encodings(stream: &mut TcpStream) -> Result<(), String> {
+fn write_encodings(
+    stream: &mut impl Write,
+    preferences: VncEncodingPreferences,
+    h264_available: bool,
+) -> VncResult<()> {
     stream
-        .write_all(&set_encodings_message())
-        .map_err(|error| format!("VNC encoding write failed: {error}"))
+        .write_all(&set_encodings_message(preferences, h264_available))
+        .map_err(|error| VncError::network(format!("VNC encoding write failed: {error}")))
 }
 
-pub(super) fn set_encodings_message() -> Vec<u8> {
-    let mut message = Vec::with_capacity(32);
+pub(super) fn set_encodings_message(
+    preferences: VncEncodingPreferences,
+    h264_available: bool,
+) -> Vec<u8> {
+    let encodings = advertised_vnc_encodings(preferences, h264_available);
+    let mut message = Vec::with_capacity(4 + encodings.len() * 4);
     message.push(2);
     message.push(0);
-    push_be_u16(&mut message, VNC_ADVERTISED_ENCODINGS.len() as u16);
-    for encoding in VNC_ADVERTISED_ENCODINGS {
+    push_be_u16(&mut message, encodings.len() as u16);
+    for encoding in encodings {
         push_be_i32(&mut message, encoding);
     }
     message
-}
-
-pub(super) fn read_vnc_events(
-    mut reader: TcpStream,
-    writer: SharedVncWriter,
-    event_writer: SharedEventWriter,
-    diagnostics: VncDiagnostics,
-    closed: Arc<AtomicBool>,
-    session_state: Arc<VncSessionSharedState>,
-    width: u16,
-    height: u16,
-) {
-    let mut framebuffer = VncFramebuffer::new(width, height);
-    let mut decode_state = VncDecodeState::default();
-    let mut counters = VncReaderDiagnosticsCounters::default();
-    let mut sent_initial_frame = false;
-    loop {
-        match read_vnc_event(&mut reader, &mut decode_state) {
-            Ok(event) => {
-                let summary = vnc_server_event_summary(&event);
-                counters.server_messages = counters.server_messages.saturating_add(1);
-                counters.helper_side_events = counters
-                    .helper_side_events
-                    .saturating_add(summary.side_events);
-                counters.dirty_rects = counters.dirty_rects.saturating_add(summary.dirty_rects);
-                counters.dirty_pixels = counters.dirty_pixels.saturating_add(summary.dirty_pixels);
-                for helper_event in vnc_helper_events(&event) {
-                    let _ = send_event(&event_writer, helper_event);
-                }
-                if let Some(change) = framebuffer.apply(event) {
-                    session_state.store_size(framebuffer.width as u16, framebuffer.height as u16);
-                    let frame_event = vnc_frame_event_for_change(
-                        &framebuffer,
-                        change,
-                        &mut sent_initial_frame,
-                        session_state.take_base_frame_request(),
-                    );
-                    match &frame_event {
-                        RemoteDesktopHelperEvent::Frame { frame } => {
-                            counters.helper_frames = counters.helper_frames.saturating_add(1);
-                            diagnostics.log(format!(
-                                "frame kind=base size={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
-                                frame.size.width,
-                                frame.size.height,
-                                counters.helper_frames,
-                                counters.helper_frame_updates,
-                                counters.server_messages,
-                                counters.dirty_rects,
-                                summary.dirty_rects,
-                                counters.dirty_pixels,
-                                counters.helper_side_events
-                            ));
-                        }
-                        RemoteDesktopHelperEvent::FrameUpdate { update } => {
-                            counters.helper_frame_updates =
-                                counters.helper_frame_updates.saturating_add(1);
-                            diagnostics.log(format!(
-                                "frame kind=update rect={}x{} helper_frames={} helper_updates={} server_messages={} dirty_rects_total={} dirty_rects_batch={} dirty_pixels={} side_events={}",
-                                update.rect.width,
-                                update.rect.height,
-                                counters.helper_frames,
-                                counters.helper_frame_updates,
-                                counters.server_messages,
-                                counters.dirty_rects,
-                                summary.dirty_rects,
-                                counters.dirty_pixels,
-                                counters.helper_side_events
-                            ));
-                        }
-                        _ => {}
-                    }
-                    let _ = send_event(&event_writer, frame_event);
-                }
-                let _ = request_framebuffer_update(
-                    &writer,
-                    true,
-                    framebuffer.width as u16,
-                    framebuffer.height as u16,
-                );
-            }
-            Err(error) => {
-                if !closed.load(Ordering::Acquire) {
-                    diagnostics.log(format!(
-                        "disconnect category={:?}",
-                        vnc_error_category_from_message(&error)
-                    ));
-                    let _ = send_event(
-                        &event_writer,
-                        RemoteDesktopHelperEvent::Disconnected {
-                            reason: Some(error),
-                        },
-                    );
-                }
-                return;
-            }
-        }
-    }
 }

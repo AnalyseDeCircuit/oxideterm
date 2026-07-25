@@ -336,6 +336,16 @@ impl WorkspaceApp {
                 .is_some_and(|session| {
                     session.provider.capabilities.clipboard_files
                         && session.profile.session_options.clipboard.files
+                        && (session.profile.protocol != RemoteDesktopProtocol::Vnc
+                            || session
+                                .state
+                                .snapshot()
+                                .negotiated_capabilities
+                                .as_ref()
+                                .is_some_and(|capabilities| {
+                                    capabilities.vendor_files
+                                        == NegotiatedCapabilityStatus::Supported
+                                }))
                 });
             if files_enabled {
                 self.send_remote_desktop_request(
@@ -351,11 +361,24 @@ impl WorkspaceApp {
             return true;
         }
 
-        // Rich clipboard formats are provider-owned. Built-in VNC remains
-        // text-only until an RFB clipboard extension is negotiated.
+        // Provider support describes the helper boundary; VNC binary formats
+        // additionally require server evidence from Extended Clipboard caps.
         if let Some(session) = self.remote_desktop_sessions.get(&tab_id)
             && session.provider.capabilities.clipboard_data
             && session.profile.session_options.clipboard.images
+            && (session.profile.protocol != RemoteDesktopProtocol::Vnc
+                || session
+                    .state
+                    .snapshot()
+                    .negotiated_capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| {
+                        capabilities.extended_clipboard == NegotiatedCapabilityStatus::Supported
+                            && capabilities
+                                .extended_clipboard_formats
+                                .iter()
+                                .any(|format| format == "dib-v5")
+                    }))
             && let Some(data) = remote_desktop_clipboard_data_from_item(&item)
         {
             self.send_remote_desktop_request(

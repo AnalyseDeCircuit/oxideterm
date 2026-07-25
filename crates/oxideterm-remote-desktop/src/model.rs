@@ -4,6 +4,120 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopVncSecurityPolicy {
+    /// Rejects sessions unless transport encryption and peer identity are verified.
+    #[default]
+    RequireVerifiedEncryption,
+    /// Allows encrypted VeNCrypt sessions whose anonymous TLS certificate is not an identity.
+    AllowUnverifiedEncryption,
+    /// Allows classic VNC security when the user accepts its weaker guarantees.
+    AllowLegacy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopVncSessionMode {
+    #[default]
+    Shared,
+    Exclusive,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopVncImageQuality {
+    Performance,
+    #[default]
+    Balanced,
+    BestQuality,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopVncCompression {
+    Low,
+    #[default]
+    Balanced,
+    High,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopVncOptions {
+    #[serde(default)]
+    pub security_policy: RemoteDesktopVncSecurityPolicy,
+    #[serde(default)]
+    pub session_mode: RemoteDesktopVncSessionMode,
+    #[serde(default)]
+    pub image_quality: RemoteDesktopVncImageQuality,
+    #[serde(default)]
+    pub compression: RemoteDesktopVncCompression,
+}
+
+/// Describes the capabilities reported by a server after protocol negotiation.
+///
+/// RFB extensions are often discovered by observation instead of an exhaustive
+/// server declaration, so absence must remain distinct from explicit rejection.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NegotiatedCapabilityStatus {
+    #[default]
+    Unknown,
+    Supported,
+    Unsupported,
+}
+
+impl NegotiatedCapabilityStatus {
+    pub const fn is_supported(self) -> bool {
+        matches!(self, Self::Supported)
+    }
+}
+
+/// Describes the cumulative capability evidence reported by a server session.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NegotiatedCapabilities {
+    #[serde(default)]
+    pub security_methods: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_security_method: Option<String>,
+    #[serde(default)]
+    pub encrypted: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub peer_identity_verified: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub resize: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub multi_monitor: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub extended_clipboard: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub extended_clipboard_formats: Vec<String>,
+    #[serde(default)]
+    pub tight: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub jpeg: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub continuous_updates: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub fence: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub last_rect: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub h264: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub qemu_audio: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub vendor_files: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub extended_key_events: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub extended_mouse_buttons: NegotiatedCapabilityStatus,
+    #[serde(default)]
+    pub lock_key_sync: NegotiatedCapabilityStatus,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktopClipboardOptions {
@@ -55,6 +169,8 @@ pub struct RemoteDesktopSessionOptions {
     pub audio: RemoteDesktopAudioOptions,
     #[serde(default)]
     pub display: RemoteDesktopDisplayOptions,
+    #[serde(default)]
+    pub vnc: RemoteDesktopVncOptions,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -784,6 +900,51 @@ mod tests {
         assert_eq!(RemoteDesktopProtocol::Rdp.default_port(), 3389);
         assert_eq!(RemoteDesktopProtocol::Vnc.provider_id(), "vnc");
         assert_eq!(RemoteDesktopProtocol::Vnc.default_port(), 5900);
+    }
+
+    #[test]
+    fn vnc_options_default_to_verified_encryption_and_balanced_rendering() {
+        let options = RemoteDesktopVncOptions::default();
+
+        assert_eq!(
+            options.security_policy,
+            RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption
+        );
+        assert_eq!(options.session_mode, RemoteDesktopVncSessionMode::Shared);
+        assert_eq!(
+            options.image_quality,
+            RemoteDesktopVncImageQuality::Balanced
+        );
+        assert_eq!(options.compression, RemoteDesktopVncCompression::Balanced);
+    }
+
+    #[test]
+    fn older_session_options_receive_safe_vnc_defaults() {
+        let options: RemoteDesktopSessionOptions = serde_json::from_str(
+            r#"{"clipboard":{"text":true,"images":false,"files":false},"audio":{"playback":false,"capture":false},"display":{"useAllMonitors":false}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            options.vnc.security_policy,
+            RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption
+        );
+        assert_eq!(
+            options.vnc.session_mode,
+            RemoteDesktopVncSessionMode::Shared
+        );
+    }
+
+    #[test]
+    fn unobserved_negotiated_capabilities_remain_unknown() {
+        let capabilities: NegotiatedCapabilities = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(capabilities.resize, NegotiatedCapabilityStatus::Unknown);
+        assert_eq!(
+            capabilities.extended_clipboard,
+            NegotiatedCapabilityStatus::Unknown
+        );
+        assert_eq!(capabilities.h264, NegotiatedCapabilityStatus::Unknown);
     }
 
     #[test]

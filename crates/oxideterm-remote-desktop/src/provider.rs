@@ -223,12 +223,16 @@ fn builtin_provider_capabilities(
 ) -> RemoteDesktopProviderCapabilities {
     RemoteDesktopProviderCapabilities {
         clipboard_text: true,
-        clipboard_data: matches!(protocol, RemoteDesktopProtocol::Rdp),
-        clipboard_files: matches!(protocol, RemoteDesktopProtocol::Rdp),
-        audio_playback: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        // VNC requests remain gated by the server-negotiated runtime snapshot.
+        clipboard_data: true,
+        clipboard_files: true,
+        // VNC exposes playback when the server confirms the QEMU Audio extension.
+        audio_playback: true,
         audio_capture: matches!(protocol, RemoteDesktopProtocol::Rdp),
-        multi_monitor: matches!(protocol, RemoteDesktopProtocol::Rdp),
-        resize: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        // Both bundled clients can request dynamic size and monitor topology;
+        // negotiated server support is reported separately per session.
+        multi_monitor: true,
+        resize: true,
         cursor: true,
         binary_frames: true,
     }
@@ -367,8 +371,11 @@ mod tests {
 
         assert_eq!(vnc.effective_default_port(), 5900);
         assert!(vnc.capabilities.clipboard_text);
-        assert!(!vnc.capabilities.clipboard_data);
-        assert!(!vnc.capabilities.resize);
+        assert!(vnc.capabilities.clipboard_data);
+        assert!(vnc.capabilities.clipboard_files);
+        assert!(vnc.capabilities.audio_playback);
+        assert!(vnc.capabilities.multi_monitor);
+        assert!(vnc.capabilities.resize);
         assert!(vnc.capabilities.cursor);
         assert!(vnc.capabilities.binary_frames);
     }
