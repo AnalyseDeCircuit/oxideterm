@@ -450,6 +450,27 @@ fn client_output_drain_prioritizes_control_events_over_saturated_graphics() {
 }
 
 #[test]
+fn egfx_protocol_failure_preserves_protocol_category() {
+    let writer = SharedEventWriter::inert_for_tests();
+    let (output_tx, output_rx) = client_rdp_output_channel(1);
+    output_tx
+        .send_control(ClientRdpOutput::ProtocolFailure(
+            "RDP Progressive decode failed.".to_string(),
+        ))
+        .unwrap();
+
+    let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
+
+    match drain.exit {
+        Some(ClientRdpSessionExit::ConnectionFailed { message, category }) => {
+            assert_eq!(message, "RDP Progressive decode failed.");
+            assert_eq!(category, RemoteDesktopErrorCategory::Protocol);
+        }
+        other => panic!("expected an EGFX protocol failure, got {other:?}"),
+    }
+}
+
+#[test]
 fn cursor_position_can_drop_under_backpressure_but_shape_is_preserved() {
     let (output_tx, output_rx) = client_rdp_output_channel(1);
     output_tx
@@ -790,6 +811,7 @@ fn client_config_enables_modern_rdp_security_and_bitmap_output() {
     assert!(client_config.connector.autologon);
     assert!(client_config.connector.enable_server_pointer);
     assert!(!client_config.connector.pointer_software_rendering);
+    assert!(client_config.connector.support_dyn_vc_gfx_protocol);
     assert_eq!(client_config.connector.desktop_size.width, 1280);
     assert_eq!(client_config.connector.desktop_size.height, 720);
     assert_eq!(

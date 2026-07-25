@@ -50,6 +50,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         enable_server_pointer: true,
         pointer_software_rendering: false,
         multitransport_flags: None,
+        support_dyn_vc_gfx_protocol: true,
         compression_type: Some(CompressionType::Rdp61),
         performance_flags: PerformanceFlags::default(),
         timezone_info: TimezoneInfo::default(),
@@ -80,11 +81,12 @@ pub(super) fn log_rdp_client_graphics_config(config: &connector::Config) {
     });
 
     eprintln!(
-        "[oxideterm:rdp-helper-capabilities] requested_size={}x{} scale={} compression={:?} bitmap={} codecs={}",
+        "[oxideterm:rdp-helper-capabilities] requested_size={}x{} scale={} compression={:?} egfx={} bitmap={} codecs={}",
         config.desktop_size.width,
         config.desktop_size.height,
         config.desktop_scale_factor,
         config.compression_type,
+        config.support_dyn_vc_gfx_protocol,
         bitmap_summary.unwrap_or_else(|| "disabled".to_string()),
         codec_labels,
     );

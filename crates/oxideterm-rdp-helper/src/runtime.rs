@@ -137,7 +137,7 @@ pub(super) fn run_client_rdp_thread(
 
     runtime.block_on(async move {
         loop {
-            let (connection_result, framed) =
+            let (connection_result, framed, egfx_bridge) =
                 match connect_native_rdp(&config, input_tx.clone(), client_output_tx.clone()).await
                 {
                     Ok(result) => result,
@@ -152,6 +152,7 @@ pub(super) fn run_client_rdp_thread(
                 connection_result,
                 &mut input_rx,
                 &client_output_tx,
+                &egfx_bridge,
             )
             .await
             {

@@ -140,7 +140,7 @@ pub(super) async fn connect_native_rdp(
     config: &ClientRdpConfig,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     output_tx: ClientRdpOutputSender,
-) -> connector::ConnectorResult<(ConnectionResult, UpgradedRdpFramed)> {
+) -> connector::ConnectorResult<(ConnectionResult, UpgradedRdpFramed, EgfxSessionBridge)> {
     let socket = TcpStream::connect((config.destination.host(), config.destination.port()))
         .await
         .map_err(|error| connector::custom_err!("TCP connect", error))?;
@@ -152,7 +152,7 @@ pub(super) async fn connect_native_rdp(
         .map_err(|error| connector::custom_err!("get socket local address", error))?;
     let mut framed = ironrdp_tokio::TokioFramed::new(socket);
     let mut connector = connector::ClientConnector::new(config.connector.clone(), client_addr);
-    attach_client_virtual_channels(&mut connector, input_tx, output_tx);
+    let egfx_bridge = attach_client_virtual_channels(&mut connector, input_tx, output_tx);
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector).await?;
     let (initial_stream, leftover_bytes) = framed.into_inner();
     let (upgraded_stream, tls_cert) =
@@ -177,22 +177,27 @@ pub(super) async fn connect_native_rdp(
     .await?;
     log_rdp_negotiated_graphics(&config.connector, &connection_result);
 
-    Ok((connection_result, upgraded_framed))
+    Ok((connection_result, upgraded_framed, egfx_bridge))
 }
 
 pub(super) fn attach_client_virtual_channels(
     connector: &mut connector::ClientConnector,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     output_tx: ClientRdpOutputSender,
-) {
-    let display_control =
-        DrdynvcClient::new().with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
+) -> EgfxSessionBridge {
+    let (graphics_pipeline, egfx_bridge) = new_egfx_channel(output_tx.clone());
+    let display_control = DrdynvcClient::new()
+        .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())))
+        .with_dynamic_channel(graphics_pipeline);
     connector.attach_static_channel(display_control);
 
     // CLIPRDR is attached as a normal static channel while the backend itself
     // bridges callbacks into OxideTerm's helper protocol.
     let clipboard = ClientClipboardBackend::new(input_tx, output_tx);
     connector.attach_static_channel(CliprdrClient::new(Box::new(clipboard)));
+
+    // The bridge is session-owned and is dropped after the active RDP loop exits.
+    egfx_bridge
 }
 
 pub(super) async fn run_native_rdp_active_session(
@@ -200,6 +205,7 @@ pub(super) async fn run_native_rdp_active_session(
     connection_result: ConnectionResult,
     input_rx: &mut tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
     output_tx: &ClientRdpOutputSender,
+    egfx_bridge: &EgfxSessionBridge,
 ) -> SessionResult<ClientRdpControlFlow> {
     let (mut reader, mut writer) = split_tokio_framed(framed);
     let mut image = DecodedImage::new(
@@ -280,7 +286,17 @@ pub(super) async fn run_native_rdp_active_session(
                         advertise_local_clipboard_data(&mut active_stage, data)?
                     }
                     RdpInputEvent::RequestFrame => {
-                        send_client_rdp_base_frame(output_tx, &image, &mut frame_state, false)?;
+                        if !egfx_bridge
+                            .request_base_frame()
+                            .map_err(|error| session::custom_err!("request EGFX base frame", error))?
+                        {
+                            send_client_rdp_base_frame(
+                                output_tx,
+                                &image,
+                                &mut frame_state,
+                                false,
+                            )?;
+                        }
                         Vec::new()
                     }
                     RdpInputEvent::Close => active_stage.graceful_shutdown()?,
@@ -344,6 +360,9 @@ pub(super) async fn run_native_rdp_active_session(
                     )
                     .await?;
                     reset_graphics_base_after_reactivation(&mut frame_state);
+                    egfx_bridge.prepare_for_reactivation().map_err(|error| {
+                        session::custom_err!("reset EGFX state after reactivation", error)
+                    })?;
                 }
                 ActiveStageOutput::Terminate(reason) => break 'session reason,
                 ActiveStageOutput::MultitransportRequest(_) | ActiveStageOutput::AutoDetect(_) => {}

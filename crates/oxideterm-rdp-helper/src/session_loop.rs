@@ -125,6 +125,12 @@ pub(super) fn handle_client_rdp_output(
                 category: connector_error_category(&error),
             });
         }
+        ClientRdpOutput::ProtocolFailure(message) => {
+            drain.exit = Some(ClientRdpSessionExit::ConnectionFailed {
+                message,
+                category: RemoteDesktopErrorCategory::Protocol,
+            });
+        }
         ClientRdpOutput::Terminated(message) => {
             drain.exit = Some(ClientRdpSessionExit::RemoteEnded(Some(message)));
         }

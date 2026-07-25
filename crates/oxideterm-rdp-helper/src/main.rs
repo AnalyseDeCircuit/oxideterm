@@ -75,6 +75,7 @@ mod client_session;
 mod clipboard;
 mod config;
 mod control;
+mod egfx;
 mod event_writer;
 mod frame;
 mod input;
@@ -85,6 +86,7 @@ use client_session::*;
 use clipboard::*;
 use config::*;
 use control::*;
+use egfx::*;
 use runtime::*;
 use session_loop::*;
 
@@ -450,6 +452,7 @@ impl ClientRdpRequestCoalescer {
 enum ClientRdpOutput {
     Event(RemoteDesktopHelperEvent),
     ConnectionFailure(connector::ConnectorError),
+    ProtocolFailure(String),
     Terminated(String),
     OutputEnded,
 }
