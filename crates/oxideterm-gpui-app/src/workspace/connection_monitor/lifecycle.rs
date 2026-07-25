@@ -88,6 +88,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        self.poll_host_service_snapshot_results(cx);
         self.sync_host_gpu_sampling(cx);
         let monitor_surface_visible = self.active_tab().is_some_and(|tab| {
             matches!(

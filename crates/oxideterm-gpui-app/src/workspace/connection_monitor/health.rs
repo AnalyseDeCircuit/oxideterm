@@ -762,6 +762,9 @@ impl WorkspaceApp {
                         this.refresh_connection_monitor_pool_stats();
                         this.sync_connection_monitor_selection(cx);
                         this.sync_host_gpu_sampling(cx);
+                        if tool == ContextSidebarTool::Services {
+                            this.request_host_services_snapshot_for_selected_connection(cx);
+                        }
                         if tool == ContextSidebarTool::Logs {
                             this.request_host_logs_snapshot_for_selected_connection(cx);
                         }
@@ -969,6 +972,9 @@ impl WorkspaceApp {
                         this.connection_monitor.host_schedule_pending_confirm = None;
                         this.sync_connection_monitor_selection(cx);
                         this.sync_host_gpu_sampling(cx);
+                        if this.active_context_sidebar_tool == ContextSidebarTool::Services {
+                            this.request_host_service_snapshot(connection_id.clone(), cx);
+                        }
                         if this.active_context_sidebar_tool == ContextSidebarTool::Logs {
                             this.request_host_logs_snapshot(
                                 connection_id.clone(),
@@ -1160,6 +1166,9 @@ impl WorkspaceApp {
                     self.connection_monitor.host_schedule_pending_confirm = None;
                     self.sync_connection_monitor_selection(cx);
                     self.sync_host_gpu_sampling(cx);
+                    if self.active_context_sidebar_tool == ContextSidebarTool::Services {
+                        self.request_host_service_snapshot(connection.connection_id.clone(), cx);
+                    }
                     if self.active_context_sidebar_tool == ContextSidebarTool::Logs {
                         self.request_host_logs_snapshot(
                             connection.connection_id.clone(),

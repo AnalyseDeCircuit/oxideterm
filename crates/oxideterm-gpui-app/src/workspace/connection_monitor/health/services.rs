@@ -2,7 +2,10 @@
 
 use super::*;
 
-use oxideterm_connection_monitor::service_action_availability;
+use oxideterm_connection_monitor::{
+    ResourceServiceSnapshot, build_service_snapshot_command, parse_service_snapshot,
+    service_action_availability,
+};
 
 impl WorkspaceApp {
     pub(super) fn render_host_services_panel(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -22,25 +25,26 @@ impl WorkspaceApp {
             .selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let active_connection = connections
-            .iter()
-            .find(|connection| connection.connection_id == selected_id)
-            .unwrap_or(&connections[0]);
-        let current = self
+        let snapshot = self
             .connection_monitor
-            .profiler_registry
-            .current(&active_connection.connection_id);
-        let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
-        let rows = metrics
-            .map(|metrics| {
+            .host_service_snapshot
+            .as_ref()
+            .filter(|_| {
+                self.connection_monitor
+                    .host_service_snapshot_connection_id
+                    .as_deref()
+                    == Some(selected_id)
+            });
+        let rows = snapshot
+            .map(|snapshot| {
                 visible_service_rows(
-                    &metrics.services.services,
+                    &snapshot.services,
                     &self.connection_monitor.host_service_search_query,
                 )
             })
             .unwrap_or_default();
-        let service_status = metrics
-            .map(|metrics| metrics.services.status.clone())
+        let service_status = snapshot
+            .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
         self.sync_host_service_list_state(&rows, selected_id);
 
@@ -69,7 +73,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        current.is_some(),
+                        !self.connection_monitor.host_service_snapshot_polling,
                         cx,
                     ))
                     .child(self.render_host_service_search(cx))
@@ -82,7 +86,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_service_list(
                 rows,
-                current.is_some(),
+                self.connection_monitor.host_service_snapshot_polling,
                 service_status,
                 selected_id,
                 cx,
@@ -186,6 +190,7 @@ impl WorkspaceApp {
                     background: Some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_panel)),
                     idle_opacity: 1.0,
+                    disabled: self.connection_monitor.host_service_snapshot_polling,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                 },
                 self.i18n.t("sidebar.host_services.actions.refresh"),
@@ -203,12 +208,12 @@ impl WorkspaceApp {
     pub(super) fn render_host_service_list(
         &self,
         rows: Vec<ResourceService>,
-        has_metrics: bool,
+        loading: bool,
         status: ResourceServiceStatus,
         selected_id: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if !has_metrics {
+        if loading && rows.is_empty() {
             return monitor_center_state(
                 self,
                 LucideIcon::Wrench,
@@ -804,10 +809,89 @@ impl WorkspaceApp {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        self.connection_monitor
-            .profiler_registry
-            .stop(&connection_id);
-        self.start_connection_monitor_profiler(connection_id, cx);
+        self.request_host_service_snapshot(connection_id, cx);
+    }
+
+    pub(super) fn request_host_services_snapshot_for_selected_connection(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let connections = self.monitor_connections();
+        let Some(connection_id) = self
+            .connection_monitor
+            .selected_connection_id
+            .clone()
+            .or_else(|| {
+                connections
+                    .first()
+                    .map(|connection| connection.connection_id.clone())
+            })
+        else {
+            return;
+        };
+        self.request_host_service_snapshot(connection_id, cx);
+    }
+
+    pub(super) fn request_host_service_snapshot(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_monitor.host_service_snapshot_polling {
+            // Coalesce selection changes and post-action refreshes behind the
+            // in-flight snapshot instead of starting concurrent SSH commands.
+            self.connection_monitor
+                .host_service_snapshot_pending_connection_id = Some(connection_id);
+            return;
+        }
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+            self.connection_monitor.host_service_snapshot_connection_id = Some(connection_id);
+            self.connection_monitor.host_service_snapshot = Some(ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error {
+                    message: self
+                        .i18n
+                        .t("sidebar.host_services.toast.connection_missing"),
+                },
+                services: Vec::new(),
+            });
+            cx.notify();
+            return;
+        };
+        let os_type = handle
+            .remote_env()
+            .map(|env| env.os_type)
+            .unwrap_or_else(|| "Unknown".to_string());
+        let command = build_service_snapshot_command(&os_type);
+        let request = HostServiceSnapshotRequest {
+            connection_id: connection_id.clone(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        if self
+            .connection_monitor
+            .host_service_snapshot_connection_id
+            .as_deref()
+            != Some(connection_id.as_str())
+        {
+            self.connection_monitor.host_service_snapshot = None;
+        }
+        self.connection_monitor.host_service_snapshot_connection_id = Some(connection_id);
+        self.connection_monitor.host_service_snapshot_running = Some(request.clone());
+        self.connection_monitor.host_service_snapshot_rx = Some(rx);
+        self.connection_monitor.host_service_snapshot_polling = true;
+        // The forwarding runtime owns this bounded page snapshot; the
+        // persistent resource profiler keeps its independent lifetime.
+        self.forwarding_runtime.handle().spawn(async move {
+            let result = handle
+                .run_command_capture(
+                    &command.command,
+                    HOST_SERVICE_SNAPSHOT_TIMEOUT,
+                    HOST_SERVICE_SNAPSHOT_MAX_OUTPUT_SIZE,
+                )
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send(HostServiceSnapshotDelivery { request, result });
+        });
+        cx.notify();
     }
 
     pub(in crate::workspace) fn handle_host_service_search_key(
@@ -1208,6 +1292,102 @@ impl WorkspaceApp {
                 );
                 cx.notify();
             }
+        }
+    }
+
+    pub(in crate::workspace) fn poll_host_service_snapshot_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.connection_monitor.host_service_snapshot_polling {
+            return;
+        }
+        let Some(rx) = self.connection_monitor.host_service_snapshot_rx.take() else {
+            self.finish_disconnected_host_service_snapshot(cx);
+            return;
+        };
+        match rx.try_recv() {
+            Ok(delivery) => self.finish_host_service_snapshot(delivery, cx),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.connection_monitor.host_service_snapshot_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.finish_disconnected_host_service_snapshot(cx);
+            }
+        }
+    }
+
+    fn finish_disconnected_host_service_snapshot(&mut self, cx: &mut Context<Self>) {
+        let connection_id = self
+            .connection_monitor
+            .host_service_snapshot_running
+            .take()
+            .map(|request| request.connection_id);
+        self.connection_monitor.host_service_snapshot_polling = false;
+        self.connection_monitor.host_service_snapshot_rx = None;
+        if let Some(connection_id) = connection_id {
+            self.connection_monitor.host_service_snapshot_connection_id = Some(connection_id);
+            self.connection_monitor.host_service_snapshot = Some(ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error {
+                    message: self.i18n.t("sidebar.host_services.toast.action_failed"),
+                },
+                services: Vec::new(),
+            });
+        }
+        self.start_pending_host_service_snapshot(cx);
+        cx.notify();
+    }
+
+    fn finish_host_service_snapshot(
+        &mut self,
+        delivery: HostServiceSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_monitor
+            .host_service_snapshot_running
+            .as_ref()
+            .is_some_and(|running| running != &delivery.request)
+        {
+            return;
+        }
+        self.connection_monitor.host_service_snapshot_polling = false;
+        self.connection_monitor.host_service_snapshot_running = None;
+        self.connection_monitor.host_service_snapshot_rx = None;
+        let snapshot = match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                parse_service_snapshot(&output.stdout)
+            }
+            Ok(output) => ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error {
+                    message: host_tool_capture_failure_message(
+                        &output.stdout,
+                        &output.stderr,
+                        output.exit_code,
+                        &self.i18n.t("sidebar.host_services.toast.action_failed"),
+                    ),
+                },
+                services: Vec::new(),
+            },
+            Err(error) => ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error { message: error },
+                services: Vec::new(),
+            },
+        };
+        self.connection_monitor.host_service_snapshot_connection_id =
+            Some(delivery.request.connection_id);
+        self.connection_monitor.host_service_snapshot = Some(snapshot);
+        self.start_pending_host_service_snapshot(cx);
+        cx.notify();
+    }
+
+    fn start_pending_host_service_snapshot(&mut self, cx: &mut Context<Self>) {
+        let pending_connection_id = self
+            .connection_monitor
+            .host_service_snapshot_pending_connection_id
+            .take();
+        if let Some(connection_id) = pending_connection_id {
+            self.request_host_service_snapshot(connection_id, cx);
         }
     }
 

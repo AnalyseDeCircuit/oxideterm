@@ -43,6 +43,8 @@ pub(super) const HOST_SERVICE_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
 pub(super) const HOST_SERVICE_STATE_COLUMN_WIDTH: f32 = 78.0;
 pub(super) const HOST_SERVICE_ENABLED_COLUMN_WIDTH: f32 = 70.0;
 pub(super) const HOST_SERVICE_PID_COLUMN_WIDTH: f32 = 54.0;
+pub(super) const HOST_SERVICE_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(12);
+pub(super) const HOST_SERVICE_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 256 * 1024;
 pub(super) const HOST_SERVICE_LOGS_TIMEOUT: Duration = Duration::from_secs(8);
 pub(super) const HOST_SERVICE_ACTION_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const HOST_SERVICE_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
@@ -298,6 +300,17 @@ pub(super) struct HostDockerLogsDialog {
     pub(super) output: Option<String>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostServiceSnapshotRequest {
+    pub(super) connection_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostServiceSnapshotDelivery {
+    pub(super) request: HostServiceSnapshotRequest,
+    pub(super) result: Result<SshCommandOutput, String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -607,6 +620,13 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_service_expanded_id: Option<String>,
     pub(super) host_service_list_state: ListState,
     pub(super) host_service_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) host_service_snapshot_connection_id: Option<String>,
+    pub(super) host_service_snapshot: Option<oxideterm_connection_monitor::ResourceServiceSnapshot>,
+    pub(super) host_service_snapshot_rx:
+        Option<std::sync::mpsc::Receiver<HostServiceSnapshotDelivery>>,
+    pub(super) host_service_snapshot_running: Option<HostServiceSnapshotRequest>,
+    pub(super) host_service_snapshot_pending_connection_id: Option<String>,
+    pub(super) host_service_snapshot_polling: bool,
     pub(super) host_service_pending_confirm: Option<HostToolConfirmState<HostServiceActionRequest>>,
     pub(super) host_service_action_running: Option<HostServiceActionRequest>,
     pub(super) host_service_action_rx: Option<std::sync::mpsc::Receiver<HostServiceActionDelivery>>,
@@ -782,6 +802,12 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_service_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            host_service_snapshot_connection_id: None,
+            host_service_snapshot: None,
+            host_service_snapshot_rx: None,
+            host_service_snapshot_running: None,
+            host_service_snapshot_pending_connection_id: None,
+            host_service_snapshot_polling: false,
             host_service_pending_confirm: None,
             host_service_action_running: None,
             host_service_action_rx: None,

@@ -117,10 +117,16 @@ const SERVICE_SAMPLE_COMMAND_LINUX_SYSTEMD: &str = concat!(
     "if [ \"$oxide_service_status\" -ne 0 ]; then ",
     "printf '__OXIDE_SERVICE_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_service_units\" | head -n 1 | tr '\\t' ' ')\"; ",
     "else ",
-    "printf '%s\\n' \"$oxide_service_units\" | awk 'NF >= 1 { print $1 }' | while IFS= read -r oxide_unit; do ",
-    "[ -n \"$oxide_unit\" ] || continue; ",
-    "systemctl show \"$oxide_unit\" --no-pager --property=Id,LoadState,ActiveState,SubState,UnitFileState,MainPID,Description 2>/dev/null | awk 'BEGIN { printf \"SHOW\" } { gsub(/\\t/, \" \"); printf \"\\t%s\", $0 } END { printf \"\\n\" }'; ",
-    "done; ",
+    "oxide_service_ids=$(printf '%s\\n' \"$oxide_service_units\" | awk '$1 == \"●\" && NF >= 2 { print $2; next } NF >= 1 { print $1 }'); ",
+    "if [ -n \"$oxide_service_ids\" ]; then ",
+    "oxide_service_details=$(systemctl show --no-pager --property=Id,LoadState,ActiveState,SubState,UnitFileState,MainPID,Description $oxide_service_ids 2>&1); ",
+    "oxide_service_detail_status=$?; ",
+    "if [ \"$oxide_service_detail_status\" -ne 0 ] && ! printf '%s\\n' \"$oxide_service_details\" | grep -q '^Id='; then ",
+    "printf '__OXIDE_SERVICE_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_service_details\" | head -n 1 | tr '\\t' ' ')\"; ",
+    "else ",
+    "printf '%s\\n' \"$oxide_service_details\" | awk '!/^[A-Za-z][A-Za-z0-9]*=/ { if (row) { printf \"\\n\"; row=0 } next } { gsub(/\\t/, \" \"); if (!row) { printf \"SHOW\"; row=1 } printf \"\\t%s\", $0 } END { if (row) printf \"\\n\" }'; ",
+    "fi; ",
+    "fi; ",
     "fi; ",
     "else echo '__OXIDE_SERVICE_UNAVAILABLE__'; fi; ",
     "echo '===SERVICES_END==='"
@@ -188,6 +194,40 @@ pub fn service_sample_command(os_type: &str) -> &'static str {
         "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => SERVICE_SAMPLE_COMMAND_BSD,
         "Windows" | "windows" => SERVICE_SAMPLE_COMMAND_WINDOWS,
         _ => SERVICE_SAMPLE_COMMAND_BSD,
+    }
+}
+
+/// Builds a bounded, page-scoped service inventory command.
+pub fn build_service_snapshot_command(os_type: &str) -> ServiceCaptureCommand {
+    let (command, capability) = match normalized_service_os(os_type) {
+        ServiceOs::LinuxSystemd => (
+            SERVICE_SAMPLE_COMMAND_LINUX_SYSTEMD.to_string(),
+            ServiceCommandCapability::Full,
+        ),
+        ServiceOs::MacLaunchctl => (
+            SERVICE_SAMPLE_COMMAND_MACOS_LAUNCHCTL.to_string(),
+            ServiceCommandCapability::Partial,
+        ),
+        ServiceOs::Bsd => (
+            SERVICE_SAMPLE_COMMAND_BSD.to_string(),
+            ServiceCommandCapability::Partial,
+        ),
+        ServiceOs::Windows => (
+            format!(
+                "powershell -NoProfile -ExecutionPolicy Bypass -Command \"{}\"",
+                SERVICE_SAMPLE_COMMAND_WINDOWS.replace('"', "`\"")
+            ),
+            ServiceCommandCapability::Partial,
+        ),
+        ServiceOs::Unsupported => (
+            "echo '===SERVICES==='; echo '__OXIDE_SERVICE_UNAVAILABLE__'; echo '===SERVICES_END==='"
+                .to_string(),
+            ServiceCommandCapability::Unknown,
+        ),
+    };
+    ServiceCaptureCommand {
+        command,
+        capability,
     }
 }
 
@@ -828,6 +868,43 @@ fn extract_section<'a>(output: &'a str, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_snapshot_batches_service_properties_in_one_systemctl_call() {
+        let command = build_service_snapshot_command("Linux");
+
+        assert_eq!(command.capability, ServiceCommandCapability::Full);
+        assert!(
+            command
+                .command
+                .contains("systemctl list-units --type=service --all")
+        );
+        assert_eq!(command.command.matches("systemctl show").count(), 1);
+        assert!(!command.command.contains("while IFS= read"));
+    }
+
+    #[test]
+    fn windows_snapshot_explicitly_selects_powershell() {
+        let command = build_service_snapshot_command("Windows");
+
+        assert_eq!(command.capability, ServiceCommandCapability::Partial);
+        assert!(command.command.starts_with("powershell -NoProfile"));
+        assert!(command.command.contains("Get-CimInstance Win32_Service"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_snapshot_commands_have_valid_posix_shell_syntax() {
+        for os_type in ["Linux", "Darwin", "FreeBSD"] {
+            let command = build_service_snapshot_command(os_type);
+            let status = std::process::Command::new("sh")
+                .args(["-n", "-c", &command.command])
+                .status()
+                .expect("run POSIX shell syntax check");
+
+            assert!(status.success(), "{os_type} snapshot command should parse");
+        }
+    }
 
     #[test]
     fn parses_systemd_services_with_enabled_state_and_main_pid() {

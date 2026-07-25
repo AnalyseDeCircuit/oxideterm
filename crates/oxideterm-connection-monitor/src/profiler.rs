@@ -19,15 +19,14 @@ use tokio::{
 use crate::{
     MetricsSource, PreviousResourceSample, RESOURCE_HISTORY_CAPACITY, ResourceMetrics,
     ResourceSystemInfo, docker_sample_command, parse_resource_metrics,
-    previous_sample_from_metrics, push_history, service_sample_command,
+    previous_sample_from_metrics, push_history,
 };
 
 pub const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 pub const RESOURCE_SAMPLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const RESOURCE_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
-// Host Tools samples include process, Docker, and service tables. Keep enough
-// room for normal service inventories so SSH capture truncation does not look
-// like a parser failure.
+// Host Tools samples include process and Docker tables. Keep enough room for
+// normal inventories so SSH capture truncation does not look like a parser failure.
 pub const RESOURCE_MAX_OUTPUT_SIZE: usize = 256 * 1024;
 pub const RESOURCE_MAX_CONSECUTIVE_FAILURES: u32 = 3;
 pub const RESOURCE_END_MARKER: &str = "===END===";
@@ -426,12 +425,11 @@ fn build_sample_command_with_system_info(os_type: &str, include_system_info: boo
         _ => None,
     };
     let docker_metrics = docker_sample_command(os_type);
-    let service_metrics = service_sample_command(os_type);
 
     match gpu_metrics {
         Some(gpu_metrics) => {
             format!(
-                "{}{metrics}; {gpu_metrics}; {port_cmd}; {docker_metrics}; {service_metrics}; echo '===END==='\n",
+                "{}{metrics}; {gpu_metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n",
                 system_info
                     .map(|command| format!("{command}; "))
                     .unwrap_or_default()
@@ -439,7 +437,7 @@ fn build_sample_command_with_system_info(os_type: &str, include_system_info: boo
         }
         None => {
             format!(
-                "{}{metrics}; {port_cmd}; {docker_metrics}; {service_metrics}; echo '===END==='\n",
+                "{}{metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n",
                 system_info
                     .map(|command| format!("{command}; "))
                     .unwrap_or_default()
@@ -462,7 +460,7 @@ fn build_windows_sample_command(include_system_info: bool) -> String {
         "};"
     ));
     let script = format!(
-        "{}{}{}{}{}{}",
+        "{}{}{}{}{}",
         concat!(
             "$ErrorActionPreference='SilentlyContinue';",
             "$os=Get-CimInstance Win32_OperatingSystem;",
@@ -539,7 +537,6 @@ fn build_windows_sample_command(include_system_info: bool) -> String {
             "Write-Output '===PORTS_END===';"
         ),
         docker_sample_command("Windows"),
-        service_sample_command("Windows"),
         "Write-Output '===END===';",
     );
     // OpenSSH on Windows may start cmd.exe or PowerShell; invoking PowerShell
@@ -898,6 +895,7 @@ mod tests {
             "nproc should be sampled before disk summaries"
         );
         assert!(linux.contains("ss -tlnp"));
+        assert!(!linux.contains("===SERVICES==="));
         let macos = build_sample_command("Darwin");
         assert!(macos.contains("sw_vers -productVersion"));
         assert!(macos.contains("kern.boottime"));
@@ -910,6 +908,7 @@ mod tests {
         assert!(windows.contains("Win32_VideoController"));
         assert!(windows.contains("\\GPU Engine(*)\\Utilization Percentage"));
         assert!(windows.contains("\\GPU Adapter Memory(*)\\Dedicated Usage"));
+        assert!(!windows.contains("===SERVICES==="));
         let freebsd = build_sample_command("FreeBSD");
         assert!(freebsd.contains("===SYSTEM_INFO==="));
         assert!(freebsd.contains("uname -m"));
