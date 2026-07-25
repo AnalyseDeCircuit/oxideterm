@@ -13,16 +13,3 @@ pub(in crate::workspace) fn ai_tool_use_policy_from_settings(
         settings.max_calls_per_round,
     )
 }
-
-pub(in crate::workspace) fn ai_reasoning_effort_value(
-    effort: oxideterm_settings::AiReasoningEffort,
-) -> Option<String> {
-    serde_json::to_value(effort)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .map(|value| match value.as_str() {
-            "none" | "minimal" => "off".to_string(),
-            "xhigh" => "max".to_string(),
-            other => other.to_string(),
-        })
-}

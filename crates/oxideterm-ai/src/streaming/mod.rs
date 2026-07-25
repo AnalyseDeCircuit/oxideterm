@@ -33,7 +33,9 @@ fn chat_stream_provider_family(provider_type: &str) -> ChatStreamProviderFamily 
         "ollama" => ChatStreamProviderFamily::Ollama,
         "anthropic" => ChatStreamProviderFamily::Anthropic,
         "gemini" => ChatStreamProviderFamily::Gemini,
-        "openai" | "openai_compatible" | "deepseek" => ChatStreamProviderFamily::OpenAiCompatible,
+        "openai" | "openai_compatible" | "deepseek" | "kimi" | "glm" => {
+            ChatStreamProviderFamily::OpenAiCompatible
+        }
         _ => ChatStreamProviderFamily::OpenAiCompatible,
     }
 }
@@ -91,6 +93,14 @@ mod tests {
         );
         assert_eq!(
             chat_stream_provider_family("deepseek"),
+            ChatStreamProviderFamily::OpenAiCompatible
+        );
+        assert_eq!(
+            chat_stream_provider_family("kimi"),
+            ChatStreamProviderFamily::OpenAiCompatible
+        );
+        assert_eq!(
+            chat_stream_provider_family("glm"),
             ChatStreamProviderFamily::OpenAiCompatible
         );
         assert_eq!(

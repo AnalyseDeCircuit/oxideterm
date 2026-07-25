@@ -1601,6 +1601,7 @@ window.focus(&this.focus_handle, cx);
                         .child(select_anchor_probe(
                             SelectAnchorId::AiConversationList,
                             div()
+                                .flex_1()
                                 .min_w_0()
                                 .cursor_pointer()
                                 .truncate()

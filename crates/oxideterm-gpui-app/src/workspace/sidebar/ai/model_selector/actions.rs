@@ -1,4 +1,41 @@
 impl WorkspaceApp {
+    pub(in crate::workspace) fn select_ai_reasoning_level(
+        &mut self,
+        provider_id: String,
+        provider_type: String,
+        model: String,
+        level: AiReasoningLevel,
+        cx: &mut Context<Self>,
+    ) {
+        let level = oxideterm_ai::normalize_reasoning_level_for_model(
+            &provider_type,
+            &model,
+            level.as_str(),
+        );
+        self.ai.chat.reasoning_menu_open = false;
+        if let Some(conversation) = self.ai.chat.conversation_state.active_conversation_mut() {
+            store_ai_reasoning_level_in_conversation(
+                conversation,
+                &provider_id,
+                &model,
+                level,
+            );
+            self.persist_ai_chat_state();
+        }
+        self.edit_settings(
+            move |settings| {
+                set_ai_model_reasoning_override(
+                    settings,
+                    &provider_id,
+                    &model,
+                    (level != AiReasoningLevel::Auto).then_some(level.as_str()),
+                );
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn ai_acp_model_options_for_agent(
         &self,
         agent_id: &str,
@@ -599,7 +636,6 @@ window.focus(&self.focus_handle, cx);
             |settings| {
                 settings.ai.active_backend = AiActiveBackend::Provider;
                 ai_select_provider_model(
-                    &mut settings.ai.providers,
                     &mut settings.ai.active_provider_id,
                     &mut settings.ai.active_model,
                     &provider_id,
@@ -663,7 +699,6 @@ window.focus(&self.focus_handle, cx);
             provider_type: "acp".to_string(),
             name: format!("{label} (ACP)"),
             base_url: String::new(),
-            default_model: fallback_model,
             models,
             enabled: agent.enabled,
             custom: false,
@@ -791,6 +826,59 @@ window.focus(&self.focus_handle, cx);
         if percentage > AI_CONTEXT_WARNING_PERCENT {
             self.ai.chat.model_switch_warning_percentage = Some(percentage.round() as usize);
         }
+    }
+}
+
+pub(in crate::workspace) fn ai_conversation_reasoning_effort<'a>(
+    conversation: &'a AiConversation,
+    provider_id: &str,
+    model: &str,
+) -> Option<&'a str> {
+    let value = conversation
+        .session_metadata
+        .as_ref()?
+        .get(AI_REASONING_EFFORT_SESSION_METADATA_KEY)?;
+    // Read the first implementation's scalar value for backward compatibility.
+    value.as_str().or_else(|| value.get(provider_id)?.get(model)?.as_str())
+}
+
+pub(in crate::workspace) fn store_ai_reasoning_level_in_conversation(
+    conversation: &mut AiConversation,
+    provider_id: &str,
+    model: &str,
+    level: AiReasoningLevel,
+) {
+    let metadata = conversation
+        .session_metadata
+        .get_or_insert_with(|| serde_json::json!({}));
+    if !metadata.is_object() {
+        *metadata = serde_json::json!({});
+    }
+    let object = metadata
+        .as_object_mut()
+        .expect("reasoning session metadata must be an object");
+    let reasoning = object
+        .entry(AI_REASONING_EFFORT_SESSION_METADATA_KEY)
+        .or_insert_with(|| serde_json::json!({}));
+    if !reasoning.is_object() {
+        *reasoning = serde_json::json!({});
+    }
+    let providers = reasoning
+        .as_object_mut()
+        .expect("reasoning session metadata must be an object");
+    let models = providers
+        .entry(provider_id.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !models.is_object() {
+        *models = serde_json::json!({});
+    }
+    let models = models
+        .as_object_mut()
+        .expect("reasoning provider metadata must be an object");
+    if level == AiReasoningLevel::Auto {
+        models.remove(model);
+    } else {
+        models.insert(model.to_string(), serde_json::json!(level.as_str()));
     }
 }
 
@@ -925,6 +1013,51 @@ mod acp_model_selection_tests {
         );
         assert_eq!(state.config_options[0].current_value_id, "gpt-5.6-terra");
     }
+
+    #[test]
+    fn reasoning_level_is_scoped_to_the_conversation_without_erasing_other_metadata() {
+        let mut conversation = AiConversation {
+            id: "conversation-1".to_string(),
+            title: "Conversation".to_string(),
+            messages: Vec::new(),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            origin: "sidebar".to_string(),
+            profile_id: None,
+            message_count: 0,
+            session_id: None,
+            session_metadata: Some(serde_json::json!({ "other": true })),
+            messages_loaded: true,
+        };
+
+        store_ai_reasoning_level_in_conversation(
+            &mut conversation,
+            "openai",
+            "gpt-5.6-sol",
+            AiReasoningLevel::High,
+        );
+        assert_eq!(
+            ai_conversation_reasoning_effort(&conversation, "openai", "gpt-5.6-sol"),
+            Some("high")
+        );
+        assert_eq!(
+            conversation.session_metadata.as_ref().and_then(|value| {
+                value.get("other").and_then(serde_json::Value::as_bool)
+            }),
+            Some(true)
+        );
+
+        store_ai_reasoning_level_in_conversation(
+            &mut conversation,
+            "openai",
+            "gpt-5.6-sol",
+            AiReasoningLevel::Auto,
+        );
+        assert_eq!(
+            ai_conversation_reasoning_effort(&conversation, "openai", "gpt-5.6-sol"),
+            None
+        );
+    }
 }
 
 #[cfg(test)]
@@ -942,7 +1075,6 @@ mod model_selector_status_signature_tests {
             provider_type: provider_type.to_string(),
             name: id.to_string(),
             base_url: base_url.to_string(),
-            default_model: "model-a".to_string(),
             models: vec!["model-a".to_string()],
             enabled,
             custom: false,

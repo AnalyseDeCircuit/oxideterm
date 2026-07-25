@@ -120,6 +120,8 @@
       "offline": "오프라인",
       "manage_providers": "공급자 관리",
       "no_provider": "공급자 미설정",
+      "select_model": "모델 선택",
+      "no_model_selected": "모델이 선택되지 않았습니다. 채팅 모델 메뉴에서 선택하세요.",
       "agent_decides": "Agent가 결정",
       "agent_model_unavailable": "자동 선택(에이전트가 모델을 공개하지 않음)",
       "agent_model_after_first_message": "자동 선택(첫 메시지를 보낸 후 실제 모델 표시)",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens가 활성화되지 않았습니다. 설정 → OxideSens에서 활성화해 주세요."
+    },
+    "reasoning": {
+      "title": "사고 강도",
+      "custom_model_hint": "알 수 없는 모델입니다. 공급자가 허용하는 값만 사용하세요.",
+      "level_auto": "자동 (auto)",
+      "level_none": "없음 (none)",
+      "level_minimal": "최소 (minimal)",
+      "level_low": "낮음 (low)",
+      "level_medium": "중간 (medium)",
+      "level_high": "높음 (high)",
+      "level_xhigh": "매우 높음 (xhigh)",
+      "level_max": "최대 (max)"
     }
   }
 }

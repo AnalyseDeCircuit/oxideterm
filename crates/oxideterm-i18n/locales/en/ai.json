@@ -120,6 +120,8 @@
       "offline": "Offline",
       "manage_providers": "Manage Providers",
       "no_provider": "No provider configured",
+      "select_model": "Select model",
+      "no_model_selected": "No model selected. Select one from the chat model menu.",
       "agent_decides": "Agent decides",
       "agent_model_unavailable": "Automatic selection (model not exposed by agent)",
       "agent_model_after_first_message": "Automatic selection (actual model appears after the first message)",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens is not enabled. Please enable it in Settings → OxideSens to get started."
+    },
+    "reasoning": {
+      "title": "Thinking Effort",
+      "custom_model_hint": "Unknown model: use only values accepted by your provider.",
+      "level_auto": "Auto",
+      "level_none": "None",
+      "level_minimal": "Minimal",
+      "level_low": "Low",
+      "level_medium": "Medium",
+      "level_high": "High",
+      "level_xhigh": "XHigh",
+      "level_max": "Max"
     }
   }
 }

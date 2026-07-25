@@ -8,18 +8,6 @@ use crate::{AiProviderView, provider_view};
 
 const EMBEDDING_TIMEOUT: Duration = Duration::from_secs(3);
 const OPENAI_DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
-const LIKELY_EMBEDDING_MODEL_MARKERS: &[&str] = &[
-    "embedding",
-    "embed",
-    "bge",
-    "e5",
-    "gte",
-    "nomic",
-    "jina",
-    "m3e",
-    "sbert",
-    "snowflake-arctic-embed",
-];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AiEmbeddingMode {
@@ -235,10 +223,6 @@ fn ai_embedding_model(
     if let Some(model) = configured {
         return model.to_string();
     }
-    let provider_default = provider.default_model.trim();
-    if likely_embedding_model(provider_default) {
-        return provider_default.to_string();
-    }
     if provider.provider_type == "openai" {
         return OPENAI_DEFAULT_EMBEDDING_MODEL.to_string();
     }
@@ -257,14 +241,6 @@ fn ai_embedding_reason(
         return AiEmbeddingProviderReason::MissingApiKey;
     }
     AiEmbeddingProviderReason::Ready
-}
-
-fn likely_embedding_model(model: &str) -> bool {
-    let normalized = model.to_ascii_lowercase();
-    !normalized.is_empty()
-        && LIKELY_EMBEDDING_MODEL_MARKERS
-            .iter()
-            .any(|marker| normalized.contains(marker))
 }
 
 async fn embed_openai_compatible(

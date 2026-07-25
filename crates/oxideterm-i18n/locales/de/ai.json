@@ -120,6 +120,8 @@
       "offline": "Offline",
       "manage_providers": "Anbieter verwalten",
       "no_provider": "Kein Anbieter konfiguriert",
+      "select_model": "Modell auswählen",
+      "no_model_selected": "Kein Modell ausgewählt. Wählen Sie eines im Modellmenü des Chats aus.",
       "agent_decides": "Vom Agenten festgelegt",
       "agent_model_unavailable": "Automatische Auswahl (Modell vom Agenten nicht offengelegt)",
       "agent_model_after_first_message": "Automatische Auswahl (tatsächliches Modell erscheint nach der ersten Nachricht)",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens ist nicht aktiviert. Bitte aktivieren Sie es unter Einstellungen → OxideSens."
+    },
+    "reasoning": {
+      "title": "Denkaufwand",
+      "custom_model_hint": "Unbekanntes Modell: Verwenden Sie nur Werte, die Ihr Anbieter akzeptiert.",
+      "level_auto": "Automatisch (auto)",
+      "level_none": "Keiner (none)",
+      "level_minimal": "Minimal (minimal)",
+      "level_low": "Niedrig (low)",
+      "level_medium": "Mittel (medium)",
+      "level_high": "Hoch (high)",
+      "level_xhigh": "Sehr hoch (xhigh)",
+      "level_max": "Maximum (max)"
     }
   }
 }

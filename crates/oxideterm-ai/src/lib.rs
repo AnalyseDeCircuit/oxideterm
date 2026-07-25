@@ -11,6 +11,7 @@ mod profiles;
 mod provider_embeddings;
 mod providers;
 mod rag;
+mod reasoning;
 mod references;
 mod settings;
 mod slash;
@@ -65,12 +66,12 @@ pub use provider_embeddings::{
     embed_texts, resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
 };
 pub use providers::{
-    AI_PROVIDER_TEMPLATES, active_model_or_provider_default, active_provider_view,
-    check_model_selector_provider_online, fetch_provider_models, first_provider_default_model,
-    generated_provider_id, is_local_provider_url, model_selector_display_name,
-    model_selector_truncated_label, model_selector_visible_provider_groups,
-    new_provider_from_template, provider_id, provider_string, provider_template_by_type,
-    provider_view, provider_views, resolve_model_selector_provider_probe, update_provider,
+    AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view,
+    check_model_selector_provider_online, fetch_provider_models, generated_provider_id,
+    is_local_provider_url, model_selector_display_name, model_selector_truncated_label,
+    model_selector_visible_provider_groups, new_provider_from_template, provider_id,
+    provider_string, provider_template_by_type, provider_view, provider_views,
+    resolve_model_selector_provider_probe, update_provider,
 };
 pub use rag::{
     AddDocumentRequest as RagAddDocumentRequest, CollectionResponse as RagCollectionResponse,
@@ -87,6 +88,10 @@ pub use rag::{
     rag_reindex_collection_with_progress, rag_remove_document, rag_search, rag_store_embeddings,
     rag_update_document,
 };
+pub use reasoning::{
+    AiModelReasoningCapability, AiReasoningLevel, AiReasoningRequestFormat,
+    model_reasoning_capability, normalize_reasoning_level_for_model,
+};
 pub use references::{
     ai_reference_context_block, ai_reference_label, current_terminal_context_system_message,
     extract_ai_error_context, infer_ai_cwd,
@@ -96,7 +101,7 @@ pub use settings::{
     apply_provider_model_refresh, model_max_response_tokens, provider_chat_requires_key,
     provider_key_display_state, provider_refresh_key_policy, remove_provider_at,
     remove_provider_at_with_scoped_settings, select_provider_model, set_active_provider_selection,
-    set_provider_default_model, take_provider_key_secret,
+    take_provider_key_secret,
 };
 pub use slash::{
     AI_PARTICIPANTS, AI_REFERENCES, AI_SLASH_COMMANDS, AiAutocompleteCandidate, AiAutocompleteKind,

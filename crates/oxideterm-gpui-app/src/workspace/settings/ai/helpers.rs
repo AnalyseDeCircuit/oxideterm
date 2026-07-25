@@ -13,8 +13,4 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.settings_select_control(select_id, label, false, Some(width), cx)
     }
-
-    pub(in crate::workspace) fn ai_reasoning_display(&self, value: &str) -> String {
-        self.i18n.t(ai_reasoning_label_key(value))
-    }
 }

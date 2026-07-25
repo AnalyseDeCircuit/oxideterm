@@ -364,6 +364,7 @@ pub enum AiReasoningEffort {
     Medium,
     High,
     Xhigh,
+    Max,
     #[default]
     Auto,
 }

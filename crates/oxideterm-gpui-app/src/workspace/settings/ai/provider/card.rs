@@ -144,15 +144,6 @@ impl WorkspaceApp {
                             .gap_y(px(4.0))
                             .text_size(px(11.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!(
-                                "{}: {}",
-                                self.i18n.t("settings_view.ai.default_model"),
-                                if provider.default_model.trim().is_empty() {
-                                    "—".to_string()
-                                } else {
-                                    provider.default_model.clone()
-                                }
-                            ))
                             .child(self.i18n_count(
                                 "settings_view.ai.provider_models_summary",
                                 provider.models.len(),

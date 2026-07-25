@@ -120,6 +120,8 @@
       "offline": "Ngoại tuyến",
       "manage_providers": "Quản lý nhà cung cấp",
       "no_provider": "Chưa cấu hình nhà cung cấp",
+      "select_model": "Chọn mô hình",
+      "no_model_selected": "Chưa chọn mô hình. Hãy chọn một mô hình trong menu mô hình của cuộc trò chuyện.",
       "agent_decides": "Do tác tử quyết định",
       "agent_model_unavailable": "Tự động chọn (tác tử không công bố mô hình)",
       "agent_model_after_first_message": "Tự động chọn (mô hình thực tế xuất hiện sau tin nhắn đầu tiên)",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens chưa được bật. Vui lòng bật trong Cài đặt → OxideSens để bắt đầu."
+    },
+    "reasoning": {
+      "title": "Mức độ suy luận",
+      "custom_model_hint": "Mô hình chưa xác định: chỉ dùng giá trị mà nhà cung cấp chấp nhận.",
+      "level_auto": "Tự động (auto)",
+      "level_none": "Không (none)",
+      "level_minimal": "Tối thiểu (minimal)",
+      "level_low": "Thấp (low)",
+      "level_medium": "Trung bình (medium)",
+      "level_high": "Cao (high)",
+      "level_xhigh": "Rất cao (xhigh)",
+      "level_max": "Tối đa (max)"
     }
   }
 }

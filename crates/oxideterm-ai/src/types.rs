@@ -13,7 +13,7 @@ pub struct AiProviderTemplate {
     pub provider_type: &'static str,
     pub label_key: &'static str,
     pub base_url: &'static str,
-    pub default_model: &'static str,
+    pub initial_models: &'static [&'static str],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -22,7 +22,6 @@ pub struct AiProviderView {
     pub provider_type: String,
     pub name: String,
     pub base_url: String,
-    pub default_model: String,
     pub models: Vec<String>,
     pub enabled: bool,
     pub custom: bool,

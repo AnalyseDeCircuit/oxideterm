@@ -122,6 +122,10 @@ correctness.
   pixel/token equivalent instead of inventing a nearby value.
 - I18n strings must come from the i18n catalog, not inline UI literals, except
   for protocol constants or temporary debug text.
+- Provider protocol identifiers such as reasoning levels must remain in
+  English. Non-English labels should include the exact identifier in
+  parentheses, for example `高（high）`, so localization never changes the
+  value sent to the provider.
 - Runtime i18n is an 11-locale system: `en`, `zh-CN`, `zh-TW`, `de`, `es-ES`,
   `fr-FR`, `it`, `ja`, `ko`, `pt-BR`, and `vi`. Any new user-facing key must be
   added to every locale domain file in the same change.

@@ -137,12 +137,11 @@ impl WorkspaceApp {
             .map(|(row_index, row)| {
                 let mut hasher = DefaultHasher::new();
                 // Chip rows preserve the old flex-wrap look in bounded chunks;
-                // visible labels, active state, and the final hidden counter
-                // determine row measurement.
+                // visible labels and the final hidden counter determine row
+                // measurement.
                 row_index.hash(&mut hasher);
                 for item in row {
                     item.model.hash(&mut hasher);
-                    item.active.hash(&mut hasher);
                 }
                 if row_index + 1 == rows.len() {
                     hidden_count.hash(&mut hasher);
@@ -189,7 +188,7 @@ impl WorkspaceApp {
         provider_index: usize,
         row_index: usize,
         hidden_count: usize,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(provider) = ai_provider_views(self.settings_store.settings())
             .get(provider_index)
@@ -222,12 +221,7 @@ impl WorkspaceApp {
             .flex_wrap()
             .gap(px(4.0));
         for item in row {
-            chips = chips.child(self.ai_provider_model_chip(
-                provider_index,
-                item.model.clone(),
-                item.active,
-                cx,
-            ));
+            chips = chips.child(self.ai_provider_model_chip(item.model.clone()));
         }
         if is_last_row && hidden_count > 0 {
             chips = chips.child(
@@ -242,57 +236,19 @@ impl WorkspaceApp {
         chips.into_any_element()
     }
 
-    pub(in crate::workspace) fn ai_provider_model_chip(
-        &self,
-        index: usize,
-        model: String,
-        active: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let model_for_edit = model.clone();
+    pub(in crate::workspace) fn ai_provider_model_chip(&self, model: String) -> AnyElement {
         div()
             .rounded(px(self.tokens.radii.sm))
             .border_1()
-            .border_color(if active {
-                rgba((self.tokens.ui.accent << 8) | AI_PROVIDER_MODEL_ACTIVE_BORDER_ALPHA)
-            } else {
-                rgba((self.tokens.ui.border << 8) | AI_PROVIDER_MODEL_BORDER_ALPHA)
-            })
-            .bg(if active {
-                rgba((self.tokens.ui.accent << 8) | AI_PROVIDER_MODEL_ACTIVE_BG_ALPHA)
-            } else {
-                rgb(self.tokens.ui.bg)
-            })
+            .border_color(rgba(
+                (self.tokens.ui.border << 8) | AI_PROVIDER_MODEL_BORDER_ALPHA,
+            ))
+            .bg(rgb(self.tokens.ui.bg))
             .px(px(6.0))
             .py(px(2.0))
             .text_size(px(10.0))
-            .text_color(rgb(if active {
-                self.tokens.ui.accent
-            } else {
-                self.tokens.ui.text_muted
-            }))
-            .cursor_pointer()
-            .hover(|style| {
-                style
-                    .text_color(rgb(self.tokens.ui.text))
-                    .border_color(rgb(self.tokens.ui.border))
-            })
+            .text_color(rgb(self.tokens.ui.text_muted))
             .child(model)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.edit_settings(
-                        |settings| {
-                            ai_set_provider_default_model(
-                                &mut settings.ai.providers,
-                                index,
-                                model_for_edit.clone(),
-                            );
-                        },
-                        cx,
-                    );
-                }),
-            )
             .into_any_element()
     }
 

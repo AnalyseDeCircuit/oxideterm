@@ -22,10 +22,8 @@ use oxideterm_settings_model::{
     ai_mcp_auth_mode_value, ai_mcp_clean_record, ai_mcp_configs, ai_mcp_draft_input_value,
     ai_mcp_draft_valid, ai_mcp_server_signature, ai_mcp_split_args, ai_mcp_transport_label,
     ai_mcp_transport_value, ai_model_context_window_panels,
-    ai_model_context_window_row as ai_model_context_window_row_model, ai_model_reasoning_panels,
-    ai_model_reasoning_row as ai_model_reasoning_row_model, ai_provider_card_signature,
+    ai_model_context_window_row as ai_model_context_window_row_model, ai_provider_card_signature,
     ai_provider_model_chip_rows, ai_provider_model_row_signature, ai_provider_views,
-    ai_reasoning_effort_from_profile_value, ai_reasoning_label_key, ai_reasoning_profile_value,
     ai_tool_auto_approve_total_count, ai_tool_auto_approved_count, ai_tool_policy_groups,
     ai_update_provider, app_ui_colors_to_colors, apply_ai_mcp_draft_input,
     apply_cloud_sync_form_input_draft, apply_persisted_settings_input_draft,
@@ -35,7 +33,6 @@ use oxideterm_settings_model::{
     persisted_settings_input_value, plugin_setting_draft_to_value, plugin_setting_input_value,
     reconnect_attempt_label, reconnect_base_delay_options, reconnect_delay_label,
     reconnect_max_attempt_options, reconnect_max_delay_options, save_theme_editor_to_settings,
-    set_ai_model_reasoning_override, set_ai_provider_reasoning_override,
     set_ai_user_context_window, settings_multiline_line_ranges, settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
@@ -57,7 +54,6 @@ use oxideterm_ai::{
     provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
     remove_provider_at_with_scoped_settings as ai_remove_provider_at_with_scoped_settings,
     set_active_provider_selection as ai_set_active_provider_selection,
-    set_provider_default_model as ai_set_provider_default_model,
     take_provider_key_secret as ai_take_provider_key_secret,
 };
 use oxideterm_connections::{

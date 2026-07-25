@@ -51,12 +51,6 @@ pub struct AiProviderModelPanel {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AiModelReasoningRow {
-    pub current_value: String,
-    pub label_key: &'static str,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiModelContextWindowRow {
     pub has_override: bool,
     pub source: ContextWindowSource,
@@ -209,17 +203,6 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
     ]
 }
 
-pub fn ai_reasoning_label_key(value: &str) -> &'static str {
-    match value {
-        "off" | "none" => "settings_view.ai.reasoning_off",
-        "low" | "minimal" => "settings_view.ai.reasoning_low",
-        "medium" => "settings_view.ai.reasoning_medium",
-        "high" => "settings_view.ai.reasoning_high",
-        "max" | "xhigh" => "settings_view.ai.reasoning_max",
-        _ => "settings_view.ai.reasoning_auto",
-    }
-}
-
 pub fn ai_context_max_chars_label_key(value: i64) -> Option<&'static str> {
     match value {
         2_000 => Some("settings_view.ai.chars_2000"),
@@ -239,39 +222,6 @@ pub fn ai_context_visible_lines_label_key(value: i64) -> Option<&'static str> {
         400 => Some("settings_view.ai.lines_400"),
         _ => None,
     }
-}
-
-pub fn ai_model_reasoning_panels(
-    settings: &PersistedSettings,
-    providers: &[AiProviderView],
-) -> Vec<AiProviderModelPanel> {
-    providers
-        .iter()
-        .enumerate()
-        .filter(|(_, provider)| !provider.models.is_empty())
-        .map(|(provider_index, provider)| {
-            let override_count = provider
-                .models
-                .iter()
-                .filter(|model| {
-                    settings
-                        .ai
-                        .reasoning_model_overrides
-                        .get(&provider.id)
-                        .and_then(|models| models.get(model.as_str()))
-                        .is_some()
-                })
-                .count();
-            AiProviderModelPanel {
-                provider_index,
-                provider_id: provider.id.clone(),
-                provider_name: provider.name.clone(),
-                model_count: provider.models.len(),
-                override_count,
-                models: provider.models.clone(),
-            }
-        })
-        .collect()
 }
 
 pub fn ai_model_context_window_panels(
@@ -305,30 +255,6 @@ pub fn ai_model_context_window_panels(
             }
         })
         .collect()
-}
-
-pub fn ai_model_reasoning_row(
-    settings: &PersistedSettings,
-    provider_id: &str,
-    model: &str,
-) -> AiModelReasoningRow {
-    let current_value = settings
-        .ai
-        .reasoning_model_overrides
-        .get(provider_id)
-        .and_then(|models| models.get(model))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("__inherit__")
-        .to_string();
-    let label_key = if current_value == "__inherit__" {
-        "settings_view.ai.reasoning_inherit_provider"
-    } else {
-        ai_reasoning_label_key(&current_value)
-    };
-    AiModelReasoningRow {
-        current_value,
-        label_key,
-    }
 }
 
 pub fn ai_model_context_window_row(
@@ -385,7 +311,6 @@ pub fn ai_provider_card_signature(
     provider.provider_type.hash(&mut hasher);
     provider.enabled.hash(&mut hasher);
     provider.custom.hash(&mut hasher);
-    provider.default_model.hash(&mut hasher);
     provider.base_url.hash(&mut hasher);
     provider.models.len().hash(&mut hasher);
     expanded.hash(&mut hasher);
@@ -480,49 +405,6 @@ pub fn ai_delete_acp_agent(settings: &mut PersistedSettings, index: usize) {
     if settings.ai.active_acp_agent_id.as_deref() == Some(removed_id.as_str()) {
         settings.ai.active_acp_agent_id =
             settings.ai.acp_agents.first().map(|agent| agent.id.clone());
-    }
-}
-
-pub fn ai_reasoning_profile_value(effort: oxideterm_settings::AiReasoningEffort) -> &'static str {
-    match effort {
-        oxideterm_settings::AiReasoningEffort::None => "off",
-        oxideterm_settings::AiReasoningEffort::Minimal => "low",
-        oxideterm_settings::AiReasoningEffort::Low => "low",
-        oxideterm_settings::AiReasoningEffort::Medium => "medium",
-        oxideterm_settings::AiReasoningEffort::High => "high",
-        oxideterm_settings::AiReasoningEffort::Xhigh => "max",
-        oxideterm_settings::AiReasoningEffort::Auto => "auto",
-    }
-}
-
-pub fn ai_reasoning_effort_from_profile_value(
-    value: &str,
-) -> oxideterm_settings::AiReasoningEffort {
-    match value {
-        "off" => oxideterm_settings::AiReasoningEffort::None,
-        "low" => oxideterm_settings::AiReasoningEffort::Low,
-        "medium" => oxideterm_settings::AiReasoningEffort::Medium,
-        "high" => oxideterm_settings::AiReasoningEffort::High,
-        "max" => oxideterm_settings::AiReasoningEffort::Xhigh,
-        _ => oxideterm_settings::AiReasoningEffort::Auto,
-    }
-}
-
-pub fn set_ai_provider_reasoning_override(
-    settings: &mut PersistedSettings,
-    provider_id: &str,
-    value: Option<&'static str>,
-) {
-    match value {
-        Some(value) => {
-            settings
-                .ai
-                .reasoning_provider_overrides
-                .insert(provider_id.to_string(), serde_json::json!(value));
-        }
-        None => {
-            settings.ai.reasoning_provider_overrides.remove(provider_id);
-        }
     }
 }
 
@@ -730,12 +612,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_model_panels_own_reasoning_and_context_view_models() {
+    fn ai_model_panels_own_context_window_view_models() {
         let mut settings = PersistedSettings::default();
-        settings
-            .ai
-            .reasoning_model_overrides
-            .insert("openai".to_string(), serde_json::json!({ "gpt-5": "high" }));
         settings
             .ai
             .user_context_windows
@@ -745,25 +623,14 @@ mod tests {
             provider_type: "openai".to_string(),
             name: "OpenAI".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
-            default_model: "gpt-5".to_string(),
             models: vec!["gpt-5".to_string(), "gpt-5-mini".to_string()],
             enabled: true,
             custom: false,
         }];
 
-        let reasoning_panels = ai_model_reasoning_panels(&settings, &providers);
         let context_panels = ai_model_context_window_panels(&settings, &providers);
 
-        assert_eq!(reasoning_panels[0].override_count, 1);
         assert_eq!(context_panels[0].override_count, 1);
-        assert_eq!(
-            ai_model_reasoning_row(&settings, "openai", "gpt-5").label_key,
-            "settings_view.ai.reasoning_high"
-        );
-        assert_eq!(
-            ai_model_reasoning_row(&settings, "openai", "gpt-5-mini").label_key,
-            "settings_view.ai.reasoning_inherit_provider"
-        );
         assert_eq!(
             ai_model_context_window_row(&settings, "openai", "gpt-5").source,
             ContextWindowSource::User

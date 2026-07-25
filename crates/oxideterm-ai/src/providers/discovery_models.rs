@@ -38,16 +38,18 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
                     .map(str::to_string)
             })
             .collect::<Vec<_>>(),
-        "openai_compatible" | "deepseek" => openai_compatible_model_values(payload)
-            .filter_map(|model| {
-                model
-                    .get("id")
-                    .or_else(|| model.get("key"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .filter(|model| !model.is_empty())
-            .collect::<Vec<_>>(),
+        "openai_compatible" | "deepseek" | "kimi" | "glm" => {
+            openai_compatible_model_values(payload)
+                .filter_map(|model| {
+                    model
+                        .get("id")
+                        .or_else(|| model.get("key"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .filter(|model| !model.is_empty())
+                .collect::<Vec<_>>()
+        }
         "openai" => payload
             .get("data")
             .and_then(Value::as_array)

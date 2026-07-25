@@ -1115,6 +1115,7 @@ impl WorkspaceApp {
                     ),
                 ],
             ),
+            self.ai_active_model_max_response_tokens_row(settings, cx),
         )
     }
 
@@ -1220,19 +1221,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ai_reasoning_section(
-        &self,
-        settings: &PersistedSettings,
-        providers: &[AiProviderView],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        settings_ai_reasoning_section(
-            self.ai_global_reasoning_section(settings, cx),
-            self.ai_model_reasoning_overrides_section(settings, providers, cx),
-            self.ai_active_model_max_response_tokens_row(settings, cx),
-        )
-    }
-
     pub(in crate::workspace) fn ai_text_editor_action_button(
         &self,
         dialog: AiTextEditorDialog,
@@ -1263,29 +1251,6 @@ impl WorkspaceApp {
             }),
         )
         .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_global_reasoning_section(
-        &self,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        settings_ai_global_reasoning_section(
-            &self.tokens,
-            self.i18n.t("settings_view.ai.reasoning_title"),
-            self.settings_select_control(
-                SettingsSelect::AiGlobalReasoning,
-                self.i18n
-                    .t(ai_reasoning_label_key(ai_reasoning_profile_value(
-                        settings.ai.reasoning_effort,
-                    ))),
-                false,
-                None,
-                cx,
-            ),
-            self.i18n.t("settings_view.ai.reasoning_hint"),
-            AI_PROVIDER_MAX_W,
-        )
     }
 
     pub(in crate::workspace) fn ai_tool_use_section(
@@ -1508,226 +1473,6 @@ impl WorkspaceApp {
         settings_ai_textarea_row(&self.tokens, label, control.into_any_element(), hint)
     }
 
-    pub(in crate::workspace) fn ai_model_reasoning_overrides_section(
-        &self,
-        settings: &PersistedSettings,
-        providers: &[AiProviderView],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let provider_panels = ai_model_reasoning_panels(settings, providers);
-        div()
-            .mt(px(8.0))
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .child(self.ai_model_reasoning_header(cx))
-            .when(self.settings_page.ai_model_reasoning_expanded, |section| {
-                if provider_panels.is_empty() {
-                    section.child(settings_ai_model_empty_text(
-                        &self.tokens,
-                        self.i18n
-                            .t("settings_view.ai.model_reasoning_overrides_empty"),
-                    ))
-                } else {
-                    let mut list = div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_col()
-                        .gap(px(16.0));
-                    for panel in provider_panels {
-                        list = list.child(self.ai_model_reasoning_provider(settings, panel, cx));
-                    }
-                    section.child(list)
-                }
-            })
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_model_reasoning_header(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        settings_ai_model_reasoning_header(
-            &self.tokens,
-            self.i18n.t("settings_view.ai.model_reasoning_overrides"),
-            self.i18n
-                .t("settings_view.ai.model_reasoning_overrides_hint"),
-            self.render_animated_chevron(
-                (
-                    "ai-model-reasoning-chevron",
-                    self.settings_page.ai_model_reasoning_expanded as usize,
-                ),
-                self.settings_page.ai_model_reasoning_expanded,
-                16.0,
-                rgb(self.tokens.ui.text_muted),
-            ),
-        )
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
-                this.settings_page
-                    .toggle_ai_section(AiSettingsSection::ModelReasoning);
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        )
-        .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_model_reasoning_provider(
-        &self,
-        settings: &PersistedSettings,
-        panel: AiProviderModelPanel,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let provider_id = panel.provider_id.clone();
-        let expanded = self
-            .settings_page
-            .expanded_ai_model_reasoning_providers
-            .contains(&provider_id);
-        let header_provider_id = provider_id.clone();
-        let header = settings_ai_model_provider_header(
-            &self.tokens,
-            panel.provider_name.clone(),
-            self.i18n
-                .t("settings_view.ai.model_reasoning_provider_summary")
-                .replace("{{count}}", &panel.model_count.to_string())
-                .replace("{{overrides}}", &panel.override_count.to_string()),
-            self.render_animated_chevron(
-                (
-                    gpui::SharedString::from(format!(
-                        "ai-model-reasoning-provider-chevron-{provider_id}"
-                    )),
-                    expanded as usize,
-                ),
-                expanded,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            ),
-        )
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, _window, cx| {
-                this.settings_page
-                    .toggle_ai_model_reasoning_provider(header_provider_id.clone());
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        );
-        let rows = if expanded {
-            let models = panel.models.clone();
-            let state = self.sync_ai_reasoning_model_list_state(settings, &provider_id, &models);
-            let spec = self.ai_provider_model_row_list_spec();
-            let workspace = cx.entity();
-            let provider_id_for_rows = provider_id;
-            let provider_index = panel.provider_index;
-            let list_height = models.len() as f32 * AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT;
-            Some(settings_ai_model_row_list_frame(
-                &self.tokens,
-                list_height,
-                tauri_virtual_list(state, spec, move |model_index, _window, cx| {
-                    let Some(model) = models.get(model_index).cloned() else {
-                        return div().into_any_element();
-                    };
-                    let provider_id = provider_id_for_rows.clone();
-                    workspace.update(cx, |this, cx| {
-                        let settings = this.settings_store.settings();
-                        this.ai_model_reasoning_row(
-                            provider_index,
-                            model_index,
-                            settings,
-                            &provider_id,
-                            &model,
-                            cx,
-                        )
-                    })
-                })
-                .into_any_element(),
-            ))
-        } else {
-            None
-        };
-        settings_ai_model_provider_section(header, rows)
-    }
-
-    pub(in crate::workspace) fn sync_ai_reasoning_model_list_state(
-        &self,
-        settings: &PersistedSettings,
-        provider_id: &str,
-        models: &[String],
-    ) -> ListState {
-        let signatures = models
-            .iter()
-            .map(|model| {
-                ai_provider_model_row_signature(
-                    provider_id,
-                    model,
-                    settings
-                        .ai
-                        .reasoning_model_overrides
-                        .get(provider_id)
-                        .and_then(|overrides| overrides.get(model)),
-                )
-            })
-            .collect::<Vec<_>>();
-        let state = {
-            let mut states = self.ai.models.reasoning_model_list_states.borrow_mut();
-            states
-                .entry(provider_id.to_string())
-                .or_insert_with(|| {
-                    // Reasoning override rows are measured independently per
-                    // provider so expanding one provider does not perturb
-                    // another provider's virtual table.
-                    ListState::new(
-                        AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT,
-                        ListAlignment::Top,
-                        self.ai_provider_model_row_list_spec().overdraw(),
-                    )
-                    .measure_all()
-                })
-                .clone()
-        };
-        {
-            let mut caches = self.ai.models.reasoning_model_list_caches.borrow_mut();
-            let cache = caches.entry(provider_id.to_string()).or_default();
-            sync_tauri_variable_list_state_by_signatures(
-                &state,
-                cache,
-                &format!("ai-reasoning-models:{provider_id}"),
-                &signatures,
-                self.ai_provider_model_row_list_spec(),
-            );
-        }
-        state
-    }
-
-    pub(in crate::workspace) fn ai_model_reasoning_row(
-        &self,
-        provider_index: usize,
-        model_index: usize,
-        settings: &PersistedSettings,
-        provider_id: &str,
-        model: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let row = ai_model_reasoning_row_model(settings, provider_id, model);
-        settings_ai_model_reasoning_row(
-            &self.tokens,
-            settings_mono_font_family(settings),
-            model.to_string(),
-            self.settings_select_control(
-                SettingsSelect::AiModelReasoning(provider_index, model_index),
-                self.i18n.t(row.label_key),
-                false,
-                Some(160.0),
-                cx,
-            ),
-            model_index == 0,
-        )
-    }
-
     pub(in crate::workspace) fn ai_model_context_windows_section(
         &self,
         settings: &PersistedSettings,
@@ -1894,7 +1639,7 @@ impl WorkspaceApp {
                 .entry(provider_id.to_string())
                 .or_insert_with(|| {
                     // Context override rows are measured independently per
-                    // provider for the same reason as reasoning rows.
+                    // provider so one expanded group cannot perturb another.
                     ListState::new(
                         AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT,
                         ListAlignment::Top,

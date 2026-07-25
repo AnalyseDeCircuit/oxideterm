@@ -5,37 +5,61 @@ pub const AI_PROVIDER_TEMPLATES: &[AiProviderTemplate] = &[
         provider_type: "openai_compatible",
         label_key: "settings_view.ai.provider_template_openai_compatible",
         base_url: "https://",
-        default_model: "",
+        initial_models: &[],
     },
     AiProviderTemplate {
         provider_type: "deepseek",
         label_key: "settings_view.ai.provider_template_deepseek",
         base_url: "https://api.deepseek.com",
-        default_model: "deepseek-v4-flash",
+        initial_models: &["deepseek-v4-flash"],
+    },
+    AiProviderTemplate {
+        provider_type: "kimi",
+        label_key: "settings_view.ai.provider_template_kimi",
+        base_url: "https://api.moonshot.cn/v1",
+        initial_models: &["kimi-k3"],
+    },
+    AiProviderTemplate {
+        provider_type: "glm",
+        label_key: "settings_view.ai.provider_template_glm",
+        base_url: "https://open.bigmodel.cn/api/paas/v4",
+        initial_models: &[
+            "glm-5.2",
+            "glm-5.1",
+            "glm-5-turbo",
+            "glm-5",
+            "glm-4.7",
+            "glm-4.6",
+            "glm-4.5-air",
+            "glm-4.5-airx",
+            "glm-4.5-flash",
+            "glm-4-flash-250414",
+            "glm-4-flashx-250414",
+        ],
     },
     AiProviderTemplate {
         provider_type: "openai",
         label_key: "settings_view.ai.provider_template_openai",
         base_url: "https://api.openai.com/v1",
-        default_model: "gpt-4o-mini",
+        initial_models: &["gpt-4o-mini"],
     },
     AiProviderTemplate {
         provider_type: "anthropic",
         label_key: "settings_view.ai.provider_template_anthropic",
         base_url: "https://api.anthropic.com",
-        default_model: "claude-sonnet-4-20250514",
+        initial_models: &["claude-sonnet-4-20250514"],
     },
     AiProviderTemplate {
         provider_type: "gemini",
         label_key: "settings_view.ai.provider_template_gemini",
         base_url: "https://generativelanguage.googleapis.com/v1beta",
-        default_model: "gemini-2.0-flash",
+        initial_models: &["gemini-2.0-flash"],
     },
     AiProviderTemplate {
         provider_type: "ollama",
         label_key: "settings_view.ai.provider_template_ollama",
         base_url: "http://localhost:11434",
-        default_model: "",
+        initial_models: &[],
     },
 ];
 
@@ -55,14 +79,12 @@ pub fn provider_view(value: &serde_json::Value) -> Option<AiProviderView> {
     let id = provider_id(value)?;
     let provider_type =
         provider_string(value, "type").unwrap_or_else(|| "openai_compatible".to_string());
-    let default_model = provider_string(value, "defaultModel").unwrap_or_default();
     Some(AiProviderView {
         custom: id.starts_with("custom-"),
         id,
         provider_type,
         name: provider_string(value, "name").unwrap_or_else(|| "Provider".to_string()),
         base_url: provider_string(value, "baseUrl").unwrap_or_default(),
-        default_model,
         models: value
             .get("models")
             .and_then(|models| models.as_array())
@@ -113,16 +135,10 @@ pub fn active_provider_view<'a>(
         .find(|provider| Some(provider.id.as_str()) == active_id)
 }
 
-pub fn active_model_or_provider_default(
-    active_model: Option<&str>,
-    provider: &AiProviderView,
-) -> Option<String> {
+pub fn active_model_selection(active_model: Option<&str>) -> Option<String> {
     active_model
         .filter(|model| !model.trim().is_empty())
         .map(str::to_string)
-        .or_else(|| {
-            (!provider.default_model.trim().is_empty()).then(|| provider.default_model.clone())
-        })
 }
 
 pub fn generated_provider_id(provider_type: &str, now_ms: u128) -> String {
@@ -135,26 +151,19 @@ pub fn new_provider_from_template(
     name: String,
     now_ms: u128,
 ) -> serde_json::Value {
-    let mut models = Vec::new();
-    if !template.default_model.is_empty() {
-        models.push(template.default_model.to_string());
-    }
+    let models = template
+        .initial_models
+        .iter()
+        .map(|model| (*model).to_string())
+        .collect::<Vec<_>>();
 
     serde_json::json!({
         "id": id,
         "type": template.provider_type,
         "name": name,
         "baseUrl": template.base_url,
-        "defaultModel": template.default_model,
         "models": models,
         "enabled": true,
         "createdAt": now_ms,
     })
-}
-
-pub fn first_provider_default_model(providers: &[serde_json::Value]) -> Option<String> {
-    providers
-        .first()
-        .and_then(|provider| provider_string(provider, "defaultModel"))
-        .filter(|model| !model.trim().is_empty())
 }

@@ -64,7 +64,8 @@ impl WorkspaceApp {
                         })
                 })
         } else {
-            model_selector_display_name(active_provider, active_model)
+            model_selector_display_name(active_model)
+                .unwrap_or_else(|| self.i18n.t("ai.model_selector.select_model"))
         };
         let selector_open =
             self.ai.models.selector_open && self.ai.models.selector_scope == Some(scope);
@@ -118,7 +119,7 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let dropdown = ai_model_selector_dropdown(&self.tokens, AiModelSelectorPlacement::Up)
+        ai_model_selector_dropdown(&self.tokens, AiModelSelectorPlacement::Up)
             .child(self.render_ai_model_selector_search(cx))
             .child(self.render_ai_model_selector_list(providers, cx))
             .child(
@@ -139,8 +140,8 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 ),
-            );
-        dropdown.into_any_element()
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_model_selector_search(

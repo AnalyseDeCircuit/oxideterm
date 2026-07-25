@@ -43,11 +43,13 @@ pub fn resolve_ai_reasoning_effort(
 
 fn normalize_reasoning_effort(value: &str) -> &'static str {
     match value {
-        "none" | "off" => "off",
-        "minimal" | "low" => "low",
+        "none" | "off" => "none",
+        "minimal" => "minimal",
+        "low" => "low",
         "medium" => "medium",
         "high" => "high",
-        "xhigh" | "max" => "max",
+        "xhigh" => "xhigh",
+        "max" => "max",
         _ => "auto",
     }
 }

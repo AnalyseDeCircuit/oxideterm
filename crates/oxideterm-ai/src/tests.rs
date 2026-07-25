@@ -21,7 +21,6 @@ fn provider(id: &str, provider_type: &str, base_url: &str, enabled: bool) -> AiP
         provider_type: provider_type.to_string(),
         name: id.to_string(),
         base_url: base_url.to_string(),
-        default_model: String::new(),
         models: Vec::new(),
         enabled,
         custom: false,
@@ -71,7 +70,7 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
 }
 
 #[test]
-fn provider_templates_match_tauri_order() {
+fn provider_templates_keep_stable_protocol_order() {
     let types = AI_PROVIDER_TEMPLATES
         .iter()
         .map(|template| template.provider_type)
@@ -82,6 +81,8 @@ fn provider_templates_match_tauri_order() {
         vec![
             "openai_compatible",
             "deepseek",
+            "kimi",
+            "glm",
             "openai",
             "anthropic",
             "gemini",
@@ -174,10 +175,7 @@ fn creates_provider_without_secret_material() {
         provider_string(&provider, "type").as_deref(),
         Some("openai")
     );
-    assert_eq!(
-        provider_string(&provider, "defaultModel").as_deref(),
-        Some("gpt-4o-mini")
-    );
+    assert!(provider.get("defaultModel").is_none());
     assert!(provider.get("apiKey").is_none());
     assert!(provider.get("secret").is_none());
     assert_eq!(
@@ -217,7 +215,7 @@ fn settings_provider_mutations_stay_out_of_gpui() {
     );
 
     assert_eq!(active_provider_id.as_deref(), Some("custom-openai-1"));
-    assert_eq!(active_model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(active_model, None);
 
     active_model = None;
     add_provider_from_template(
@@ -230,10 +228,9 @@ fn settings_provider_mutations_stay_out_of_gpui() {
         3,
     );
     assert_eq!(active_provider_id.as_deref(), Some("custom-openai-1"));
-    assert_eq!(active_model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(active_model, None);
 
     select_provider_model(
-        &mut providers,
         &mut active_provider_id,
         &mut active_model,
         "custom-ollama-2",
@@ -241,22 +238,13 @@ fn settings_provider_mutations_stay_out_of_gpui() {
     );
     assert_eq!(active_provider_id.as_deref(), Some("custom-ollama-2"));
     assert_eq!(active_model.as_deref(), Some("llama3.2"));
-    assert_eq!(
-        provider_string(&providers[1], "defaultModel").as_deref(),
-        Some("llama3.2")
-    );
-    set_provider_default_model(&mut providers, 1, "qwen2.5".into());
-    assert_eq!(
-        provider_string(&providers[1], "defaultModel").as_deref(),
-        Some("qwen2.5")
-    );
+    assert!(providers[1].get("defaultModel").is_none());
 
     let empty_default_provider = AiProviderView {
         id: "custom-empty".into(),
         provider_type: "openai_compatible".into(),
         name: "Empty".into(),
         base_url: "https://".into(),
-        default_model: String::new(),
         models: Vec::new(),
         enabled: true,
         custom: true,
@@ -267,7 +255,7 @@ fn settings_provider_mutations_stay_out_of_gpui() {
         &empty_default_provider,
     );
     assert_eq!(active_provider_id.as_deref(), Some("custom-empty"));
-    assert_eq!(active_model.as_deref(), Some("llama3.2"));
+    assert_eq!(active_model, None);
 
     let mut context_windows = serde_json::Map::new();
     assert!(!apply_provider_model_refresh(
@@ -324,7 +312,7 @@ fn settings_provider_mutations_stay_out_of_gpui() {
     );
     assert_eq!(removed.as_deref(), Some("custom-ollama-2"));
     assert_eq!(active_provider_id.as_deref(), Some("custom-openai-1"));
-    assert_eq!(active_model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(active_model, None);
     assert!(reasoning_provider_overrides.is_empty());
     assert!(reasoning_model_overrides.is_empty());
     assert!(user_context_windows.is_empty());
@@ -531,6 +519,13 @@ fn model_context_window_info_matches_tauri_priority() {
 
     let empty = serde_json::Map::new();
     assert_eq!(
+        model_context_window_info("glm-5.2", &empty, None, &empty),
+        ModelContextWindowInfo {
+            value: 1_000_000,
+            source: ContextWindowSource::Pattern,
+        }
+    );
+    assert_eq!(
         model_context_window_info("custom-256k-model", &empty, None, &empty),
         ModelContextWindowInfo {
             value: 262_144,
@@ -732,7 +727,7 @@ fn ai_policy_auto_allows_read_only_and_detects_command_deny_list() {
 }
 
 #[test]
-fn reasoning_effort_resolution_matches_tauri_priority() {
+fn reasoning_effort_resolution_preserves_priority_and_exact_levels() {
     let provider_overrides = serde_json::json!({
         "provider-1": "high",
         "provider-legacy": "xhigh"
@@ -790,7 +785,7 @@ fn reasoning_effort_resolution_matches_tauri_priority() {
             Some("provider-3"),
             Some("model-z"),
         ),
-        "low"
+        "minimal"
     );
     assert_eq!(
         resolve_ai_reasoning_effort(
@@ -800,7 +795,7 @@ fn reasoning_effort_resolution_matches_tauri_priority() {
             Some("provider-legacy"),
             Some("model-old"),
         ),
-        "off"
+        "none"
     );
 }
 
@@ -930,17 +925,17 @@ fn rag_store_indexes_and_searches_like_tauri_keyword_path() {
 }
 
 #[test]
-fn model_selector_display_and_filter_match_tauri() {
+fn model_selector_display_omits_provider_and_filter_keeps_matching_models() {
     let mut openai = provider("OpenAI", "openai", "https://api.openai.com/v1", true);
-    openai.default_model = "gpt-4o-mini".to_string();
     openai.models = vec!["gpt-4o-mini".to_string(), "gpt-4o".to_string()];
     let mut disabled = provider("Disabled", "openai", "https://api.example", false);
     disabled.models = vec!["hidden-model".to_string()];
 
     assert_eq!(
-        model_selector_display_name(Some(&openai), Some("provider/model-name")),
-        "OpenAI/model-name"
+        model_selector_display_name(Some("provider/model-name")).as_deref(),
+        Some("model-name")
     );
+    assert_eq!(model_selector_display_name(None), None);
     assert_eq!(
         model_selector_truncated_label("0123456789012345678901234"),
         "0123456789012345678901..."
@@ -954,19 +949,15 @@ fn model_selector_display_and_filter_match_tauri() {
 
 #[test]
 fn active_provider_and_model_helpers_keep_settings_logic_out_of_ui() {
-    let mut openai = provider("OpenAI", "openai", "https://api.openai.com/v1", true);
-    openai.default_model = "gpt-4o-mini".to_string();
+    let openai = provider("OpenAI", "openai", "https://api.openai.com/v1", true);
     let ollama = provider("Ollama", "ollama", "http://localhost:11434", true);
     let providers = vec![openai.clone(), ollama];
 
     let active = active_provider_view(&providers, Some("OpenAI"));
     assert_eq!(active, Some(&openai));
+    assert_eq!(active_model_selection(None), None);
     assert_eq!(
-        active_model_or_provider_default(None, &openai).as_deref(),
-        Some("gpt-4o-mini")
-    );
-    assert_eq!(
-        active_model_or_provider_default(Some("gpt-4o"), &openai).as_deref(),
+        active_model_selection(Some("gpt-4o")).as_deref(),
         Some("gpt-4o")
     );
 }
@@ -978,7 +969,6 @@ fn embedding_provider_resolution_matches_tauri_auto_and_configured_paths() {
         "type": "openai",
         "name": "OpenAI",
         "baseUrl": "https://api.openai.com/v1",
-        "defaultModel": "gpt-4o-mini",
         "enabled": true,
     });
     let ollama = serde_json::json!({
@@ -986,7 +976,6 @@ fn embedding_provider_resolution_matches_tauri_auto_and_configured_paths() {
         "type": "ollama",
         "name": "Ollama",
         "baseUrl": "http://localhost:11434",
-        "defaultModel": "nomic-embed-text",
         "enabled": true,
     });
     let providers = vec![openai, ollama];
@@ -1003,7 +992,10 @@ fn embedding_provider_resolution_matches_tauri_auto_and_configured_paths() {
     let configured = resolve_ai_embedding_provider(
         &providers,
         Some("openai"),
-        Some(&serde_json::json!({ "providerId": "ollama", "model": "" })),
+        Some(&serde_json::json!({
+            "providerId": "ollama",
+            "model": "nomic-embed-text"
+        })),
         None,
     );
     assert_eq!(configured.mode, AiEmbeddingMode::Configured);
@@ -2337,6 +2329,20 @@ fn openai_compatible_tool_subturn_preserves_reasoning_for_kimi_style_models() {
     let converted = openai_chat_messages(&test_stream_config("openai_compatible"), &messages);
     assert_eq!(
         converted[1]["reasoning_content"].as_str(),
+        Some("kimi reasoning")
+    );
+}
+
+#[test]
+fn kimi_preserves_reasoning_for_assistant_turns_without_tools() {
+    let mut assistant = chat_message("a1", AiChatRole::Assistant, "answer");
+    assistant.thinking_content = Some("kimi reasoning".to_string());
+
+    let mut config = test_stream_config("kimi");
+    config.model = "kimi-k3".to_string();
+    let converted = openai_chat_messages(&config, &[assistant]);
+    assert_eq!(
+        converted[0]["reasoning_content"].as_str(),
         Some("kimi reasoning")
     );
 }

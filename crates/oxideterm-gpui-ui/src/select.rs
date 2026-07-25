@@ -87,9 +87,6 @@ pub enum SelectAnchorId {
     SettingsAiProviderTemplate,
     SettingsAiContextMaxChars,
     SettingsAiContextVisibleLines,
-    SettingsAiGlobalReasoning,
-    SettingsAiProviderReasoning(usize),
-    SettingsAiModelReasoning(usize, usize),
     SettingsAiEmbeddingProvider,
     SettingsKnowledgeCollectionScope,
     SettingsKnowledgeDocumentFormat,
@@ -106,6 +103,7 @@ pub enum SelectAnchorId {
     AiChatMenu,
     AiModelSelector,
     AiInlineModelSelector,
+    AiReasoningMenu,
     AiSafetyMenu,
     AiContextPopover,
     NewConnectionGroup,
@@ -179,9 +177,6 @@ impl SelectAnchorId {
                 | Self::SettingsAiProviderTemplate
                 | Self::SettingsAiContextMaxChars
                 | Self::SettingsAiContextVisibleLines
-                | Self::SettingsAiGlobalReasoning
-                | Self::SettingsAiProviderReasoning(_)
-                | Self::SettingsAiModelReasoning(_, _)
                 | Self::SettingsAiEmbeddingProvider
                 | Self::SettingsKnowledgeCollectionScope
                 | Self::SettingsKnowledgeDocumentFormat
@@ -738,7 +733,6 @@ mod tests {
     #[test]
     fn settings_select_anchor_ids_are_distinct_from_slider_and_sidebar_anchors() {
         assert!(SelectAnchorId::SettingsLanguage.is_settings_select_trigger());
-        assert!(SelectAnchorId::SettingsAiModelReasoning(1, 3).is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsSftpConflict.is_settings_select_trigger());
         assert!(SelectAnchorId::SettingsConnectionImportSource.is_settings_select_trigger());
         assert!(

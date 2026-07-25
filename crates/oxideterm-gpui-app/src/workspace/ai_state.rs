@@ -32,6 +32,7 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) inline_panel: AiInlinePanelState,
     pub(super) conversation_list_open: bool,
     pub(super) menu_open: bool,
+    pub(super) reasoning_menu_open: bool,
     pub(super) safety_menu_open: bool,
     pub(super) safety_confirm_open: bool,
     pub(super) safety_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
@@ -91,8 +92,6 @@ pub(super) struct AiRuntimeWorkspaceState {
 pub(super) struct AiModelWorkspaceState {
     pub(super) context_model_list_states: RefCell<HashMap<String, ListState>>,
     pub(super) context_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
-    pub(super) reasoning_model_list_states: RefCell<HashMap<String, ListState>>,
-    pub(super) reasoning_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     pub(super) provider_model_chip_list_states: RefCell<HashMap<String, ListState>>,
     pub(super) provider_model_chip_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     pub(super) provider_card_list_state: ListState,
@@ -188,6 +187,7 @@ impl AiChatWorkspaceState {
             inline_panel: AiInlinePanelState::default(),
             conversation_list_open: false,
             menu_open: false,
+            reasoning_menu_open: false,
             safety_menu_open: false,
             safety_confirm_open: false,
             safety_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -253,8 +253,6 @@ impl AiModelWorkspaceState {
         Self {
             context_model_list_states: RefCell::new(HashMap::new()),
             context_model_list_caches: RefCell::new(HashMap::new()),
-            reasoning_model_list_states: RefCell::new(HashMap::new()),
-            reasoning_model_list_caches: RefCell::new(HashMap::new()),
             provider_model_chip_list_states: RefCell::new(HashMap::new()),
             provider_model_chip_list_caches: RefCell::new(HashMap::new()),
             provider_card_list_state: ListState::new(

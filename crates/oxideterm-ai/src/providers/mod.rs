@@ -5,9 +5,9 @@ mod discovery_models;
 mod selector;
 
 pub use catalog::{
-    AI_PROVIDER_TEMPLATES, active_model_or_provider_default, active_provider_view,
-    first_provider_default_model, generated_provider_id, new_provider_from_template, provider_id,
-    provider_string, provider_template_by_type, provider_view, provider_views, update_provider,
+    AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view, generated_provider_id,
+    new_provider_from_template, provider_id, provider_string, provider_template_by_type,
+    provider_view, provider_views, update_provider,
 };
 pub use discovery::fetch_provider_models;
 pub(crate) use discovery::{

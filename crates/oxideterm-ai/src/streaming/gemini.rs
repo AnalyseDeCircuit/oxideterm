@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::providers::{api_key_required_ref, url_encode_component};
 use crate::{
-    AiChatMessage, AiChatRole, AiChatStreamConfig, AiStreamEvent, AiToolCall, AiToolChoice,
-    AiToolDefinition,
+    AiChatMessage, AiChatRole, AiChatStreamConfig, AiReasoningLevel, AiReasoningRequestFormat,
+    AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, model_reasoning_capability,
 };
 
 use super::CHAT_STREAM_TIMEOUT;
@@ -75,6 +75,7 @@ pub(crate) fn gemini_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
             serde_json::json!({ "maxOutputTokens": tokens }),
         );
     }
+    apply_gemini_reasoning_options(&mut body, config);
     if !config.tools.is_empty()
         && let Some(object) = body.as_object_mut()
     {
@@ -87,6 +88,46 @@ pub(crate) fn gemini_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
         }
     }
     body
+}
+
+fn apply_gemini_reasoning_options(body: &mut Value, config: &AiChatStreamConfig) {
+    let effort = AiReasoningLevel::parse(config.reasoning_effort.as_deref().unwrap_or("auto"));
+    if effort == AiReasoningLevel::Auto {
+        return;
+    }
+    let capability = model_reasoning_capability(&config.provider_type, &config.model);
+    let generation_config = body
+        .as_object_mut()
+        .expect("Gemini request body must be an object")
+        .entry("generationConfig")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(generation_config) = generation_config.as_object_mut() else {
+        return;
+    };
+    match capability.request_format {
+        AiReasoningRequestFormat::GeminiThinkingLevel => {
+            generation_config.insert(
+                "thinkingConfig".to_string(),
+                serde_json::json!({ "thinkingLevel": effort.as_str() }),
+            );
+        }
+        AiReasoningRequestFormat::GeminiThinkingBudget => {
+            // Gemini's official OpenAI compatibility mapping documents these
+            // budgets for the Gemini 2.5 family.
+            let budget = match effort {
+                AiReasoningLevel::None => 0,
+                AiReasoningLevel::Minimal | AiReasoningLevel::Low => 1024,
+                AiReasoningLevel::Medium => 8192,
+                AiReasoningLevel::High | AiReasoningLevel::Xhigh | AiReasoningLevel::Max => 24576,
+                AiReasoningLevel::Auto => return,
+            };
+            generation_config.insert(
+                "thinkingConfig".to_string(),
+                serde_json::json!({ "thinkingBudget": budget }),
+            );
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String>, Vec<Value>) {
@@ -290,4 +331,54 @@ fn parse_gemini_error(status: u16, body: &str) -> String {
         fallback = body.chars().take(200).collect();
     }
     fallback
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AiExecutionBackend, AiPolicySafetyMode, AiToolUsePolicy};
+
+    fn config(model: &str, effort: &str) -> AiChatStreamConfig {
+        AiChatStreamConfig {
+            execution_backend: AiExecutionBackend::Provider,
+            provider_id: Some("gemini".to_string()),
+            acp_agent_id: None,
+            acp_session_id: None,
+            acp_config_selection: None,
+            provider_type: "gemini".to_string(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
+            model: model.to_string(),
+            api_key: None,
+            max_response_tokens: Some(4096),
+            reasoning_effort: Some(effort.to_string()),
+            safety_mode: AiPolicySafetyMode::Default,
+            profile_id: None,
+            tool_policy: AiToolUsePolicy::default(),
+            tools: Vec::new(),
+            tool_choice: AiToolChoice::Auto,
+        }
+    }
+
+    #[test]
+    fn gemini_three_uses_official_thinking_level_field() {
+        let body = gemini_chat_body(&config("gemini-3.6-flash", "medium"), &[]);
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingLevel"].as_str(),
+            Some("medium")
+        );
+    }
+
+    #[test]
+    fn gemini_two_five_maps_levels_to_official_budgets() {
+        let body = gemini_chat_body(&config("gemini-2.5-flash", "none"), &[]);
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingBudget"].as_i64(),
+            Some(0)
+        );
+        let body = gemini_chat_body(&config("gemini-2.5-pro", "high"), &[]);
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingBudget"].as_i64(),
+            Some(24576)
+        );
+    }
 }

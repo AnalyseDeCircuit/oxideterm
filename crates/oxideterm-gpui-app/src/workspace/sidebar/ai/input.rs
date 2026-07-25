@@ -32,6 +32,9 @@ impl WorkspaceApp {
                 SelectAnchorId::AiModelSelector,
                 cx,
             ))
+            .when_some(self.render_ai_reasoning_indicator(cx), |bar, indicator| {
+                bar.child(indicator)
+            })
             .child(self.render_ai_safety_indicator(cx))
             .child(self.render_ai_tool_indicator(cx))
             .into_any_element()
@@ -42,10 +45,19 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let placeholder = if enabled {
-            self.i18n.t("ai.input.placeholder")
+        let settings = self.settings_store.settings();
+        let model_selected = if settings.ai.active_backend == AiActiveBackend::Acp {
+            settings.ai.active_acp_agent_id.is_some()
         } else {
+            settings.ai.active_provider_id.is_some()
+                && active_model_selection(settings.ai.active_model.as_deref()).is_some()
+        };
+        let placeholder = if !enabled {
             self.i18n.t("ai.input.placeholder_disabled")
+        } else if !model_selected {
+            self.i18n.t("ai.model_selector.select_model")
+        } else {
+            self.i18n.t("ai.input.placeholder")
         };
         let target = WorkspaceImeTarget::AiChatInput;
         let focused = self.ai.chat.input_focused;
@@ -164,7 +176,7 @@ window.focus(&this.focus_handle, cx);
             input,
             Self::deferred_ai_text_input_anchor_update(cx.entity()),
         );
-        let send_disabled = !enabled || self.ai.chat.draft.trim().is_empty();
+        let send_disabled = !enabled || !model_selected || self.ai.chat.draft.trim().is_empty();
         let action_focused = self.ai.chat.footer_focus == Some(AiChatFooterAction::Submit)
             && (self.ai.chat.loading || !send_disabled);
         let action = if self.ai.chat.loading {
@@ -859,11 +871,7 @@ window.focus(&this.focus_handle, cx);
         let providers = ai_provider_views(&settings.ai.providers);
         let active_provider =
             active_provider_view(&providers, settings.ai.active_provider_id.as_deref());
-        let model = active_provider
-            .and_then(|provider| {
-                active_model_or_provider_default(settings.ai.active_model.as_deref(), provider)
-            })
-            .unwrap_or_default();
+        let model = active_model_selection(settings.ai.active_model.as_deref()).unwrap_or_default();
         let provider_id = active_provider
             .map(|provider| provider.id.as_str())
             .unwrap_or("");

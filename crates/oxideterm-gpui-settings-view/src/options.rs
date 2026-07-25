@@ -3,7 +3,7 @@ use std::path::Path;
 use oxideterm_gpui_ui::select::SelectAnchorId;
 use oxideterm_i18n::I18n;
 use oxideterm_settings::{
-    AiReasoningEffort, AiThinkingStyle, AnimationSpeed, BackgroundFit, ConflictAction,
+    AiThinkingStyle, AnimationSpeed, BackgroundFit, ConflictAction,
     CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language, PersistedSettings,
     TerminalBackspaceSequence, TerminalDeleteSequence, TerminalEncoding, UiDensity, UpdateChannel,
     UpdateProxyMode, UpdateProxyProtocol,
@@ -584,18 +584,6 @@ pub fn cycle_ai_thinking(settings: &mut PersistedSettings) {
     settings.ai.thinking_style = match settings.ai.thinking_style {
         AiThinkingStyle::Detailed => AiThinkingStyle::Compact,
         AiThinkingStyle::Compact => AiThinkingStyle::Detailed,
-    };
-}
-
-pub fn cycle_ai_reasoning(settings: &mut PersistedSettings) {
-    settings.ai.reasoning_effort = match settings.ai.reasoning_effort {
-        AiReasoningEffort::None => AiReasoningEffort::Minimal,
-        AiReasoningEffort::Minimal => AiReasoningEffort::Low,
-        AiReasoningEffort::Low => AiReasoningEffort::Medium,
-        AiReasoningEffort::Medium => AiReasoningEffort::High,
-        AiReasoningEffort::High => AiReasoningEffort::Xhigh,
-        AiReasoningEffort::Xhigh => AiReasoningEffort::Auto,
-        AiReasoningEffort::Auto => AiReasoningEffort::None,
     };
 }
 

@@ -77,6 +77,7 @@ pub fn settings_ai_context_controls_section(
     title: AnyElement,
     fields: Vec<AnyElement>,
     sources: AnyElement,
+    max_response_tokens: AnyElement,
 ) -> AnyElement {
     // Context controls are a two-column form followed by source toggles. The
     // controls themselves stay app-owned because select/list state lives there.
@@ -89,6 +90,7 @@ pub fn settings_ai_context_controls_section(
         .child(title)
         .child(div().grid().grid_cols(2).gap(px(24.0)).children(fields))
         .child(sources)
+        .child(max_response_tokens)
         .into_any_element()
 }
 
@@ -134,25 +136,6 @@ pub fn settings_ai_editor_summary_section(
                 )
                 .child(edit_action),
         )
-        .into_any_element()
-}
-
-pub fn settings_ai_reasoning_section(
-    global_default: AnyElement,
-    model_overrides: AnyElement,
-    max_response_tokens: AnyElement,
-) -> AnyElement {
-    // Reasoning controls form one policy card, separate from prompt content
-    // and context-window sizing so each card has one clear responsibility.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap(px(16.0))
-        .child(global_default)
-        .child(model_overrides)
-        .child(max_response_tokens)
         .into_any_element()
 }
 
@@ -257,39 +240,6 @@ pub fn settings_ai_context_source_row(
                         .child(hint),
                 ),
         )
-}
-
-pub fn settings_ai_global_reasoning_section(
-    tokens: &ThemeTokens,
-    title: String,
-    control: AnyElement,
-    hint: String,
-    _max_width: f32,
-) -> AnyElement {
-    // The global reasoning section is a simple labeled select. Option content
-    // and writes stay app/model-owned.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap(px(8.0))
-        .child(
-            div()
-                .mb(px(8.0))
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text))
-                .child(title.to_uppercase()),
-        )
-        .child(control)
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_xs))
-                .text_color(rgb(tokens.ui.text_muted))
-                .child(hint),
-        )
-        .into_any_element()
 }
 
 pub fn settings_ai_textarea_surface(
@@ -465,56 +415,6 @@ pub fn settings_ai_collapsible_header(
         .child(chevron)
 }
 
-pub fn settings_ai_model_reasoning_header(
-    tokens: &ThemeTokens,
-    title: String,
-    hint: String,
-    chevron: AnyElement,
-) -> gpui::Div {
-    // Reasoning override header uses the compact hoverable trigger from the
-    // React settings card. The app attaches the expansion toggle.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .mb(px(12.0))
-        .rounded(px(tokens.radii.md))
-        .px(px(4.0))
-        .py(px(4.0))
-        .flex()
-        .items_start()
-        .justify_between()
-        .gap(px(12.0))
-        .text_color(rgb(tokens.ui.text_muted))
-        .cursor_pointer()
-        .hover(|style| {
-            style
-                .bg(rgba(
-                    (tokens.ui.bg_hover << 8) | AI_CONTEXT_PROVIDER_HOVER_ALPHA,
-                ))
-                .text_color(rgb(tokens.ui.text))
-        })
-        .child(
-            div()
-                .min_w(px(0.0))
-                .flex_1()
-                .child(
-                    div()
-                        .text_size(px(tokens.metrics.ui_text_xs))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(tokens.ui.text))
-                        .child(title.to_uppercase()),
-                )
-                .child(
-                    div()
-                        .mt(px(4.0))
-                        .text_size(px(tokens.metrics.ui_text_xs))
-                        .text_color(rgb(tokens.ui.text_muted))
-                        .child(hint),
-                ),
-        )
-        .child(div().mt(px(2.0)).child(chevron))
-}
-
 pub fn settings_ai_context_windows_header(
     tokens: &ThemeTokens,
     title: String,
@@ -522,8 +422,7 @@ pub fn settings_ai_context_windows_header(
     chevron: AnyElement,
     _max_width: f32,
 ) -> gpui::Div {
-    // Context-window header is wider and less card-like than the reasoning
-    // override trigger, matching the original page hierarchy.
+    // Context-window headers keep provider scope visually prominent.
     div()
         .mb(px(16.0))
         .w_full()
@@ -652,40 +551,6 @@ pub fn settings_ai_model_row_list_frame(
         .overflow_hidden()
         .h(px(list_height))
         .child(rows)
-        .into_any_element()
-}
-
-pub fn settings_ai_model_reasoning_row(
-    tokens: &ThemeTokens,
-    mono_font_family: SharedString,
-    model: String,
-    select: AnyElement,
-    is_first: bool,
-) -> AnyElement {
-    // The select is caller-provided because it is backed by app-local select
-    // anchors; this helper owns the stable row layout and typography.
-    div()
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(12.0))
-        .py(px(6.0))
-        .when(!is_first, |row| {
-            row.border_t_1().border_color(rgba(
-                (tokens.ui.border << 8) | AI_CONTEXT_PROVIDER_ROW_TOP_BORDER_ALPHA,
-            ))
-        })
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .text_size(px(tokens.metrics.ui_text_xs))
-                .font_family(mono_font_family)
-                .text_color(rgb(tokens.ui.text_muted))
-                .overflow_hidden()
-                .child(model),
-        )
-        .child(select)
         .into_any_element()
 }
 

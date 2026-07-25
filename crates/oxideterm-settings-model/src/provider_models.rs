@@ -6,7 +6,6 @@
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiProviderModelChipItem {
     pub model: String,
-    pub active: bool,
 }
 
 pub fn ai_provider_model_chip_rows(
@@ -23,7 +22,6 @@ pub fn ai_provider_model_chip_rows(
         .take(visible_model_count)
         .map(|model| AiProviderModelChipItem {
             model: model.clone(),
-            active: provider.default_model == *model,
         })
         .collect::<Vec<_>>()
         .chunks(chips_per_row)

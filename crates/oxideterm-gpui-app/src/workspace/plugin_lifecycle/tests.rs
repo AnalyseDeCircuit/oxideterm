@@ -995,8 +995,7 @@ fn ai_host_calls_return_sanitized_messages_and_provider_info() {
         "id": "provider-1",
         "type": "openai",
         "name": "OpenAI",
-        "models": ["gpt-4o-mini"],
-        "defaultModel": "gpt-4o-mini"
+        "models": ["gpt-4o-mini"]
     })];
     let snapshot = native_plugin_ai_snapshot_value(
         &chat,

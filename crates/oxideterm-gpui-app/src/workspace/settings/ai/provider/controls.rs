@@ -272,19 +272,6 @@ impl WorkspaceApp {
                     cx,
                 ),
             ))
-            .child(self.ai_provider_field(
-                "settings_view.ai.default_model",
-                self.ai_provider_text_input_control(
-                    SettingsInput::AiProviderDefaultModel(index),
-                    provider.default_model.clone(),
-                    self.i18n.t("settings_view.ai.default_model"),
-                    cx,
-                ),
-            ))
-            .child(self.ai_provider_field(
-                "settings_view.ai.reasoning_provider_default",
-                self.ai_provider_reasoning_select(index, provider, cx),
-            ))
             .into_any_element()
     }
 
@@ -346,47 +333,6 @@ impl WorkspaceApp {
             },
         )
         .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_provider_reasoning_select(
-        &self,
-        index: usize,
-        provider: &AiProviderView,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let current = self
-            .settings_store
-            .settings()
-            .ai
-            .reasoning_provider_overrides
-            .get(&provider.id)
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("__inherit__")
-            .to_string();
-        let label = if current == "__inherit__" {
-            let global = self.ai_reasoning_display(ai_reasoning_profile_value(
-                self.settings_store.settings().ai.reasoning_effort,
-            ));
-            self.i18n
-                .t("settings_view.ai.reasoning_inherit_global")
-                .replace("{{value}}", &global)
-        } else {
-            self.ai_reasoning_display(&current)
-        };
-        let select_id = SettingsSelect::AiProviderReasoning(index);
-        self.settings_select_control_with_trigger_style(
-            select_id,
-            label,
-            false,
-            None,
-            |trigger| {
-                trigger
-                    .w_full()
-                    .h(px(32.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-            },
-            cx,
-        )
     }
 
     pub(in crate::workspace) fn ai_provider_field(

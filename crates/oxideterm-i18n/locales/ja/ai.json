@@ -120,6 +120,8 @@
       "offline": "オフライン",
       "manage_providers": "プロバイダーを管理",
       "no_provider": "プロバイダー未設定",
+      "select_model": "モデルを選択",
+      "no_model_selected": "モデルが選択されていません。チャットのモデルメニューから選択してください。",
       "agent_decides": "Agent が決定",
       "agent_model_unavailable": "自動選択（Agent はモデルを公開していません）",
       "agent_model_after_first_message": "自動選択（最初のメッセージ送信後に実際のモデルを表示）",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens が有効になっていません。設定 → OxideSens から有効にしてください。"
+    },
+    "reasoning": {
+      "title": "思考強度",
+      "custom_model_hint": "不明なモデルです。プロバイダーが受け付ける値のみ使用してください。",
+      "level_auto": "自動（auto）",
+      "level_none": "なし（none）",
+      "level_minimal": "最小（minimal）",
+      "level_low": "低（low）",
+      "level_medium": "中（medium）",
+      "level_high": "高（high）",
+      "level_xhigh": "非常に高い（xhigh）",
+      "level_max": "最大（max）"
     }
   }
 }

@@ -640,6 +640,7 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiChatMenu
                     | SelectAnchorId::AiModelSelector
                     | SelectAnchorId::AiInlineModelSelector
+                    | SelectAnchorId::AiReasoningMenu
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
             ) && self.has_ai_sidebar_floating_overlay())
@@ -1515,6 +1516,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::AiChatMenu
             | SelectAnchorId::AiModelSelector
             | SelectAnchorId::AiInlineModelSelector
+            | SelectAnchorId::AiReasoningMenu
             | SelectAnchorId::AiSafetyMenu
             | SelectAnchorId::AiContextPopover
             | SelectAnchorId::NewConnectionGroup

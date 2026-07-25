@@ -47,6 +47,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self) {
         self.ai.chat.conversation_list_open = false;
         self.ai.chat.menu_open = false;
+        self.ai.chat.reasoning_menu_open = false;
         self.ai.chat.safety_menu_open = false;
         self.ai.chat.context_popover_open = false;
         self.close_ai_model_selector();

@@ -99,8 +99,7 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
             "type": "openai",
             "name": "OpenAI",
             "baseUrl": "https://api.openai.com/v1",
-            "defaultModel": "gpt-4o-mini",
-            "models": [],
+            "models": ["gpt-4o-mini"],
             "enabled": true,
             "createdAt": created_at,
         }),
@@ -109,8 +108,7 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
             "type": "anthropic",
             "name": "Anthropic",
             "baseUrl": "https://api.anthropic.com",
-            "defaultModel": "claude-sonnet-4-20250514",
-            "models": [],
+            "models": ["claude-sonnet-4-20250514"],
             "enabled": true,
             "createdAt": created_at,
         }),
@@ -119,7 +117,6 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
             "type": "deepseek",
             "name": "DeepSeek",
             "baseUrl": "https://api.deepseek.com",
-            "defaultModel": "deepseek-v4-flash",
             "models": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
             "enabled": true,
             "createdAt": created_at,
@@ -129,8 +126,7 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
             "type": "gemini",
             "name": "Google Gemini",
             "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
-            "defaultModel": "gemini-2.0-flash",
-            "models": [],
+            "models": ["gemini-2.0-flash"],
             "enabled": true,
             "createdAt": created_at,
         }),
@@ -139,7 +135,6 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
             "type": "ollama",
             "name": "Ollama (Local)",
             "baseUrl": "http://localhost:11434",
-            "defaultModel": "",
             "models": [],
             "enabled": false,
             "createdAt": created_at,
@@ -155,7 +150,6 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
                 "type": "openai_compatible",
                 "name": "Custom (Migrated)",
                 "baseUrl": base_url,
-                "defaultModel": legacy_model,
                 "models": [legacy_model],
                 "enabled": true,
                 "createdAt": created_at,
@@ -172,8 +166,23 @@ fn migrate_ai_providers(settings: &mut Value, warnings: &mut Vec<String>) {
 
     ai.insert("providers".to_string(), Value::Array(providers));
     ai.insert("activeProviderId".to_string(), active_provider_id);
-    ai.insert("activeModel".to_string(), json!(legacy_model));
+    ai.insert("activeModel".to_string(), Value::Null);
     warnings.push("Migrated AI settings to multi-provider format".to_string());
+}
+
+fn remove_ai_provider_default_models(settings: &mut Value) {
+    let Some(providers) = settings
+        .get_mut("ai")
+        .and_then(|ai| ai.get_mut("providers"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for provider in providers {
+        if let Some(provider) = provider.as_object_mut() {
+            provider.remove("defaultModel");
+        }
+    }
 }
 
 fn normalize_ai_tool_auto_approve_keys(settings: &mut Value, raw: &Value) {
@@ -389,7 +398,6 @@ fn normalize_ai_reasoning_effort_aliases(settings: &mut Value) {
     };
     let Some(normalized) = (match current {
         "off" => Some("none"),
-        "max" => Some("xhigh"),
         _ => None,
     }) else {
         return;
@@ -399,19 +407,19 @@ fn normalize_ai_reasoning_effort_aliases(settings: &mut Value) {
 
 fn ai_reasoning_profile_value(value: &str) -> &'static str {
     match value {
-        "none" | "off" => "off",
-        "minimal" | "low" => "low",
+        "none" | "off" => "none",
+        "minimal" => "minimal",
+        "low" => "low",
         "medium" => "medium",
         "high" => "high",
-        "xhigh" | "max" => "max",
+        "xhigh" => "xhigh",
+        "max" => "max",
         _ => "auto",
     }
 }
 
 fn ai_reasoning_settings_value(value: &str) -> &'static str {
     match ai_reasoning_profile_value(value) {
-        "off" => "none",
-        "max" => "xhigh",
         other => other,
     }
 }
@@ -505,6 +513,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     }
     normalize_sftp_speed_limit_key(&mut settings, &raw);
     migrate_ai_providers(&mut settings, &mut migration_warnings);
+    remove_ai_provider_default_models(&mut settings);
     migrate_ai_tool_use_settings(&mut settings, &raw);
     normalize_ai_tool_auto_approve_keys(&mut settings, &raw);
     migrate_acp_agent_presets(&mut settings, &mut migration_warnings);
@@ -757,7 +766,9 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     sanitize_enum(
         &mut settings,
         &["ai", "reasoningEffort"],
-        &["none", "minimal", "low", "medium", "high", "xhigh", "auto"],
+        &[
+            "none", "minimal", "low", "medium", "high", "xhigh", "max", "auto",
+        ],
         "auto",
         &mut validation_warnings,
     );
@@ -941,9 +952,38 @@ mod tests {
             sanitized.settings.ai.active_provider_id.as_deref(),
             Some("builtin-openai")
         );
-        assert_eq!(
-            sanitized.settings.ai.active_model.as_deref(),
-            Some("gpt-4o-mini")
+        assert_eq!(sanitized.settings.ai.active_model, None);
+        assert!(
+            providers
+                .iter()
+                .all(|provider| provider.get("defaultModel").is_none())
+        );
+    }
+
+    #[test]
+    fn removes_legacy_provider_default_model_without_selecting_it() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "providers": [{
+                    "id": "provider-1",
+                    "type": "openai",
+                    "name": "OpenAI",
+                    "baseUrl": "https://api.openai.com/v1",
+                    "defaultModel": "gpt-4o-mini",
+                    "models": ["gpt-4o-mini"],
+                    "enabled": true
+                }],
+                "activeProviderId": "provider-1",
+                "activeModel": null
+            }
+        }))
+        .expect("sanitize settings");
+
+        assert_eq!(sanitized.settings.ai.active_model, None);
+        assert!(
+            sanitized.settings.ai.providers[0]
+                .get("defaultModel")
+                .is_none()
         );
     }
 
@@ -1143,7 +1183,6 @@ mod tests {
                     "type": "openai_compatible",
                     "name": "Provider 1",
                     "baseUrl": "https://gateway.example/v1",
-                    "defaultModel": "model-1",
                     "models": ["model-1"],
                     "enabled": true,
                     "createdAt": 1
@@ -1185,7 +1224,6 @@ mod tests {
                     "type": "openai",
                     "name": "OpenAI",
                     "baseUrl": "https://api.openai.com/v1",
-                    "defaultModel": "gpt-4o-mini",
                     "models": ["gpt-4o-mini"],
                     "enabled": true,
                     "createdAt": 1
@@ -1198,7 +1236,7 @@ mod tests {
 
         assert_eq!(
             sanitized.settings.ai.reasoning_effort,
-            AiReasoningEffort::Xhigh
+            AiReasoningEffort::Max
         );
         assert!(
             !sanitized
@@ -1218,7 +1256,6 @@ mod tests {
                     "type": "openai",
                     "name": "OpenAI",
                     "baseUrl": "https://api.openai.com/v1",
-                    "defaultModel": "gpt-4o-mini",
                     "models": ["gpt-4o-mini"],
                     "enabled": true,
                     "createdAt": 1
@@ -1369,9 +1406,6 @@ mod tests {
             sanitized.settings.ai.active_provider_id.as_deref(),
             first.get("id").and_then(Value::as_str)
         );
-        assert_eq!(
-            sanitized.settings.ai.active_model.as_deref(),
-            Some("gateway-model")
-        );
+        assert_eq!(sanitized.settings.ai.active_model, None);
     }
 }

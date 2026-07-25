@@ -160,12 +160,6 @@ pub fn persisted_settings_input_value(
             .get(index)
             .and_then(|provider| ai_provider_string(provider, "baseUrl"))
             .unwrap_or_default(),
-        SettingsInput::AiProviderDefaultModel(index) => settings
-            .ai
-            .providers
-            .get(index)
-            .and_then(|provider| ai_provider_string(provider, "defaultModel"))
-            .unwrap_or_default(),
         SettingsInput::AiProviderApiKey(_) => String::new(),
         SettingsInput::AiAcpAgentDisplayName(index) => settings
             .ai
@@ -423,9 +417,6 @@ pub fn apply_persisted_settings_input_draft(
         }
         SettingsInput::AiProviderBaseUrl(index) => {
             set_ai_provider_string(settings, index, "baseUrl", draft.trim())
-        }
-        SettingsInput::AiProviderDefaultModel(index) => {
-            set_ai_provider_string(settings, index, "defaultModel", draft.trim())
         }
         SettingsInput::AiAcpAgentDisplayName(index) => {
             if let Some(agent) = settings.ai.acp_agents.get_mut(index) {

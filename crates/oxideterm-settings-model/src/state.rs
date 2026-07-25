@@ -42,11 +42,9 @@ pub struct SettingsPageModel {
     pub ai_provider_settings_expanded: bool,
     pub ai_tool_use_expanded: bool,
     pub ai_context_windows_expanded: bool,
-    pub ai_model_reasoning_expanded: bool,
     pub expanded_ai_providers: HashMap<String, bool>,
     pub expanded_ai_provider_models: HashSet<String>,
     pub expanded_ai_context_providers: HashSet<String>,
-    pub expanded_ai_model_reasoning_providers: HashSet<String>,
     pub knowledge_selected_collection_id: Option<String>,
     pub knowledge_create_dialog_open: bool,
     pub knowledge_new_document_dialog_open: bool,
@@ -96,11 +94,9 @@ impl Default for SettingsPageModel {
             ai_provider_settings_expanded: true,
             ai_tool_use_expanded: true,
             ai_context_windows_expanded: true,
-            ai_model_reasoning_expanded: false,
             expanded_ai_providers: HashMap::new(),
             expanded_ai_provider_models: HashSet::new(),
             expanded_ai_context_providers: HashSet::new(),
-            expanded_ai_model_reasoning_providers: HashSet::new(),
             knowledge_selected_collection_id: None,
             knowledge_create_dialog_open: false,
             knowledge_new_document_dialog_open: false,
@@ -207,9 +203,6 @@ impl SettingsPageModel {
             AiSettingsSection::ContextWindows => {
                 self.ai_context_windows_expanded = !self.ai_context_windows_expanded;
             }
-            AiSettingsSection::ModelReasoning => {
-                self.ai_model_reasoning_expanded = !self.ai_model_reasoning_expanded;
-            }
         }
     }
 
@@ -230,8 +223,6 @@ impl SettingsPageModel {
         self.expanded_ai_providers.remove(provider_id);
         self.expanded_ai_provider_models.remove(provider_id);
         self.expanded_ai_context_providers.remove(provider_id);
-        self.expanded_ai_model_reasoning_providers
-            .remove(provider_id);
     }
 
     /// Opens or closes the AI enable confirmation modal.
@@ -659,18 +650,6 @@ impl SettingsPageModel {
         self.settings_connection_status = status;
     }
 
-    /// Toggles a model reasoning provider panel.
-    pub fn toggle_ai_model_reasoning_provider(&mut self, provider_id: impl Into<String>) {
-        let provider_id = provider_id.into();
-        if !self
-            .expanded_ai_model_reasoning_providers
-            .insert(provider_id.clone())
-        {
-            self.expanded_ai_model_reasoning_providers
-                .remove(&provider_id);
-        }
-    }
-
     /// Toggles a context-window provider panel.
     pub fn toggle_ai_context_provider(&mut self, provider_id: impl Into<String>) {
         let provider_id = provider_id.into();
@@ -688,7 +667,6 @@ pub enum AiSettingsSection {
     ProviderSettings,
     ToolUse,
     ContextWindows,
-    ModelReasoning,
 }
 
 #[cfg(test)]
@@ -735,20 +713,11 @@ mod tests {
         model
             .expanded_ai_context_providers
             .insert(provider_id.clone());
-        model
-            .expanded_ai_model_reasoning_providers
-            .insert(provider_id.clone());
-
         model.remove_ai_provider_page_state(&provider_id);
 
         assert!(!model.expanded_ai_providers.contains_key(&provider_id));
         assert!(!model.expanded_ai_provider_models.contains(&provider_id));
         assert!(!model.expanded_ai_context_providers.contains(&provider_id));
-        assert!(
-            !model
-                .expanded_ai_model_reasoning_providers
-                .contains(&provider_id)
-        );
     }
 
     #[test]

@@ -913,12 +913,23 @@ window.focus(&this.focus_handle, cx);
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model =
-            active_model_or_provider_default(settings.ai.active_model.as_deref(), &provider)
-                .ok_or_else(|| {
-                    "No model selected. Please refresh models or select one in Settings > AI."
-                        .to_string()
-                })?;
+        let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
+            self.i18n.t("ai.model_selector.no_model_selected")
+        })?;
+        let reasoning_effort = settings
+            .ai
+            .reasoning_model_overrides
+            .get(&provider.id)
+            .and_then(|models| models.get(&model))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("auto");
+        let reasoning_effort = oxideterm_ai::normalize_reasoning_level_for_model(
+            &provider.provider_type,
+            &model,
+            reasoning_effort,
+        )
+        .as_str()
+        .to_string();
         Ok(AiChatStreamConfig {
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id.clone()),
@@ -934,7 +945,7 @@ window.focus(&this.focus_handle, cx);
                 &provider.id,
                 &model,
             ),
-            reasoning_effort: Some(resolve_terminal_ai_inline_reasoning_effort(settings)),
+            reasoning_effort: Some(reasoning_effort),
             safety_mode: AiPolicySafetyMode::Default,
             profile_id: None,
             tool_policy: AiToolUsePolicy::default(),
@@ -1079,20 +1090,6 @@ pub(in crate::workspace) fn truncate_ai_inline_context(
         .unwrap_or_default();
     context.drain(..keep_from);
     context
-}
-
-pub(in crate::workspace) fn resolve_terminal_ai_inline_reasoning_effort(
-    settings: &PersistedSettings,
-) -> String {
-    let value = serde_json::to_value(settings.ai.reasoning_effort)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| "auto".to_string());
-    match value.as_str() {
-        "none" | "minimal" => "off".to_string(),
-        "xhigh" => "max".to_string(),
-        other => other.to_string(),
-    }
 }
 
 pub(in crate::workspace) fn extract_terminal_ai_inline_command(text: &str) -> String {

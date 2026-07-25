@@ -120,6 +120,8 @@
       "offline": "離線",
       "manage_providers": "管理供應商",
       "no_provider": "未設定供應商",
+      "select_model": "選擇模型",
+      "no_model_selected": "尚未選擇模型。請從聊天模型選單中選擇。",
       "agent_decides": "由 Agent 決定",
       "agent_model_unavailable": "自動選擇（代理程式未公開模型）",
       "agent_model_after_first_message": "自動選擇（傳送第一則訊息後顯示實際模型）",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens 尚未啟用。請前往 設定 → OxideSens 開啟後使用。"
+    },
+    "reasoning": {
+      "title": "思考強度",
+      "custom_model_hint": "未知模型：請僅使用供應商明確支援的檔位。",
+      "level_auto": "自動（auto）",
+      "level_none": "無（none）",
+      "level_minimal": "最低（minimal）",
+      "level_low": "低（low）",
+      "level_medium": "中（medium）",
+      "level_high": "高（high）",
+      "level_xhigh": "極高（xhigh）",
+      "level_max": "最大（max）"
     }
   }
 }

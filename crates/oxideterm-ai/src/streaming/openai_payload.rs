@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use crate::{
-    AiChatMessage, AiChatRole, AiChatStreamConfig, AiToolCall, AiToolChoice, AiToolDefinition,
+    AiChatMessage, AiChatRole, AiChatStreamConfig, AiReasoningLevel, AiReasoningRequestFormat,
+    AiToolCall, AiToolChoice, AiToolDefinition, model_reasoning_capability,
 };
 
 pub(crate) fn openai_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) -> Value {
@@ -33,19 +34,34 @@ fn apply_tool_options(body: &mut serde_json::Map<String, Value>, config: &AiChat
     match &config.tool_choice {
         AiToolChoice::Auto => {}
         AiToolChoice::Required => {
-            body.insert("tool_choice".to_string(), serde_json::json!("required"));
+            // GLM documents only automatic tool selection, while Kimi K2.6
+            // and K2.7 reject `required`.
+            if config.provider_type != "glm" && !kimi_model_rejects_required_tool_choice(config) {
+                body.insert("tool_choice".to_string(), serde_json::json!("required"));
+            }
         }
         AiToolChoice::Named(name) if !name.is_empty() => {
-            body.insert(
-                "tool_choice".to_string(),
-                serde_json::json!({
-                    "type": "function",
-                    "function": { "name": name },
-                }),
-            );
+            // Neither Kimi nor GLM documents named tool selection.
+            if !matches!(config.provider_type.as_str(), "kimi" | "glm") {
+                body.insert(
+                    "tool_choice".to_string(),
+                    serde_json::json!({
+                        "type": "function",
+                        "function": { "name": name },
+                    }),
+                );
+            }
         }
         AiToolChoice::Named(_) => {}
     }
+}
+
+fn kimi_model_rejects_required_tool_choice(config: &AiChatStreamConfig) -> bool {
+    if config.provider_type != "kimi" {
+        return false;
+    }
+    let model = config.model.to_ascii_lowercase();
+    model.starts_with("kimi-k2.6") || model.starts_with("kimi-k2.7-code")
 }
 
 fn openai_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {
@@ -65,14 +81,15 @@ fn openai_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {
 }
 
 fn apply_reasoning_options(body: &mut serde_json::Map<String, Value>, config: &AiChatStreamConfig) {
-    let effort = config.reasoning_effort.as_deref().unwrap_or("auto");
-    if effort == "auto" {
+    let effort = AiReasoningLevel::parse(config.reasoning_effort.as_deref().unwrap_or("auto"));
+    if effort == AiReasoningLevel::Auto {
         return;
     }
+    let capability = model_reasoning_capability(&config.provider_type, &config.model);
 
-    match config.provider_type.as_str() {
-        "deepseek" => {
-            if matches!(effort, "off" | "none") {
+    match capability.request_format {
+        AiReasoningRequestFormat::DeepSeek => {
+            if effort == AiReasoningLevel::None {
                 body.insert(
                     "thinking".to_string(),
                     serde_json::json!({ "type": "disabled" }),
@@ -85,21 +102,47 @@ fn apply_reasoning_options(body: &mut serde_json::Map<String, Value>, config: &A
             );
             body.insert(
                 "reasoning_effort".to_string(),
-                serde_json::json!(if matches!(effort, "max" | "xhigh") {
+                serde_json::json!(if matches!(
+                    effort,
+                    AiReasoningLevel::Max | AiReasoningLevel::Xhigh
+                ) {
                     "max"
                 } else {
                     "high"
                 }),
             );
         }
-        "openai" => {
-            let value = match effort {
-                "off" | "none" => "minimal",
-                "max" | "xhigh" => "high",
-                "minimal" | "low" | "medium" | "high" => effort,
-                _ => return,
-            };
-            body.insert("reasoning_effort".to_string(), serde_json::json!(value));
+        AiReasoningRequestFormat::OpenAi => {
+            body.insert(
+                "reasoning_effort".to_string(),
+                serde_json::json!(effort.as_str()),
+            );
+        }
+        AiReasoningRequestFormat::KimiThinking => {
+            if effort == AiReasoningLevel::None {
+                body.insert(
+                    "thinking".to_string(),
+                    serde_json::json!({ "type": "disabled" }),
+                );
+            }
+        }
+        AiReasoningRequestFormat::GlmEffort => {
+            body.insert(
+                "thinking".to_string(),
+                serde_json::json!({ "type": "enabled" }),
+            );
+            body.insert(
+                "reasoning_effort".to_string(),
+                serde_json::json!(effort.as_str()),
+            );
+        }
+        AiReasoningRequestFormat::GlmThinking => {
+            if effort == AiReasoningLevel::None {
+                body.insert(
+                    "thinking".to_string(),
+                    serde_json::json!({ "type": "disabled" }),
+                );
+            }
         }
         _ => {}
     }
@@ -183,10 +226,22 @@ fn openai_message_value(
         AiChatRole::Assistant => {
             let calls = tool_calls_from_message(message);
             if calls.is_empty() {
-                serde_json::json!({
+                let mut assistant = serde_json::json!({
                     "role": "assistant",
                     "content": message.content,
-                })
+                });
+                // K3 and K2.7 require preserved thinking across complete
+                // assistant messages, including turns without tool calls.
+                if kimi_model_requires_preserved_thinking(config)
+                    && let Some(reasoning) = message.thinking_content.as_ref()
+                    && let Some(object) = assistant.as_object_mut()
+                {
+                    object.insert(
+                        "reasoning_content".to_string(),
+                        Value::String(reasoning.clone()),
+                    );
+                }
+                assistant
             } else {
                 let mut assistant = serde_json::json!({
                     "role": "assistant",
@@ -220,6 +275,14 @@ fn openai_message_value(
             }
         }
     }
+}
+
+fn kimi_model_requires_preserved_thinking(config: &AiChatStreamConfig) -> bool {
+    if config.provider_type != "kimi" {
+        return false;
+    }
+    let model = config.model.to_ascii_lowercase();
+    model.starts_with("kimi-k3") || model.starts_with("kimi-k2.7-code")
 }
 
 fn should_preserve_reasoning_content(
@@ -286,12 +349,12 @@ mod tests {
     }
 
     #[test]
-    fn openai_reasoning_payload_matches_tauri_mapping() {
+    fn openai_reasoning_payload_preserves_supported_protocol_levels() {
         let body = openai_chat_body(&config("openai", "xhigh"), &[]);
-        assert_eq!(body["reasoning_effort"].as_str(), Some("high"));
+        assert_eq!(body["reasoning_effort"].as_str(), Some("xhigh"));
 
         let body = openai_chat_body(&config("openai", "off"), &[]);
-        assert_eq!(body["reasoning_effort"].as_str(), Some("minimal"));
+        assert_eq!(body["reasoning_effort"].as_str(), Some("none"));
     }
 
     #[test]
@@ -302,6 +365,79 @@ mod tests {
         let body = openai_chat_body(&config("deepseek", "max"), &[]);
         assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
         assert_eq!(body["reasoning_effort"].as_str(), Some("max"));
+    }
+
+    #[test]
+    fn kimi_reasoning_payload_matches_documented_model_parameters() {
+        let mut k3 = config("kimi", "max");
+        k3.model = "kimi-k3".to_string();
+        let body = openai_chat_body(&k3, &[]);
+        assert_eq!(body["reasoning_effort"].as_str(), Some("max"));
+        assert!(body.get("thinking").is_none());
+
+        let mut k2_6 = config("kimi", "none");
+        k2_6.model = "kimi-k2.6".to_string();
+        let body = openai_chat_body(&k2_6, &[]);
+        assert_eq!(body["thinking"]["type"].as_str(), Some("disabled"));
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn glm_reasoning_payload_matches_documented_model_parameters() {
+        let mut glm_5_2 = config("glm", "xhigh");
+        glm_5_2.model = "glm-5.2".to_string();
+        let body = openai_chat_body(&glm_5_2, &[]);
+        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
+        assert_eq!(body["reasoning_effort"].as_str(), Some("xhigh"));
+
+        let mut glm_4_7 = config("glm", "none");
+        glm_4_7.model = "glm-4.7".to_string();
+        let body = openai_chat_body(&glm_4_7, &[]);
+        assert_eq!(body["thinking"]["type"].as_str(), Some("disabled"));
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn kimi_k2_omits_unsupported_required_tool_choice() {
+        let mut config = config("kimi", "auto");
+        config.model = "kimi-k2.7-code-highspeed".to_string();
+        config.tools = vec![AiToolDefinition {
+            name: "run_command".to_string(),
+            description: "Run command".to_string(),
+            parameters: serde_json::json!({ "type": "object" }),
+        }];
+        config.tool_choice = AiToolChoice::Required;
+
+        let body = openai_chat_body(&config, &[]);
+        assert!(body.get("tool_choice").is_none());
+
+        config.model = "kimi-k3".to_string();
+        let body = openai_chat_body(&config, &[]);
+        assert_eq!(body["tool_choice"].as_str(), Some("required"));
+
+        config.tool_choice = AiToolChoice::Named("run_command".to_string());
+        let body = openai_chat_body(&config, &[]);
+        assert!(body.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn glm_omits_unsupported_tool_choice_modes() {
+        let mut config = config("glm", "auto");
+        config.model = "glm-5.2".to_string();
+        config.tools = vec![AiToolDefinition {
+            name: "run_command".to_string(),
+            description: "Run command".to_string(),
+            parameters: serde_json::json!({ "type": "object" }),
+        }];
+
+        config.tool_choice = AiToolChoice::Required;
+        let body = openai_chat_body(&config, &[]);
+        assert!(body.get("tool_choice").is_none());
+        assert_eq!(body["tools"][0]["function"]["name"], "run_command");
+
+        config.tool_choice = AiToolChoice::Named("run_command".to_string());
+        let body = openai_chat_body(&config, &[]);
+        assert!(body.get("tool_choice").is_none());
     }
 
     #[test]

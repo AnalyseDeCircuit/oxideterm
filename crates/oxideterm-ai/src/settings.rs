@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
 use zeroize::Zeroizing;
 
-use crate::providers::{new_provider_from_template, provider_id, provider_string, update_provider};
+use crate::providers::{new_provider_from_template, provider_id, update_provider};
 use crate::{AiProviderTemplate, AiProviderView, ProviderModelRefresh};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,21 +66,13 @@ pub fn provider_refresh_key_policy(provider_type: &str) -> AiProviderRefreshKeyP
     }
 }
 
-pub fn set_provider_default_model(providers: &mut [Value], index: usize, model: String) {
-    update_provider(providers, index, |provider| {
-        provider.insert("defaultModel".to_string(), serde_json::json!(model));
-    });
-}
-
 pub fn set_active_provider_selection(
     active_provider_id: &mut Option<String>,
     active_model: &mut Option<String>,
     provider: &AiProviderView,
 ) {
     *active_provider_id = Some(provider.id.clone());
-    if !provider.default_model.trim().is_empty() {
-        *active_model = Some(provider.default_model.clone());
-    }
+    *active_model = None;
 }
 
 pub fn add_provider_from_template(
@@ -93,15 +85,9 @@ pub fn add_provider_from_template(
     now_ms: u128,
 ) {
     let value = new_provider_from_template(template, id, label, now_ms);
-    let default_model = provider_string(&value, "defaultModel");
     providers.push(value);
     if active_provider_id.is_none() {
         select_first_provider(providers, active_provider_id, active_model);
-    } else if active_model
-        .as_ref()
-        .is_none_or(|model| model.trim().is_empty())
-    {
-        *active_model = default_model.filter(|model| !model.trim().is_empty());
     }
 }
 
@@ -141,21 +127,13 @@ pub fn remove_provider_at_with_scoped_settings(
 }
 
 pub fn select_provider_model(
-    providers: &mut [Value],
     active_provider_id: &mut Option<String>,
     active_model: &mut Option<String>,
     provider_id_value: &str,
     model: String,
 ) {
     *active_provider_id = Some(provider_id_value.to_string());
-    *active_model = Some(model.clone());
-    if let Some((index, _)) = providers
-        .iter()
-        .enumerate()
-        .find(|(_, provider)| provider_id(provider).as_deref() == Some(provider_id_value))
-    {
-        set_provider_default_model(providers, index, model);
-    }
+    *active_model = Some(model);
 }
 
 pub fn apply_provider_model_refresh(
@@ -211,7 +189,5 @@ fn select_first_provider(
 ) {
     let first = providers.first();
     *active_provider_id = first.and_then(provider_id);
-    *active_model = first
-        .and_then(|provider| provider_string(provider, "defaultModel"))
-        .filter(|model| !model.trim().is_empty());
+    *active_model = None;
 }

@@ -104,21 +104,34 @@ impl WorkspaceApp {
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model =
-            active_model_or_provider_default(settings.ai.active_model.as_deref(), &provider)
-                .ok_or_else(|| {
-                    "No model selected. Please refresh models or select one in Settings > AI."
-                        .to_string()
-                })?;
+        let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
+            self.i18n.t("ai.model_selector.no_model_selected")
+        })?;
         let max_response_tokens =
             ai_chat_request_max_response_tokens(settings, &provider.id, &model);
-        let reasoning_effort = oxideterm_ai::resolve_ai_reasoning_effort(
-            ai_reasoning_effort_value(settings.ai.reasoning_effort).as_deref(),
-            &settings.ai.reasoning_provider_overrides,
-            &settings.ai.reasoning_model_overrides,
-            Some(&provider.id),
-            Some(&model),
-        );
+        let configured_reasoning_effort = settings
+            .ai
+            .reasoning_model_overrides
+            .get(&provider.id)
+            .and_then(|models| models.get(&model))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("auto");
+        let reasoning_effort = self
+            .ai
+            .chat
+            .conversation_state
+            .active_conversation()
+            .and_then(|conversation| {
+                ai_conversation_reasoning_effort(conversation, &provider.id, &model)
+            })
+            .unwrap_or(configured_reasoning_effort);
+        let reasoning_effort = oxideterm_ai::normalize_reasoning_level_for_model(
+            &provider.provider_type,
+            &model,
+            reasoning_effort,
+        )
+        .as_str()
+        .to_string();
         let tools = ai_stream_tool_definitions(
             tool_policy.enabled,
             &tool_policy,
@@ -156,12 +169,9 @@ impl WorkspaceApp {
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model =
-            active_model_or_provider_default(settings.ai.active_model.as_deref(), &provider)
-                .ok_or_else(|| {
-                    "No model selected. Please refresh models or select one in Settings > AI."
-                        .to_string()
-                })?;
+        let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
+            self.i18n.t("ai.model_selector.no_model_selected")
+        })?;
         let max_response_tokens = if compact {
             ai_model_max_response_tokens(
                 &settings.ai.model_max_response_tokens,
@@ -184,13 +194,29 @@ impl WorkspaceApp {
         } else {
             None
         };
-        let reasoning_effort = oxideterm_ai::resolve_ai_reasoning_effort(
-            ai_reasoning_effort_value(settings.ai.reasoning_effort).as_deref(),
-            &settings.ai.reasoning_provider_overrides,
-            &settings.ai.reasoning_model_overrides,
-            Some(&provider.id),
-            Some(&model),
-        );
+        let configured_reasoning_effort = settings
+            .ai
+            .reasoning_model_overrides
+            .get(&provider.id)
+            .and_then(|models| models.get(&model))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("auto");
+        let reasoning_effort = self
+            .ai
+            .chat
+            .conversation_state
+            .active_conversation()
+            .and_then(|conversation| {
+                ai_conversation_reasoning_effort(conversation, &provider.id, &model)
+            })
+            .unwrap_or(configured_reasoning_effort);
+        let reasoning_effort = oxideterm_ai::normalize_reasoning_level_for_model(
+            &provider.provider_type,
+            &model,
+            reasoning_effort,
+        )
+        .as_str()
+        .to_string();
         Ok(AiChatStreamConfig {
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id),

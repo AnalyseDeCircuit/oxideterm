@@ -120,6 +120,8 @@
       "offline": "Offline",
       "manage_providers": "Gerenciar provedores",
       "no_provider": "Nenhum provedor configurado",
+      "select_model": "Selecionar modelo",
+      "no_model_selected": "Nenhum modelo selecionado. Selecione um no menu de modelos do chat.",
       "agent_decides": "Definido pelo agente",
       "agent_model_unavailable": "Seleção automática (modelo não informado pelo agente)",
       "agent_model_after_first_message": "Seleção automática (o modelo real aparece após a primeira mensagem)",
@@ -396,6 +398,18 @@
     },
     "sidebar": {
       "not_enabled_hint": "OxideSens não está habilitado. Ative-o em Configurações → OxideSens para começar."
+    },
+    "reasoning": {
+      "title": "Intensidade de raciocínio",
+      "custom_model_hint": "Modelo desconhecido: use somente valores aceitos pelo provedor.",
+      "level_auto": "Automático (auto)",
+      "level_none": "Nenhum (none)",
+      "level_minimal": "Mínimo (minimal)",
+      "level_low": "Baixo (low)",
+      "level_medium": "Médio (medium)",
+      "level_high": "Alto (high)",
+      "level_xhigh": "Muito alto (xhigh)",
+      "level_max": "Máximo (max)"
     }
   }
 }

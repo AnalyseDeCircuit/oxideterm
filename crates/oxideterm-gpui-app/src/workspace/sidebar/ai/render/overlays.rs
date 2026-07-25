@@ -8,6 +8,7 @@ pub(in crate::workspace) const AI_TOP_FLOATING_INSET_X: f32 = 8.0; // Tauri left
 pub(in crate::workspace) const AI_FLOATING_GAP: f32 = 4.0; // Tauri mt-0.5/mb-1 style popup gap.
 pub(in crate::workspace) const AI_CHAT_MENU_WIDTH: f32 = 160.0; // Tauri w-40.
 pub(in crate::workspace) const AI_MODEL_SELECTOR_DROPDOWN_WIDTH: f32 = 256.0; // Tauri w-64.
+pub(in crate::workspace) const AI_REASONING_MENU_WIDTH: f32 = 220.0; // Compact VS Code-style effort menu.
 pub(in crate::workspace) const AI_CONTEXT_POPOVER_WIDTH: f32 = 280.0; // Tauri-sized compact context popover.
 
 impl WorkspaceApp {
@@ -44,6 +45,7 @@ impl WorkspaceApp {
                     anchor.bounds.origin.x = anchor.bounds.origin.x + px(dx);
                 }
                 SelectAnchorId::AiModelSelector
+                | SelectAnchorId::AiReasoningMenu
                 | SelectAnchorId::AiSafetyMenu
                 | SelectAnchorId::AiContextPopover => {
                     anchor.bounds.origin.x = anchor.bounds.origin.x + px(dx);
@@ -119,6 +121,19 @@ impl WorkspaceApp {
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(), cx),
             )
+        } else if self.ai.chat.reasoning_menu_open {
+            let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;
+            (
+                Corner::BottomLeft,
+                ai_sidebar_popup_left(
+                    f32::from(anchor.bounds.left()),
+                    AI_REASONING_MENU_WIDTH,
+                    panel_left,
+                    panel_right,
+                ),
+                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                self.render_ai_reasoning_menu(cx)?,
+            )
         } else if self.ai.chat.safety_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
             (
@@ -193,6 +208,7 @@ impl WorkspaceApp {
             || self.ai.chat.menu_open
             || (self.ai.models.selector_open
                 && self.ai.models.selector_scope == Some(AiModelSelectorScope::Sidebar))
+            || self.ai.chat.reasoning_menu_open
             || self.ai.chat.safety_menu_open
             || self.ai.chat.context_popover_open
     }

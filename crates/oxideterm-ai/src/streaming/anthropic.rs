@@ -3,8 +3,8 @@ use serde_json::Value;
 
 use crate::providers::{ANTHROPIC_VERSION, api_key_required_ref};
 use crate::{
-    AiChatMessage, AiChatRole, AiChatStreamConfig, AiStreamEvent, AiToolCall, AiToolChoice,
-    AiToolDefinition,
+    AiChatMessage, AiChatRole, AiChatStreamConfig, AiReasoningLevel, AiReasoningRequestFormat,
+    AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, model_reasoning_capability,
 };
 
 use super::CHAT_STREAM_TIMEOUT;
@@ -71,15 +71,41 @@ fn anthropic_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) 
             serde_json::json!({ "type": "enabled", "budget_tokens": thinking_budget }),
         );
     }
+    apply_anthropic_effort(&mut body, config);
     if let Some(system) = system.filter(|system| !system.is_empty())
         && let Some(object) = body.as_object_mut()
     {
         object.insert("system".to_string(), serde_json::json!(system));
     }
     if let Some(object) = body.as_object_mut() {
-        apply_anthropic_tool_options(object, config, thinking_budget.is_some());
+        let thinking_enabled = object.get("thinking").is_some();
+        apply_anthropic_tool_options(object, config, thinking_enabled);
     }
     body
+}
+
+fn apply_anthropic_effort(body: &mut Value, config: &AiChatStreamConfig) {
+    let effort = AiReasoningLevel::parse(config.reasoning_effort.as_deref().unwrap_or("auto"));
+    let capability = model_reasoning_capability(&config.provider_type, &config.model);
+    if effort == AiReasoningLevel::Auto
+        || capability.request_format != AiReasoningRequestFormat::AnthropicEffort
+    {
+        return;
+    }
+    if let Some(object) = body.as_object_mut() {
+        object.insert(
+            "output_config".to_string(),
+            serde_json::json!({ "effort": effort.as_str() }),
+        );
+        // Current effort-capable Claude models use adaptive thinking rather
+        // than the deprecated manual budget_tokens control.
+        if !matches!(effort, AiReasoningLevel::None) {
+            object.insert(
+                "thinking".to_string(),
+                serde_json::json!({ "type": "adaptive" }),
+            );
+        }
+    }
 }
 
 fn apply_anthropic_tool_options(
@@ -129,6 +155,11 @@ fn anthropic_tool_definitions(tools: &[AiToolDefinition]) -> Vec<Value> {
 }
 
 fn anthropic_thinking_budget(config: &AiChatStreamConfig) -> Option<i64> {
+    if model_reasoning_capability(&config.provider_type, &config.model).request_format
+        == AiReasoningRequestFormat::AnthropicEffort
+    {
+        return None;
+    }
     let effort = config.reasoning_effort.as_deref().unwrap_or("auto");
     if matches!(effort, "auto" | "off" | "none") || config.provider_type != "anthropic" {
         return None;
@@ -417,7 +448,7 @@ mod tests {
             acp_config_selection: None,
             provider_type: "anthropic".to_string(),
             base_url: "https://api.anthropic.com".to_string(),
-            model: "claude".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
             api_key: None,
             max_response_tokens: Some(max_response_tokens),
             reasoning_effort: Some(reasoning_effort.to_string()),
@@ -430,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_thinking_budget_matches_tauri_cap() {
+    fn anthropic_effort_uses_current_output_config_and_adaptive_thinking() {
         let message = AiChatMessage {
             id: "u1".to_string(),
             role: AiChatRole::User,
@@ -450,16 +481,13 @@ mod tests {
             suggestions: Vec::new(),
         };
         let body = anthropic_chat_body(&config("high", 4096), &[message]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
-        assert_eq!(body["thinking"]["budget_tokens"].as_i64(), Some(3072));
-
-        let body = anthropic_chat_body(&config("off", 4096), &[]);
-        assert!(body.get("thinking").is_none());
+        assert_eq!(body["thinking"]["type"].as_str(), Some("adaptive"));
+        assert_eq!(body["output_config"]["effort"].as_str(), Some("high"));
     }
 
     #[test]
     fn anthropic_tool_payload_matches_tauri_shape() {
-        let mut tool_config = config("off", 4096);
+        let mut tool_config = config("auto", 4096);
         tool_config.tools = vec![AiToolDefinition {
             name: "get_state".to_string(),
             description: "Get state".to_string(),

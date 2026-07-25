@@ -260,14 +260,6 @@ impl WorkspaceApp {
                 let settings = self.settings_store.settings();
                 let provider_views = ai_provider_views(settings);
                 self.ai_disabled_settings_card(
-                    self.ai_reasoning_section(settings, &provider_views, cx),
-                    settings.ai.enabled,
-                )
-            }
-            (AiSettingsPage::Context, 4) => {
-                let settings = self.settings_store.settings();
-                let provider_views = ai_provider_views(settings);
-                self.ai_disabled_settings_card(
                     self.ai_model_context_windows_section(settings, &provider_views, cx),
                     settings.ai.enabled,
                 )
@@ -566,16 +558,6 @@ impl WorkspaceApp {
                         settings.ai.acp_agents.len().hash(&mut hasher);
                     }
                     (AiSettingsPage::Context, 5) => {
-                        settings.ai.providers.len().hash(&mut hasher);
-                        self.settings_page
-                            .ai_model_reasoning_expanded
-                            .hash(&mut hasher);
-                        hash_string_set(
-                            &self.settings_page.expanded_ai_model_reasoning_providers,
-                            &mut hasher,
-                        );
-                    }
-                    (AiSettingsPage::Context, 6) => {
                         settings.ai.providers.len().hash(&mut hasher);
                         self.settings_page
                             .ai_context_windows_expanded

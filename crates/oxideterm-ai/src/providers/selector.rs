@@ -54,25 +54,10 @@ pub fn resolve_model_selector_provider_probe(
     ModelSelectorProviderProbe::StoredKey
 }
 
-pub fn model_selector_display_name(
-    active_provider: Option<&AiProviderView>,
-    active_model: Option<&str>,
-) -> String {
-    let Some(provider) = active_provider else {
-        return "OxideSens".to_string();
-    };
-    let model = active_model
+pub fn model_selector_display_name(active_model: Option<&str>) -> Option<String> {
+    active_model
         .filter(|model| !model.trim().is_empty())
-        .unwrap_or(provider.default_model.as_str());
-    if model.trim().is_empty() {
-        provider.name.clone()
-    } else {
-        format!(
-            "{}/{}",
-            provider.name,
-            model.rsplit('/').next().unwrap_or(model)
-        )
-    }
+        .map(|model| model.rsplit('/').next().unwrap_or(model).to_string())
 }
 
 pub fn model_selector_truncated_label(label: &str) -> String {
