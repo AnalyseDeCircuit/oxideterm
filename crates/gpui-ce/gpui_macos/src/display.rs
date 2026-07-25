@@ -8,7 +8,7 @@ use cocoa::{
 use core_foundation::base::CFRelease;
 use core_foundation::uuid::{CFUUIDGetUUIDBytes, CFUUIDRef};
 use core_graphics::display::{CGDirectDisplayID, CGDisplayBounds, CGGetActiveDisplayList};
-use gpui::{Bounds, DisplayId, Pixels, PlatformDisplay, point, px, size};
+use gpui::{Bounds, DevicePixels, DisplayId, Pixels, PlatformDisplay, point, px, size};
 use objc::{msg_send, sel, sel_impl};
 use uuid::Uuid;
 
@@ -112,8 +112,35 @@ impl PlatformDisplay for MacDisplay {
             let bounds = CGDisplayBounds(self.0);
 
             Bounds {
-                origin: Default::default(),
+                origin: point(px(bounds.origin.x as f32), px(bounds.origin.y as f32)),
                 size: size(px(bounds.size.width as f32), px(bounds.size.height as f32)),
+            }
+        }
+    }
+
+    fn physical_bounds(&self) -> Bounds<DevicePixels> {
+        unsafe {
+            let bounds = CGDisplayBounds(self.0);
+            Bounds {
+                origin: point(
+                    (bounds.origin.x as i32).into(),
+                    (bounds.origin.y as i32).into(),
+                ),
+                size: size(
+                    (bounds.size.width as i32).into(),
+                    (bounds.size.height as i32).into(),
+                ),
+            }
+        }
+    }
+
+    fn scale_factor(&self) -> f32 {
+        unsafe {
+            let screen = self.get_nsscreen();
+            if screen == nil {
+                1.0
+            } else {
+                NSScreen::backingScaleFactor(screen) as f32
             }
         }
     }

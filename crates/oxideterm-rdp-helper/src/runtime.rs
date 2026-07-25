@@ -137,16 +137,21 @@ pub(super) fn run_client_rdp_thread(
 
     runtime.block_on(async move {
         loop {
-            let (connection_result, framed, egfx_bridge) =
-                match connect_native_rdp(&config, input_tx.clone(), client_output_tx.clone()).await
-                {
-                    Ok(result) => result,
-                    Err(error) => {
-                        let _ = client_output_tx
-                            .send_control(ClientRdpOutput::ConnectionFailure(error));
-                        break;
-                    }
-                };
+            let (connection_result, framed, egfx_bridge) = match connect_native_rdp(
+                &config,
+                &mut input_rx,
+                input_tx.clone(),
+                client_output_tx.clone(),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ =
+                        client_output_tx.send_control(ClientRdpOutput::ConnectionFailure(error));
+                    break;
+                }
+            };
             match run_native_rdp_active_session(
                 framed,
                 connection_result,

@@ -1137,6 +1137,17 @@
     "reconnect": "Kết nối lại",
     "resize_dynamic": "Đổi kích thước từ xa",
     "resize_fixed": "Kích thước máy chủ cố định",
-    "disconnect": "Ngắt kết nối"
+    "disconnect": "Ngắt kết nối",
+    "certificate_unknown_title": "Xác minh chứng chỉ máy chủ RDP",
+    "certificate_unknown_description": "Chứng chỉ máy chủ này chưa được tin cậy. Hãy đối chiếu dấu vân tay SHA-256 trước khi gửi thông tin đăng nhập.",
+    "certificate_changed_title": "Chứng chỉ máy chủ RDP đã thay đổi",
+    "certificate_changed_description": "Chứng chỉ không còn khớp với dấu vân tay đã lưu. Điều này có thể do máy chủ thay đổi hoặc có hành vi chặn bắt.",
+    "certificate_endpoint": "Điểm cuối: {{endpoint}}",
+    "certificate_presented_fingerprint": "Dấu vân tay SHA-256 được cung cấp",
+    "certificate_saved_fingerprint": "Dấu vân tay SHA-256 đã lưu",
+    "certificate_remember": "Ghi nhớ chứng chỉ này trên thiết bị",
+    "certificate_trust": "Tin cậy và tiếp tục",
+    "certificate_save_failed": "Không thể lưu bản ghi tin cậy chứng chỉ: {{error}}",
+    "clipboard_file_failed": "Không thể nhận tệp từ bảng nhớ tạm: {{error}}"
   }
 }

@@ -45,6 +45,15 @@ impl RemoteDesktopFakeBackend {
         request: RemoteDesktopHelperRequest,
     ) -> Vec<RemoteDesktopHelperEvent> {
         match request {
+            RemoteDesktopHelperRequest::StartConnect {
+                protocol,
+                endpoint,
+                size,
+                scale_factor: _,
+                read_only,
+                session_options: _,
+                monitor_layout: _,
+            } => self.connect(protocol, endpoint, size, read_only),
             RemoteDesktopHelperRequest::Connect {
                 protocol,
                 endpoint,
@@ -54,23 +63,7 @@ impl RemoteDesktopFakeBackend {
                 size,
                 scale_factor: _scale_factor,
                 read_only,
-            } => {
-                self.protocol = protocol;
-                self.endpoint = Some(endpoint);
-                self.size = RemoteDesktopSize::clamped(size.width, size.height);
-                self.read_only = read_only;
-                self.status = RemoteDesktopSessionStatus::Connected;
-                vec![
-                    RemoteDesktopHelperEvent::Status {
-                        status: RemoteDesktopSessionStatus::Connecting,
-                        message: Some("Fake remote desktop helper is opening.".to_string()),
-                    },
-                    RemoteDesktopHelperEvent::Connected { size: self.size },
-                    RemoteDesktopHelperEvent::Frame {
-                        frame: self.synthetic_frame(),
-                    },
-                ]
-            }
+            } => self.connect(protocol, endpoint, size, read_only),
             RemoteDesktopHelperRequest::Resize { size, .. } => {
                 self.size = RemoteDesktopSize::clamped(size.width, size.height);
                 vec![
@@ -124,9 +117,37 @@ impl RemoteDesktopFakeBackend {
             | RemoteDesktopHelperRequest::Text { .. }
             | RemoteDesktopHelperRequest::ClipboardText { .. }
             | RemoteDesktopHelperRequest::ClipboardData { .. }
+            | RemoteDesktopHelperRequest::ClipboardFiles { .. }
+            | RemoteDesktopHelperRequest::CancelClipboardTransfer { .. }
+            | RemoteDesktopHelperRequest::UpdateDisplayLayout { .. }
+            | RemoteDesktopHelperRequest::Authenticate { .. }
             | RemoteDesktopHelperRequest::SynchronizeLockKeys { .. }
             | RemoteDesktopHelperRequest::ReleaseAllInputs => Vec::new(),
         }
+    }
+
+    fn connect(
+        &mut self,
+        protocol: RemoteDesktopProtocol,
+        endpoint: RemoteDesktopEndpoint,
+        size: RemoteDesktopSize,
+        read_only: bool,
+    ) -> Vec<RemoteDesktopHelperEvent> {
+        self.protocol = protocol;
+        self.endpoint = Some(endpoint);
+        self.size = RemoteDesktopSize::clamped(size.width, size.height);
+        self.read_only = read_only;
+        self.status = RemoteDesktopSessionStatus::Connected;
+        vec![
+            RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Connecting,
+                message: Some("Fake remote desktop helper is opening.".to_string()),
+            },
+            RemoteDesktopHelperEvent::Connected { size: self.size },
+            RemoteDesktopHelperEvent::Frame {
+                frame: self.synthetic_frame(),
+            },
+        ]
     }
 
     fn synthetic_frame(&self) -> RemoteDesktopFrame {

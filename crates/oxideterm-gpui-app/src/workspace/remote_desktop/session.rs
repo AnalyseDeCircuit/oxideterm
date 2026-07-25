@@ -11,6 +11,7 @@ impl WorkspaceApp {
     ) {
         let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
         let mut changed = self.schedule_remote_desktop_viewport_resizes(scale_factor, cx);
+        self.sync_remote_desktop_monitor_layouts(cx);
         while let Ok(delivery) = self.remote_desktop_worker_rx.try_recv() {
             match delivery {
                 RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation } => {
@@ -37,15 +38,48 @@ impl WorkspaceApp {
                     if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
                         continue;
                     }
+                    if let RemoteDesktopHelperEvent::ServerCertificate { certificate } = event {
+                        self.handle_remote_desktop_certificate(tab_id, generation, certificate, cx);
+                        changed = true;
+                        continue;
+                    }
+                    if let RemoteDesktopHelperEvent::ClipboardTransferFailed {
+                        transfer_id: _,
+                        message,
+                    } = event
+                    {
+                        self.push_command_palette_toast(
+                            self.i18n
+                                .t("remote_desktop.clipboard_file_failed")
+                                .replace("{{error}}", &message),
+                            None,
+                            TerminalNoticeVariant::Error,
+                        );
+                        changed = true;
+                        continue;
+                    }
                     if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
                         match &event {
-                            RemoteDesktopHelperEvent::ClipboardText { text } => {
+                            RemoteDesktopHelperEvent::ClipboardText { text }
+                                if session.profile.session_options.clipboard.text =>
+                            {
                                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                             }
-                            RemoteDesktopHelperEvent::ClipboardData { data } => {
+                            RemoteDesktopHelperEvent::ClipboardData { data }
+                                if session.profile.session_options.clipboard.images =>
+                            {
                                 if let Some(item) = remote_desktop_clipboard_item_from_data(data) {
                                     cx.write_to_clipboard(item);
                                 }
+                            }
+                            RemoteDesktopHelperEvent::ClipboardFilesReady { paths, .. }
+                                if session.profile.session_options.clipboard.files =>
+                            {
+                                cx.write_to_clipboard(ClipboardItem {
+                                    entries: vec![ClipboardEntry::ExternalPaths(
+                                        gpui::ExternalPaths(paths.iter().cloned().collect()),
+                                    )],
+                                });
                             }
                             _ => {}
                         }
@@ -87,6 +121,29 @@ impl WorkspaceApp {
 
         if changed {
             cx.notify();
+        }
+    }
+
+    fn sync_remote_desktop_monitor_layouts(&mut self, cx: &App) {
+        let updated_layouts = self
+            .remote_desktop_sessions
+            .iter()
+            .filter(|(_, session)| session.profile.session_options.display.use_all_monitors)
+            .map(|(tab_id, session)| (*tab_id, remote_desktop_monitor_layout(&session.profile, cx)))
+            .collect::<Vec<_>>();
+        for (tab_id, layout) in updated_layouts {
+            let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
+                continue;
+            };
+            if layout == session.last_monitor_layout {
+                continue;
+            }
+            if let Some(request_tx) = session.request_tx.as_ref() {
+                let _ = request_tx.send(RemoteDesktopHelperRequest::UpdateDisplayLayout {
+                    layout: layout.clone(),
+                });
+            }
+            session.last_monitor_layout = layout;
         }
     }
 
@@ -179,6 +236,7 @@ impl WorkspaceApp {
         worker_wake: RemoteDesktopWorkerWake,
         initial_size: RemoteDesktopSize,
         scale_factor: Option<u32>,
+        monitor_layout: RemoteDesktopMonitorLayout,
     ) -> mpsc::Sender<RemoteDesktopHelperRequest> {
         let (request_tx, request_rx) = mpsc::channel();
         let delivery_tx = self.remote_desktop_worker_tx.clone();
@@ -193,6 +251,7 @@ impl WorkspaceApp {
                     password,
                     initial_size,
                     scale_factor,
+                    monitor_layout,
                     frame_slot,
                     worker_wake,
                     request_rx,
@@ -502,6 +561,8 @@ impl WorkspaceApp {
 
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
         let worker_wake = RemoteDesktopWorkerWake::default();
+        let monitor_layout = remote_desktop_monitor_layout(&profile, cx);
+        let worker_monitor_layout = monitor_layout.clone();
         let request_tx = self.spawn_remote_desktop_worker(
             tab_id,
             generation,
@@ -512,6 +573,7 @@ impl WorkspaceApp {
             worker_wake.clone(),
             initial_request_size,
             scale_factor,
+            worker_monitor_layout,
         );
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             let old_images = session.state.take_all_images();
@@ -527,9 +589,11 @@ impl WorkspaceApp {
             session.frame_slot = frame_slot;
             session.request_tx = Some(request_tx);
             session.worker_generation = generation;
+            session.certificate_challenge = None;
             session.last_viewport_size = initial_viewport_size;
             session.last_sent_resize = None;
             session.last_viewport_scale_factor = scale_factor;
+            session.last_monitor_layout = monitor_layout;
             session.resize_generation = Arc::new(AtomicU64::new(0));
             session.last_lock_keys = None;
             session.wheel_pixel_remainder = remote_desktop_empty_wheel_delta();
@@ -567,6 +631,8 @@ impl WorkspaceApp {
         };
 
         let worker_wake = RemoteDesktopWorkerWake::default();
+        let monitor_layout = remote_desktop_monitor_layout(&profile, cx);
+        let worker_monitor_layout = monitor_layout.clone();
         let request_tx = self.spawn_remote_desktop_worker(
             tab_id,
             generation,
@@ -577,13 +643,16 @@ impl WorkspaceApp {
             worker_wake.clone(),
             initial_request_size,
             scale_factor,
+            worker_monitor_layout,
         );
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             session.request_tx = Some(request_tx);
             session.worker_generation = generation;
+            session.certificate_challenge = None;
             session.last_viewport_size = initial_viewport_size;
             session.last_sent_resize = None;
             session.last_viewport_scale_factor = scale_factor;
+            session.last_monitor_layout = monitor_layout;
             session.last_lock_keys = None;
             session.wheel_pixel_remainder = remote_desktop_empty_wheel_delta();
             session.state.apply_event(RemoteDesktopHelperEvent::Status {
@@ -924,4 +993,91 @@ impl WorkspaceApp {
             let _ = window.drop_dynamic_texture(texture);
         }
     }
+}
+
+fn remote_desktop_monitor_layout(
+    profile: &RemoteDesktopConnectionProfile,
+    cx: &App,
+) -> RemoteDesktopMonitorLayout {
+    if !profile.session_options.display.use_all_monitors {
+        return RemoteDesktopMonitorLayout::default();
+    }
+
+    let displays = cx.displays();
+    let primary_id = cx
+        .primary_display()
+        .map(|display| display.id())
+        .or_else(|| {
+            displays
+                .iter()
+                .find(|display| {
+                    let bounds = display.physical_bounds();
+                    i32::from(bounds.origin.x) == 0 && i32::from(bounds.origin.y) == 0
+                })
+                .map(|display| display.id())
+        })
+        .or_else(|| displays.first().map(|display| display.id()));
+    let Some(primary_id) = primary_id else {
+        return RemoteDesktopMonitorLayout::default();
+    };
+    let Some(primary_bounds) = displays
+        .iter()
+        .find(|display| display.id() == primary_id)
+        .map(|display| display.physical_bounds())
+    else {
+        return RemoteDesktopMonitorLayout::default();
+    };
+    let primary_left = i32::from(primary_bounds.origin.x);
+    let primary_top = i32::from(primary_bounds.origin.y);
+
+    let mut monitors = displays
+        .into_iter()
+        .filter_map(|display| {
+            let bounds = display.physical_bounds();
+            let width = u32::try_from(i32::from(bounds.size.width)).ok()?;
+            let height = u32::try_from(i32::from(bounds.size.height)).ok()?;
+            if width < 200 || height < 200 {
+                return None;
+            }
+            let width = width.min(8192) & !1;
+            let height = height.min(8192);
+            let primary = display.id() == primary_id;
+            let desktop_scale_factor = (display.scale_factor()
+                * REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER)
+                .round()
+                .clamp(
+                    REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT as f32,
+                    REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT as f32,
+                ) as u32;
+            let device_scale_factor = match desktop_scale_factor {
+                0..=120 => 100,
+                121..=160 => 140,
+                _ => 180,
+            };
+
+            Some(RemoteDesktopMonitor {
+                stable_id: display
+                    .uuid()
+                    .map(|uuid| uuid.to_string())
+                    .unwrap_or_else(|_| format!("display-{}", u64::from(display.id()))),
+                left: i32::from(bounds.origin.x).saturating_sub(primary_left),
+                top: i32::from(bounds.origin.y).saturating_sub(primary_top),
+                width,
+                height,
+                primary,
+                desktop_scale_factor,
+                device_scale_factor,
+                physical_width_mm: None,
+                physical_height_mm: None,
+                orientation: if width >= height {
+                    RemoteDesktopMonitorOrientation::Landscape
+                } else {
+                    RemoteDesktopMonitorOrientation::Portrait
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    monitors.sort_by_key(|monitor| (!monitor.primary, monitor.top, monitor.left));
+
+    RemoteDesktopMonitorLayout { monitors }
 }

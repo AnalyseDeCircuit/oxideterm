@@ -8,6 +8,7 @@ pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
     TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
 };
+use oxideterm_remote_desktop::{RemoteDesktopProviderCapabilities, RemoteDesktopSessionOptions};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshAuthTab {
@@ -189,6 +190,64 @@ pub(in crate::workspace) enum NewConnectionField {
     TelnetProfileName,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum RemoteDesktopSessionFeature {
+    ClipboardText,
+    ClipboardImages,
+    ClipboardFiles,
+    AudioPlayback,
+    AudioCapture,
+    MultiMonitor,
+}
+
+/// Keeps provider support separate from the user's per-session selection.
+pub(in crate::workspace) fn remote_desktop_feature_supported(
+    capabilities: &RemoteDesktopProviderCapabilities,
+    feature: RemoteDesktopSessionFeature,
+) -> bool {
+    match feature {
+        RemoteDesktopSessionFeature::ClipboardText => capabilities.clipboard_text,
+        RemoteDesktopSessionFeature::ClipboardImages => capabilities.clipboard_data,
+        RemoteDesktopSessionFeature::ClipboardFiles => capabilities.clipboard_files,
+        RemoteDesktopSessionFeature::AudioPlayback => capabilities.audio_playback,
+        RemoteDesktopSessionFeature::AudioCapture => capabilities.audio_capture,
+        RemoteDesktopSessionFeature::MultiMonitor => capabilities.multi_monitor,
+    }
+}
+
+/// Reads one feature without duplicating the nested options layout in the view.
+pub(in crate::workspace) fn remote_desktop_feature_selected(
+    options: &RemoteDesktopSessionOptions,
+    feature: RemoteDesktopSessionFeature,
+) -> bool {
+    match feature {
+        RemoteDesktopSessionFeature::ClipboardText => options.clipboard.text,
+        RemoteDesktopSessionFeature::ClipboardImages => options.clipboard.images,
+        RemoteDesktopSessionFeature::ClipboardFiles => options.clipboard.files,
+        RemoteDesktopSessionFeature::AudioPlayback => options.audio.playback,
+        RemoteDesktopSessionFeature::AudioCapture => options.audio.capture,
+        RemoteDesktopSessionFeature::MultiMonitor => options.display.use_all_monitors,
+    }
+}
+
+/// Mutates only the option represented by the clicked feature row.
+pub(in crate::workspace) fn toggle_remote_desktop_feature(
+    options: &mut RemoteDesktopSessionOptions,
+    feature: RemoteDesktopSessionFeature,
+) {
+    let selected = remote_desktop_feature_selected(options, feature);
+    match feature {
+        RemoteDesktopSessionFeature::ClipboardText => options.clipboard.text = !selected,
+        RemoteDesktopSessionFeature::ClipboardImages => options.clipboard.images = !selected,
+        RemoteDesktopSessionFeature::ClipboardFiles => options.clipboard.files = !selected,
+        RemoteDesktopSessionFeature::AudioPlayback => options.audio.playback = !selected,
+        RemoteDesktopSessionFeature::AudioCapture => options.audio.capture = !selected,
+        RemoteDesktopSessionFeature::MultiMonitor => {
+            options.display.use_all_monitors = !selected;
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::workspace) struct PrivilegeCredentialDraft {
     pub(in crate::workspace) credential_id: Option<String>,
@@ -321,6 +380,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) username: String,
     pub(in crate::workspace) auth_tab: SshAuthTab,
     pub(in crate::workspace) password: String,
+    pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
     pub(in crate::workspace) password_visible: bool,
@@ -382,6 +442,10 @@ impl fmt::Debug for NewConnectionForm {
             .field("username", &self.username)
             .field("auth_tab", &self.auth_tab)
             .field("password", &"[redacted secret]")
+            .field(
+                "remote_desktop_session_options",
+                &self.remote_desktop_session_options,
+            )
             .field(
                 "saved_password_keychain_id",
                 &self.saved_password_keychain_id,
@@ -450,6 +514,7 @@ impl Default for NewConnectionForm {
             username: "root".to_string(),
             auth_tab: SshAuthTab::Password,
             password: String::new(),
+            remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
             saved_password_keychain_id: None,
             password_loaded: true,
             password_visible: false,
@@ -993,13 +1058,15 @@ mod tests {
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
-        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
-        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_transport_default_port,
-        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
-        backspace_current_connection_field, default_auth_tab_for_family,
-        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
-        next_connection_field, select_current_connection_field, text_from_keystroke,
+        NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
+        RemoteDesktopSessionOptions, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
+        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
+        VNC_DEFAULT_PORT_TEXT, apply_transport_default_port, apply_transport_default_username,
+        auth_family_from_tab, auth_tab_from_key_source, backspace_current_connection_field,
+        default_auth_tab_for_family, insert_text_into_current_connection_field,
+        key_source_from_tab, new_connection_form_mode, next_connection_field,
+        remote_desktop_feature_supported, select_current_connection_field, text_from_keystroke,
+        toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1152,6 +1219,69 @@ mod tests {
             ),
             NewConnectionField::Name
         );
+    }
+
+    #[test]
+    fn remote_desktop_form_uses_privacy_preserving_session_defaults() {
+        let form = NewConnectionForm::default();
+
+        assert!(form.remote_desktop_session_options.clipboard.text);
+        assert!(form.remote_desktop_session_options.clipboard.images);
+        assert!(!form.remote_desktop_session_options.clipboard.files);
+        assert!(form.remote_desktop_session_options.audio.playback);
+        assert!(!form.remote_desktop_session_options.audio.capture);
+        assert!(!form.remote_desktop_session_options.display.use_all_monitors);
+    }
+
+    #[test]
+    fn remote_desktop_feature_support_matches_builtin_providers() {
+        let rdp = oxideterm_remote_desktop::builtin_provider_manifest(
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
+        );
+        let vnc = oxideterm_remote_desktop::builtin_provider_manifest(
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
+        );
+
+        for feature in [
+            RemoteDesktopSessionFeature::ClipboardText,
+            RemoteDesktopSessionFeature::ClipboardImages,
+            RemoteDesktopSessionFeature::ClipboardFiles,
+            RemoteDesktopSessionFeature::AudioPlayback,
+            RemoteDesktopSessionFeature::AudioCapture,
+            RemoteDesktopSessionFeature::MultiMonitor,
+        ] {
+            assert!(remote_desktop_feature_supported(&rdp.capabilities, feature));
+        }
+        assert!(remote_desktop_feature_supported(
+            &vnc.capabilities,
+            RemoteDesktopSessionFeature::ClipboardText
+        ));
+        for feature in [
+            RemoteDesktopSessionFeature::ClipboardImages,
+            RemoteDesktopSessionFeature::ClipboardFiles,
+            RemoteDesktopSessionFeature::AudioPlayback,
+            RemoteDesktopSessionFeature::AudioCapture,
+            RemoteDesktopSessionFeature::MultiMonitor,
+        ] {
+            assert!(!remote_desktop_feature_supported(
+                &vnc.capabilities,
+                feature
+            ));
+        }
+    }
+
+    #[test]
+    fn remote_desktop_feature_toggle_changes_only_the_selected_option() {
+        let mut options = RemoteDesktopSessionOptions::default();
+
+        toggle_remote_desktop_feature(&mut options, RemoteDesktopSessionFeature::ClipboardFiles);
+
+        assert!(options.clipboard.files);
+        assert!(options.clipboard.text);
+        assert!(options.clipboard.images);
+        assert!(options.audio.playback);
+        assert!(!options.audio.capture);
+        assert!(!options.display.use_all_monitors);
     }
 
     #[test]

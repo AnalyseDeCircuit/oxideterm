@@ -1137,6 +1137,17 @@
     "reconnect": "Reconnect",
     "resize_dynamic": "Remote resize",
     "resize_fixed": "Fixed server size",
-    "disconnect": "Disconnect"
+    "disconnect": "Disconnect",
+    "certificate_unknown_title": "Verify the RDP server certificate",
+    "certificate_unknown_description": "This server certificate is not trusted yet. Compare the SHA-256 fingerprint before sending your credentials.",
+    "certificate_changed_title": "The RDP server certificate changed",
+    "certificate_changed_description": "The certificate no longer matches the saved fingerprint. This can indicate a server change or an interception attempt.",
+    "certificate_endpoint": "Endpoint: {{endpoint}}",
+    "certificate_presented_fingerprint": "Presented SHA-256 fingerprint",
+    "certificate_saved_fingerprint": "Saved SHA-256 fingerprint",
+    "certificate_remember": "Remember this certificate on this device",
+    "certificate_trust": "Trust and continue",
+    "certificate_save_failed": "Could not save the certificate trust record: {{error}}",
+    "clipboard_file_failed": "Could not receive clipboard files: {{error}}"
   }
 }

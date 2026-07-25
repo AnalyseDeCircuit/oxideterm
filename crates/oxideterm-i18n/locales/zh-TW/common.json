@@ -1137,6 +1137,17 @@
     "reconnect": "重新連線",
     "resize_dynamic": "遠端尺寸可調",
     "resize_fixed": "固定伺服器尺寸",
-    "disconnect": "中斷連線"
+    "disconnect": "中斷連線",
+    "certificate_unknown_title": "驗證 RDP 伺服器憑證",
+    "certificate_unknown_description": "此伺服器憑證尚未受信任。傳送憑證前，請核對 SHA-256 指紋。",
+    "certificate_changed_title": "RDP 伺服器憑證已變更",
+    "certificate_changed_description": "此憑證與已儲存的指紋不再相符。這可能表示伺服器已更換，也可能存在攔截風險。",
+    "certificate_endpoint": "端點：{{endpoint}}",
+    "certificate_presented_fingerprint": "伺服器提供的 SHA-256 指紋",
+    "certificate_saved_fingerprint": "已儲存的 SHA-256 指紋",
+    "certificate_remember": "在此裝置上記住此憑證",
+    "certificate_trust": "信任並繼續",
+    "certificate_save_failed": "無法儲存憑證信任記錄：{{error}}",
+    "clipboard_file_failed": "無法接收剪貼簿檔案：{{error}}"
   }
 }

@@ -1137,6 +1137,17 @@
     "reconnect": "Reconectar",
     "resize_dynamic": "Redimensionamento remoto",
     "resize_fixed": "Tamanho fixo do servidor",
-    "disconnect": "Desconectar"
+    "disconnect": "Desconectar",
+    "certificate_unknown_title": "Verificar o certificado do servidor RDP",
+    "certificate_unknown_description": "Este certificado ainda não é confiável. Compare a impressão digital SHA-256 antes de enviar suas credenciais.",
+    "certificate_changed_title": "O certificado do servidor RDP mudou",
+    "certificate_changed_description": "O certificado não corresponde mais à impressão digital salva. Isso pode indicar uma troca de servidor ou uma tentativa de interceptação.",
+    "certificate_endpoint": "Endpoint: {{endpoint}}",
+    "certificate_presented_fingerprint": "Impressão digital SHA-256 apresentada",
+    "certificate_saved_fingerprint": "Impressão digital SHA-256 salva",
+    "certificate_remember": "Lembrar este certificado neste dispositivo",
+    "certificate_trust": "Confiar e continuar",
+    "certificate_save_failed": "Não foi possível salvar o registro de confiança do certificado: {{error}}",
+    "clipboard_file_failed": "Não foi possível receber os arquivos da área de transferência: {{error}}"
   }
 }

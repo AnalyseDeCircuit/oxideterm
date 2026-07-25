@@ -9,14 +9,16 @@ use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
         NewConnectionSelect, NewConnectionSubmitAction, NewConnectionTransport,
         NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy, RDP_DEFAULT_PORT_TEXT,
-        SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthFamily, SshAuthTab,
-        SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
-        apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
-        auth_tab_from_key_source, backspace_current_connection_field, clear_connection_selection,
-        clear_current_connection_field, connection_field_is_selected, current_connection_field,
-        default_auth_tab_for_family, insert_text_into_current_connection_field,
-        key_source_from_tab, new_connection_form_mode, next_connection_field,
-        next_jump_connection_field, select_current_connection_field, text_from_keystroke,
+        RemoteDesktopSessionFeature, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
+        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
+        VNC_DEFAULT_PORT_TEXT, apply_transport_default_port, apply_transport_default_username,
+        auth_family_from_tab, auth_tab_from_key_source, backspace_current_connection_field,
+        clear_connection_selection, clear_current_connection_field, connection_field_is_selected,
+        current_connection_field, default_auth_tab_for_family,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, next_jump_connection_field, remote_desktop_feature_selected,
+        remote_desktop_feature_supported, select_current_connection_field, text_from_keystroke,
+        toggle_remote_desktop_feature,
     },
     ssh_flow::SshConnectionIntent,
 };
@@ -31,12 +33,12 @@ use crate::workspace::{
 use gpui::Div;
 use oxideterm_connections::SavedUpstreamProxyProtocol;
 use oxideterm_gpui_ui::{
-    ButtonTone, TextInputView, button,
+    ButtonTone, CheckboxOptions, TextInputView, button,
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
         ToolbarButtonOptions,
     },
-    checkbox, form_field,
+    checkbox, checkbox_with, form_field,
     modal::{dismissible_dialog_backdrop, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_header, segmented_tab, segmented_tabs,
     select::{

@@ -107,6 +107,8 @@ impl WorkspaceApp {
         };
 
         let geometry = session.geometry.clone();
+        let certificate_challenge = session.certificate_challenge.clone();
+        let worker_generation = session.worker_generation;
         let desktop_surface = div()
             .min_h(px(0.0))
             .flex_1()
@@ -340,6 +342,14 @@ impl WorkspaceApp {
             .flex_col()
             .child(desktop_surface)
             .child(self.render_remote_desktop_footer(tab_id, cx))
+            .when_some(certificate_challenge, |surface, challenge| {
+                surface.child(self.render_remote_desktop_certificate_dialog(
+                    tab_id,
+                    worker_generation,
+                    challenge,
+                    cx,
+                ))
+            })
             .into_any_element()
     }
 }

@@ -1,14 +1,27 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     RemoteDesktopCursorShape, RemoteDesktopEndpoint, RemoteDesktopFrame, RemoteDesktopFrameUpdate,
-    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopMonitorLayout, RemoteDesktopProtocol, RemoteDesktopSecret,
+    RemoteDesktopSessionOptions, RemoteDesktopSessionStatus, RemoteDesktopSize,
 };
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopServerCertificate {
+    pub challenge_id: String,
+    pub endpoint: RemoteDesktopEndpoint,
+    pub sha256_fingerprint: String,
+    pub subject: Option<String>,
+    pub issuer: Option<String>,
+    pub valid_from: Option<String>,
+    pub valid_to: Option<String>,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -115,6 +128,18 @@ pub enum RemoteDesktopErrorCategory {
     rename_all_fields = "camelCase"
 )]
 pub enum RemoteDesktopHelperRequest {
+    StartConnect {
+        protocol: RemoteDesktopProtocol,
+        endpoint: RemoteDesktopEndpoint,
+        size: RemoteDesktopSize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale_factor: Option<u32>,
+        read_only: bool,
+        #[serde(default)]
+        session_options: RemoteDesktopSessionOptions,
+        #[serde(default)]
+        monitor_layout: RemoteDesktopMonitorLayout,
+    },
     Connect {
         protocol: RemoteDesktopProtocol,
         endpoint: RemoteDesktopEndpoint,
@@ -125,6 +150,13 @@ pub enum RemoteDesktopHelperRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scale_factor: Option<u32>,
         read_only: bool,
+    },
+    Authenticate {
+        challenge_id: String,
+        sha256_fingerprint: String,
+        username: String,
+        password: RemoteDesktopSecret,
+        domain: Option<String>,
     },
     Resize {
         size: RemoteDesktopSize,
@@ -155,6 +187,16 @@ pub enum RemoteDesktopHelperRequest {
     ClipboardData {
         data: RemoteDesktopClipboardData,
     },
+    ClipboardFiles {
+        transfer_id: String,
+        paths: Vec<PathBuf>,
+    },
+    CancelClipboardTransfer {
+        transfer_id: String,
+    },
+    UpdateDisplayLayout {
+        layout: RemoteDesktopMonitorLayout,
+    },
     SynchronizeLockKeys {
         keys: RemoteDesktopLockKeys,
     },
@@ -167,6 +209,24 @@ pub enum RemoteDesktopHelperRequest {
 impl fmt::Debug for RemoteDesktopHelperRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::StartConnect {
+                protocol,
+                endpoint,
+                size,
+                scale_factor,
+                read_only,
+                session_options,
+                monitor_layout,
+            } => formatter
+                .debug_struct("StartConnect")
+                .field("protocol", protocol)
+                .field("endpoint", endpoint)
+                .field("size", size)
+                .field("scale_factor", scale_factor)
+                .field("read_only", read_only)
+                .field("session_options", session_options)
+                .field("monitor_count", &monitor_layout.monitors.len())
+                .finish(),
             Self::Connect {
                 protocol,
                 endpoint,
@@ -186,6 +246,23 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("size", size)
                 .field("scale_factor", scale_factor)
                 .field("read_only", read_only)
+                .finish(),
+            Self::Authenticate {
+                challenge_id,
+                sha256_fingerprint,
+                username,
+                password: _,
+                domain,
+            } => formatter
+                .debug_struct("Authenticate")
+                .field("challenge_id", challenge_id)
+                .field("sha256_fingerprint", sha256_fingerprint)
+                .field(
+                    "username",
+                    &format_args!("<redacted:{}>", username.chars().count()),
+                )
+                .field("password", &"[redacted secret]")
+                .field("domain", &domain.as_ref().map(|_| "<present>"))
                 .finish(),
             Self::Resize { size, scale_factor } => formatter
                 .debug_struct("Resize")
@@ -224,6 +301,19 @@ impl fmt::Debug for RemoteDesktopHelperRequest {
                 .field("format", &data.format)
                 .field("bytes", &format_args!("<{} bytes>", data.bytes.len()))
                 .finish(),
+            Self::ClipboardFiles { transfer_id, paths } => formatter
+                .debug_struct("ClipboardFiles")
+                .field("transfer_id", transfer_id)
+                .field("path_count", &paths.len())
+                .finish(),
+            Self::CancelClipboardTransfer { transfer_id } => formatter
+                .debug_struct("CancelClipboardTransfer")
+                .field("transfer_id", transfer_id)
+                .finish(),
+            Self::UpdateDisplayLayout { layout } => formatter
+                .debug_struct("UpdateDisplayLayout")
+                .field("monitor_count", &layout.monitors.len())
+                .finish(),
             Self::SynchronizeLockKeys { keys } => formatter
                 .debug_struct("SynchronizeLockKeys")
                 .field("keys", keys)
@@ -250,6 +340,9 @@ pub enum RemoteDesktopHelperEvent {
     Connected {
         size: RemoteDesktopSize,
     },
+    ServerCertificate {
+        certificate: RemoteDesktopServerCertificate,
+    },
     Frame {
         frame: RemoteDesktopFrame,
     },
@@ -272,6 +365,14 @@ pub enum RemoteDesktopHelperEvent {
     },
     ClipboardData {
         data: RemoteDesktopClipboardData,
+    },
+    ClipboardFilesReady {
+        transfer_id: String,
+        paths: Vec<PathBuf>,
+    },
+    ClipboardTransferFailed {
+        transfer_id: String,
+        message: String,
     },
     ConnectionFailure {
         message: String,
@@ -297,6 +398,16 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
             Self::Connected { size } => formatter
                 .debug_struct("Connected")
                 .field("size", size)
+                .finish(),
+            Self::ServerCertificate { certificate } => formatter
+                .debug_struct("ServerCertificate")
+                .field("challenge_id", &certificate.challenge_id)
+                .field("endpoint", &certificate.endpoint)
+                .field("sha256_fingerprint", &certificate.sha256_fingerprint)
+                .field("subject", &certificate.subject)
+                .field("issuer", &certificate.issuer)
+                .field("valid_from", &certificate.valid_from)
+                .field("valid_to", &certificate.valid_to)
                 .finish(),
             Self::Frame { frame } => formatter
                 .debug_struct("Frame")
@@ -345,6 +456,19 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("format", &data.format)
                 .field("bytes", &format_args!("<{} bytes>", data.bytes.len()))
                 .finish(),
+            Self::ClipboardFilesReady { transfer_id, paths } => formatter
+                .debug_struct("ClipboardFilesReady")
+                .field("transfer_id", transfer_id)
+                .field("path_count", &paths.len())
+                .finish(),
+            Self::ClipboardTransferFailed {
+                transfer_id,
+                message,
+            } => formatter
+                .debug_struct("ClipboardTransferFailed")
+                .field("transfer_id", transfer_id)
+                .field("message", message)
+                .finish(),
             Self::ConnectionFailure { message, category } => formatter
                 .debug_struct("ConnectionFailure")
                 .field("message", message)
@@ -388,6 +512,59 @@ mod tests {
         assert!(!debug.contains("super-secret"));
         assert!(!debug.contains("admin"));
         assert!(!debug.contains("corp"));
+    }
+
+    #[test]
+    fn staged_connect_withholds_credentials_until_authentication() {
+        let request = RemoteDesktopHelperRequest::StartConnect {
+            protocol: RemoteDesktopProtocol::Rdp,
+            endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
+            size: RemoteDesktopSize {
+                width: 1280,
+                height: 720,
+            },
+            scale_factor: Some(125),
+            read_only: false,
+            session_options: RemoteDesktopSessionOptions::default(),
+            monitor_layout: RemoteDesktopMonitorLayout::default(),
+        };
+
+        let encoded = serde_json::to_string(&request).unwrap();
+
+        assert!(!encoded.contains("username"));
+        assert!(!encoded.contains("password"));
+        assert!(!encoded.contains("domain"));
+    }
+
+    #[test]
+    fn authentication_debug_redacts_credentials() {
+        let request = RemoteDesktopHelperRequest::Authenticate {
+            challenge_id: "challenge".to_string(),
+            sha256_fingerprint: "AA:BB".to_string(),
+            username: "admin".to_string(),
+            password: RemoteDesktopSecret::from("super-secret"),
+            domain: Some("corp".to_string()),
+        };
+
+        let debug = format!("{request:?}");
+
+        assert!(debug.contains("redacted"));
+        assert!(!debug.contains("super-secret"));
+        assert!(!debug.contains("admin"));
+        assert!(!debug.contains("corp"));
+    }
+
+    #[test]
+    fn clipboard_file_debug_does_not_expose_local_paths() {
+        let request = RemoteDesktopHelperRequest::ClipboardFiles {
+            transfer_id: "transfer".to_string(),
+            paths: vec![PathBuf::from("/private/example.txt")],
+        };
+
+        let debug = format!("{request:?}");
+
+        assert!(debug.contains("path_count"));
+        assert!(!debug.contains("/private/example.txt"));
     }
 
     #[test]

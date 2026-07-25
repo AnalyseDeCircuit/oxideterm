@@ -9,18 +9,16 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
     let height = u16::try_from(requested_size.height).unwrap_or(u16::MAX);
     let codecs = client_codecs_capabilities(RDP_CLIENT_BITMAP_CODECS)
         .map_err(|error| format!("RDP bitmap codec setup failed: {error}"))?;
-    let password = config.password.expose_secret().to_string();
-
-    // IronRDP requires owned credential strings in its connector config. That
-    // downstream copy lives only inside this helper process for the session,
-    // is never logged, and is dropped with the native client config; the
-    // worker config still zeroizes the UI-provided secret wrapper.
     let connector = connector::Config {
-        credentials: Credentials::UsernamePassword {
-            username: config.username.clone(),
-            password,
+        // A smart-card placeholder prevents IronRDP from emitting the
+        // username-derived mstshash cookie during certificate preflight.
+        // Real credentials replace this value only after the user accepts the
+        // certificate bound to the current TLS stream.
+        credentials: Credentials::SmartCard {
+            pin: String::new(),
+            config: None,
         },
-        domain: config.domain.clone(),
+        domain: None,
         enable_tls: true,
         enable_credssp: true,
         desktop_size: connector::DesktopSize { width, height },
@@ -45,8 +43,8 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         hardware_id: None,
         license_cache: None,
         request_data: None,
-        autologon: true,
-        enable_audio_playback: false,
+        autologon: false,
+        enable_audio_playback: config.session_options.audio.playback,
         enable_server_pointer: true,
         pointer_software_rendering: false,
         multitransport_flags: None,
@@ -60,6 +58,8 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
     Ok(ClientRdpConfig {
         destination: ClientRdpDestination::from_parts(&config.endpoint.host, config.endpoint.port),
         connector,
+        session_options: config.session_options,
+        monitor_layout: config.monitor_layout.clone(),
     })
 }
 

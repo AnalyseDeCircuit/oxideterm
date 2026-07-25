@@ -32,6 +32,14 @@ pub struct RemoteDesktopProviderCapabilities {
     #[serde(default)]
     pub clipboard_data: bool,
     #[serde(default)]
+    pub clipboard_files: bool,
+    #[serde(default)]
+    pub audio_playback: bool,
+    #[serde(default)]
+    pub audio_capture: bool,
+    #[serde(default)]
+    pub multi_monitor: bool,
+    #[serde(default)]
     pub resize: bool,
     #[serde(default)]
     pub cursor: bool,
@@ -216,6 +224,10 @@ fn builtin_provider_capabilities(
     RemoteDesktopProviderCapabilities {
         clipboard_text: true,
         clipboard_data: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        clipboard_files: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        audio_playback: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        audio_capture: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        multi_monitor: matches!(protocol, RemoteDesktopProtocol::Rdp),
         resize: matches!(protocol, RemoteDesktopProtocol::Rdp),
         cursor: true,
         binary_frames: true,
@@ -278,6 +290,10 @@ mod tests {
             capabilities: RemoteDesktopProviderCapabilities {
                 clipboard_text: true,
                 clipboard_data: matches!(protocol, RemoteDesktopProtocol::Rdp),
+                clipboard_files: false,
+                audio_playback: false,
+                audio_capture: false,
+                multi_monitor: false,
                 resize: true,
                 cursor: true,
                 binary_frames: true,

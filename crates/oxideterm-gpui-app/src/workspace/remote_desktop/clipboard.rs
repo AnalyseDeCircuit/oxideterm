@@ -18,6 +18,18 @@ pub(super) fn remote_desktop_clipboard_data_from_item(
     })
 }
 
+pub(super) fn remote_desktop_clipboard_paths_from_item(
+    item: &ClipboardItem,
+) -> Option<Vec<std::path::PathBuf>> {
+    let paths = item.entries().iter().find_map(|entry| {
+        let ClipboardEntry::ExternalPaths(paths) = entry else {
+            return None;
+        };
+        Some(paths.paths().to_vec())
+    })?;
+    (!paths.is_empty()).then_some(paths)
+}
+
 pub(super) fn remote_desktop_clipboard_item_from_data(
     data: &RemoteDesktopClipboardData,
 ) -> Option<ClipboardItem> {

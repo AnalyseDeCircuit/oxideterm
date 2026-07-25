@@ -4,6 +4,40 @@ use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
 const NEW_CONNECTION_TRANSPORT_ROW_GAP: f32 = 4.0;
+const REMOTE_DESKTOP_CLIPBOARD_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] = &[
+    (
+        RemoteDesktopSessionFeature::ClipboardText,
+        "modals.new_connection.remote_desktop_clipboard_text",
+        "modals.new_connection.remote_desktop_clipboard_text_hint",
+    ),
+    (
+        RemoteDesktopSessionFeature::ClipboardImages,
+        "modals.new_connection.remote_desktop_clipboard_images",
+        "modals.new_connection.remote_desktop_clipboard_images_hint",
+    ),
+    (
+        RemoteDesktopSessionFeature::ClipboardFiles,
+        "modals.new_connection.remote_desktop_clipboard_files",
+        "modals.new_connection.remote_desktop_clipboard_files_hint",
+    ),
+];
+const REMOTE_DESKTOP_AUDIO_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] = &[
+    (
+        RemoteDesktopSessionFeature::AudioPlayback,
+        "modals.new_connection.remote_desktop_audio_playback",
+        "modals.new_connection.remote_desktop_audio_playback_hint",
+    ),
+    (
+        RemoteDesktopSessionFeature::AudioCapture,
+        "modals.new_connection.remote_desktop_audio_capture",
+        "modals.new_connection.remote_desktop_audio_capture_hint",
+    ),
+];
+const REMOTE_DESKTOP_DISPLAY_FEATURES: &[(RemoteDesktopSessionFeature, &str, &str)] = &[(
+    RemoteDesktopSessionFeature::MultiMonitor,
+    "modals.new_connection.remote_desktop_multi_monitor",
+    "modals.new_connection.remote_desktop_multi_monitor_hint",
+)];
 
 fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
     match transport {
@@ -1650,6 +1684,8 @@ impl WorkspaceApp {
         };
         let port_invalid = !form.port.trim().is_empty()
             && !form.port.trim().parse::<u16>().is_ok_and(|port| port > 0);
+        let capabilities =
+            oxideterm_remote_desktop::builtin_provider_manifest(protocol).capabilities;
 
         div()
             .flex()
@@ -1722,6 +1758,159 @@ impl WorkspaceApp {
                 true,
                 cx,
             ))
+            .child(self.render_remote_desktop_features(&capabilities, cx))
+            .into_any_element()
+    }
+
+    fn render_remote_desktop_features(
+        &self,
+        capabilities: &oxideterm_remote_desktop::RemoteDesktopProviderCapabilities,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .pt(px(self.tokens.spacing.one))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.three))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(
+                                self.i18n
+                                    .t("modals.new_connection.remote_desktop_features_title"),
+                            ),
+                    )
+                    .child(
+                        self.render_connection_hint(
+                            self.i18n
+                                .t("modals.new_connection.remote_desktop_features_hint"),
+                        ),
+                    ),
+            )
+            .child(self.render_remote_desktop_feature_group(
+                "modals.new_connection.remote_desktop_clipboard_group",
+                REMOTE_DESKTOP_CLIPBOARD_FEATURES,
+                capabilities,
+                cx,
+            ))
+            .child(self.render_remote_desktop_feature_group(
+                "modals.new_connection.remote_desktop_audio_group",
+                REMOTE_DESKTOP_AUDIO_FEATURES,
+                capabilities,
+                cx,
+            ))
+            .child(self.render_remote_desktop_feature_group(
+                "modals.new_connection.remote_desktop_display_group",
+                REMOTE_DESKTOP_DISPLAY_FEATURES,
+                capabilities,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_remote_desktop_feature_group(
+        &self,
+        title_key: &str,
+        features: &[(RemoteDesktopSessionFeature, &str, &str)],
+        capabilities: &oxideterm_remote_desktop::RemoteDesktopProviderCapabilities,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(title_key)),
+            )
+            .children(features.iter().map(|(feature, label_key, hint_key)| {
+                self.render_remote_desktop_feature_row(
+                    self.i18n.t(label_key),
+                    self.i18n.t(hint_key),
+                    remote_desktop_feature_supported(capabilities, *feature),
+                    *feature,
+                    cx,
+                )
+            }))
+            .into_any_element()
+    }
+
+    fn render_remote_desktop_feature_row(
+        &self,
+        label: String,
+        hint: String,
+        supported: bool,
+        feature: RemoteDesktopSessionFeature,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self.new_connection_form.as_ref().is_some_and(|form| {
+            supported
+                && remote_desktop_feature_selected(&form.remote_desktop_session_options, feature)
+        });
+        let hint = if supported {
+            hint
+        } else {
+            format!(
+                "{hint} · {}",
+                self.i18n
+                    .t("modals.new_connection.remote_desktop_feature_unsupported")
+            )
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.one))
+            .child(
+                checkbox_with(
+                    &self.tokens,
+                    label,
+                    selected,
+                    CheckboxOptions {
+                        disabled: !supported,
+                        ..CheckboxOptions::default()
+                    },
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if supported && let Some(form) = this.new_connection_form.as_mut() {
+                            // Session feature choices are immutable once the helper starts.
+                            toggle_remote_desktop_feature(
+                                &mut form.remote_desktop_session_options,
+                                feature,
+                            );
+                        }
+                        this.close_new_connection_select();
+                        cx.notify();
+                    }),
+                ),
+            )
+            .child(
+                div()
+                    .pl(px(
+                        self.tokens.metrics.ui_checkbox_size + self.tokens.spacing.two
+                    ))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(if supported {
+                        self.tokens.ui.text_muted
+                    } else {
+                        self.tokens.ui.warning
+                    }))
+                    .child(hint),
+            )
             .into_any_element()
     }
 

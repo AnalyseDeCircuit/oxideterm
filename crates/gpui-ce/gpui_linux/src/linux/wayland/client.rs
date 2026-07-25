@@ -795,6 +795,8 @@ impl LinuxClient for WaylandClient {
                     id: id.clone(),
                     name: output.name.clone(),
                     bounds: output.bounds.to_pixels(output.scale as f32),
+                    physical_bounds: output.bounds,
+                    scale_factor: output.scale as f32,
                 }) as Rc<dyn PlatformDisplay>
             })
             .collect()
@@ -811,6 +813,8 @@ impl LinuxClient for WaylandClient {
                         id: object_id.clone(),
                         name: output.name.clone(),
                         bounds: output.bounds.to_pixels(output.scale as f32),
+                        physical_bounds: output.bounds,
+                        scale_factor: output.scale as f32,
                     }) as Rc<dyn PlatformDisplay>
                 })
             })
@@ -1027,6 +1031,9 @@ impl LinuxClient for WaylandClient {
             let data_source = data_device_manager.create_data_source(&state.globals.qh, ());
             for mime_type in TEXT_MIME_TYPES {
                 data_source.offer(mime_type.to_string());
+            }
+            if state.clipboard.has_files() {
+                data_source.offer(FILE_LIST_MIME_TYPE.to_string());
             }
             data_source.offer(state.clipboard.self_mime());
             data_device.set_selection(Some(&data_source), serial);

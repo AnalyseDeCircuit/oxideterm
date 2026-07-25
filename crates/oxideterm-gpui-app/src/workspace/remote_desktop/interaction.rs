@@ -329,10 +329,33 @@ impl WorkspaceApp {
             return true;
         };
 
+        if let Some(paths) = remote_desktop_clipboard_paths_from_item(&item) {
+            let files_enabled = self
+                .remote_desktop_sessions
+                .get(&tab_id)
+                .is_some_and(|session| {
+                    session.provider.capabilities.clipboard_files
+                        && session.profile.session_options.clipboard.files
+                });
+            if files_enabled {
+                self.send_remote_desktop_request(
+                    tab_id,
+                    RemoteDesktopHelperRequest::ClipboardFiles {
+                        transfer_id: uuid::Uuid::new_v4().to_string(),
+                        paths,
+                    },
+                );
+            }
+            // External paths must never fall through to text injection because
+            // that would bypass the file-redirection consent boundary.
+            return true;
+        }
+
         // Rich clipboard formats are provider-owned. Built-in VNC remains
         // text-only until an RFB clipboard extension is negotiated.
         if let Some(session) = self.remote_desktop_sessions.get(&tab_id)
             && session.provider.capabilities.clipboard_data
+            && session.profile.session_options.clipboard.images
             && let Some(data) = remote_desktop_clipboard_data_from_item(&item)
         {
             self.send_remote_desktop_request(
@@ -342,6 +365,16 @@ impl WorkspaceApp {
             return true;
         }
 
+        let text_enabled = self
+            .remote_desktop_sessions
+            .get(&tab_id)
+            .is_some_and(|session| {
+                session.provider.capabilities.clipboard_text
+                    && session.profile.session_options.clipboard.text
+            });
+        if !text_enabled {
+            return true;
+        }
         let Some(text) = item.text() else {
             return true;
         };

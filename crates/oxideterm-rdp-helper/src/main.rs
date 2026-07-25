@@ -19,16 +19,22 @@ use ironrdp::{
         CliprdrClient,
         backend::{ClipboardMessage, CliprdrBackend},
         pdu::{
-            ClipboardFormat, ClipboardFormatId, ClipboardFormatName,
-            ClipboardGeneralCapabilityFlags, FileContentsRequest, FileContentsResponse,
-            FormatDataRequest, FormatDataResponse, LockDataId,
+            ClipboardFileAttributes, ClipboardFormat, ClipboardFormatId, ClipboardFormatName,
+            ClipboardGeneralCapabilityFlags, FileContentsFlags, FileContentsRequest,
+            FileContentsResponse, FileDescriptor, FormatDataRequest, FormatDataResponse,
+            LockDataId,
         },
     },
     connector::ConnectionResult,
     connector::connection_activation::ConnectionActivationState,
     connector::{self, ConnectorErrorKind, Credentials},
-    displaycontrol::client::DisplayControlClient,
-    dvc::DrdynvcClient,
+    displaycontrol::{
+        client::DisplayControlClient,
+        pdu::{
+            DeviceScaleFactor, DisplayControlMonitorLayout, DisplayControlPdu, MonitorOrientation,
+        },
+    },
+    dvc::{DrdynvcClient, encode_dvc_messages},
     graphics::image_processing::PixelFormat,
     input::{
         Database as RdpInputDatabase, MousePosition, Operation as RdpInputOperation,
@@ -47,9 +53,10 @@ use ironrdp::{
         },
     },
     session::{
-        self, ActiveStage, ActiveStageOutput, GracefulDisconnectReason, SessionResult, fast_path,
-        image::DecodedImage,
+        self, ActiveStage, ActiveStageOutput, GracefulDisconnectReason, SessionErrorExt as _,
+        SessionResult, fast_path, image::DecodedImage,
     },
+    svc::{ChannelFlags, SvcProcessorMessages},
 };
 use ironrdp_cliprdr_format::bitmap::{dib_to_png, dibv5_to_png, png_to_cf_dib, png_to_cf_dibv5};
 use ironrdp_core::{IntoOwned as _, WriteBuf, impl_as_any};
@@ -59,18 +66,22 @@ use oxideterm_remote_desktop::{
     RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopCursorShape,
     RemoteDesktopEndpoint, RemoteDesktopErrorCategory, RemoteDesktopFakeBackend,
     RemoteDesktopFrameFormat, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
-    RemoteDesktopLockKeys, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
-    RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line,
-    run_fake_backend_stdio,
+    RemoteDesktopLockKeys, RemoteDesktopMonitorLayout, RemoteDesktopMouseButtonState,
+    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionOptions,
+    RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line, run_fake_backend_stdio,
 };
+use sha2::{Digest as _, Sha256};
 use smallvec::SmallVec;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
 };
+use x509_cert::der::Encode as _;
 use zeroize::Zeroize;
 
+mod audio;
+mod audio_input;
 mod client_session;
 mod clipboard;
 mod config;
@@ -82,6 +93,8 @@ mod input;
 mod runtime;
 mod session_loop;
 
+use audio::PcmRdpsndBackend;
+use audio_input::AudioInputClient;
 use client_session::*;
 use clipboard::*;
 use config::*;
@@ -113,7 +126,6 @@ const RDP_DISPLAYCONTROL_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 100;
 const RDP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
 const RDP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const RDP_CLIPBOARD_TIMEOUT_POLL_INTERVAL: Duration = Duration::from_secs(5);
-const RDP_CLIPBOARD_TEMPORARY_DIRECTORY: &str = ".cliprdr";
 const RDP_CLIPBOARD_FORMAT_IMAGE_PNG: ClipboardFormatId = ClipboardFormatId(0xc001);
 const RDP_CLIPBOARD_FORMAT_IMAGE_JPEG: ClipboardFormatId = ClipboardFormatId(0xc002);
 const RDP_CLIPBOARD_FORMAT_IMAGE_WEBP: ClipboardFormatId = ClipboardFormatId(0xc003);
@@ -172,15 +184,14 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
     let Some(first_request) = read_request_line(reader).map_err(|error| error.to_string())? else {
         return Ok(());
     };
-    let RemoteDesktopHelperRequest::Connect {
+    let RemoteDesktopHelperRequest::StartConnect {
         protocol,
         endpoint,
-        username,
-        password,
-        domain,
         size,
         scale_factor,
         read_only,
+        session_options,
+        monitor_layout,
     } = first_request
     else {
         send_event(
@@ -204,37 +215,15 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
         return Ok(());
     }
 
-    let Some(username) = username.filter(|username| !username.trim().is_empty()) else {
-        send_event(
-            &writer,
-            RemoteDesktopHelperEvent::ConnectionFailure {
-                message: "RDP username is required.".to_string(),
-                category: Some(RemoteDesktopErrorCategory::Configuration),
-            },
-        )?;
-        return Ok(());
-    };
-    let Some(password) = password else {
-        send_event(
-            &writer,
-            RemoteDesktopHelperEvent::ConnectionFailure {
-                message: "RDP password is required.".to_string(),
-                category: Some(RemoteDesktopErrorCategory::Configuration),
-            },
-        )?;
-        return Ok(());
-    };
-
     let (request_tx, request_rx) = mpsc::channel();
     let handle = start_rdp_worker(
         RdpWorkerConfig {
             endpoint,
-            username,
-            password,
-            domain,
             size,
             scale_factor: rdp_connector_scale_factor(scale_factor),
             read_only,
+            session_options,
+            monitor_layout,
         },
         writer,
         request_rx,
@@ -257,12 +246,11 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
 
 struct RdpWorkerConfig {
     endpoint: RemoteDesktopEndpoint,
-    username: String,
-    password: RemoteDesktopSecret,
-    domain: Option<String>,
     size: RemoteDesktopSize,
     scale_factor: u32,
     read_only: bool,
+    session_options: RemoteDesktopSessionOptions,
+    monitor_layout: RemoteDesktopMonitorLayout,
 }
 
 #[derive(Debug)]
@@ -473,6 +461,8 @@ type UpgradedRdpFramed = ironrdp_tokio::TokioFramed<Box<dyn AsyncReadWrite + Unp
 struct ClientRdpConfig {
     destination: ClientRdpDestination,
     connector: connector::Config,
+    session_options: RemoteDesktopSessionOptions,
+    monitor_layout: RemoteDesktopMonitorLayout,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -499,6 +489,13 @@ impl ClientRdpDestination {
 }
 #[derive(Debug)]
 enum RdpInputEvent {
+    Authenticate {
+        challenge_id: String,
+        sha256_fingerprint: String,
+        username: String,
+        password: RemoteDesktopSecret,
+        domain: Option<String>,
+    },
     Resize {
         width: u16,
         height: u16,
@@ -509,6 +506,13 @@ enum RdpInputEvent {
     Clipboard(ClipboardMessage),
     SetClipboardText(String),
     SetClipboardData(RemoteDesktopClipboardData),
+    SetClipboardFiles {
+        transfer_id: String,
+        paths: Vec<std::path::PathBuf>,
+    },
+    CancelClipboardTransfer(String),
+    UpdateDisplayLayout(RemoteDesktopMonitorLayout),
+    MicrophoneReady,
     RequestFrame,
     Close,
 }
@@ -519,12 +523,10 @@ enum ClientRdpControlFlow {
 
 impl Drop for RdpWorkerConfig {
     fn drop(&mut self) {
-        // The form-to-helper boundary converts the UI draft into
-        // RemoteDesktopSecret. Clear the remaining username/domain drafts here
-        // together with the secret wrapper when the worker config leaves scope.
-        self.username.zeroize();
-        if let Some(domain) = self.domain.as_mut() {
-            domain.zeroize();
+        // Monitor identifiers can expose a local hardware inventory. Keep
+        // their lifetime bounded to the helper session.
+        for monitor in &mut self.monitor_layout.monitors {
+            monitor.stable_id.zeroize();
         }
     }
 }

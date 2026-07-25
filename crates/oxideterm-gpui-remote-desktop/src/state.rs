@@ -472,9 +472,12 @@ impl RemoteDesktopViewState {
                 self.cursor.visible = false;
             }
             RemoteDesktopHelperEvent::ClipboardText { .. }
-            | RemoteDesktopHelperEvent::ClipboardData { .. } => {
+            | RemoteDesktopHelperEvent::ClipboardData { .. }
+            | RemoteDesktopHelperEvent::ClipboardFilesReady { .. }
+            | RemoteDesktopHelperEvent::ClipboardTransferFailed { .. }
+            | RemoteDesktopHelperEvent::ServerCertificate { .. } => {
                 // Clipboard changes are handled by the app surface that owns
-                // focus, clipboard, and pointer capture.
+                // focus, clipboard, certificate prompts, and pointer capture.
             }
         }
     }

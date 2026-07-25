@@ -1541,41 +1541,24 @@ impl LinuxClient for X11Client {
 
     fn displays(&self) -> Vec<Rc<dyn PlatformDisplay>> {
         let state = self.0.borrow();
-        let setup = state.xcb_connection.setup();
-        setup
-            .roots
-            .iter()
-            .enumerate()
-            .filter_map(|(root_id, _)| {
-                Some(Rc::new(
-                    X11Display::new(&state.xcb_connection, state.scale_factor, root_id).ok()?,
-                ) as Rc<dyn PlatformDisplay>)
-            })
+        X11Display::all(&state.xcb_connection, state.scale_factor)
+            .into_iter()
+            .map(|display| Rc::new(display) as Rc<dyn PlatformDisplay>)
             .collect()
     }
 
     fn primary_display(&self) -> Option<Rc<dyn PlatformDisplay>> {
         let state = self.0.borrow();
-        X11Display::new(
-            &state.xcb_connection,
-            state.scale_factor,
-            state.x_root_index,
-        )
-        .log_err()
-        .map(|display| Rc::new(display) as Rc<dyn PlatformDisplay>)
+        X11Display::primary(&state.xcb_connection, state.scale_factor)
+            .map(|display| Rc::new(display) as Rc<dyn PlatformDisplay>)
     }
 
     fn display(&self, id: DisplayId) -> Option<Rc<dyn PlatformDisplay>> {
         let state = self.0.borrow();
-
-        Some(Rc::new(
-            X11Display::new(
-                &state.xcb_connection,
-                state.scale_factor,
-                u64::from(id) as usize,
-            )
-            .ok()?,
-        ))
+        X11Display::all(&state.xcb_connection, state.scale_factor)
+            .into_iter()
+            .find(|display| display.id() == id)
+            .map(|display| Rc::new(display) as Rc<dyn PlatformDisplay>)
     }
 
     #[cfg(feature = "screen-capture")]
@@ -1760,8 +1743,8 @@ impl LinuxClient for X11Client {
         let mut state = self.0.borrow_mut();
         state
             .clipboard
-            .set_text(
-                std::borrow::Cow::Owned(item.text().unwrap_or_default()),
+            .set_item(
+                &item,
                 clipboard::ClipboardKind::Clipboard,
                 clipboard::WaitConfig::None,
             )

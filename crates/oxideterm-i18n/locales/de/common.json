@@ -1137,6 +1137,17 @@
     "reconnect": "Neu verbinden",
     "resize_dynamic": "Remote-Größe anpassbar",
     "resize_fixed": "Feste Servergröße",
-    "disconnect": "Trennen"
+    "disconnect": "Trennen",
+    "certificate_unknown_title": "RDP-Serverzertifikat überprüfen",
+    "certificate_unknown_description": "Dieses Serverzertifikat ist noch nicht vertrauenswürdig. Vergleichen Sie den SHA-256-Fingerabdruck, bevor Sie Ihre Anmeldedaten senden.",
+    "certificate_changed_title": "Das RDP-Serverzertifikat wurde geändert",
+    "certificate_changed_description": "Das Zertifikat stimmt nicht mehr mit dem gespeicherten Fingerabdruck überein. Dies kann auf einen Serverwechsel oder einen Abfangversuch hindeuten.",
+    "certificate_endpoint": "Endpunkt: {{endpoint}}",
+    "certificate_presented_fingerprint": "Vorgelegter SHA-256-Fingerabdruck",
+    "certificate_saved_fingerprint": "Gespeicherter SHA-256-Fingerabdruck",
+    "certificate_remember": "Dieses Zertifikat auf diesem Gerät speichern",
+    "certificate_trust": "Vertrauen und fortfahren",
+    "certificate_save_failed": "Der Zertifikat-Vertrauenseintrag konnte nicht gespeichert werden: {{error}}",
+    "clipboard_file_failed": "Zwischenablagedateien konnten nicht empfangen werden: {{error}}"
   }
 }

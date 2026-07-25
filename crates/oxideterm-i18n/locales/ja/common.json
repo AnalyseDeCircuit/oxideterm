@@ -1137,6 +1137,17 @@
     "reconnect": "再接続",
     "resize_dynamic": "リモートサイズ可変",
     "resize_fixed": "サーバー固定サイズ",
-    "disconnect": "切断"
+    "disconnect": "切断",
+    "certificate_unknown_title": "RDP サーバー証明書を確認",
+    "certificate_unknown_description": "このサーバー証明書はまだ信頼されていません。資格情報を送信する前に SHA-256 フィンガープリントを照合してください。",
+    "certificate_changed_title": "RDP サーバー証明書が変更されました",
+    "certificate_changed_description": "証明書が保存済みのフィンガープリントと一致しません。サーバーの変更または傍受の可能性があります。",
+    "certificate_endpoint": "エンドポイント: {{endpoint}}",
+    "certificate_presented_fingerprint": "提示された SHA-256 フィンガープリント",
+    "certificate_saved_fingerprint": "保存済みの SHA-256 フィンガープリント",
+    "certificate_remember": "このデバイスで証明書を記憶する",
+    "certificate_trust": "信頼して続行",
+    "certificate_save_failed": "証明書の信頼情報を保存できませんでした：{{error}}",
+    "clipboard_file_failed": "クリップボードのファイルを受信できませんでした：{{error}}"
   }
 }

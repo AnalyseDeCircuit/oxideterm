@@ -1,0 +1,2 @@
+<key>NSMicrophoneUsageDescription</key>
+<string>OxideTerm uses the microphone only when microphone redirection is enabled for an RDP connection.</string>

@@ -1137,6 +1137,17 @@
     "reconnect": "Riconnetti",
     "resize_dynamic": "Ridimensionamento remoto",
     "resize_fixed": "Dimensione server fissa",
-    "disconnect": "Disconnetti"
+    "disconnect": "Disconnetti",
+    "certificate_unknown_title": "Verifica il certificato del server RDP",
+    "certificate_unknown_description": "Questo certificato non è ancora attendibile. Confronta l’impronta SHA-256 prima di inviare le credenziali.",
+    "certificate_changed_title": "Il certificato del server RDP è cambiato",
+    "certificate_changed_description": "Il certificato non corrisponde più all’impronta salvata. Potrebbe indicare una modifica del server o un tentativo di intercettazione.",
+    "certificate_endpoint": "Endpoint: {{endpoint}}",
+    "certificate_presented_fingerprint": "Impronta SHA-256 presentata",
+    "certificate_saved_fingerprint": "Impronta SHA-256 salvata",
+    "certificate_remember": "Ricorda questo certificato su questo dispositivo",
+    "certificate_trust": "Considera attendibile e continua",
+    "certificate_save_failed": "Impossibile salvare il record di attendibilità del certificato: {{error}}",
+    "clipboard_file_failed": "Impossibile ricevere i file dagli appunti: {{error}}"
   }
 }

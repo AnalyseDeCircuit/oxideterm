@@ -175,7 +175,9 @@ impl Pasteboard {
                 [ClipboardEntry::Image(image)] => {
                     self.write_image(image);
                 }
-                [ClipboardEntry::ExternalPaths(_)] => {}
+                [ClipboardEntry::ExternalPaths(paths)] => {
+                    self.write_external_paths(paths);
+                }
                 _ => {
                     // Agus NB: We're currently only writing string entries to the clipboard when we have more than one.
                     //
@@ -251,6 +253,36 @@ impl Pasteboard {
 
             self.inner
                 .setData_forType(bytes, Into::<UTType>::into(image.format).inner_mut());
+        }
+    }
+
+    fn write_external_paths(&self, paths: &ExternalPaths) {
+        unsafe {
+            let path_strings = paths
+                .paths()
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            let ns_paths = path_strings
+                .iter()
+                .map(|path| ns_string(path))
+                .collect::<Vec<id>>();
+            let ns_path_array = NSArray::arrayWithObjects(nil, &ns_paths);
+            let types =
+                NSArray::arrayWithObjects(nil, &[NSFilenamesPboardType, NSPasteboardTypeString]);
+
+            self.inner.declareTypes_owner(types, nil);
+            self.inner
+                .setPropertyList_forType(ns_path_array, NSFilenamesPboardType);
+
+            // A plain-text representation keeps pasting useful in text-only applications.
+            let joined_paths = path_strings.join("\n");
+            let bytes = NSData::dataWithBytes_length_(
+                nil,
+                joined_paths.as_ptr() as *const c_void,
+                joined_paths.len() as u64,
+            );
+            self.inner.setData_forType(bytes, NSPasteboardTypeString);
         }
     }
 }
@@ -342,11 +374,24 @@ mod tests {
         base::{id, nil},
         foundation::{NSArray, NSData},
     };
-    use std::ffi::c_void;
+    use std::{
+        ffi::c_void,
+        sync::{Mutex, MutexGuard},
+    };
 
     use gpui::{ClipboardEntry, ClipboardItem, ClipboardString, ImageFormat};
 
     use super::*;
+
+    static PASTEBOARD_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_pasteboard_tests() -> MutexGuard<'static, ()> {
+        // AppKit pasteboard calls are process-global and are not safe to drive
+        // concurrently from Rust's parallel test threads.
+        PASTEBOARD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
 
     unsafe fn simulate_external_file_copy(pasteboard: &Pasteboard, paths: &[&str]) {
         unsafe {
@@ -377,6 +422,7 @@ mod tests {
 
     #[test]
     fn test_string() {
+        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
         assert_eq!(pasteboard.read(), None);
 
@@ -411,6 +457,7 @@ mod tests {
 
     #[test]
     fn test_read_external_path() {
+        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
 
         unsafe {
@@ -441,6 +488,7 @@ mod tests {
 
     #[test]
     fn test_read_external_paths_with_spaces() {
+        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
         let paths = ["/some file with spaces.txt"];
 
@@ -460,6 +508,7 @@ mod tests {
 
     #[test]
     fn test_read_multiple_external_paths() {
+        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
         let paths = ["/file.txt", "/image.png"];
 
@@ -491,7 +540,33 @@ mod tests {
     }
 
     #[test]
+    fn test_write_external_paths() {
+        let _guard = lock_pasteboard_tests();
+        let pasteboard = Pasteboard::unique();
+        let item = ClipboardItem {
+            entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(
+                [PathBuf::from("/file.txt"), PathBuf::from("/image.png")]
+                    .into_iter()
+                    .collect(),
+            ))],
+        };
+
+        pasteboard.write(item);
+        let copied_item = pasteboard.read().expect("should read copied paths");
+
+        assert_eq!(
+            copied_item.entries[0],
+            ClipboardEntry::ExternalPaths(ExternalPaths(
+                [PathBuf::from("/file.txt"), PathBuf::from("/image.png")]
+                    .into_iter()
+                    .collect(),
+            ))
+        );
+    }
+
+    #[test]
     fn test_read_image() {
+        let _guard = lock_pasteboard_tests();
         let pasteboard = Pasteboard::unique();
 
         // Smallest valid PNG: 1x1 transparent pixel

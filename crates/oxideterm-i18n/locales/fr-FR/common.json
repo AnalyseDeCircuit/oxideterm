@@ -1137,6 +1137,17 @@
     "reconnect": "Reconnecter",
     "resize_dynamic": "Redimensionnement distant",
     "resize_fixed": "Taille serveur fixe",
-    "disconnect": "Déconnecter"
+    "disconnect": "Déconnecter",
+    "certificate_unknown_title": "Vérifier le certificat du serveur RDP",
+    "certificate_unknown_description": "Ce certificat serveur n’est pas encore approuvé. Comparez son empreinte SHA-256 avant d’envoyer vos identifiants.",
+    "certificate_changed_title": "Le certificat du serveur RDP a changé",
+    "certificate_changed_description": "Le certificat ne correspond plus à l’empreinte enregistrée. Cela peut indiquer un changement de serveur ou une tentative d’interception.",
+    "certificate_endpoint": "Point de terminaison : {{endpoint}}",
+    "certificate_presented_fingerprint": "Empreinte SHA-256 présentée",
+    "certificate_saved_fingerprint": "Empreinte SHA-256 enregistrée",
+    "certificate_remember": "Mémoriser ce certificat sur cet appareil",
+    "certificate_trust": "Faire confiance et continuer",
+    "certificate_save_failed": "Impossible d’enregistrer la relation de confiance du certificat : {{error}}",
+    "clipboard_file_failed": "Impossible de recevoir les fichiers du presse-papiers : {{error}}"
   }
 }

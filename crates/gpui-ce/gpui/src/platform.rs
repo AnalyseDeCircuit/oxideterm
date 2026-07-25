@@ -272,6 +272,16 @@ pub trait PlatformDisplay: Debug {
     /// Get the bounds for this display
     fn bounds(&self) -> Bounds<Pixels>;
 
+    /// Returns the display bounds in the platform's physical pixel coordinate space.
+    fn physical_bounds(&self) -> Bounds<DevicePixels> {
+        self.bounds().to_device_pixels(self.scale_factor())
+    }
+
+    /// Returns the display scale used to map logical coordinates to physical pixels.
+    fn scale_factor(&self) -> f32 {
+        1.0
+    }
+
     /// Get the visible bounds for this display, excluding taskbar/dock areas.
     /// This is the usable area where windows can be placed without being obscured.
     /// Defaults to the full display bounds if not overridden.

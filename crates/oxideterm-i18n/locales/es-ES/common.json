@@ -1137,6 +1137,17 @@
     "reconnect": "Reconectar",
     "resize_dynamic": "Redimensionamiento remoto",
     "resize_fixed": "Tamaño fijo del servidor",
-    "disconnect": "Desconectar"
+    "disconnect": "Desconectar",
+    "certificate_unknown_title": "Verificar el certificado del servidor RDP",
+    "certificate_unknown_description": "Este certificado aún no es de confianza. Compara la huella SHA-256 antes de enviar tus credenciales.",
+    "certificate_changed_title": "El certificado del servidor RDP ha cambiado",
+    "certificate_changed_description": "El certificado ya no coincide con la huella guardada. Puede indicar un cambio de servidor o un intento de interceptación.",
+    "certificate_endpoint": "Punto de conexión: {{endpoint}}",
+    "certificate_presented_fingerprint": "Huella SHA-256 presentada",
+    "certificate_saved_fingerprint": "Huella SHA-256 guardada",
+    "certificate_remember": "Recordar este certificado en este dispositivo",
+    "certificate_trust": "Confiar y continuar",
+    "certificate_save_failed": "No se pudo guardar el registro de confianza del certificado: {{error}}",
+    "clipboard_file_failed": "No se pudieron recibir los archivos del portapapeles: {{error}}"
   }
 }

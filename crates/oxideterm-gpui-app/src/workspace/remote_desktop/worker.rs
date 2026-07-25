@@ -20,6 +20,7 @@ pub(super) fn preview_remote_desktop_profile(
         domain: None,
         credential_ref: None,
         read_only: false,
+        session_options: Default::default(),
     }
 }
 
@@ -31,6 +32,7 @@ pub(super) fn run_remote_desktop_worker(
     password: Option<RemoteDesktopSecret>,
     initial_size: RemoteDesktopSize,
     scale_factor: Option<u32>,
+    monitor_layout: RemoteDesktopMonitorLayout,
     frame_slot: RemoteDesktopFrameDeliverySlot,
     worker_wake: RemoteDesktopWorkerWake,
     request_rx: mpsc::Receiver<RemoteDesktopHelperRequest>,
@@ -60,6 +62,7 @@ pub(super) fn run_remote_desktop_worker(
             password,
             initial_size,
             scale_factor,
+            monitor_layout,
         },
         frame_slot,
         request_rx,

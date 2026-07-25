@@ -20,7 +20,8 @@ use oxideterm_remote_desktop::{
     RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopConnectionProfile,
     RemoteDesktopEndpoint, RemoteDesktopErrorCategory, RemoteDesktopFrameDeliverySlot,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState,
-    RemoteDesktopLockKeys, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
+    RemoteDesktopLockKeys, RemoteDesktopMonitor, RemoteDesktopMonitorLayout,
+    RemoteDesktopMonitorOrientation, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
     RemoteDesktopProtocol, RemoteDesktopProviderManifest, RemoteDesktopSecret,
     RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta,
     builtin_preview_provider_registry, builtin_provider_registry,
@@ -30,6 +31,7 @@ use tokio::sync::Notify;
 
 use super::*;
 
+mod certificate;
 mod clipboard;
 mod input;
 mod interaction;
@@ -37,6 +39,7 @@ mod session;
 mod view;
 mod worker;
 
+use certificate::*;
 use clipboard::*;
 use input::*;
 use worker::*;
@@ -239,6 +242,8 @@ pub(super) struct RemoteDesktopSession {
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
     password: Option<RemoteDesktopSecret>,
+    certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
+    session_trusted_certificate_fingerprint: Option<String>,
     state: RemoteDesktopViewState,
     geometry: SharedRemoteDesktopGeometry,
     frame_slot: RemoteDesktopFrameDeliverySlot,
@@ -247,6 +252,7 @@ pub(super) struct RemoteDesktopSession {
     last_viewport_size: Option<RemoteDesktopSize>,
     last_sent_resize: Option<RemoteDesktopResizeRequestState>,
     last_viewport_scale_factor: Option<u32>,
+    last_monitor_layout: RemoteDesktopMonitorLayout,
     resize_generation: Arc<AtomicU64>,
     last_input_modifiers: RemoteDesktopModifierState,
     last_lock_keys: Option<RemoteDesktopLockKeys>,
@@ -274,6 +280,8 @@ impl RemoteDesktopSession {
             // Runtime credentials are kept only for this tab so a user-visible
             // reconnect can start a fresh helper after the previous one exits.
             password,
+            certificate_challenge: None,
+            session_trusted_certificate_fingerprint: None,
             state,
             geometry: SharedRemoteDesktopGeometry::default(),
             frame_slot,
@@ -282,6 +290,7 @@ impl RemoteDesktopSession {
             last_viewport_size: None,
             last_sent_resize: None,
             last_viewport_scale_factor: None,
+            last_monitor_layout: RemoteDesktopMonitorLayout::default(),
             resize_generation: Arc::new(AtomicU64::new(0)),
             last_input_modifiers: RemoteDesktopModifierState::default(),
             last_lock_keys: None,

@@ -5,9 +5,10 @@ use std::{io::BufReader, sync::mpsc, thread};
 
 use crate::{
     RemoteDesktopConnectionProfile, RemoteDesktopFakeBackend, RemoteDesktopFrameDeliverySlot,
-    RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopProviderManifest,
-    RemoteDesktopSecret, RemoteDesktopSessionId, RemoteDesktopSize, is_remote_desktop_frame_event,
-    read_event_line,
+    RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopMonitorLayout,
+    RemoteDesktopProtocol, RemoteDesktopProviderManifest, RemoteDesktopSecret,
+    RemoteDesktopSessionId, RemoteDesktopSessionOptions, RemoteDesktopSize,
+    is_remote_desktop_frame_event, read_event_line,
 };
 use crate::{helper_process, request_writer};
 
@@ -51,6 +52,7 @@ pub struct RemoteDesktopWorkerConfig {
     pub password: Option<RemoteDesktopSecret>,
     pub initial_size: RemoteDesktopSize,
     pub scale_factor: Option<u32>,
+    pub monitor_layout: RemoteDesktopMonitorLayout,
 }
 
 pub fn run_remote_desktop_worker(
@@ -62,11 +64,13 @@ pub fn run_remote_desktop_worker(
     match helper_process::spawn_remote_desktop_helper(&config.provider) {
         Ok(mut helper) => {
             let stdout = helper.child.stdout.take();
-            let connect = connect_request(
+            let connect = initial_connect_request(
                 &config.profile,
+                &config.provider,
                 config.password,
                 config.initial_size,
                 config.scale_factor,
+                config.monitor_layout,
             );
             if let Err(error) = helper_process::write_initial_remote_desktop_connect(
                 &mut helper.child,
@@ -162,6 +166,56 @@ pub fn connect_request(
         size: RemoteDesktopSize::clamped(initial_size.width, initial_size.height),
         scale_factor,
         read_only: profile.read_only,
+    }
+}
+
+pub fn initial_connect_request(
+    profile: &RemoteDesktopConnectionProfile,
+    provider: &RemoteDesktopProviderManifest,
+    password: Option<RemoteDesktopSecret>,
+    initial_size: RemoteDesktopSize,
+    scale_factor: Option<u32>,
+    monitor_layout: RemoteDesktopMonitorLayout,
+) -> RemoteDesktopHelperRequest {
+    if profile.protocol != RemoteDesktopProtocol::Rdp {
+        return connect_request(profile, password, initial_size, scale_factor);
+    }
+    let session_options = effective_session_options(profile.session_options, provider);
+    let monitor_layout = if session_options.display.use_all_monitors {
+        monitor_layout
+    } else {
+        RemoteDesktopMonitorLayout::default()
+    };
+
+    RemoteDesktopHelperRequest::StartConnect {
+        protocol: profile.protocol,
+        endpoint: profile.endpoint.clone(),
+        size: RemoteDesktopSize::clamped(initial_size.width, initial_size.height),
+        scale_factor,
+        read_only: profile.read_only,
+        session_options,
+        monitor_layout,
+    }
+}
+
+pub fn effective_session_options(
+    requested: RemoteDesktopSessionOptions,
+    provider: &RemoteDesktopProviderManifest,
+) -> RemoteDesktopSessionOptions {
+    let capabilities = &provider.capabilities;
+    RemoteDesktopSessionOptions {
+        clipboard: crate::RemoteDesktopClipboardOptions {
+            text: requested.clipboard.text && capabilities.clipboard_text,
+            images: requested.clipboard.images && capabilities.clipboard_data,
+            files: requested.clipboard.files && capabilities.clipboard_files,
+        },
+        audio: crate::RemoteDesktopAudioOptions {
+            playback: requested.audio.playback && capabilities.audio_playback,
+            capture: requested.audio.capture && capabilities.audio_capture,
+        },
+        display: crate::RemoteDesktopDisplayOptions {
+            use_all_monitors: requested.display.use_all_monitors && capabilities.multi_monitor,
+        },
     }
 }
 
@@ -269,7 +323,10 @@ fn send_delivery(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RemoteDesktopEndpoint, RemoteDesktopProtocol, builtin_preview_provider_registry};
+    use crate::{
+        RemoteDesktopEndpoint, RemoteDesktopProtocol, builtin_preview_provider_registry,
+        builtin_provider_manifest,
+    };
 
     fn profile() -> RemoteDesktopConnectionProfile {
         RemoteDesktopConnectionProfile {
@@ -284,6 +341,7 @@ mod tests {
             domain: None,
             credential_ref: None,
             read_only: false,
+            session_options: RemoteDesktopSessionOptions::default(),
         }
     }
 
@@ -320,5 +378,33 @@ mod tests {
             .unwrap();
 
         assert!(remote_desktop_provider_uses_fake_backend(provider));
+    }
+
+    #[test]
+    fn effective_options_never_exceed_provider_capabilities() {
+        let provider = builtin_provider_manifest(RemoteDesktopProtocol::Vnc);
+        let requested = RemoteDesktopSessionOptions {
+            clipboard: crate::RemoteDesktopClipboardOptions {
+                text: true,
+                images: true,
+                files: true,
+            },
+            audio: crate::RemoteDesktopAudioOptions {
+                playback: true,
+                capture: true,
+            },
+            display: crate::RemoteDesktopDisplayOptions {
+                use_all_monitors: true,
+            },
+        };
+
+        let effective = effective_session_options(requested, &provider);
+
+        assert!(effective.clipboard.text);
+        assert!(!effective.clipboard.images);
+        assert!(!effective.clipboard.files);
+        assert!(!effective.audio.playback);
+        assert!(!effective.audio.capture);
+        assert!(!effective.display.use_all_monitors);
     }
 }

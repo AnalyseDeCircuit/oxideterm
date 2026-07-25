@@ -7,6 +7,7 @@
 //! protocol dependencies. UI crates own presentation, helper binaries own the
 //! protocol engines, and this crate owns the shared wire/model boundary.
 
+mod certificate_store;
 mod codec;
 mod fake;
 mod frame_queue;
@@ -18,6 +19,9 @@ mod request_writer;
 mod secret;
 mod worker;
 
+pub use certificate_store::{
+    REMOTE_DESKTOP_CERTIFICATE_STORE_FILE, RemoteDesktopCertificateStore, certificate_endpoint_key,
+};
 pub use codec::{
     RemoteDesktopJsonLineError, decode_event_line, decode_request_line, encode_event_line,
     encode_request_line, read_event_line, read_request_line, write_event_line, write_request_line,
@@ -32,13 +36,16 @@ pub use helper_protocol::{
     RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopErrorCategory,
     RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopKey, RemoteDesktopKeyState,
     RemoteDesktopLockKeys, RemoteDesktopMouseButton, RemoteDesktopMouseButtonState,
-    RemoteDesktopWheelDelta,
+    RemoteDesktopServerCertificate, RemoteDesktopWheelDelta,
 };
 pub use model::{
-    RemoteDesktopConnectionProfile, RemoteDesktopCursorShape, RemoteDesktopEndpoint,
+    RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopConnectionProfile,
+    RemoteDesktopCursorShape, RemoteDesktopDisplayOptions, RemoteDesktopEndpoint,
     RemoteDesktopFrame, RemoteDesktopFrameCompression, RemoteDesktopFrameFormat,
-    RemoteDesktopFrameUpdate, RemoteDesktopProtocol, RemoteDesktopRect, RemoteDesktopSessionId,
-    RemoteDesktopSessionStatus, RemoteDesktopSize,
+    RemoteDesktopFrameUpdate, RemoteDesktopMonitor, RemoteDesktopMonitorLayout,
+    RemoteDesktopMonitorOrientation, RemoteDesktopProtocol, RemoteDesktopRect,
+    RemoteDesktopSessionId, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
+    RemoteDesktopSize,
 };
 pub use provider::{
     RemoteDesktopProviderCapabilities, RemoteDesktopProviderEntry, RemoteDesktopProviderError,
@@ -49,5 +56,6 @@ pub use provider::{
 pub use secret::RemoteDesktopSecret;
 pub use worker::{
     RemoteDesktopWorkerConfig, RemoteDesktopWorkerDelivery, RemoteDesktopWorkerId, connect_request,
-    remote_desktop_provider_uses_fake_backend, run_remote_desktop_worker,
+    effective_session_options, initial_connect_request, remote_desktop_provider_uses_fake_backend,
+    run_remote_desktop_worker,
 };

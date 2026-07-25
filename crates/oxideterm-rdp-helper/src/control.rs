@@ -21,6 +21,23 @@ pub(super) fn forward_client_rdp_request(
     read_only: bool,
 ) -> Result<(), String> {
     match request {
+        RemoteDesktopHelperRequest::Authenticate {
+            challenge_id,
+            sha256_fingerprint,
+            username,
+            password,
+            domain,
+        } => {
+            input_tx
+                .send(RdpInputEvent::Authenticate {
+                    challenge_id,
+                    sha256_fingerprint,
+                    username,
+                    password,
+                    domain,
+                })
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
+        }
         RemoteDesktopHelperRequest::Resize { size, scale_factor } => {
             let requested_size = normalized_rdp_desktop_size(size);
             input_tx
@@ -91,6 +108,21 @@ pub(super) fn forward_client_rdp_request(
                 .send(RdpInputEvent::SetClipboardData(data))
                 .map_err(|_| "RDP input channel is closed.".to_string())?;
         }
+        RemoteDesktopHelperRequest::ClipboardFiles { transfer_id, paths } if !read_only => {
+            input_tx
+                .send(RdpInputEvent::SetClipboardFiles { transfer_id, paths })
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
+        }
+        RemoteDesktopHelperRequest::UpdateDisplayLayout { layout } => {
+            input_tx
+                .send(RdpInputEvent::UpdateDisplayLayout(layout))
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
+        }
+        RemoteDesktopHelperRequest::CancelClipboardTransfer { transfer_id } => {
+            input_tx
+                .send(RdpInputEvent::CancelClipboardTransfer(transfer_id))
+                .map_err(|_| "RDP input channel is closed.".to_string())?;
+        }
         RemoteDesktopHelperRequest::SynchronizeLockKeys { keys } if !read_only => {
             send_client_rdp_lock_key_state(input_tx, keys)?;
         }
@@ -114,7 +146,8 @@ pub(super) fn forward_client_rdp_request(
                     .map_err(|_| "RDP input channel is closed.".to_string())?;
             }
         }
-        RemoteDesktopHelperRequest::Connect { .. }
+        RemoteDesktopHelperRequest::StartConnect { .. }
+        | RemoteDesktopHelperRequest::Connect { .. }
         | RemoteDesktopHelperRequest::Close
         | RemoteDesktopHelperRequest::Reconnect
         | RemoteDesktopHelperRequest::MouseMove { .. }
@@ -124,6 +157,7 @@ pub(super) fn forward_client_rdp_request(
         | RemoteDesktopHelperRequest::Text { .. }
         | RemoteDesktopHelperRequest::ClipboardText { .. }
         | RemoteDesktopHelperRequest::ClipboardData { .. }
+        | RemoteDesktopHelperRequest::ClipboardFiles { .. }
         | RemoteDesktopHelperRequest::SynchronizeLockKeys { .. }
         | RemoteDesktopHelperRequest::ReleaseAllInputs => {}
     }

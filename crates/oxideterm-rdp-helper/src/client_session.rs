@@ -138,12 +138,25 @@ impl RdpGraphicsDiagnostics {
 
 pub(super) async fn connect_native_rdp(
     config: &ClientRdpConfig,
+    input_rx: &mut tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     output_tx: ClientRdpOutputSender,
 ) -> connector::ConnectorResult<(ConnectionResult, UpgradedRdpFramed, EgfxSessionBridge)> {
-    let socket = TcpStream::connect((config.destination.host(), config.destination.port()))
-        .await
-        .map_err(|error| connector::custom_err!("TCP connect", error))?;
+    let mut deferred_inputs = VecDeque::new();
+    let socket = {
+        let connect = TcpStream::connect((config.destination.host(), config.destination.port()));
+        tokio::pin!(connect);
+        loop {
+            tokio::select! {
+                result = &mut connect => {
+                    break result.map_err(|error| connector::custom_err!("TCP connect", error))?;
+                }
+                input = input_rx.recv() => {
+                    defer_or_cancel_preconnection_input(input, &mut deferred_inputs)?;
+                }
+            }
+        }
+    };
     socket
         .set_nodelay(true)
         .map_err(|error| connector::custom_err!("set TCP_NODELAY", error))?;
@@ -152,52 +165,382 @@ pub(super) async fn connect_native_rdp(
         .map_err(|error| connector::custom_err!("get socket local address", error))?;
     let mut framed = ironrdp_tokio::TokioFramed::new(socket);
     let mut connector = connector::ClientConnector::new(config.connector.clone(), client_addr);
-    let egfx_bridge = attach_client_virtual_channels(&mut connector, input_tx, output_tx);
-    let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector).await?;
+    let egfx_bridge = attach_client_virtual_channels(
+        &mut connector,
+        input_tx.clone(),
+        output_tx.clone(),
+        config.session_options,
+        config.monitor_layout.clone(),
+    );
+    let should_upgrade = {
+        let connect_begin = ironrdp_tokio::connect_begin(&mut framed, &mut connector);
+        tokio::pin!(connect_begin);
+        loop {
+            tokio::select! {
+                result = &mut connect_begin => break result?,
+                input = input_rx.recv() => {
+                    defer_or_cancel_preconnection_input(input, &mut deferred_inputs)?;
+                }
+            }
+        }
+    };
     let (initial_stream, leftover_bytes) = framed.into_inner();
-    let (upgraded_stream, tls_cert) =
-        ironrdp_tls::upgrade(initial_stream, config.destination.host())
-            .await
-            .map_err(|error| connector::custom_err!("TLS upgrade", error))?;
+    let (upgraded_stream, tls_cert) = {
+        let tls_upgrade = ironrdp_tls::upgrade(initial_stream, config.destination.host());
+        tokio::pin!(tls_upgrade);
+        loop {
+            tokio::select! {
+                result = &mut tls_upgrade => {
+                    break result.map_err(|error| connector::custom_err!("TLS upgrade", error))?;
+                }
+                input = input_rx.recv() => {
+                    defer_or_cancel_preconnection_input(input, &mut deferred_inputs)?;
+                }
+            }
+        }
+    };
+    let certificate = rdp_server_certificate(&config.destination, &tls_cert)?;
+    output_tx
+        .send_control(ClientRdpOutput::Event(
+            RemoteDesktopHelperEvent::ServerCertificate {
+                certificate: certificate.clone(),
+            },
+        ))
+        .map_err(|error| connector::custom_err!("publish RDP certificate challenge", error))?;
+    wait_for_rdp_authentication(input_rx, &mut deferred_inputs, &mut connector, &certificate)
+        .await?;
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let erased_stream: Box<dyn AsyncReadWrite + Unpin + Send + Sync> = Box::new(upgraded_stream);
     let mut upgraded_framed =
         ironrdp_tokio::TokioFramed::new_with_leftover(erased_stream, leftover_bytes);
     let server_public_key = ironrdp_tls::extract_tls_server_public_key(&tls_cert)
         .ok_or_else(|| connector::general_err!("unable to extract TLS server public key"))?;
-    let connection_result = ironrdp_tokio::connect_finalize(
-        upgraded,
-        connector,
-        &mut upgraded_framed,
-        &mut ironrdp_tokio::reqwest::ReqwestNetworkClient::new(),
-        connector::ServerName::new(config.destination.host().to_string()),
-        server_public_key.to_owned(),
-        None,
-    )
-    .await?;
+    let connection_result = {
+        let mut network_client = ironrdp_tokio::reqwest::ReqwestNetworkClient::new();
+        let connect_finalize = ironrdp_tokio::connect_finalize(
+            upgraded,
+            connector,
+            &mut upgraded_framed,
+            &mut network_client,
+            connector::ServerName::new(config.destination.host().to_string()),
+            server_public_key.to_owned(),
+            None,
+        );
+        tokio::pin!(connect_finalize);
+        loop {
+            tokio::select! {
+                result = &mut connect_finalize => break result?,
+                input = input_rx.recv() => {
+                    defer_or_cancel_preconnection_input(input, &mut deferred_inputs)?;
+                }
+            }
+        }
+    };
+    for input in deferred_inputs {
+        // Preserve resize and input events generated while the certificate
+        // dialog was visible, after authentication has established the session.
+        let _ = input_tx.send(input);
+    }
     log_rdp_negotiated_graphics(&config.connector, &connection_result);
 
     Ok((connection_result, upgraded_framed, egfx_bridge))
+}
+
+fn defer_or_cancel_preconnection_input(
+    input: Option<RdpInputEvent>,
+    deferred_inputs: &mut VecDeque<RdpInputEvent>,
+) -> connector::ConnectorResult<()> {
+    match input {
+        Some(RdpInputEvent::Close) | None => {
+            Err(connector::general_err!("RDP connection canceled"))
+        }
+        Some(input) => {
+            deferred_inputs.push_back(input);
+            Ok(())
+        }
+    }
+}
+
+async fn wait_for_rdp_authentication(
+    input_rx: &mut tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
+    deferred_inputs: &mut VecDeque<RdpInputEvent>,
+    connector: &mut connector::ClientConnector,
+    certificate: &oxideterm_remote_desktop::RemoteDesktopServerCertificate,
+) -> connector::ConnectorResult<()> {
+    loop {
+        match input_rx.recv().await {
+            Some(RdpInputEvent::Authenticate {
+                challenge_id,
+                sha256_fingerprint,
+                mut username,
+                password,
+                mut domain,
+            }) => {
+                if challenge_id != certificate.challenge_id
+                    || sha256_fingerprint != certificate.sha256_fingerprint
+                {
+                    username.zeroize();
+                    if let Some(domain) = domain.as_mut() {
+                        domain.zeroize();
+                    }
+                    return Err(connector::general_err!(
+                        "RDP certificate challenge no longer matches the active TLS stream"
+                    ));
+                }
+                if username.trim().is_empty() || password.is_empty() {
+                    username.zeroize();
+                    if let Some(domain) = domain.as_mut() {
+                        domain.zeroize();
+                    }
+                    return Err(connector::general_err!("RDP credentials are incomplete"));
+                }
+
+                // IronRDP currently owns plain String credentials. This copy is
+                // created only after certificate acceptance and remains scoped
+                // to the native connector for the authenticated session.
+                connector.config.credentials = Credentials::UsernamePassword {
+                    username,
+                    password: password.expose_secret().to_string(),
+                };
+                connector.config.domain = domain;
+                connector.config.autologon = true;
+                return Ok(());
+            }
+            Some(RdpInputEvent::Close) | None => {
+                return Err(connector::general_err!("RDP connection canceled"));
+            }
+            Some(input) => deferred_inputs.push_back(input),
+        }
+    }
+}
+
+fn rdp_server_certificate(
+    destination: &ClientRdpDestination,
+    certificate: &x509_cert::Certificate,
+) -> connector::ConnectorResult<oxideterm_remote_desktop::RemoteDesktopServerCertificate> {
+    let der = certificate
+        .to_der()
+        .map_err(|error| connector::custom_err!("read RDP TLS certificate", error))?;
+    let digest = Sha256::digest(&der);
+    let fingerprint = digest
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":");
+
+    Ok(oxideterm_remote_desktop::RemoteDesktopServerCertificate {
+        challenge_id: uuid::Uuid::new_v4().to_string(),
+        endpoint: RemoteDesktopEndpoint::new(destination.host(), destination.port()),
+        sha256_fingerprint: fingerprint,
+        // native-tls exposes the authenticated certificate bytes but no
+        // portable subject/validity parser. The fingerprint remains the
+        // authoritative identity shown and pinned by OxideTerm.
+        subject: None,
+        issuer: None,
+        valid_from: None,
+        valid_to: None,
+    })
 }
 
 pub(super) fn attach_client_virtual_channels(
     connector: &mut connector::ClientConnector,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     output_tx: ClientRdpOutputSender,
+    session_options: RemoteDesktopSessionOptions,
+    monitor_layout: RemoteDesktopMonitorLayout,
 ) -> EgfxSessionBridge {
     let (graphics_pipeline, egfx_bridge) = new_egfx_channel(output_tx.clone());
-    let display_control = DrdynvcClient::new()
-        .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())))
+    let initial_layout = if session_options.display.use_all_monitors {
+        build_display_control_layout(&monitor_layout).ok()
+    } else {
+        None
+    };
+    let mut dynamic_channels = DrdynvcClient::new()
+        .with_dynamic_channel(DisplayControlClient::new(move |capabilities| {
+            let Some(layout) = initial_layout.as_ref() else {
+                return Ok(Vec::new());
+            };
+            let requested_area = layout
+                .monitors()
+                .iter()
+                .map(|monitor| {
+                    let (width, height) = monitor.dimensions();
+                    u64::from(width) * u64::from(height)
+                })
+                .sum::<u64>();
+            if requested_area > capabilities.max_monitor_area() {
+                return Ok(Vec::new());
+            }
+            Ok(vec![Box::new(DisplayControlPdu::from(layout.clone()))])
+        }))
         .with_dynamic_channel(graphics_pipeline);
-    connector.attach_static_channel(display_control);
+    if session_options.audio.capture {
+        dynamic_channels =
+            dynamic_channels.with_dynamic_channel(AudioInputClient::new(input_tx.clone()));
+    }
+    connector.attach_static_channel(dynamic_channels);
 
     // CLIPRDR is attached as a normal static channel while the backend itself
     // bridges callbacks into OxideTerm's helper protocol.
-    let clipboard = ClientClipboardBackend::new(input_tx, output_tx);
-    connector.attach_static_channel(CliprdrClient::new(Box::new(clipboard)));
+    if session_options.clipboard.text
+        || session_options.clipboard.images
+        || session_options.clipboard.files
+    {
+        let clipboard = ClientClipboardBackend::new(input_tx, output_tx, session_options.clipboard);
+        connector.attach_static_channel(CliprdrClient::new(Box::new(clipboard)));
+    }
+
+    // RDPSND is session-owned so disabling playback omits both negotiation and
+    // the local device thread.
+    if session_options.audio.playback {
+        let audio_backend = PcmRdpsndBackend::new();
+        connector.attach_static_channel(ironrdp::rdpsnd::client::Rdpsnd::new(Box::new(
+            audio_backend,
+        )));
+    }
 
     // The bridge is session-owned and is dropped after the active RDP loop exits.
     egfx_bridge
+}
+
+fn build_display_control_layout(
+    layout: &RemoteDesktopMonitorLayout,
+) -> ironrdp_core::EncodeResult<DisplayControlMonitorLayout> {
+    let monitors = layout
+        .monitors
+        .iter()
+        .map(|monitor| {
+            let mut entry = if monitor.primary {
+                MonitorLayoutEntry::new_primary(monitor.width, monitor.height)?
+            } else {
+                MonitorLayoutEntry::new_secondary(monitor.width, monitor.height)?
+                    .with_position(monitor.left, monitor.top)?
+            };
+            entry = entry
+                .with_orientation(match monitor.orientation {
+                    oxideterm_remote_desktop::RemoteDesktopMonitorOrientation::Landscape => {
+                        MonitorOrientation::Landscape
+                    }
+                    oxideterm_remote_desktop::RemoteDesktopMonitorOrientation::Portrait => {
+                        MonitorOrientation::Portrait
+                    }
+                    oxideterm_remote_desktop::RemoteDesktopMonitorOrientation::LandscapeFlipped => {
+                        MonitorOrientation::LandscapeFlipped
+                    }
+                    oxideterm_remote_desktop::RemoteDesktopMonitorOrientation::PortraitFlipped => {
+                        MonitorOrientation::PortraitFlipped
+                    }
+                })
+                .with_desktop_scale_factor(monitor.desktop_scale_factor)?
+                .with_device_scale_factor(match monitor.device_scale_factor {
+                    100 => DeviceScaleFactor::Scale100Percent,
+                    140 => DeviceScaleFactor::Scale140Percent,
+                    180 => DeviceScaleFactor::Scale180Percent,
+                    _ => DeviceScaleFactor::Scale100Percent,
+                });
+            if let (Some(width), Some(height)) =
+                (monitor.physical_width_mm, monitor.physical_height_mm)
+            {
+                entry = entry.with_physical_dimensions(width, height)?;
+            }
+            Ok(entry)
+        })
+        .collect::<ironrdp_core::EncodeResult<Vec<_>>>()?;
+    DisplayControlMonitorLayout::new(&monitors)
+}
+
+#[cfg(test)]
+mod monitor_layout_tests {
+    use super::*;
+    use oxideterm_remote_desktop::{RemoteDesktopMonitor, RemoteDesktopMonitorOrientation};
+
+    #[test]
+    fn display_control_layout_preserves_primary_relative_topology() {
+        let layout = RemoteDesktopMonitorLayout {
+            monitors: vec![
+                RemoteDesktopMonitor {
+                    stable_id: "primary".to_string(),
+                    left: 0,
+                    top: 0,
+                    width: 1920,
+                    height: 1080,
+                    primary: true,
+                    desktop_scale_factor: 100,
+                    device_scale_factor: 100,
+                    physical_width_mm: None,
+                    physical_height_mm: None,
+                    orientation: RemoteDesktopMonitorOrientation::Landscape,
+                },
+                RemoteDesktopMonitor {
+                    stable_id: "left".to_string(),
+                    left: -1280,
+                    top: 0,
+                    width: 1280,
+                    height: 1024,
+                    primary: false,
+                    desktop_scale_factor: 100,
+                    device_scale_factor: 100,
+                    physical_width_mm: None,
+                    physical_height_mm: None,
+                    orientation: RemoteDesktopMonitorOrientation::Landscape,
+                },
+            ],
+        };
+
+        let encoded = build_display_control_layout(&layout).unwrap();
+
+        assert_eq!(encoded.monitors().len(), 2);
+        assert!(encoded.monitors()[0].is_primary());
+        assert_eq!(encoded.monitors()[0].position(), Some((0, 0)));
+        assert_eq!(encoded.monitors()[1].position(), Some((-1280, 0)));
+        assert_eq!(encoded.monitors()[1].dimensions(), (1280, 1024));
+    }
+}
+
+fn encode_display_control_layout(
+    active_stage: &mut ActiveStage,
+    layout: &RemoteDesktopMonitorLayout,
+) -> Option<SessionResult<Vec<u8>>> {
+    let display_control_channel = active_stage.get_dvc::<DisplayControlClient>()?;
+    let channel_id = display_control_channel.channel_id()?;
+    let display_control =
+        display_control_channel.channel_processor_downcast_ref::<DisplayControlClient>()?;
+    if !display_control.ready() {
+        return None;
+    }
+    let layout = match build_display_control_layout(layout) {
+        Ok(layout) => DisplayControlPdu::from(layout),
+        Err(error) => return Some(Err(session::SessionError::encode(error))),
+    };
+    let messages =
+        match encode_dvc_messages(channel_id, vec![Box::new(layout)], ChannelFlags::empty()) {
+            Ok(messages) => messages,
+            Err(error) => return Some(Err(session::SessionError::encode(error))),
+        };
+    Some(
+        active_stage
+            .process_svc_processor_messages(SvcProcessorMessages::<DrdynvcClient>::new(messages)),
+    )
+}
+
+fn encode_pending_microphone_packets(
+    active_stage: &mut ActiveStage,
+) -> Option<SessionResult<Vec<u8>>> {
+    let audio_input_channel = active_stage.get_dvc::<AudioInputClient>()?;
+    let channel_id = audio_input_channel.channel_id()?;
+    let audio_input = audio_input_channel.channel_processor_downcast_ref::<AudioInputClient>()?;
+    let messages = audio_input.drain_messages();
+    if messages.is_empty() {
+        return None;
+    }
+    let messages = match encode_dvc_messages(channel_id, messages, ChannelFlags::empty()) {
+        Ok(messages) => messages,
+        Err(error) => return Some(Err(session::SessionError::encode(error))),
+    };
+    Some(
+        active_stage
+            .process_svc_processor_messages(SvcProcessorMessages::<DrdynvcClient>::new(messages)),
+    )
 }
 
 pub(super) async fn run_native_rdp_active_session(
@@ -284,6 +627,41 @@ pub(super) async fn run_native_rdp_active_session(
                     }
                     RdpInputEvent::SetClipboardData(data) => {
                         advertise_local_clipboard_data(&mut active_stage, data)?
+                    }
+                    RdpInputEvent::SetClipboardFiles { transfer_id, paths } => {
+                        advertise_local_clipboard_files(
+                            &mut active_stage,
+                            transfer_id,
+                            paths,
+                        )?
+                    }
+                    RdpInputEvent::CancelClipboardTransfer(transfer_id) => {
+                        cancel_clipboard_transfer(&mut active_stage, &transfer_id);
+                        Vec::new()
+                    }
+                    RdpInputEvent::UpdateDisplayLayout(layout) => {
+                        if let Some(response_frame) =
+                            encode_display_control_layout(&mut active_stage, &layout)
+                        {
+                            vec![ActiveStageOutput::ResponseFrame(response_frame?)]
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    RdpInputEvent::MicrophoneReady => {
+                        if let Some(response_frame) =
+                            encode_pending_microphone_packets(&mut active_stage)
+                        {
+                            vec![ActiveStageOutput::ResponseFrame(response_frame?)]
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    RdpInputEvent::Authenticate { .. } => {
+                        // Authentication is consumed before ActiveStage is
+                        // created. Ignore a delayed duplicate bound to the
+                        // already-established session.
+                        Vec::new()
                     }
                     RdpInputEvent::RequestFrame => {
                         if !egfx_bridge

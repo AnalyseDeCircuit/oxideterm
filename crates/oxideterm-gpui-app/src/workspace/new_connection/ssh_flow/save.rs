@@ -716,6 +716,9 @@ impl WorkspaceApp {
             domain: None,
             credential_ref: None,
             read_only: false,
+            // A reconnect reuses the profile, so keep the user's per-session
+            // redirection choices on the profile instead of rebuilding defaults.
+            session_options: form.remote_desktop_session_options,
         };
 
         self.new_connection_form = None;

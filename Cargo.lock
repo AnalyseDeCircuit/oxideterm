@@ -2706,6 +2706,7 @@ dependencies = [
  "const-oid 0.9.6",
  "der_derive",
  "flagset",
+ "pem-rfc7468 0.7.0",
  "zeroize",
 ]
 
@@ -2716,7 +2717,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71fd89660b2dc699704064e59e9dba0147b903e85319429e131620d022be411b"
 dependencies = [
  "const-oid 0.10.2",
- "pem-rfc7468",
+ "pem-rfc7468 1.0.0",
  "zeroize",
 ]
 
@@ -3044,7 +3045,7 @@ dependencies = [
  "group",
  "hkdf 0.13.0",
  "hybrid-array",
- "pem-rfc7468",
+ "pem-rfc7468 1.0.0",
  "pkcs8",
  "rand_core 0.10.1",
  "sec1",
@@ -5243,6 +5244,7 @@ dependencies = [
  "ironrdp-graphics",
  "ironrdp-input",
  "ironrdp-pdu",
+ "ironrdp-rdpsnd",
  "ironrdp-session",
  "ironrdp-svc",
 ]
@@ -5345,6 +5347,7 @@ dependencies = [
  "ironrdp-dvc",
  "ironrdp-graphics",
  "ironrdp-pdu",
+ "openh264",
  "tracing",
 ]
 
@@ -5399,6 +5402,18 @@ dependencies = [
  "sha1 0.10.6",
  "tap",
  "x509-cert",
+]
+
+[[package]]
+name = "ironrdp-rdpsnd"
+version = "0.8.1"
+source = "git+https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b#82c4acf89a173d38442f859e18963c39350ee74b"
+dependencies = [
+ "bitflags 2.11.1",
+ "ironrdp-core",
+ "ironrdp-pdu",
+ "ironrdp-svc",
+ "tracing",
 ]
 
 [[package]]
@@ -7189,6 +7204,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "openh264"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6b2b561d2103303e233779545da757ecd35bad82188d619a6d8901f3007e1ff"
+dependencies = [
+ "openh264-sys2",
+ "wide 1.5.0",
+]
+
+[[package]]
+name = "openh264-sys2"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75a8867e48183bbd9147380227448c065fe456eb30b0ebc68929809c36c30985"
+dependencies = [
+ "libloading",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "openssl"
 version = "0.10.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8041,6 +8076,7 @@ dependencies = [
 name = "oxideterm-rdp-helper"
 version = "2.0.11"
 dependencies = [
+ "cpal",
  "ironrdp",
  "ironrdp-cliprdr-format",
  "ironrdp-core",
@@ -8052,8 +8088,12 @@ dependencies = [
  "native-tls",
  "oxideterm-remote-desktop",
  "semver",
+ "sha2 0.10.9",
  "smallvec",
+ "tempfile",
  "tokio",
+ "uuid",
+ "x509-cert",
  "zeroize",
 ]
 
@@ -8062,8 +8102,10 @@ name = "oxideterm-remote-desktop"
 version = "2.0.11"
 dependencies = [
  "base64 0.22.1",
+ "oxideterm-atomic-file",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "uuid",
  "zeroize",
@@ -8545,6 +8587,15 @@ checksum = "112d82ceb8c5bf524d9af484d4e4970c9fd5a0cc15ba14ad93dccd28873b0629"
 dependencies = [
  "digest 0.11.3",
  "hmac 0.13.0",
+]
+
+[[package]]
+name = "pem-rfc7468"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+dependencies = [
+ "base64ct",
 ]
 
 [[package]]
@@ -9339,7 +9390,7 @@ dependencies = [
  "rand_xoshiro",
  "rayon",
  "ref-cast",
- "wide",
+ "wide 0.8.3",
 ]
 
 [[package]]
@@ -10546,6 +10597,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe_arch"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a52ec151f024d703f9fd65abb7cbe81e7cdb39f18917a3a37e3014470dc7c59"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "salsa20"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11328,7 +11388,7 @@ dependencies = [
  "crypto-bigint",
  "ctutils",
  "digest 0.11.3",
- "pem-rfc7468",
+ "pem-rfc7468 1.0.0",
  "zeroize",
 ]
 
@@ -14258,7 +14318,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13ca908d26e4786149c48efcf6c0ea09ab0e06d1fe3c17dc1b4b0f1ca4a7e788"
 dependencies = [
  "bytemuck",
- "safe_arch",
+ "safe_arch 0.9.3",
+]
+
+[[package]]
+name = "wide"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfdfe6a32973f2d1b268b8895845a8a96cac2f0191e72c27cc929036060dbf89"
+dependencies = [
+ "bytemuck",
+ "safe_arch 1.1.0",
 ]
 
 [[package]]

@@ -541,15 +541,14 @@ fn client_loop_prioritizes_queued_close_over_pending_output_error() {
     request_tx.send(RemoteDesktopHelperRequest::Close).unwrap();
     let mut config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-        username: "alice".to_string(),
-        password: RemoteDesktopSecret::from("secret"),
-        domain: None,
         size: RemoteDesktopSize {
             width: 1280,
             height: 720,
         },
         scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
         read_only: false,
+        session_options: RemoteDesktopSessionOptions::default(),
+        monitor_layout: RemoteDesktopMonitorLayout::default(),
     };
 
     let exit = run_client_rdp_loop(
@@ -602,7 +601,11 @@ fn clipboard_formats_prefer_unicode_text() {
 fn clipboard_ready_advertises_cached_local_text() {
     let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
     let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-    let mut backend = ClientClipboardBackend::new(input_tx, output_tx);
+    let mut backend = ClientClipboardBackend::new(
+        input_tx,
+        output_tx,
+        RemoteDesktopSessionOptions::default().clipboard,
+    );
     backend.set_local_text("hello".to_string());
 
     backend.on_ready();
@@ -628,7 +631,11 @@ fn clipboard_ready_advertises_cached_local_text() {
 fn clipboard_ready_advertises_cached_local_image_data() {
     let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
     let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-    let mut backend = ClientClipboardBackend::new(input_tx, output_tx);
+    let mut backend = ClientClipboardBackend::new(
+        input_tx,
+        output_tx,
+        RemoteDesktopSessionOptions::default().clipboard,
+    );
     backend.set_local_data(RemoteDesktopClipboardData::new(
         RemoteDesktopClipboardFormat::ImagePng,
         vec![1, 2, 3],
@@ -788,18 +795,17 @@ fn lock_key_sync_request_emits_fastpath_sync_event() {
 }
 
 #[test]
-fn client_config_enables_modern_rdp_security_and_bitmap_output() {
+fn client_config_withholds_credentials_until_certificate_acceptance() {
     let config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-        username: "alice".to_string(),
-        password: RemoteDesktopSecret::from("secret"),
-        domain: None,
         size: RemoteDesktopSize {
             width: 1280,
             height: 720,
         },
         scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
         read_only: false,
+        session_options: RemoteDesktopSessionOptions::default(),
+        monitor_layout: RemoteDesktopMonitorLayout::default(),
     };
 
     let client_config = build_client_rdp_config(&config).unwrap();
@@ -808,7 +814,7 @@ fn client_config_enables_modern_rdp_security_and_bitmap_output() {
     assert_eq!(client_config.destination.port(), 3389);
     assert!(client_config.connector.enable_tls);
     assert!(client_config.connector.enable_credssp);
-    assert!(client_config.connector.autologon);
+    assert!(!client_config.connector.autologon);
     assert!(client_config.connector.enable_server_pointer);
     assert!(!client_config.connector.pointer_software_rendering);
     assert!(client_config.connector.support_dyn_vc_gfx_protocol);
@@ -835,15 +841,14 @@ fn rdp_bitmap_codec_labels_describe_advertised_codecs() {
 fn client_config_adjusts_initial_display_size_for_rdp() {
     let config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-        username: "alice".to_string(),
-        password: RemoteDesktopSecret::from("secret"),
-        domain: None,
         size: RemoteDesktopSize {
             width: 1601,
             height: 899,
         },
         scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
         read_only: false,
+        session_options: RemoteDesktopSessionOptions::default(),
+        monitor_layout: RemoteDesktopMonitorLayout::default(),
     };
 
     let client_config = build_client_rdp_config(&config).unwrap();
@@ -916,15 +921,14 @@ fn resize_request_enters_client_loop_with_normalized_rdp_size() {
 fn reconnect_state_remembers_latest_resize() {
     let mut config = RdpWorkerConfig {
         endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-        username: "alice".to_string(),
-        password: RemoteDesktopSecret::from("secret"),
-        domain: None,
         size: RemoteDesktopSize {
             width: 1280,
             height: 720,
         },
         scale_factor: RDP_CONNECT_DEFAULT_SCALE_FACTOR_PERCENT,
         read_only: false,
+        session_options: RemoteDesktopSessionOptions::default(),
+        monitor_layout: RemoteDesktopMonitorLayout::default(),
     };
 
     remember_rdp_reconnect_state(

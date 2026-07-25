@@ -10,8 +10,9 @@ use std::{
 use ironrdp::pdu::geometry::{ExclusiveRectangle, Rectangle as _};
 use ironrdp_egfx::{
     client::{BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler, Surface},
+    decode::OpenH264Decoder,
     pdu::{
-        CacheToSurfacePdu, CapabilitiesV8Flags, CapabilitySet, Codec1Type,
+        CacheToSurfacePdu, CapabilitiesV8Flags, CapabilitiesV81Flags, CapabilitySet, Codec1Type,
         DeleteEncodingContextPdu, EvictCacheEntryPdu, GfxPdu, SolidFillPdu, SurfaceToCachePdu,
         SurfaceToSurfacePdu, WireToSurface2Pdu,
     },
@@ -31,6 +32,7 @@ const EGFX_MAX_DESKTOP_BYTES: usize = 256 * 1024 * 1024;
 const EGFX_MAX_SINGLE_SURFACE_BYTES: usize = 256 * 1024 * 1024;
 const EGFX_MAX_TOTAL_SURFACE_BYTES: usize = 512 * 1024 * 1024;
 const EGFX_MAX_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const OPENH264_LIBRARY_PATH_ENV: &str = "OXIDETERM_OPENH264_LIBRARY";
 
 /// Gives the session loop a safe way to request the latest EGFX base frame.
 #[derive(Clone)]
@@ -67,6 +69,17 @@ impl EgfxSessionBridge {
 pub(super) fn new_egfx_channel(
     output_tx: ClientRdpOutputSender,
 ) -> (GraphicsPipelineClient, EgfxSessionBridge) {
+    let h264_decoder = std::env::var_os(OPENH264_LIBRARY_PATH_ENV).and_then(|path| {
+        OpenH264Decoder::from_library_path(std::path::Path::new(&path))
+            .map(|decoder| Box::new(decoder) as Box<dyn ironrdp_egfx::decode::H264Decoder>)
+            .map_err(|error| {
+                if remote_rdp_helper_graphics_diagnostics_enabled() {
+                    eprintln!("[oxideterm:rdp-helper-capabilities] OpenH264 unavailable: {error}");
+                }
+            })
+            .ok()
+    });
+    let h264_available = h264_decoder.is_some();
     let renderer = Arc::new(Mutex::new(EgfxRenderer::new(output_tx.clone())));
     let bridge = EgfxSessionBridge {
         renderer: renderer.clone(),
@@ -75,16 +88,20 @@ pub(super) fn new_egfx_channel(
         renderer,
         output_tx,
         reported_lock_failure: false,
+        h264_available,
     };
 
-    // No H.264 decoder is supplied, so the channel cannot advertise AVC modes.
-    (GraphicsPipelineClient::new(Box::new(handler), None), bridge)
+    (
+        GraphicsPipelineClient::new(Box::new(handler), h264_decoder),
+        bridge,
+    )
 }
 
 struct OxideTermGraphicsPipelineHandler {
     renderer: Arc<Mutex<EgfxRenderer>>,
     output_tx: ClientRdpOutputSender,
     reported_lock_failure: bool,
+    h264_available: bool,
 }
 
 impl OxideTermGraphicsPipelineHandler {
@@ -111,10 +128,19 @@ impl OxideTermGraphicsPipelineHandler {
 
 impl GraphicsPipelineHandler for OxideTermGraphicsPipelineHandler {
     fn capabilities(&self) -> Vec<CapabilitySet> {
-        // V8 provides Progressive, ClearCodec, and Uncompressed without implying AVC support.
-        vec![CapabilitySet::V8 {
+        let mut capabilities = Vec::with_capacity(2);
+        if self.h264_available {
+            // V8.1 is the newest capability set whose complete AVC surface is
+            // implemented by the pinned IronRDP client. V10.x would also
+            // advertise AVC444, which is intentionally unsupported here.
+            capabilities.push(CapabilitySet::V8_1 {
+                flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
+            });
+        }
+        capabilities.push(CapabilitySet::V8 {
             flags: CapabilitiesV8Flags::SMALL_CACHE,
-        }]
+        });
+        capabilities
     }
 
     fn on_capabilities_confirmed(&mut self, capabilities: &CapabilitySet) {
@@ -242,10 +268,16 @@ impl EgfxRenderer {
     }
 
     fn confirm_capabilities(&self, capabilities: &CapabilitySet) -> Result<(), String> {
-        if matches!(capabilities, CapabilitySet::V8 { .. }) {
-            Ok(())
-        } else {
-            Err("RDP server confirmed an EGFX capability OxideTerm did not advertise.".to_string())
+        match capabilities {
+            CapabilitySet::V8 { .. } => Ok(()),
+            CapabilitySet::V8_1 { flags }
+                if flags.contains(CapabilitiesV81Flags::AVC420_ENABLED) =>
+            {
+                Ok(())
+            }
+            _ => Err(
+                "RDP server confirmed an EGFX capability OxideTerm did not advertise.".to_string(),
+            ),
         }
     }
 
@@ -919,6 +951,7 @@ mod tests {
             renderer,
             output_tx,
             reported_lock_failure: false,
+            h264_available: false,
         };
 
         assert_eq!(
@@ -926,6 +959,30 @@ mod tests {
             vec![CapabilitySet::V8 {
                 flags: CapabilitiesV8Flags::SMALL_CACHE,
             }]
+        );
+    }
+
+    #[test]
+    fn handler_advertises_avc420_only_when_decoder_is_available() {
+        let (output_tx, _output_rx) = client_rdp_output_channel(4);
+        let renderer = Arc::new(Mutex::new(EgfxRenderer::new(output_tx.clone())));
+        let handler = OxideTermGraphicsPipelineHandler {
+            renderer,
+            output_tx,
+            reported_lock_failure: false,
+            h264_available: true,
+        };
+
+        assert_eq!(
+            handler.capabilities(),
+            vec![
+                CapabilitySet::V8_1 {
+                    flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
+                },
+                CapabilitySet::V8 {
+                    flags: CapabilitiesV8Flags::SMALL_CACHE,
+                },
+            ]
         );
     }
 

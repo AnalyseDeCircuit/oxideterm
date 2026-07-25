@@ -4,6 +4,91 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopClipboardOptions {
+    pub text: bool,
+    pub images: bool,
+    pub files: bool,
+}
+
+impl Default for RemoteDesktopClipboardOptions {
+    fn default() -> Self {
+        Self {
+            // Text and image clipboard redirection preserve the existing RDP behavior.
+            text: true,
+            images: true,
+            files: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopAudioOptions {
+    pub playback: bool,
+    pub capture: bool,
+}
+
+impl Default for RemoteDesktopAudioOptions {
+    fn default() -> Self {
+        Self {
+            playback: true,
+            // Microphone access must always be an explicit user choice.
+            capture: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopDisplayOptions {
+    pub use_all_monitors: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopSessionOptions {
+    #[serde(default)]
+    pub clipboard: RemoteDesktopClipboardOptions,
+    #[serde(default)]
+    pub audio: RemoteDesktopAudioOptions,
+    #[serde(default)]
+    pub display: RemoteDesktopDisplayOptions,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopMonitorOrientation {
+    Landscape,
+    Portrait,
+    LandscapeFlipped,
+    PortraitFlipped,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopMonitor {
+    pub stable_id: String,
+    pub left: i32,
+    pub top: i32,
+    pub width: u32,
+    pub height: u32,
+    pub primary: bool,
+    pub desktop_scale_factor: u32,
+    pub device_scale_factor: u32,
+    pub physical_width_mm: Option<u32>,
+    pub physical_height_mm: Option<u32>,
+    pub orientation: RemoteDesktopMonitorOrientation,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopMonitorLayout {
+    #[serde(default)]
+    pub monitors: Vec<RemoteDesktopMonitor>,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteDesktopProtocol {
@@ -113,6 +198,8 @@ pub struct RemoteDesktopConnectionProfile {
     pub domain: Option<String>,
     pub credential_ref: Option<String>,
     pub read_only: bool,
+    #[serde(default)]
+    pub session_options: RemoteDesktopSessionOptions,
 }
 
 impl RemoteDesktopConnectionProfile {
@@ -141,6 +228,7 @@ impl RemoteDesktopConnectionProfile {
             domain: None,
             credential_ref: None,
             read_only: false,
+            session_options: RemoteDesktopSessionOptions::default(),
         })
     }
 
