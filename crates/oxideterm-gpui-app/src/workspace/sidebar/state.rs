@@ -162,6 +162,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.set_sidebar_collapsed_with_motion(!self.sidebar_collapsed, cx);
         self.sidebar_resizing = false;
+        self.sidebar_resize_hotzone_hovered = false;
         self.persist_sidebar_settings();
         cx.notify();
     }
@@ -313,6 +314,7 @@ impl WorkspaceApp {
             .ai_sidebar_collapsed = true;
         self.set_context_sidebar_rendered_with_motion(false, cx);
         self.ai.chat.sidebar_resizing = false;
+        self.sidebar_resize_hotzone_hovered = false;
         self.sync_host_gpu_sampling(cx);
         self.clear_ai_sidebar_keyboard_focus();
         self.close_ai_sidebar_popovers();

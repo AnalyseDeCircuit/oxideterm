@@ -243,6 +243,12 @@ impl Render for WorkspaceApp {
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
         let titlebar_visible = self.window_titlebar_visible(window);
         let effective_titlebar_height = self.window_titlebar_height(window);
+        let resize_hotzone_visible =
+            !zen_mode && (!self.sidebar_collapsed || self.context_sidebar_visible());
+        let sidebar_resize_cursor_active = (resize_hotzone_visible
+            && self.sidebar_resize_hotzone_hovered)
+            || self.sidebar_resizing
+            || self.ai.chat.sidebar_resizing;
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode);
 
         div()
@@ -260,10 +266,9 @@ impl Render for WorkspaceApp {
             .font_family(settings_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
             ))
-            .when(
-                self.sidebar_resizing || self.ai.chat.sidebar_resizing,
-                |root| root.cursor(CursorStyle::ResizeColumn),
-            )
+            .when(sidebar_resize_cursor_active, |root| {
+                root.cursor(CursorStyle::ResizeColumn)
+            })
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .on_mouse_down(
@@ -912,6 +917,27 @@ impl Render for WorkspaceApp {
                         layout.child(self.render_animated_context_sidebar_frame(cx))
                     }),
             )
+            .when(!zen_mode && !self.sidebar_collapsed, |root| {
+                root.child(self.render_left_sidebar_resize_hotzone(effective_titlebar_height, cx))
+            })
+            .when(!zen_mode && self.context_sidebar_visible(), |root| {
+                root.child(
+                    self.render_context_right_sidebar_resize_hotzone(effective_titlebar_height, cx),
+                )
+            })
+            .when(sidebar_resize_cursor_active, |root| {
+                root.child(
+                    canvas(
+                        |_, _, _| (),
+                        |_, _, window, _| {
+                            // A window-level override keeps the resize cursor active above
+                            // blocking terminal and virtual-list hitboxes.
+                            window.set_window_cursor_style(CursorStyle::ResizeColumn);
+                        },
+                    )
+                    .absolute(),
+                )
+            })
             .when(
                 self.browser_pointer_capture_owner()
                     .is_some_and(browser_behavior::pointer_capture_needs_workspace_overlay),

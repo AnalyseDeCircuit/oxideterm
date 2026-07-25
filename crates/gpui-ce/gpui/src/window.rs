@@ -3313,6 +3313,14 @@ impl Window {
         });
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    /// Returns the cursor resolved for the current mouse hit test.
+    pub fn cursor_style_for_test(&self) -> CursorStyle {
+        self.rendered_frame
+            .cursor_style(self)
+            .unwrap_or(CursorStyle::Arrow)
+    }
+
     /// Updates the cursor style for the entire window at the platform level. A cursor
     /// style using this method will have precedence over any cursor style set using
     /// `set_cursor_style`. This method should only be called during the paint

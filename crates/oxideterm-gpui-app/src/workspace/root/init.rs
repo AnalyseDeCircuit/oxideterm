@@ -279,6 +279,7 @@ impl WorkspaceApp {
             native_plugin_ui: plugin_ui::NativePluginUiState::default(),
             split_drag: None,
             sidebar_resizing: false,
+            sidebar_resize_hotzone_hovered: false,
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_rendered: !settings.sidebar_ui.collapsed,
             sidebar_motion_generation: 0,

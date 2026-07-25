@@ -91,8 +91,8 @@ use gpui::{
     ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba,
     ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, TextLayout,
-    Timer, UniformListScrollHandle, WeakEntity, Window, anchored, deferred, div, prelude::*, px,
-    relative, rgb, rgba, svg,
+    Timer, UniformListScrollHandle, WeakEntity, Window, anchored, canvas, deferred, div,
+    prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connection_monitor::{
     CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
@@ -826,6 +826,7 @@ pub(crate) struct WorkspaceApp {
     native_plugin_ui: plugin_ui::NativePluginUiState,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
+    sidebar_resize_hotzone_hovered: bool,
     sidebar_collapsed: bool,
     sidebar_rendered: bool,
     sidebar_motion_generation: u64,
