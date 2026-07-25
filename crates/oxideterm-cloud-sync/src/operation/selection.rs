@@ -62,6 +62,48 @@ pub(super) fn filter_serial_profiles_snapshot(
     }
 }
 
+pub(super) fn filter_remote_desktop_profiles_snapshot(
+    snapshot: &mut RemoteDesktopProfilesSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .records
+            .retain(|profile| selected_ids.contains(&profile.id));
+    }
+}
+
+pub(super) fn strip_remote_desktop_credential_refs(
+    snapshot: &mut RemoteDesktopProfilesSyncSnapshot,
+) {
+    // Protected-store identifiers are device-local and must never cross the cloud boundary.
+    for profile in &mut snapshot.records {
+        profile.credential_ref = None;
+    }
+}
+
+pub(super) fn preserve_local_remote_desktop_credential_refs(
+    snapshot: &mut RemoteDesktopProfilesSyncSnapshot,
+    connection_store: &ConnectionStore,
+) {
+    let local_refs = connection_store
+        .remote_desktop_profiles()
+        .iter()
+        .filter_map(|profile| {
+            profile
+                .credential_ref
+                .as_ref()
+                .map(|credential_ref| (profile.id.as_str(), credential_ref))
+        })
+        .collect::<BTreeMap<_, _>>();
+    // Applying remote metadata must not erase an existing device-local protected-store binding.
+    for profile in &mut snapshot.records {
+        profile.credential_ref = local_refs
+            .get(profile.id.as_str())
+            .map(|credential_ref| (*credential_ref).clone());
+    }
+}
+
 pub(super) fn filter_quick_commands_snapshot_json(
     snapshot_json: &mut String,
     selected_ids: Option<&BTreeSet<String>>,
@@ -138,6 +180,7 @@ pub(super) fn has_structured_conflict(
             || dirty_sections.forwards
             || dirty_sections.quick_commands
             || dirty_sections.serial_profiles
+            || dirty_sections.remote_desktop_profiles
             || dirty_sections.sensitive_credentials
             || dirty_sections.app_settings.values().any(|dirty| *dirty)
             || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
@@ -153,6 +196,11 @@ pub(super) fn has_structured_conflict(
         return true;
     }
     if dirty_sections.serial_profiles && remote.serial_profiles != previous.serial_profiles {
+        return true;
+    }
+    if dirty_sections.remote_desktop_profiles
+        && remote.remote_desktop_profiles != previous.remote_desktop_profiles
+    {
         return true;
     }
     if dirty_sections.sensitive_credentials

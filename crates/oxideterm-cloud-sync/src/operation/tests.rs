@@ -52,8 +52,86 @@ fn dirty_snapshot() -> CloudSyncLocalSnapshot {
         forwards_record_count: 0,
         quick_commands_record_count: 0,
         serial_profiles_record_count: 0,
+        remote_desktop_profiles_record_count: 0,
         sensitive_credentials_record_count: 0,
     }
+}
+
+fn remote_desktop_snapshot(
+    credential_ref: Option<&str>,
+    host: &str,
+) -> oxideterm_connections::RemoteDesktopProfilesSyncSnapshot {
+    serde_json::from_value(serde_json::json!({
+        "revision": "remote-desktop-revision",
+        "exportedAt": "2026-07-26T00:00:00Z",
+        "records": [{
+            "id": "desktop-1",
+            "name": "Production desktop",
+            "protocol": "vnc",
+            "host": host,
+            "port": 5900,
+            "credential_ref": credential_ref,
+            "created_at": "2026-07-26T00:00:00Z",
+            "updated_at": "2026-07-26T00:00:00Z"
+        }]
+    }))
+    .expect("remote desktop snapshot should deserialize")
+}
+
+#[test]
+fn remote_desktop_cloud_metadata_omits_device_local_credential_refs() {
+    let mut snapshot = remote_desktop_snapshot(Some("device-keychain-entry"), "desktop.test");
+
+    strip_remote_desktop_credential_refs(&mut snapshot);
+
+    let json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
+    assert!(!json.contains("device-keychain-entry"));
+    assert!(snapshot.records[0].credential_ref.is_none());
+}
+
+#[test]
+fn remote_desktop_apply_preserves_only_the_current_devices_credential_ref() {
+    let path = std::env::temp_dir().join(format!(
+        "oxideterm-cloud-sync-remote-desktop-{}.json",
+        uuid::Uuid::new_v4()
+    ));
+    let mut store_data = oxideterm_connections::ConnectionStoreData::default();
+    store_data.remote_desktop_profiles =
+        remote_desktop_snapshot(Some("current-device-keychain-entry"), "desktop.test").records;
+    std::fs::write(&path, serde_json::to_vec(&store_data).unwrap()).unwrap();
+    let store = ConnectionStore::load(&path).expect("connection store should load");
+    let mut incoming =
+        remote_desktop_snapshot(Some("untrusted-remote-keychain-entry"), "remote.test");
+
+    preserve_local_remote_desktop_credential_refs(&mut incoming, &store);
+
+    assert_eq!(
+        incoming.records[0].credential_ref.as_deref(),
+        Some("current-device-keychain-entry")
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn remote_desktop_three_way_merge_preserves_independent_changes() {
+    let base = remote_desktop_snapshot(None, "old.test");
+    let mut local = base.clone();
+    local.records[0].name = "Renamed desktop".to_string();
+    let mut remote = base.clone();
+    remote.records[0].host = "new.test".to_string();
+
+    let changed = merge_remote_desktop_profile_records(
+        &mut remote,
+        &base,
+        &local,
+        &ConflictStrategy::Merge,
+        Utc::now(),
+    )
+    .expect("remote desktop profile merge should succeed");
+
+    assert!(changed);
+    assert_eq!(remote.records[0].name, "Renamed desktop");
+    assert_eq!(remote.records[0].host, "new.test");
 }
 
 #[test]
@@ -256,6 +334,7 @@ fn upload_conflict_check_rejects_changed_sensitive_credentials_section() {
         forwards_record_count: 0,
         quick_commands_record_count: 0,
         serial_profiles_record_count: 0,
+        remote_desktop_profiles_record_count: 0,
         sensitive_credentials_record_count: 1,
     };
     let metadata = RemoteMetadata {

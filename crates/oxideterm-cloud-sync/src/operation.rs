@@ -9,8 +9,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use oxideterm_connections::{
-    ConnectionStore, SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
-    SerialProfilesSyncSnapshot,
+    ConnectionStore, RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
+    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
     oxide_file::{
         AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideImportOptions, OxideMetadata,
@@ -36,7 +36,7 @@ use crate::{
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
     },
-    quick_commands_object_path, revision_id, secret_keys,
+    quick_commands_object_path, remote_desktop_profiles_object_path, revision_id, secret_keys,
     secrets::{CloudSyncSecretProvider, SecretReadMode, get_action_secrets},
     sensitive_credentials_object_path, serial_profiles_object_path,
     service::{
@@ -139,6 +139,7 @@ pub struct StructuredUploadItemFilter {
     pub forward_ids: Option<BTreeSet<String>>,
     pub quick_command_ids: Option<BTreeSet<String>>,
     pub serial_profile_ids: Option<BTreeSet<String>>,
+    pub remote_desktop_profile_ids: Option<BTreeSet<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -204,10 +205,12 @@ pub struct StructuredPreview {
     pub forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands_snapshot_json: Option<String>,
     pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub base_connections_snapshot: Option<SavedConnectionsSyncSnapshot>,
     pub base_forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub base_quick_commands_snapshot_json: Option<String>,
     pub base_serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub base_remote_desktop_profiles_snapshot: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub sensitive_credentials_entry: Option<Vec<u8>>,
     pub sensitive_credentials_preview: Option<ImportPreview>,
     pub app_settings_entries: std::collections::BTreeMap<String, Vec<u8>>,
@@ -248,6 +251,7 @@ impl StructuredPreview {
             forwards: self.forwards_snapshot.is_some(),
             quick_commands: self.quick_commands_snapshot_json.is_some(),
             serial_profiles: self.serial_profiles_snapshot.is_some(),
+            remote_desktop_profiles: self.remote_desktop_profiles_snapshot.is_some(),
             sensitive_credentials: self.sensitive_credentials_entry.is_some(),
             app_settings_sections: self.app_settings_entries.keys().cloned().collect(),
             plugin_ids: self.plugin_settings_entries.keys().cloned().collect(),

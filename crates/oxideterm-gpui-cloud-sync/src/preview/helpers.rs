@@ -477,6 +477,11 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                     .as_ref()
                     .map(|snapshot| snapshot.records.len())
                     .unwrap_or(0),
+                remote_desktop_profiles: preview
+                    .remote_desktop_profiles_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.records.len())
+                    .unwrap_or(0),
                 sensitive_credentials: preview
                     .sensitive_credentials_preview
                     .as_ref()
@@ -510,6 +515,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: 0,
+            remote_desktop_profiles: 0,
             sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
             has_app_settings: preview.preview.has_app_settings,
             app_settings_sections: preview

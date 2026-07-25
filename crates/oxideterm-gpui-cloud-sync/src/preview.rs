@@ -13,8 +13,8 @@ use oxideterm_cloud_sync::{
     state::CloudSyncPersistedState,
 };
 use oxideterm_connections::{
-    ConnectionInfo, SavedConnectionsSyncSnapshot, SerialProfile, SerialProfilesSyncSnapshot,
-    oxide_file::AppSettingsSectionPreview,
+    ConnectionInfo, RemoteDesktopProfilesSyncSnapshot, SavedConnectionsSyncSnapshot, SerialProfile,
+    SerialProfilesSyncSnapshot, oxide_file::AppSettingsSectionPreview,
 };
 use oxideterm_forwarding::{PersistedForwardDto, SavedForwardsSyncSnapshot};
 use oxideterm_quick_commands::{QuickCommand, QuickCommandsSnapshot};
@@ -62,6 +62,7 @@ pub struct CloudSyncPreviewSummary {
     pub forwards: usize,
     pub quick_commands: usize,
     pub serial_profiles: usize,
+    pub remote_desktop_profiles: usize,
     pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub app_settings_sections: Vec<CloudSyncAppSettingsSection>,
@@ -211,6 +212,7 @@ pub struct CloudSyncLocalFieldDiffSnapshot {
     pub forwards: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands: Option<QuickCommandsSnapshot>,
     pub serial_profiles: Option<SerialProfilesSyncSnapshot>,
+    pub remote_desktop_profiles: Option<RemoteDesktopProfilesSyncSnapshot>,
     pub app_settings_sections: Vec<AppSettingsSectionPreview>,
 }
 

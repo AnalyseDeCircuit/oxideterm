@@ -26,6 +26,8 @@ pub enum CloudSyncPreviewSelectionAction {
     ToggleQuickCommandItem(String),
     ToggleSerialProfiles,
     ToggleSerialProfileItem(String),
+    ToggleRemoteDesktopProfiles,
+    ToggleRemoteDesktopProfileItem(String),
     ToggleSensitiveCredentials,
     ToggleAppSettings,
     ToggleAppSettingsSection(String),
@@ -82,6 +84,8 @@ pub struct CloudSyncPreviewSelection {
     pub selected_quick_command_ids: BTreeSet<String>,
     pub import_serial_profiles: bool,
     pub selected_serial_profile_ids: BTreeSet<String>,
+    pub import_remote_desktop_profiles: bool,
+    pub selected_remote_desktop_profile_ids: BTreeSet<String>,
     pub import_sensitive_credentials: bool,
     pub import_app_settings: bool,
     pub selected_app_settings_sections: BTreeSet<String>,
@@ -102,6 +106,8 @@ pub enum CloudSyncUploadSelectionAction {
     ToggleQuickCommandItem(String),
     ToggleSerialProfiles,
     ToggleSerialProfileItem(String),
+    ToggleRemoteDesktopProfiles,
+    ToggleRemoteDesktopProfileItem(String),
     ToggleSensitiveCredentials,
     ToggleAppSettings,
     ToggleAppSettingsSection(String),
@@ -122,6 +128,9 @@ pub struct CloudSyncUploadSelection {
     pub sync_serial_profiles: bool,
     pub serial_profile_item_ids: BTreeSet<String>,
     pub selected_serial_profile_ids: Option<BTreeSet<String>>,
+    pub sync_remote_desktop_profiles: bool,
+    pub remote_desktop_profile_item_ids: BTreeSet<String>,
+    pub selected_remote_desktop_profile_ids: Option<BTreeSet<String>>,
     pub sync_sensitive_credentials: bool,
     pub sync_app_settings: bool,
     pub selected_app_settings_sections: BTreeSet<String>,
@@ -171,6 +180,15 @@ impl CloudSyncUploadSelection {
                 .map(|profile| profile.id.clone())
                 .collect(),
             selected_serial_profile_ids: None,
+            sync_remote_desktop_profiles: scope.sync_remote_desktop_profiles,
+            remote_desktop_profile_item_ids: local
+                .remote_desktop_profiles
+                .as_ref()
+                .into_iter()
+                .flat_map(|snapshot| snapshot.records.iter())
+                .map(|profile| profile.id.clone())
+                .collect(),
+            selected_remote_desktop_profile_ids: None,
             sync_sensitive_credentials: scope.sync_sensitive_credentials,
             sync_app_settings: scope.sync_app_settings,
             selected_app_settings_sections: scope.app_settings_sections.iter().cloned().collect(),
@@ -184,6 +202,7 @@ impl CloudSyncUploadSelection {
         scope.sync_forwards = Some(self.sync_forwards);
         scope.sync_quick_commands = Some(self.sync_quick_commands);
         scope.sync_serial_profiles = Some(self.sync_serial_profiles);
+        scope.sync_remote_desktop_profiles = Some(self.sync_remote_desktop_profiles);
         scope.sync_sensitive_credentials = Some(self.sync_sensitive_credentials);
         scope.sync_app_settings = Some(self.sync_app_settings);
         scope.app_settings_sections = Some(
@@ -202,6 +221,7 @@ impl CloudSyncUploadSelection {
             forward_ids: self.selected_forward_ids.clone(),
             quick_command_ids: self.selected_quick_command_ids.clone(),
             serial_profile_ids: self.selected_serial_profile_ids.clone(),
+            remote_desktop_profile_ids: self.selected_remote_desktop_profile_ids.clone(),
         }
     }
 
@@ -223,6 +243,10 @@ impl CloudSyncUploadSelection {
                 .selected_serial_profile_ids
                 .as_ref()
                 .is_none_or(|selected| selected.contains(id)),
+            CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfileItem(id) => self
+                .selected_remote_desktop_profile_ids
+                .as_ref()
+                .is_none_or(|selected| selected.contains(id)),
             CloudSyncUploadSelectionAction::ToggleAppSettingsSection(id) => {
                 self.selected_app_settings_sections.contains(id)
             }
@@ -230,6 +254,9 @@ impl CloudSyncUploadSelection {
             CloudSyncUploadSelectionAction::ToggleForwards => self.sync_forwards,
             CloudSyncUploadSelectionAction::ToggleQuickCommands => self.sync_quick_commands,
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => self.sync_serial_profiles,
+            CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
+                self.sync_remote_desktop_profiles
+            }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 self.sync_sensitive_credentials
             }
@@ -273,6 +300,16 @@ impl CloudSyncUploadSelection {
                 toggle_optional_set_value(
                     &mut self.selected_serial_profile_ids,
                     &self.serial_profile_item_ids,
+                    id,
+                );
+            }
+            CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
+                self.sync_remote_desktop_profiles = !self.sync_remote_desktop_profiles;
+            }
+            CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfileItem(id) => {
+                toggle_optional_set_value(
+                    &mut self.selected_remote_desktop_profile_ids,
+                    &self.remote_desktop_profile_item_ids,
                     id,
                 );
             }
@@ -364,6 +401,8 @@ impl CloudSyncPreviewSelection {
             selected_quick_command_ids: preview_quick_command_ids(preview),
             import_serial_profiles: summary.serial_profiles > 0,
             selected_serial_profile_ids: preview_serial_profile_ids(preview),
+            import_remote_desktop_profiles: summary.remote_desktop_profiles > 0,
+            selected_remote_desktop_profile_ids: preview_remote_desktop_profile_ids(preview),
             import_sensitive_credentials: summary.sensitive_credentials > 0,
             import_app_settings: summary.has_app_settings,
             selected_app_settings_sections: summary
@@ -427,6 +466,7 @@ impl CloudSyncPreviewSelection {
             || self.effective_import_forwards(summary)
             || self.effective_import_quick_commands(summary)
             || self.effective_import_serial_profiles(summary)
+            || self.effective_import_remote_desktop_profiles(summary)
             || self.import_sensitive_credentials
             || self.effective_import_app_settings(summary)
             || self.effective_import_plugin_settings()
@@ -440,6 +480,8 @@ impl CloudSyncPreviewSelection {
                 && !self.selected_quick_command_ids.is_empty(),
             serial_profiles: self.import_serial_profiles
                 && !self.selected_serial_profile_ids.is_empty(),
+            remote_desktop_profiles: self.import_remote_desktop_profiles
+                && !self.selected_remote_desktop_profile_ids.is_empty(),
             sensitive_credentials: self.import_sensitive_credentials,
             app_settings_sections: if self.import_app_settings {
                 self.selected_app_settings_sections
@@ -469,6 +511,15 @@ impl CloudSyncPreviewSelection {
     pub fn effective_import_serial_profiles(&self, summary: &CloudSyncPreviewSummary) -> bool {
         self.import_serial_profiles
             && (summary.serial_profiles == 0 || !self.selected_serial_profile_ids.is_empty())
+    }
+
+    pub fn effective_import_remote_desktop_profiles(
+        &self,
+        summary: &CloudSyncPreviewSummary,
+    ) -> bool {
+        self.import_remote_desktop_profiles
+            && (summary.remote_desktop_profiles == 0
+                || !self.selected_remote_desktop_profile_ids.is_empty())
     }
 
     pub fn selected_app_settings_hash_set(
@@ -543,6 +594,19 @@ impl CloudSyncPreviewSelection {
                 checked: self.import_serial_profiles,
                 disabled: false,
                 action: CloudSyncPreviewSelectionAction::ToggleSerialProfiles,
+            });
+        }
+        if summary.remote_desktop_profiles > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_remote_desktop_profiles",
+                    count_name: "count",
+                    count: summary.remote_desktop_profiles,
+                },
+                meta: None,
+                checked: self.import_remote_desktop_profiles,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleRemoteDesktopProfiles,
             });
         }
         if summary.sensitive_credentials > 0 {
@@ -658,6 +722,12 @@ impl CloudSyncPreviewSelection {
             CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(profile_id) => {
                 toggle_set_value(&mut self.selected_serial_profile_ids, profile_id);
             }
+            CloudSyncPreviewSelectionAction::ToggleRemoteDesktopProfiles => {
+                self.import_remote_desktop_profiles = !self.import_remote_desktop_profiles;
+            }
+            CloudSyncPreviewSelectionAction::ToggleRemoteDesktopProfileItem(profile_id) => {
+                toggle_set_value(&mut self.selected_remote_desktop_profile_ids, profile_id);
+            }
             CloudSyncPreviewSelectionAction::ToggleSensitiveCredentials => {
                 self.import_sensitive_credentials = !self.import_sensitive_credentials;
             }
@@ -761,6 +831,19 @@ fn preview_serial_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Str
     }
 }
 
+fn preview_remote_desktop_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String> {
+    match preview {
+        CloudSyncPendingPreview::Structured(preview) => preview
+            .remote_desktop_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| snapshot.records.iter())
+            .map(|profile| profile.id.clone())
+            .collect(),
+        CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
+    }
+}
+
 pub fn structured_apply_covers_full_remote(
     manifest: &StructuredManifest,
     selection: &StructuredApplySelection,
@@ -769,6 +852,8 @@ pub fn structured_apply_covers_full_remote(
         && (manifest.sections.forwards.is_none() || selection.forwards)
         && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
         && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
+        && (manifest.sections.remote_desktop_profiles.is_none()
+            || selection.remote_desktop_profiles)
         && (manifest.sections.sensitive_credentials.is_none() || selection.sensitive_credentials)
         && manifest
             .sections
@@ -924,6 +1009,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
+        remote_desktop_profiles: manifest
+            .sections
+            .remote_desktop_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
         sensitive_credentials: manifest
             .sections
             .sensitive_credentials
@@ -941,6 +1032,7 @@ pub fn history_summary_from_legacy_preview(preview: &LegacyPreview) -> CloudSync
         forwards: preview.preview.total_forwards,
         quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
         serial_profiles: 0,
+        remote_desktop_profiles: 0,
         sensitive_credentials: preview.metadata.portable_secret_count.unwrap_or(0),
         has_app_settings: preview.preview.has_app_settings,
         plugin_settings_count: preview.preview.plugin_settings_count,
@@ -1019,6 +1111,8 @@ mod tests {
             selected_quick_command_ids: BTreeSet::new(),
             import_serial_profiles: false,
             selected_serial_profile_ids: BTreeSet::new(),
+            import_remote_desktop_profiles: false,
+            selected_remote_desktop_profile_ids: BTreeSet::new(),
             import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),
@@ -1053,6 +1147,8 @@ mod tests {
             selected_quick_command_ids: BTreeSet::new(),
             import_serial_profiles: false,
             selected_serial_profile_ids: BTreeSet::new(),
+            import_remote_desktop_profiles: false,
+            selected_remote_desktop_profile_ids: BTreeSet::new(),
             import_sensitive_credentials: false,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),
@@ -1087,6 +1183,8 @@ mod tests {
             selected_quick_command_ids: BTreeSet::new(),
             import_serial_profiles: false,
             selected_serial_profile_ids: BTreeSet::new(),
+            import_remote_desktop_profiles: false,
+            selected_remote_desktop_profile_ids: BTreeSet::new(),
             import_sensitive_credentials: true,
             import_app_settings: false,
             selected_app_settings_sections: BTreeSet::new(),

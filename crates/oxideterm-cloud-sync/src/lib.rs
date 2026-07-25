@@ -231,6 +231,8 @@ pub struct RawSyncScope {
     #[serde(default)]
     pub sync_serial_profiles: Option<bool>,
     #[serde(default)]
+    pub sync_remote_desktop_profiles: Option<bool>,
+    #[serde(default)]
     pub sync_sensitive_credentials: Option<bool>,
     #[serde(default)]
     pub sync_app_settings: Option<bool>,
@@ -255,6 +257,8 @@ pub struct SyncScope {
     pub sync_quick_commands: bool,
     #[serde(default = "default_true")]
     pub sync_serial_profiles: bool,
+    #[serde(default = "default_true")]
+    pub sync_remote_desktop_profiles: bool,
     #[serde(default)]
     pub sync_sensitive_credentials: bool,
     #[serde(default = "default_true")]
@@ -287,6 +291,8 @@ pub struct LocalSyncMetadata {
     #[serde(default)]
     pub serial_profiles_revision: Option<String>,
     #[serde(default)]
+    pub remote_desktop_profiles_revision: Option<String>,
+    #[serde(default)]
     pub sensitive_credentials_revision: Option<String>,
     #[serde(default)]
     pub settings_revision: Option<String>,
@@ -308,6 +314,8 @@ pub struct StructuredLocalState {
     #[serde(default)]
     pub serial_profiles: Option<String>,
     #[serde(default)]
+    pub remote_desktop_profiles: Option<String>,
+    #[serde(default)]
     pub sensitive_credentials: Option<String>,
     #[serde(default)]
     pub app_settings: BTreeMap<String, Option<String>>,
@@ -326,6 +334,8 @@ pub struct StructuredDirtySections {
     pub quick_commands: bool,
     #[serde(default)]
     pub serial_profiles: bool,
+    #[serde(default)]
+    pub remote_desktop_profiles: bool,
     #[serde(default)]
     pub sensitive_credentials: bool,
     #[serde(default)]
@@ -354,6 +364,8 @@ pub struct StructuredSectionRevisions {
     #[serde(default)]
     pub serial_profiles: Option<String>,
     #[serde(default)]
+    pub remote_desktop_profiles: Option<String>,
+    #[serde(default)]
     pub sensitive_credentials: Option<String>,
     #[serde(default)]
     pub app_settings: BTreeMap<String, String>,
@@ -372,6 +384,8 @@ pub struct StructuredApplySelection {
     pub quick_commands: bool,
     #[serde(default)]
     pub serial_profiles: bool,
+    #[serde(default)]
+    pub remote_desktop_profiles: bool,
     #[serde(default)]
     pub sensitive_credentials: bool,
     #[serde(default)]
@@ -401,6 +415,8 @@ pub struct StructuredManifestSections {
     pub quick_commands: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles: Option<StructuredObjectEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_desktop_profiles: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_credentials: Option<StructuredObjectEntry>,
     #[serde(default)]
@@ -460,6 +476,9 @@ pub fn normalize_sync_scope(
             .unwrap_or(true),
         sync_serial_profiles: scope
             .and_then(|scope| scope.sync_serial_profiles)
+            .unwrap_or(true),
+        sync_remote_desktop_profiles: scope
+            .and_then(|scope| scope.sync_remote_desktop_profiles)
             .unwrap_or(true),
         // Sensitive credentials currently reuse the encrypted connection archive, so they must not
         // be synced when connection sync is disabled.
@@ -540,6 +559,10 @@ pub fn build_structured_local_state(
             .sync_serial_profiles
             .then(|| local_metadata.serial_profiles_revision.clone())
             .flatten(),
+        remote_desktop_profiles: scope
+            .sync_remote_desktop_profiles
+            .then(|| local_metadata.remote_desktop_profiles_revision.clone())
+            .flatten(),
         sensitive_credentials: scope
             .sync_sensitive_credentials
             .then(|| local_metadata.sensitive_credentials_revision.clone())
@@ -567,6 +590,9 @@ pub fn compute_structured_dirty_sections(
         serial_profiles: scope.sync_serial_profiles
             && current_state.serial_profiles
                 != baseline_state.and_then(|state| state.serial_profiles.clone()),
+        remote_desktop_profiles: scope.sync_remote_desktop_profiles
+            && current_state.remote_desktop_profiles
+                != baseline_state.and_then(|state| state.remote_desktop_profiles.clone()),
         sensitive_credentials: scope.sync_sensitive_credentials
             && current_state.sensitive_credentials
                 != baseline_state.and_then(|state| state.sensitive_credentials.clone()),
@@ -621,6 +647,7 @@ pub fn compute_structured_dirty_sections(
         || dirty_sections.forwards
         || dirty_sections.quick_commands
         || dirty_sections.serial_profiles
+        || dirty_sections.remote_desktop_profiles
         || dirty_sections.sensitive_credentials
         || dirty_sections.app_settings.values().any(|dirty| *dirty)
         || dirty_sections.plugin_settings.values().any(|dirty| *dirty);
@@ -674,6 +701,11 @@ pub fn build_manifest_section_revisions(
             .serial_profiles
             .as_ref()
             .map(|entry| entry.revision.clone()),
+        remote_desktop_profiles: manifest
+            .sections
+            .remote_desktop_profiles
+            .as_ref()
+            .map(|entry| entry.revision.clone()),
         sensitive_credentials: manifest
             .sections
             .sensitive_credentials
@@ -713,6 +745,9 @@ pub fn merge_structured_baseline(
     if selection.serial_profiles {
         merged.serial_profiles = next_state.serial_profiles.clone();
     }
+    if selection.remote_desktop_profiles {
+        merged.remote_desktop_profiles = next_state.remote_desktop_profiles.clone();
+    }
     if selection.sensitive_credentials {
         merged.sensitive_credentials = next_state.sensitive_credentials.clone();
     }
@@ -748,6 +783,9 @@ pub fn count_structured_upload_plan_units(
     }
     if scope.sync_serial_profiles {
         total += usize::from(local_metadata.serial_profiles_revision.is_some());
+    }
+    if scope.sync_remote_desktop_profiles {
+        total += usize::from(local_metadata.remote_desktop_profiles_revision.is_some());
     }
     if scope.sync_sensitive_credentials {
         total += usize::from(local_metadata.sensitive_credentials_revision.is_some());
@@ -790,6 +828,10 @@ pub fn quick_commands_object_path(revision: &str) -> String {
 
 pub fn serial_profiles_object_path(revision: &str) -> String {
     format!("structured/serial-profiles/{revision}.json")
+}
+
+pub fn remote_desktop_profiles_object_path(revision: &str) -> String {
+    format!("structured/remote-desktop-profiles/{revision}.json")
 }
 
 pub fn sensitive_credentials_object_path(revision: &str) -> String {
@@ -940,6 +982,8 @@ mod tests {
 
         assert!(scope.sync_connections);
         assert!(scope.sync_forwards);
+        assert!(scope.sync_serial_profiles);
+        assert!(scope.sync_remote_desktop_profiles);
         assert!(scope.sync_app_settings);
         assert_eq!(scope.app_settings_sections, DEFAULT_APP_SETTINGS_SECTIONS);
         assert!(!scope.include_local_terminal_env_vars);
@@ -1051,6 +1095,7 @@ mod tests {
             forwards: Some("fwd-1".into()),
             quick_commands: None,
             serial_profiles: None,
+            remote_desktop_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-1".into())),
@@ -1089,6 +1134,12 @@ mod tests {
             record_count: Some(2),
             content_type: "application/json".into(),
         });
+        manifest.sections.remote_desktop_profiles = Some(StructuredObjectEntry {
+            revision: "remote-desktop-rev".into(),
+            path: remote_desktop_profiles_object_path("remote-desktop-rev"),
+            record_count: Some(1),
+            content_type: "application/json".into(),
+        });
         manifest.sections.app_settings.insert(
             "general".into(),
             StructuredObjectEntry {
@@ -1105,12 +1156,28 @@ mod tests {
             "structured/connections/conn-rev.json"
         );
         assert_eq!(
+            manifest
+                .sections
+                .remote_desktop_profiles
+                .as_ref()
+                .unwrap()
+                .path,
+            "structured/remote-desktop-profiles/remote-desktop-rev.json"
+        );
+        assert_eq!(
             manifest.sections.app_settings["general"].path,
             "structured/settings/app/general/gen-rev.oxide"
         );
         assert_eq!(
             manifest.section_revisions.connections.as_deref(),
             Some("conn-rev")
+        );
+        assert_eq!(
+            manifest
+                .section_revisions
+                .remote_desktop_profiles
+                .as_deref(),
+            Some("remote-desktop-rev")
         );
         assert_eq!(
             manifest.section_revisions.app_settings["general"],
@@ -1133,6 +1200,7 @@ mod tests {
             forwards: Some("fwd-old".into()),
             quick_commands: None,
             serial_profiles: None,
+            remote_desktop_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-old".into())),
@@ -1145,6 +1213,7 @@ mod tests {
             forwards: Some("fwd-new".into()),
             quick_commands: None,
             serial_profiles: None,
+            remote_desktop_profiles: None,
             sensitive_credentials: None,
             app_settings: BTreeMap::from([
                 ("general".into(), Some("gen-new".into())),

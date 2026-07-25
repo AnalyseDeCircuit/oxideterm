@@ -1076,6 +1076,7 @@ fn create_cloud_sync_rollback_backup(
             forwards: preview.total_forwards,
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: 0,
+            remote_desktop_profiles: 0,
             sensitive_credentials: metadata.portable_secret_count.unwrap_or(0),
         }),
     }))

@@ -47,6 +47,8 @@ pub struct CloudSyncHistorySummary {
     #[serde(default)]
     pub serial_profiles: usize,
     #[serde(default)]
+    pub remote_desktop_profiles: usize,
+    #[serde(default)]
     pub sensitive_credentials: usize,
     pub has_app_settings: bool,
     pub plugin_settings_count: usize,
@@ -77,6 +79,8 @@ pub struct CloudSyncRollbackBackupMetadata {
     pub quick_commands: usize,
     #[serde(default)]
     pub serial_profiles: usize,
+    #[serde(default)]
+    pub remote_desktop_profiles: usize,
     #[serde(default)]
     pub sensitive_credentials: usize,
 }
@@ -476,6 +480,7 @@ mod tests {
         assert_eq!(structured_state.connections.as_deref(), Some("conn-rev"));
         assert!(structured_state.quick_commands.is_none());
         assert!(structured_state.serial_profiles.is_none());
+        assert!(structured_state.remote_desktop_profiles.is_none());
         assert!(structured_state.sensitive_credentials.is_none());
         assert!(
             state

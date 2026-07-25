@@ -40,6 +40,8 @@ impl CloudSyncOperationService {
             selection.quick_commands && preview.quick_commands_snapshot_json.is_some();
         let apply_serial_profiles =
             selection.serial_profiles && preview.serial_profiles_snapshot.is_some();
+        let apply_remote_desktop_profiles =
+            selection.remote_desktop_profiles && preview.remote_desktop_profiles_snapshot.is_some();
         let apply_sensitive_credentials =
             selection.sensitive_credentials && preview.sensitive_credentials_entry.is_some();
         let needs_password = !app_settings_entry_ids.is_empty() || !plugin_entry_ids.is_empty();
@@ -56,6 +58,7 @@ impl CloudSyncOperationService {
             + usize::from(selection.forwards && preview.forwards_snapshot.is_some())
             + usize::from(apply_quick_commands)
             + usize::from(apply_serial_profiles)
+            + usize::from(apply_remote_desktop_profiles)
             + usize::from(apply_sensitive_credentials))
         .max(1);
         report_progress(progress, CloudSyncProgressStage::Importing, 0, total);
@@ -83,6 +86,11 @@ impl CloudSyncOperationService {
                 .unwrap_or(0),
             serial_profiles: preview
                 .serial_profiles_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.records.len())
+                .unwrap_or(0),
+            remote_desktop_profiles: preview
+                .remote_desktop_profiles_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.records.len())
                 .unwrap_or(0),
@@ -115,6 +123,7 @@ impl CloudSyncOperationService {
                             conflict_strategy: ImportConflictStrategy::Merge,
                             import_forwards: false,
                             import_serial_profiles: false,
+                            import_remote_desktop_profiles: false,
                             import_portable_secrets: true,
                             restore_managed_keys: true,
                             restore_managed_key_passphrases: true,
@@ -246,6 +255,14 @@ impl CloudSyncOperationService {
         } else {
             None
         };
+        let mut remote_desktop_profiles_snapshot = if selection.remote_desktop_profiles {
+            preview.remote_desktop_profiles_snapshot
+        } else {
+            None
+        };
+        if let Some(snapshot) = remote_desktop_profiles_snapshot.as_mut() {
+            preserve_local_remote_desktop_credential_refs(snapshot, connection_store);
+        }
         let connection_conflict_strategy = match conflict_strategy {
             ConflictStrategy::Skip => SavedConnectionsConflictStrategy::Skip,
             ConflictStrategy::Replace => SavedConnectionsConflictStrategy::Replace,
@@ -261,6 +278,7 @@ impl CloudSyncOperationService {
             forwards_snapshot,
             quick_commands_snapshot_json,
             serial_profiles_snapshot,
+            remote_desktop_profiles_snapshot,
             app_settings_snapshots,
             plugin_settings_snapshot,
             connection_conflict_strategy,
@@ -268,7 +286,8 @@ impl CloudSyncOperationService {
         completed += usize::from(applied.connections.is_some())
             + usize::from(applied.forwards.is_some())
             + usize::from(apply_quick_commands)
-            + usize::from(apply_serial_profiles);
+            + usize::from(apply_serial_profiles)
+            + usize::from(apply_remote_desktop_profiles);
         report_progress(
             progress,
             CloudSyncProgressStage::Importing,
@@ -295,6 +314,7 @@ impl CloudSyncOperationService {
                 .is_some_and(|outcome| outcome.skipped == 0),
             quick_commands: apply_quick_commands,
             serial_profiles: apply_serial_profiles,
+            remote_desktop_profiles: apply_remote_desktop_profiles,
             sensitive_credentials: apply_sensitive_credentials,
             app_settings_sections: app_settings_entry_ids,
             plugin_ids: plugin_entry_ids,

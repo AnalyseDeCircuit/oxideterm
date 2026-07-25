@@ -118,10 +118,12 @@ impl CloudSyncOperationService {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            remote_desktop_profiles_snapshot: None,
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_remote_desktop_profiles_snapshot: None,
             sensitive_credentials_entry: None,
             sensitive_credentials_preview: None,
             app_settings_entries: std::collections::BTreeMap::new(),
@@ -157,6 +159,14 @@ impl CloudSyncOperationService {
                 .await?;
             preview.serial_profiles_snapshot = Some(serde_json::from_slice(&object.bytes)?);
         }
+        if let Some(entry) = preview.manifest.sections.remote_desktop_profiles.as_ref() {
+            let object = self
+                .read_required_object(settings, &metadata_secrets, entry)
+                .await?;
+            let mut snapshot = serde_json::from_slice(&object.bytes)?;
+            strip_remote_desktop_credential_refs(&mut snapshot);
+            preview.remote_desktop_profiles_snapshot = Some(snapshot);
+        }
         if let Some(previous) = previous_remote_sections {
             preview.base_connections_snapshot = read_optional_snapshot_at_revision(
                 self,
@@ -190,6 +200,17 @@ impl CloudSyncOperationService {
                 serial_profiles_object_path,
             )
             .await?;
+            preview.base_remote_desktop_profiles_snapshot = read_optional_snapshot_at_revision(
+                self,
+                settings,
+                &metadata_secrets,
+                previous.remote_desktop_profiles.as_deref(),
+                remote_desktop_profiles_object_path,
+            )
+            .await?;
+            if let Some(snapshot) = preview.base_remote_desktop_profiles_snapshot.as_mut() {
+                strip_remote_desktop_credential_refs(snapshot);
+            }
         }
         if let Some(entry) = preview.manifest.sections.sensitive_credentials.as_ref() {
             let object = self

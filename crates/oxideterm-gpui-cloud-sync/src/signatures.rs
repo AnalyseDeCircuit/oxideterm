@@ -110,6 +110,10 @@ pub fn cloud_sync_section_signature(
             state.sync_scope.sync_serial_profiles.hash(&mut hasher);
             state
                 .sync_scope
+                .sync_remote_desktop_profiles
+                .hash(&mut hasher);
+            state
+                .sync_scope
                 .sync_sensitive_credentials
                 .hash(&mut hasher);
             state.sync_scope.sync_app_settings.hash(&mut hasher);

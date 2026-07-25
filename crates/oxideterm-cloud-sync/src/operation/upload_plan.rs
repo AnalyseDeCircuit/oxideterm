@@ -134,6 +134,37 @@ impl CloudSyncOperationService {
             );
         }
 
+        if local_snapshot.scope.sync_remote_desktop_profiles {
+            let mut snapshot = connection_store.export_remote_desktop_profiles_snapshot()?;
+            filter_remote_desktop_profiles_snapshot(
+                &mut snapshot,
+                item_filter.remote_desktop_profile_ids.as_ref(),
+            );
+            strip_remote_desktop_credential_refs(&mut snapshot);
+            // Cloud profile objects are non-secret metadata; credentials and device-local
+            // protected-store references never enter this plaintext structured object.
+            let bytes = serde_json::to_vec(&snapshot)?;
+            let path = remote_desktop_profiles_object_path(&snapshot.revision);
+            manifest.sections.remote_desktop_profiles = Some(crate::StructuredObjectEntry {
+                revision: snapshot.revision.clone(),
+                path: path.clone(),
+                record_count: Some(snapshot.records.len()),
+                content_type: "application/json".to_string(),
+            });
+            objects.push(StructuredUploadObject {
+                path,
+                bytes,
+                content_type: "application/json".to_string(),
+            });
+            completed_exports += 1;
+            report_progress(
+                progress,
+                CloudSyncProgressStage::Exporting,
+                2 + completed_exports,
+                total,
+            );
+        }
+
         if local_snapshot.scope.sync_sensitive_credentials {
             let password =
                 sync_password.context("missing_sync_password: cloud sync password is required")?;
