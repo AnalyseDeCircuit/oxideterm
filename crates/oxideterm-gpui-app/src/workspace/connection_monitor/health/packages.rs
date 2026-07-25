@@ -798,6 +798,9 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Packages) {
+            return;
+        }
         if self.connection_monitor.host_package_snapshot_polling {
             if feedback.should_toast() {
                 self.push_host_package_toast(

@@ -299,6 +299,59 @@ pub struct DiagnosticsSettings {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HostToolsSettings {
+    #[serde(default = "default_host_tool_enabled")]
+    pub monitor_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub gpu_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub processes_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub services_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub logs_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub tmux_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub docker_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub ports_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub schedules_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub filesystems_enabled: bool,
+    #[serde(default = "default_host_tool_enabled")]
+    pub packages_enabled: bool,
+    #[serde(flatten)]
+    pub extra: ExtraFields,
+}
+
+impl Default for HostToolsSettings {
+    fn default() -> Self {
+        Self {
+            // Existing installations keep their current behavior until the user opts out.
+            monitor_enabled: true,
+            gpu_enabled: true,
+            processes_enabled: true,
+            services_enabled: true,
+            logs_enabled: true,
+            tmux_enabled: true,
+            docker_enabled: true,
+            ports_enabled: true,
+            schedules_enabled: true,
+            filesystems_enabled: true,
+            packages_enabled: true,
+            extra: ExtraFields::new(),
+        }
+    }
+}
+
+fn default_host_tool_enabled() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedSettings {
     pub version: u32,
     pub general: GeneralSettings,
@@ -341,6 +394,8 @@ pub struct PersistedSettings {
     pub ssh_config: SshConfigSettings,
     #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
+    #[serde(default)]
+    pub host_tools: HostToolsSettings,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -375,6 +430,7 @@ impl Default for PersistedSettings {
             new_connection: NewConnectionSettings::default(),
             ssh_config: SshConfigSettings::default(),
             diagnostics: DiagnosticsSettings::default(),
+            host_tools: HostToolsSettings::default(),
             extra: ExtraFields::new(),
         }
     }
@@ -398,7 +454,7 @@ impl PersistedSettings {
 
 #[cfg(test)]
 mod misc_tests {
-    use super::{PersistedSettings, SettingsApplicationProxyMode};
+    use super::{HostToolsSettings, PersistedSettings, SettingsApplicationProxyMode};
     use crate::DEFAULT_WINDOW_OPACITY;
 
     #[test]
@@ -499,6 +555,39 @@ mod misc_tests {
         assert!(restored.ssh_config.auto_load_hosts);
         assert!(!restored.ssh_config.auto_sync_hosts);
         assert!(!restored.ssh_config.allow_proxy_command);
+    }
+
+    #[test]
+    fn legacy_settings_enable_every_host_tool_when_section_is_missing() {
+        let mut serialized = PersistedSettings::default().to_value();
+        serialized
+            .as_object_mut()
+            .expect("settings should be an object")
+            .remove("hostTools");
+
+        let restored: PersistedSettings =
+            serde_json::from_value(serialized).expect("legacy settings should deserialize");
+
+        assert_eq!(restored.host_tools, HostToolsSettings::default());
+    }
+
+    #[test]
+    fn missing_host_tool_flags_default_to_enabled() {
+        let restored: HostToolsSettings =
+            serde_json::from_value(serde_json::json!({"monitorEnabled": false}))
+                .expect("host tool settings should deserialize");
+
+        assert!(!restored.monitor_enabled);
+        assert!(restored.gpu_enabled);
+        assert!(restored.processes_enabled);
+        assert!(restored.services_enabled);
+        assert!(restored.logs_enabled);
+        assert!(restored.tmux_enabled);
+        assert!(restored.docker_enabled);
+        assert!(restored.ports_enabled);
+        assert!(restored.schedules_enabled);
+        assert!(restored.filesystems_enabled);
+        assert!(restored.packages_enabled);
     }
 
     #[test]

@@ -581,7 +581,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) selector_open: bool,
     pub(in crate::workspace) selector_highlighted_index: Option<usize>,
     pub(in crate::workspace) selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
-    pub(in crate::workspace) disabled_profiler_connections: HashSet<String>,
     pub(in crate::workspace) profiler_registry: ProfilerRegistry,
     pub(in crate::workspace) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
     pub(in crate::workspace) profiler_update_rx:
@@ -745,7 +744,6 @@ impl ConnectionMonitorState {
             selector_open: false,
             selector_highlighted_index: None,
             selector_focus_origin: None,
-            disabled_profiler_connections: HashSet::new(),
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
             profiler_update_rx,

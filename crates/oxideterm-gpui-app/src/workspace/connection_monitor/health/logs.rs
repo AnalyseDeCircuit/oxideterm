@@ -682,6 +682,9 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Logs) {
+            return;
+        }
         if self.connection_monitor.host_log_snapshot_polling {
             if feedback.should_toast() {
                 self.push_host_log_toast(

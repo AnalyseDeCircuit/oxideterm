@@ -999,6 +999,9 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Schedules) {
+            return;
+        }
         if self.connection_monitor.host_schedule_snapshot_polling {
             if feedback.should_toast() {
                 self.push_host_schedule_toast(

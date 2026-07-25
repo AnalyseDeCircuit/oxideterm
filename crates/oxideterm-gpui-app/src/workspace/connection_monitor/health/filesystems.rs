@@ -927,6 +927,9 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Filesystems) {
+            return;
+        }
         if self.connection_monitor.host_filesystem_snapshot_polling {
             if feedback.should_toast() {
                 self.push_host_filesystem_toast(

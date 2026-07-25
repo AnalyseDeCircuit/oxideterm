@@ -59,16 +59,18 @@ const SYSTEM_INFO_COMMAND_UNIX: &str = concat!(
     "case \"$boot_time\" in ''|*[!0-9]*) ;; *) printf 'boot_time_ms\\t%s000\\n' \"$boot_time\"; now=$(date +%s 2>/dev/null); if [ -n \"$now\" ]; then printf 'uptime_seconds\\t%s\\n' \"$((now-boot_time))\"; fi ;; esac"
 );
 
-// Keep process sampling on short, machine-readable `ps` output. A previous
-// `/proc` walker could emit a non-empty but unusable table, preventing fallback
-// and leaving the Host Tools process page empty on otherwise healthy Linux hosts.
-const METRICS_COMMAND_LINUX: &str = concat!(
+const METRICS_COMMAND_LINUX_SYSTEM: &str = concat!(
     "echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat 2>/dev/null; ",
     "echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null; ",
     "echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; ",
     "echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; ",
     "echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); ",
-    "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; ",
+    "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'"
+);
+// Keep process sampling on short, machine-readable `ps` output. A previous
+// `/proc` walker could emit a non-empty but unusable table, preventing fallback
+// and leaving the Host Tools process page empty on otherwise healthy Linux hosts.
+const METRICS_COMMAND_LINUX_PROCESSES: &str = concat!(
     "echo '===TOPPROCS==='; ",
     "mem_total=$(awk '/^MemTotal:/{print $2; exit}' /proc/meminfo 2>/dev/null); ",
     "emit_full_ps_rows() { awk 'NR<=200 && $1 ~ /^[0-9]+$/ {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;cmd=$0;sub(\"^([[:space:]]*[^[:space:]]+){10}[[:space:]]*\", \"\", cmd);gsub(/\\t/,\" \",cmd);if(cmd==\"\")cmd=comm;if(length(cmd)>240)cmd=substr(cmd,1,240);printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,cmd}'; }; ",
@@ -109,14 +111,36 @@ const METRICS_COMMAND_LINUX_GPU: &str = concat!(
     "timeout 3 intel_gpu_top -J -s 1000 -n 2 -o - 2>/dev/null || true; ",
     "fi"
 );
-const METRICS_COMMAND_MACOS: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'; echo '===TOPPROCS==='; ps axww -o pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,command= 2>/dev/null | sort -k6 -rn | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;$1=$2=$3=$4=$5=$6=$7=$8=$9=$10=\"\";sub(/^ +/,\"\");gsub(/\\t/,\" \");printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,$0}'";
+const METRICS_COMMAND_MACOS_SYSTEM: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'";
+const METRICS_COMMAND_MACOS_PROCESSES: &str = "echo '===TOPPROCS==='; ps axww -o pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,command= 2>/dev/null | sort -k6 -rn | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;$1=$2=$3=$4=$5=$6=$7=$8=$9=$10=\"\";sub(/^ +/,\"\");gsub(/\\t/,\" \");printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,$0}'";
 const METRICS_COMMAND_UNSUPPORTED: &str =
     "echo '===UNSUPPORTED==='; uname -s 2>/dev/null || echo unknown";
-const PORT_CMD_LINUX: &str = "echo '===PORTS==='; ((ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep -i listen || true); echo '===PORTS_END==='";
-const PORT_CMD_MACOS: &str = "echo '===PORTS==='; ((lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2) || true); echo '===PORTS_END==='";
-const PORT_CMD_WINDOWS: &str = "echo '===PORTS==='; powershell -NoProfile -Command \"Get-NetTCPConnection -State Listen 2>$null | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -HideTableHeaders\" 2>/dev/null; echo '===PORTS_END==='";
-const PORT_CMD_FREEBSD: &str =
-    "echo '===PORTS==='; sockstat -4 -6 -l -P tcp 2>/dev/null | tail -n +2; echo '===PORTS_END==='";
+
+/// Selects only the recurring probes the user has enabled.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResourceSamplingConfig {
+    pub system: bool,
+    pub gpu: bool,
+    pub processes: bool,
+    pub docker: bool,
+}
+
+impl ResourceSamplingConfig {
+    pub fn is_empty(self) -> bool {
+        !self.system && !self.gpu && !self.processes && !self.docker
+    }
+}
+
+impl Default for ResourceSamplingConfig {
+    fn default() -> Self {
+        Self {
+            system: true,
+            gpu: true,
+            processes: true,
+            docker: true,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -165,6 +189,7 @@ pub trait ResourceSampler: Send + Sync + 'static {
 
 struct ConnectionProfilerEntry {
     snapshot: ConnectionProfilerSnapshot,
+    config: ResourceSamplingConfig,
     stop_tx: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
 }
@@ -214,6 +239,7 @@ impl ProfilerRegistry {
             connection_id,
             ConnectionProfilerEntry {
                 snapshot: running_snapshot(),
+                config: ResourceSamplingConfig::default(),
                 stop_tx: None,
                 task: None,
             },
@@ -229,7 +255,14 @@ impl ProfilerRegistry {
         update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
     ) -> bool {
         let spawn_handle = Handle::try_current().ok();
-        self.start_with_sampler_on_handle(connection_id, sampler, os_type, update_tx, spawn_handle)
+        self.start_with_sampler_on_handle(
+            connection_id,
+            sampler,
+            os_type,
+            ResourceSamplingConfig::default(),
+            update_tx,
+            spawn_handle,
+        )
     }
 
     pub fn start_with_sampler_on(
@@ -240,7 +273,34 @@ impl ProfilerRegistry {
         update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
         handle: Handle,
     ) -> bool {
-        self.start_with_sampler_on_handle(connection_id, sampler, os_type, update_tx, Some(handle))
+        self.start_with_sampler_on_config(
+            connection_id,
+            sampler,
+            os_type,
+            ResourceSamplingConfig::default(),
+            update_tx,
+            handle,
+        )
+    }
+
+    /// Restarts a running sampler when its enabled probe set changes.
+    pub fn start_with_sampler_on_config(
+        &self,
+        connection_id: impl Into<String>,
+        sampler: Arc<dyn ResourceSampler>,
+        os_type: impl Into<String>,
+        config: ResourceSamplingConfig,
+        update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
+        handle: Handle,
+    ) -> bool {
+        self.start_with_sampler_on_handle(
+            connection_id,
+            sampler,
+            os_type,
+            config,
+            update_tx,
+            Some(handle),
+        )
     }
 
     fn start_with_sampler_on_handle(
@@ -248,6 +308,7 @@ impl ProfilerRegistry {
         connection_id: impl Into<String>,
         sampler: Arc<dyn ResourceSampler>,
         os_type: impl Into<String>,
+        config: ResourceSamplingConfig,
         update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
         spawn_handle: Option<Handle>,
     ) -> bool {
@@ -259,8 +320,8 @@ impl ProfilerRegistry {
             if matches!(
                 profilers
                     .get(&connection_id)
-                    .map(|entry| entry.snapshot.state),
-                Some(ProfilerState::Running)
+                    .map(|entry| (entry.snapshot.state, entry.config)),
+                Some((ProfilerState::Running, running_config)) if running_config == config
             ) {
                 return false;
             }
@@ -273,6 +334,7 @@ impl ProfilerRegistry {
                 connection_id.clone(),
                 ConnectionProfilerEntry {
                     snapshot: running_snapshot(),
+                    config,
                     stop_tx: Some(stop_tx),
                     task: None,
                 },
@@ -287,6 +349,7 @@ impl ProfilerRegistry {
                 task_connection_id,
                 sampler,
                 os_type,
+                config,
                 update_tx,
                 stop_rx,
             )
@@ -382,94 +445,104 @@ impl ProfilerRegistry {
 }
 
 pub fn build_sample_command(os_type: &str) -> String {
-    build_sample_command_with_system_info(os_type, true)
+    build_sample_command_for(os_type, ResourceSamplingConfig::default())
 }
 
-fn build_live_sample_command(os_type: &str) -> String {
-    build_sample_command_with_system_info(os_type, false)
+pub fn build_sample_command_for(os_type: &str, config: ResourceSamplingConfig) -> String {
+    build_sample_command_with_system_info(os_type, config, true)
 }
 
-fn build_sample_command_with_system_info(os_type: &str, include_system_info: bool) -> String {
-    let metrics = match os_type {
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
-            METRICS_COMMAND_LINUX
-        }
-        "macOS" | "macos" | "Darwin" => METRICS_COMMAND_MACOS,
-        "Windows" | "windows" => return build_windows_sample_command(include_system_info),
-        "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => METRICS_COMMAND_UNSUPPORTED,
-        _ => METRICS_COMMAND_UNSUPPORTED,
-    };
-    let system_info = if include_system_info {
-        match os_type {
+fn build_live_sample_command(os_type: &str, config: ResourceSamplingConfig) -> String {
+    build_sample_command_with_system_info(os_type, config, false)
+}
+
+fn build_sample_command_with_system_info(
+    os_type: &str,
+    config: ResourceSamplingConfig,
+    include_system_info: bool,
+) -> String {
+    if matches!(os_type, "Windows" | "windows") {
+        return build_windows_sample_command(config, include_system_info);
+    }
+
+    let mut commands = Vec::new();
+    if include_system_info && config.system {
+        let system_info = match os_type {
             "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
-                Some(SYSTEM_INFO_COMMAND_LINUX)
+                SYSTEM_INFO_COMMAND_LINUX
             }
-            "macOS" | "macos" | "Darwin" => Some(SYSTEM_INFO_COMMAND_MACOS),
-            "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => Some(SYSTEM_INFO_COMMAND_UNIX),
-            _ => Some(SYSTEM_INFO_COMMAND_UNIX),
-        }
-    } else {
-        None
-    };
-    let port_cmd = match os_type {
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => PORT_CMD_LINUX,
-        "macOS" | "macos" | "Darwin" => PORT_CMD_MACOS,
-        "Windows" | "windows" => PORT_CMD_WINDOWS,
-        "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => PORT_CMD_FREEBSD,
-        _ => PORT_CMD_LINUX,
-    };
-    let gpu_metrics = match os_type {
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
-            Some(METRICS_COMMAND_LINUX_GPU)
-        }
-        _ => None,
-    };
-    let docker_metrics = docker_sample_command(os_type);
+            "macOS" | "macos" | "Darwin" => SYSTEM_INFO_COMMAND_MACOS,
+            "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => SYSTEM_INFO_COMMAND_UNIX,
+            _ => SYSTEM_INFO_COMMAND_UNIX,
+        };
+        commands.push(system_info.to_string());
+    }
 
-    match gpu_metrics {
-        Some(gpu_metrics) => {
-            format!(
-                "{}{metrics}; {gpu_metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n",
-                system_info
-                    .map(|command| format!("{command}; "))
-                    .unwrap_or_default()
-            )
-        }
-        None => {
-            format!(
-                "{}{metrics}; {port_cmd}; {docker_metrics}; echo '===END==='\n",
-                system_info
-                    .map(|command| format!("{command}; "))
-                    .unwrap_or_default()
-            )
+    if config.system {
+        let metrics = match os_type {
+            "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
+                METRICS_COMMAND_LINUX_SYSTEM
+            }
+            "macOS" | "macos" | "Darwin" => METRICS_COMMAND_MACOS_SYSTEM,
+            "FreeBSD" | "freebsd" | "OpenBSD" | "NetBSD" => METRICS_COMMAND_UNSUPPORTED,
+            _ => METRICS_COMMAND_UNSUPPORTED,
+        };
+        commands.push(metrics.to_string());
+    }
+    if config.gpu
+        && matches!(
+            os_type,
+            "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin"
+        )
+    {
+        commands.push(METRICS_COMMAND_LINUX_GPU.to_string());
+    }
+    if config.processes {
+        let process_metrics = match os_type {
+            "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin" => {
+                Some(METRICS_COMMAND_LINUX_PROCESSES)
+            }
+            "macOS" | "macos" | "Darwin" => Some(METRICS_COMMAND_MACOS_PROCESSES),
+            _ => None,
+        };
+        if let Some(process_metrics) = process_metrics {
+            commands.push(process_metrics.to_string());
         }
     }
+    if config.docker {
+        commands.push(docker_sample_command(os_type).to_string());
+    }
+    commands.push("echo '===END==='".to_string());
+    format!("{}\n", commands.join("; "))
 }
 
-fn build_windows_sample_command(include_system_info: bool) -> String {
-    let system_info = include_system_info.then_some(concat!(
-        "Write-Output '===SYSTEM_INFO===';",
-        "if($os){",
-        "Write-Output ('system_name'+[char]9+$os.Caption);",
-        "Write-Output ('system_version'+[char]9+($os.Version+' (Build '+$os.BuildNumber+')'));",
-        "Write-Output ('architecture'+[char]9+$os.OSArchitecture);",
-        "$boot=[DateTimeOffset]$os.LastBootUpTime;",
-        "Write-Output ('boot_time_ms'+[char]9+$boot.ToUnixTimeMilliseconds());",
-        "$uptime=[UInt64][Math]::Max(0,[Math]::Floor(((Get-Date)-$os.LastBootUpTime).TotalSeconds));",
-        "Write-Output ('uptime_seconds'+[char]9+$uptime);",
-        "};"
-    ));
-    let script = format!(
-        "{}{}{}{}{}",
-        concat!(
-            "$ErrorActionPreference='SilentlyContinue';",
-            "$os=Get-CimInstance Win32_OperatingSystem;",
+fn build_windows_sample_command(
+    config: ResourceSamplingConfig,
+    include_system_info: bool,
+) -> String {
+    let mut script = String::from("$ErrorActionPreference='SilentlyContinue';");
+    if config.system || config.processes {
+        script.push_str("$os=Get-CimInstance Win32_OperatingSystem;");
+    }
+    if include_system_info && config.system {
+        script.push_str(concat!(
+            "Write-Output '===SYSTEM_INFO===';",
+            "if($os){",
+            "Write-Output ('system_name'+[char]9+$os.Caption);",
+            "Write-Output ('system_version'+[char]9+($os.Version+' (Build '+$os.BuildNumber+')'));",
+            "Write-Output ('architecture'+[char]9+$os.OSArchitecture);",
+            "$boot=[DateTimeOffset]$os.LastBootUpTime;",
+            "Write-Output ('boot_time_ms'+[char]9+$boot.ToUnixTimeMilliseconds());",
+            "$uptime=[UInt64][Math]::Max(0,[Math]::Floor(((Get-Date)-$os.LastBootUpTime).TotalSeconds));",
+            "Write-Output ('uptime_seconds'+[char]9+$uptime);",
+            "};"
+        ));
+    }
+    if config.system {
+        script.push_str(concat!(
             "Write-Output '===CPU_DIRECT===';",
             "$cpu=(Get-CimInstance Win32_Processor|Measure-Object -Property LoadPercentage -Average).Average;",
             "if($cpu -ne $null){[Math]::Round($cpu,1)};",
-        ),
-        system_info.unwrap_or_default(),
-        concat!(
             "Write-Output '===MEMINFO===';",
             "if($os){",
             "Write-Output ('MemTotal: '+$os.TotalVisibleMemorySize+' kB');",
@@ -491,7 +564,11 @@ fn build_windows_sample_command(include_system_info: bool) -> String {
             "Write-Output '===NETDEV===';",
             "Get-NetAdapterStatistics|ForEach-Object{",
             "Write-Output ($_.Name+': '+$_.ReceivedBytes+' 0 0 0 0 0 0 0 '+$_.SentBytes)",
-            "};",
+            "};"
+        ));
+    }
+    if config.gpu {
+        script.push_str(concat!(
             "Write-Output '===GPUS===';",
             "$gpuControllers=@(Get-CimInstance Win32_VideoController);",
             "$gpuUtil=@{};$gpuMem=@{};",
@@ -520,7 +597,11 @@ fn build_windows_sample_command(include_system_info: bool) -> String {
             "$used=if($gpuMem.ContainsKey($i)){[Math]::Round(([double]$gpuMem[$i])/1MB)}else{''};",
             "$util=if($gpuUtil.ContainsKey($i)){[Math]::Min(100,[Math]::Round([double]$gpuUtil[$i],1))}else{''};",
             "Write-Output ($i+','+$name+','+$util+','+$used+','+$total)",
-            "};",
+            "};"
+        ));
+    }
+    if config.processes {
+        script.push_str(concat!(
             "Write-Output '===TOPPROCS===';",
             "$memTotal=if($os){[double]$os.TotalVisibleMemorySize*1024}else{0};",
             "Get-Process|Sort-Object WorkingSet64 -Descending|Select-Object -First 200|ForEach-Object{",
@@ -529,16 +610,13 @@ fn build_windows_sample_command(include_system_info: bool) -> String {
             "$rss=[UInt64]$_.WorkingSet64;$vsz=[UInt64]$_.VirtualMemorySize64;",
             "$elapsed=if($_.StartTime){((Get-Date)-$_.StartTime).ToString()}else{''};",
             "Write-Output ($_.Id+[char]9+''+[char]9+''+[char]9+''+[char]9+$cpu+[char]9+$pct+[char]9+[Math]::Round($rss/1024)+[char]9+[Math]::Round($vsz/1024)+[char]9+$elapsed+[char]9+$_.ProcessName+[char]9+$_.Path)",
-            "};",
-            "Write-Output '===PORTS===';",
-            "Get-NetTCPConnection -State Listen|ForEach-Object{",
-            "Write-Output ($_.LocalAddress+' '+$_.LocalPort+' '+$_.OwningProcess)",
-            "};",
-            "Write-Output '===PORTS_END===';"
-        ),
-        docker_sample_command("Windows"),
-        "Write-Output '===END===';",
-    );
+            "};"
+        ));
+    }
+    if config.docker {
+        script.push_str(&docker_sample_command("Windows"));
+    }
+    script.push_str("Write-Output '===END===';");
     // OpenSSH on Windows may start cmd.exe or PowerShell; invoking PowerShell
     // explicitly keeps the sampler independent from the user's default shell.
     format!("powershell -NoProfile -ExecutionPolicy Bypass -Command \"{script}\"\r\n")
@@ -581,6 +659,7 @@ async fn sample_loop(
     connection_id: String,
     sampler: Arc<dyn ResourceSampler>,
     os_type: String,
+    config: ResourceSamplingConfig,
     update_tx: Option<mpsc::UnboundedSender<ProfilerUpdate>>,
     mut stop_rx: oneshot::Receiver<()>,
 ) {
@@ -598,8 +677,8 @@ async fn sample_loop(
         }
     };
 
-    let initial_command = build_sample_command(&os_type);
-    let live_command = build_live_sample_command(&os_type);
+    let initial_command = build_sample_command_for(&os_type, config);
+    let live_command = build_live_sample_command(&os_type, config);
     let mut system_info_sampled = false;
     let mut cached_system_info: Option<CachedSystemInfo> = None;
     let mut previous_sample: Option<PreviousResourceSample> = None;
@@ -894,17 +973,17 @@ mod tests {
             nproc_marker < disk_marker,
             "nproc should be sampled before disk summaries"
         );
-        assert!(linux.contains("ss -tlnp"));
+        assert!(!linux.contains("ss -tlnp"));
         assert!(!linux.contains("===SERVICES==="));
         let macos = build_sample_command("Darwin");
         assert!(macos.contains("sw_vers -productVersion"));
         assert!(macos.contains("kern.boottime"));
-        assert!(macos.contains("lsof -iTCP"));
+        assert!(!macos.contains("lsof -iTCP"));
         assert!(macos.contains("ps axww -o"));
         let windows = build_sample_command("Windows");
         assert!(windows.contains("LastBootUpTime"));
         assert!(windows.contains("OSArchitecture"));
-        assert!(windows.contains("Get-NetTCPConnection"));
+        assert!(!windows.contains("Get-NetTCPConnection"));
         assert!(windows.contains("Win32_VideoController"));
         assert!(windows.contains("\\GPU Engine(*)\\Utilization Percentage"));
         assert!(windows.contains("\\GPU Adapter Memory(*)\\Dedicated Usage"));
@@ -912,12 +991,51 @@ mod tests {
         let freebsd = build_sample_command("FreeBSD");
         assert!(freebsd.contains("===SYSTEM_INFO==="));
         assert!(freebsd.contains("uname -m"));
-        assert!(freebsd.contains("sockstat"));
+        assert!(!freebsd.contains("sockstat"));
         assert!(freebsd.contains("===UNSUPPORTED==="));
         assert!(build_sample_command("unknown").contains("===UNSUPPORTED==="));
         assert!(linux.contains("===END==="));
-        assert!(!build_live_sample_command("Linux").contains("===SYSTEM_INFO==="));
-        assert!(!build_live_sample_command("Windows").contains("===SYSTEM_INFO==="));
+        assert!(
+            !build_live_sample_command("Linux", ResourceSamplingConfig::default())
+                .contains("===SYSTEM_INFO===")
+        );
+        assert!(
+            !build_live_sample_command("Windows", ResourceSamplingConfig::default())
+                .contains("===SYSTEM_INFO===")
+        );
+    }
+
+    #[test]
+    fn sampling_command_includes_only_enabled_recurring_probes() {
+        let processes_only = build_sample_command_for(
+            "Linux",
+            ResourceSamplingConfig {
+                system: false,
+                gpu: false,
+                processes: true,
+                docker: false,
+            },
+        );
+
+        assert!(processes_only.contains("===TOPPROCS==="));
+        assert!(!processes_only.contains("===STAT==="));
+        assert!(!processes_only.contains("===GPUS==="));
+        assert!(!processes_only.contains("===DOCKER==="));
+        assert!(!processes_only.contains("===PORTS==="));
+
+        let docker_only = build_sample_command_for(
+            "Windows",
+            ResourceSamplingConfig {
+                system: false,
+                gpu: false,
+                processes: false,
+                docker: true,
+            },
+        );
+        assert!(docker_only.contains("===DOCKER==="));
+        assert!(!docker_only.contains("Win32_OperatingSystem"));
+        assert!(!docker_only.contains("===TOPPROCS==="));
+        assert!(!docker_only.contains("===PORTS==="));
     }
 
     #[cfg(unix)]

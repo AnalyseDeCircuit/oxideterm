@@ -1178,6 +1178,8 @@ impl WorkspaceApp {
             .set_mode(crate::workspace::ide::node_agent_mode_from_settings(
                 &settings,
             ));
+        // Monitoring settings own recurring remote shells and page-scoped GPU work.
+        self.apply_host_tool_monitoring_settings(cx);
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
         self.context_sidebar_motion_generation =

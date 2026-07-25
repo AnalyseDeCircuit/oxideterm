@@ -65,10 +65,7 @@ impl WorkspaceApp {
                     .current(&active_connection.connection_id)
             })
             .flatten();
-        let disabled = self
-            .connection_monitor
-            .disabled_profiler_connections
-            .contains(&active_connection.connection_id);
+        let disabled = !self.settings_store.settings().host_tools.monitor_enabled;
         let profiler_state = if compact {
             current.as_ref().map(|(_, state)| *state)
         } else {
@@ -110,10 +107,10 @@ impl WorkspaceApp {
             .when(compact, |panel| panel.flex_1().min_h_0())
             .child(self.render_monitor_panel_header(
                 &connections,
-                active_connection,
                 selected_id,
                 is_running,
                 !disabled,
+                !compact,
                 cx,
             ));
 
@@ -164,15 +161,13 @@ impl WorkspaceApp {
                                 ))
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener({
-                                        let connection_id = active_connection.connection_id.clone();
-                                        move |this, _event, _window, cx| {
-                                            this.start_connection_monitor_profiler(
-                                                connection_id.clone(),
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        }
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.set_host_tool_monitoring_enabled(
+                                            ContextSidebarTool::Monitor,
+                                            true,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
                                     }),
                                 ),
                         ),
@@ -451,10 +446,10 @@ impl WorkspaceApp {
     pub(super) fn render_monitor_panel_header(
         &self,
         connections: &[MonitorConnectionOption],
-        connection: &MonitorConnectionOption,
         selected_id: &str,
         is_running: bool,
         is_enabled: bool,
+        show_toggle: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -477,67 +472,53 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .p_1()
-                    .rounded(px(self.tokens.radii.md))
-                    .cursor_pointer()
-                    .text_color(if is_enabled {
-                        rgb(MONITOR_EMERALD)
-                    } else {
-                        rgb(theme.text_muted)
-                    })
-                    .hover(|button| {
-                        if is_enabled {
-                            button
-                                .text_color(rgb(MONITOR_RED))
-                                .bg(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA))
-                        } else {
-                            button
-                                .text_color(rgb(MONITOR_EMERALD))
-                                .bg(rgba((MONITOR_EMERALD_DARK << 8) | MONITOR_TINT_ALPHA))
-                        }
-                    })
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Power,
-                        14.0,
-                        if is_enabled {
+            .when(show_toggle, |header| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .p_1()
+                        .rounded(px(self.tokens.radii.md))
+                        .cursor_pointer()
+                        .text_color(if is_enabled {
                             rgb(MONITOR_EMERALD)
                         } else {
                             rgb(theme.text_muted)
-                        },
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener({
-                            let connection_id = connection.connection_id.clone();
-                            move |this, _event, _window, cx| {
-                                let profiler_state = this
-                                    .connection_monitor
-                                    .profiler_registry
-                                    .state(&connection_id);
-                                if this
-                                    .connection_monitor
-                                    .disabled_profiler_connections
-                                    .contains(&connection_id)
-                                    || !matches!(profiler_state, Some(ProfilerState::Running))
-                                {
-                                    this.start_connection_monitor_profiler(
-                                        connection_id.clone(),
-                                        cx,
-                                    );
-                                } else {
-                                    this.stop_connection_monitor_profiler(
-                                        connection_id.clone(),
-                                        cx,
-                                    );
-                                }
-                                cx.stop_propagation();
+                        })
+                        .hover(|button| {
+                            if is_enabled {
+                                button
+                                    .text_color(rgb(MONITOR_RED))
+                                    .bg(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA))
+                            } else {
+                                button
+                                    .text_color(rgb(MONITOR_EMERALD))
+                                    .bg(rgba((MONITOR_EMERALD_DARK << 8) | MONITOR_TINT_ALPHA))
                             }
-                        }),
-                    ),
-            )
+                        })
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Power,
+                            14.0,
+                            if is_enabled {
+                                rgb(MONITOR_EMERALD)
+                            } else {
+                                rgb(theme.text_muted)
+                            },
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                let enabled =
+                                    this.settings_store.settings().host_tools.monitor_enabled;
+                                this.set_host_tool_monitoring_enabled(
+                                    ContextSidebarTool::Monitor,
+                                    !enabled,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+            })
             .child(
                 div()
                     .flex_none()

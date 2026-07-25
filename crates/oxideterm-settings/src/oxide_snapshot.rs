@@ -155,6 +155,7 @@ const NATIVE_PREFERENCES_KEYS: &[&str] = &[
     "experimental",
     "newConnection",
     "settingsNavigation",
+    "hostTools",
 ];
 
 pub fn export_oxide_settings_snapshot_json(
@@ -503,6 +504,7 @@ mod tests {
         assert!(parsed["settings"].get("launcher").is_some());
         assert!(parsed["settings"].get("experimental").is_some());
         assert!(parsed["settings"].get("newConnection").is_some());
+        assert!(parsed["settings"].get("hostTools").is_some());
         assert_eq!(
             parsed["settings"]["settingsNavigation"]["groups"][0][0],
             Value::String("terminal".to_string())

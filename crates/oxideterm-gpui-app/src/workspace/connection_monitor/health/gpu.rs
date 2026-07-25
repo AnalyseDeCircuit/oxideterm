@@ -621,7 +621,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn sync_host_gpu_sampling(&mut self, cx: &mut Context<Self>) {
-        let visible = self.context_sidebar_visible()
+        let enabled = self.settings_store.settings().host_tools.gpu_enabled;
+        let visible = enabled
+            && self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
             && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
         if !visible {

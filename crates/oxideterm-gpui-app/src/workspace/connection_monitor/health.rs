@@ -19,6 +19,7 @@ const HOST_TOOLS_TAB_SCROLLBAR_MIN_THUMB_WIDTH: f32 = 32.0;
 const HOST_TOOLS_TAB_SCROLLBAR_RADIUS: f32 = 2.0;
 const HOST_TOOLS_TAB_SCROLLBAR_ALPHA: u32 = 0x66;
 const HOST_TOOLS_TAB_SCROLLBAR_DRAG_HEIGHT: f32 = 12.0;
+const HOST_TOOLS_MONITOR_TOGGLE_WIDTH: f32 = 36.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct HostToolsTabSelectionGeometry {
@@ -51,6 +52,45 @@ fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
         ContextSidebarTool::Schedules => 8,
         ContextSidebarTool::Filesystems => 9,
         ContextSidebarTool::Packages => 10,
+    }
+}
+
+impl ContextSidebarTool {
+    fn monitoring_enabled(self, settings: &oxideterm_settings::HostToolsSettings) -> bool {
+        match self {
+            Self::Monitor => settings.monitor_enabled,
+            Self::Gpu => settings.gpu_enabled,
+            Self::Processes => settings.processes_enabled,
+            Self::Services => settings.services_enabled,
+            Self::Logs => settings.logs_enabled,
+            Self::Tmux => settings.tmux_enabled,
+            Self::Docker => settings.docker_enabled,
+            Self::Ports => settings.ports_enabled,
+            Self::Schedules => settings.schedules_enabled,
+            Self::Filesystems => settings.filesystems_enabled,
+            Self::Packages => settings.packages_enabled,
+        }
+    }
+
+    fn set_monitoring_enabled(
+        self,
+        settings: &mut oxideterm_settings::HostToolsSettings,
+        enabled: bool,
+    ) {
+        // Keep persistence mapping next to the read mapping so new Host Tools cannot drift.
+        match self {
+            Self::Monitor => settings.monitor_enabled = enabled,
+            Self::Gpu => settings.gpu_enabled = enabled,
+            Self::Processes => settings.processes_enabled = enabled,
+            Self::Services => settings.services_enabled = enabled,
+            Self::Logs => settings.logs_enabled = enabled,
+            Self::Tmux => settings.tmux_enabled = enabled,
+            Self::Docker => settings.docker_enabled = enabled,
+            Self::Ports => settings.ports_enabled = enabled,
+            Self::Schedules => settings.schedules_enabled = enabled,
+            Self::Filesystems => settings.filesystems_enabled = enabled,
+            Self::Packages => settings.packages_enabled = enabled,
+        }
     }
 }
 
@@ -121,6 +161,59 @@ mod services;
 mod tmux;
 
 impl WorkspaceApp {
+    fn host_tool_monitoring_enabled(&self, tool: ContextSidebarTool) -> bool {
+        tool.monitoring_enabled(&self.settings_store.settings().host_tools)
+    }
+
+    fn set_host_tool_monitoring_enabled(
+        &mut self,
+        tool: ContextSidebarTool,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.edit_settings(
+            move |settings| tool.set_monitoring_enabled(&mut settings.host_tools, enabled),
+            cx,
+        );
+        if enabled && self.active_context_sidebar_tool == tool {
+            self.request_host_tool_snapshot_if_needed(tool, cx);
+        }
+    }
+
+    fn request_host_tool_snapshot_if_needed(
+        &mut self,
+        tool: ContextSidebarTool,
+        cx: &mut Context<Self>,
+    ) {
+        match tool {
+            ContextSidebarTool::Services => {
+                self.request_host_services_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Logs => {
+                self.request_host_logs_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Tmux => {
+                self.request_host_tmux_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Ports => {
+                self.request_host_ports_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Schedules => {
+                self.request_host_schedules_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Filesystems => {
+                self.request_host_filesystems_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Packages => {
+                self.request_host_packages_snapshot_for_selected_connection(cx);
+            }
+            ContextSidebarTool::Monitor
+            | ContextSidebarTool::Gpu
+            | ContextSidebarTool::Processes
+            | ContextSidebarTool::Docker => {}
+        }
+    }
+
     // Keep Host Tools filter chips visually consistent across resource panels.
     fn host_tools_filter_chip(&self, active: bool) -> Div {
         let theme = self.tokens.ui;
@@ -152,18 +245,23 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let active_tool = self.active_context_sidebar_tool;
-        let content = match active_tool {
-            ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
-            ContextSidebarTool::Gpu => self.render_host_gpu_panel(cx),
-            ContextSidebarTool::Processes => self.render_host_processes_panel(cx),
-            ContextSidebarTool::Services => self.render_host_services_panel(cx),
-            ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
-            ContextSidebarTool::Tmux => self.render_host_tmux_panel(cx),
-            ContextSidebarTool::Docker => self.render_host_docker_panel(cx),
-            ContextSidebarTool::Ports => self.render_host_ports_panel(cx),
-            ContextSidebarTool::Schedules => self.render_host_schedules_panel(cx),
-            ContextSidebarTool::Filesystems => self.render_host_filesystems_panel(cx),
-            ContextSidebarTool::Packages => self.render_host_packages_panel(cx),
+        let enabled = self.host_tool_monitoring_enabled(active_tool);
+        let content = if enabled {
+            match active_tool {
+                ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
+                ContextSidebarTool::Gpu => self.render_host_gpu_panel(cx),
+                ContextSidebarTool::Processes => self.render_host_processes_panel(cx),
+                ContextSidebarTool::Services => self.render_host_services_panel(cx),
+                ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
+                ContextSidebarTool::Tmux => self.render_host_tmux_panel(cx),
+                ContextSidebarTool::Docker => self.render_host_docker_panel(cx),
+                ContextSidebarTool::Ports => self.render_host_ports_panel(cx),
+                ContextSidebarTool::Schedules => self.render_host_schedules_panel(cx),
+                ContextSidebarTool::Filesystems => self.render_host_filesystems_panel(cx),
+                ContextSidebarTool::Packages => self.render_host_packages_panel(cx),
+            }
+        } else {
+            self.render_host_tool_monitoring_disabled(active_tool, cx)
         };
         let content = oxideterm_gpui_ui::motion::fade_in(
             &self.tokens,
@@ -349,6 +447,8 @@ impl WorkspaceApp {
                 cx,
             ));
 
+        let monitoring_enabled =
+            self.host_tool_monitoring_enabled(self.active_context_sidebar_tool);
         div()
             .id("host-tools-tab-strip")
             .flex_none()
@@ -364,8 +464,127 @@ impl WorkspaceApp {
             .when_some(selection_indicator, |strip, indicator| {
                 strip.child(indicator)
             })
-            .child(tabs)
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .bottom_0()
+                    .right(px(HOST_TOOLS_MONITOR_TOGGLE_WIDTH))
+                    .child(tabs),
+            )
+            .child(self.render_host_tool_monitoring_toggle(monitoring_enabled, cx))
             .child(self.render_host_tools_tab_scrollbar(cx))
+            .into_any_element()
+    }
+
+    fn render_host_tool_monitoring_toggle(
+        &self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tool = self.active_context_sidebar_tool;
+        let color = if enabled {
+            MONITOR_EMERALD
+        } else {
+            self.tokens.ui.text_muted
+        };
+        div()
+            .id("host-tool-monitoring-toggle")
+            .absolute()
+            .right_0()
+            .top_0()
+            .w(px(HOST_TOOLS_MONITOR_TOGGLE_WIDTH))
+            .h(px(
+                HOST_TOOLS_TAB_STRIP_HEIGHT - HOST_TOOLS_TAB_SCROLLBAR_HEIGHT
+            ))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .text_color(rgb(color))
+            .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
+            .hover(move |button| {
+                if enabled {
+                    button.bg(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA))
+                } else {
+                    button.bg(rgba((MONITOR_EMERALD_DARK << 8) | MONITOR_TINT_ALPHA))
+                }
+            })
+            .child(Self::render_lucide_icon(
+                LucideIcon::Power,
+                14.0,
+                rgb(color),
+            ))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.set_host_tool_monitoring_enabled(tool, !enabled, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_tool_monitoring_disabled(
+        &self,
+        tool: ContextSidebarTool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let color = self.tokens.ui.text_muted;
+        div()
+            .size_full()
+            .p_4()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .text_align(gpui::TextAlign::Center)
+            .text_color(rgb(color))
+            .child(div().mb_2().opacity(0.3).child(Self::render_lucide_icon(
+                LucideIcon::Power,
+                24.0,
+                rgb(color),
+            )))
+            .child(
+                div()
+                    .mb_3()
+                    .text_size(px(14.0))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::PlainDocument,
+                        "host-tool-monitoring-disabled",
+                        format!("{tool:?}"),
+                        self.i18n.t("profiler.panel.disabled"),
+                        color,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .px_3()
+                    .py_1()
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .text_size(px(12.0))
+                    .cursor_pointer()
+                    .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "host-tool-monitoring-enable",
+                        format!("{tool:?}"),
+                        self.i18n.t("profiler.panel.enable"),
+                        color,
+                        cx,
+                    ))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.set_host_tool_monitoring_enabled(tool, true, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -1243,6 +1462,20 @@ mod tests {
         for (expected_index, tool) in tools.into_iter().enumerate() {
             assert_eq!(host_tools_tab_index(tool), expected_index);
         }
+    }
+
+    #[test]
+    fn host_tool_monitoring_flags_do_not_change_navigation_order() {
+        let mut settings = oxideterm_settings::HostToolsSettings::default();
+        ContextSidebarTool::Services.set_monitoring_enabled(&mut settings, false);
+
+        assert!(!ContextSidebarTool::Services.monitoring_enabled(&settings));
+        assert!(ContextSidebarTool::Monitor.monitoring_enabled(&settings));
+        assert_eq!(
+            host_tools_tab_index(ContextSidebarTool::Services),
+            3,
+            "disabled monitoring keeps the Services tab in its stable position"
+        );
     }
 
     #[test]

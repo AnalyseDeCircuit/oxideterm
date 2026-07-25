@@ -268,6 +268,9 @@ pub fn parse_resource_metrics(
     let docker = parse_docker_snapshot(output);
     let services = parse_service_snapshot(output);
     let has_memory = mem.is_some();
+    let has_auxiliary_metrics = !gpus.is_empty()
+        || !top_processes.is_empty()
+        || !matches!(docker.status, crate::ResourceDockerStatus::Unknown);
 
     let cpu_percent = match (&cpu_snap, previous) {
         (Some(current), Some(previous)) => cpu_usage_percent(current, &previous.cpu),
@@ -383,6 +386,7 @@ pub fn parse_resource_metrics(
         (true, _, _, _) | (_, true, _, _) | (_, _, true, _) | (_, _, _, true) => {
             MetricsSource::Partial
         }
+        _ if has_auxiliary_metrics => MetricsSource::Partial,
         _ => MetricsSource::RttOnly,
     };
 
@@ -1105,6 +1109,17 @@ Inter-|   Receive                                                |  Transmit
             processes[0].full_command.as_deref(),
             Some("/usr/bin/node /srv/app/server.js")
         );
+    }
+
+    #[test]
+    fn process_only_sample_is_a_valid_partial_metrics_update() {
+        let output = "===TOPPROCS===\n1363656\t1\twww-data\tS\t12.3\t4.5\t262144\t524288\t01:02:03\tnode\t/usr/bin/node\n===END===";
+
+        let metrics = parse_resource_metrics(output, None, 10_000);
+
+        assert_eq!(metrics.source, MetricsSource::Partial);
+        assert_eq!(metrics.top_processes.len(), 1);
+        assert_eq!(metrics.cpu_percent, None);
     }
 
     #[test]

@@ -837,6 +837,9 @@ impl WorkspaceApp {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Services) {
+            return;
+        }
         if self.connection_monitor.host_service_snapshot_polling {
             // Coalesce selection changes and post-action refreshes behind the
             // in-flight snapshot instead of starting concurrent SSH commands.

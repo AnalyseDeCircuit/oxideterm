@@ -78,9 +78,10 @@ impl WorkspaceApp {
             self.connection_monitor
                 .selected_connection_id
                 .hash(&mut hasher);
-            self.connection_monitor
-                .disabled_profiler_connections
-                .len()
+            self.settings_store
+                .settings()
+                .host_tools
+                .monitor_enabled
                 .hash(&mut hasher);
         }
         hasher.finish()

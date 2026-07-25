@@ -1218,6 +1218,9 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Tmux) {
+            return;
+        }
         if self.connection_monitor.host_tmux_snapshot_polling {
             if feedback.should_toast() {
                 self.push_host_tmux_toast(

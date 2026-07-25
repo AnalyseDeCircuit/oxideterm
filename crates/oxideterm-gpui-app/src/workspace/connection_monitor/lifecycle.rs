@@ -166,9 +166,6 @@ impl WorkspaceApp {
                 self.connection_monitor
                     .profiler_registry
                     .remove(&connection_id);
-                self.connection_monitor
-                    .disabled_profiler_connections
-                    .remove(&connection_id);
             }
         }
         if connections.is_empty() {
@@ -200,11 +197,8 @@ impl WorkspaceApp {
         let Some(connection_id) = self.connection_monitor.selected_connection_id.clone() else {
             return;
         };
-        if self
-            .connection_monitor
-            .disabled_profiler_connections
-            .contains(&connection_id)
-        {
+        if self.resource_sampling_config().is_empty() {
+            self.connection_monitor.profiler_registry.stop_all();
             return;
         }
         if self
@@ -225,9 +219,6 @@ impl WorkspaceApp {
         let Some(handle) = self.ssh_registry.get(&connection_id) else {
             return;
         };
-        self.connection_monitor
-            .disabled_profiler_connections
-            .remove(&connection_id);
         let Some(os_type) = handle.remote_env().map(|env| env.os_type) else {
             // Lifecycle polling retries this start after environment detection;
             // choosing Linux here would run incorrect probes on other hosts.
@@ -236,28 +227,43 @@ impl WorkspaceApp {
         let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
         self.connection_monitor
             .profiler_registry
-            .start_with_sampler_on(
+            .start_with_sampler_on_config(
                 connection_id,
                 sampler,
                 os_type,
+                self.resource_sampling_config(),
                 Some(self.connection_monitor.profiler_update_tx.clone()),
                 self.forwarding_runtime.handle().clone(),
             );
         cx.notify();
     }
 
-    pub(super) fn stop_connection_monitor_profiler(
+    pub(in crate::workspace) fn apply_host_tool_monitoring_settings(
         &mut self,
-        connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        self.connection_monitor
-            .profiler_registry
-            .stop(&connection_id);
-        self.connection_monitor
-            .disabled_profiler_connections
-            .insert(connection_id);
-        cx.notify();
+        let config = self.resource_sampling_config();
+        if config.is_empty() {
+            // The registry owns persistent shells, so stop them at the settings boundary.
+            self.connection_monitor.profiler_registry.stop_all();
+        } else {
+            for connection_id in self.connection_monitor.profiler_registry.connection_ids() {
+                self.start_connection_monitor_profiler(connection_id, cx);
+            }
+            self.sync_connection_monitor_selection(cx);
+        }
+        self.sync_host_gpu_sampling(cx);
+    }
+
+    fn resource_sampling_config(&self) -> oxideterm_connection_monitor::ResourceSamplingConfig {
+        let host_tools = &self.settings_store.settings().host_tools;
+        oxideterm_connection_monitor::ResourceSamplingConfig {
+            system: host_tools.monitor_enabled,
+            // The detailed GPU page owns its own task; this probe only feeds Monitor summaries.
+            gpu: host_tools.monitor_enabled && host_tools.gpu_enabled,
+            processes: host_tools.processes_enabled,
+            docker: host_tools.docker_enabled,
+        }
     }
 
     pub(super) fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
