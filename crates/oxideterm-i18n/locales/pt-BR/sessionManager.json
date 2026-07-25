@@ -136,6 +136,12 @@
       "delete_failed": "Falha ao excluir perfil Telnet",
       "confirm_delete": "Excluir perfil Telnet \"{{name}}\"?"
     },
+    "remote_desktop_profiles": {
+      "delete": "Excluir",
+      "open_failed": "Não foi possível abrir a conexão de área de trabalho remota",
+      "delete_failed": "Não foi possível excluir a conexão de área de trabalho remota",
+      "confirm_delete": "Excluir a conexão de área de trabalho remota \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Credenciais de privilégio",
       "description": "Armazena credenciais separadas para prompts sudo/su. Os segredos ficam no chaveiro do sistema e só são lidos depois de clicar no auxiliar do terminal.",

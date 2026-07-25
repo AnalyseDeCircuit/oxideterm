@@ -9,8 +9,9 @@ use std::{
 
 use gpui::{Context, Window};
 use oxideterm_connections::{
-    SaveConnectionRequest, SaveSerialProfileRequest, SaveTelnetProfileRequest,
-    SavedUpstreamProxyProtocol, first_available_default_key_path,
+    SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
+    SaveTelnetProfileRequest, SavedUpstreamProxyProtocol, SecretString,
+    first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,

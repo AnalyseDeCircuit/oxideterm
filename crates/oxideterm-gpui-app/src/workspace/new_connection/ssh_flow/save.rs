@@ -235,7 +235,7 @@ impl WorkspaceApp {
                 NewConnectionFormMode::NewConnection
             )
         {
-            self.submit_remote_desktop_connection_form(window, cx);
+            self.submit_remote_desktop_connection_form(action, window, cx);
             return;
         }
         if self
@@ -645,6 +645,7 @@ impl WorkspaceApp {
 
     pub(super) fn submit_remote_desktop_connection_form(
         &mut self,
+        action: NewConnectionSubmitAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -698,16 +699,28 @@ impl WorkspaceApp {
             .then(|| form.username.trim().to_string())
             .filter(|username| !username.is_empty());
         let password = if !form.password.is_empty() {
-            // Remote desktop passwords are runtime-only. Move the UI draft into
-            // a zeroizing wrapper before the form is dropped. VNC keeps this
-            // optional because servers may advertise unauthenticated access.
-            Some(RemoteDesktopSecret::from(std::mem::take(
-                &mut form.password,
-            )))
+            // Move the UI draft into a zeroizing type before saving or starting a worker.
+            Some(SecretString::from(std::mem::take(&mut form.password)))
         } else {
             None
         };
-        let profile = RemoteDesktopConnectionProfile {
+        let save_credential = form.save_password;
+        let should_save = action != NewConnectionSubmitAction::Connect;
+        let save_request = should_save.then(|| SaveRemoteDesktopProfileRequest {
+            id: None,
+            name: label.clone(),
+            group: (!form.group.trim().is_empty()).then(|| form.group.trim().to_string()),
+            protocol,
+            host: host.clone(),
+            port,
+            username: username.clone(),
+            domain: None,
+            credential_ref: None,
+            credential: save_credential.then(|| password.clone()).flatten(),
+            read_only: false,
+            session_options: form.remote_desktop_session_options,
+        });
+        let mut profile = RemoteDesktopConnectionProfile {
             id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
             label,
             protocol,
@@ -720,10 +733,40 @@ impl WorkspaceApp {
             // redirection choices on the profile instead of rebuilding defaults.
             session_options: form.remote_desktop_session_options,
         };
+        form.pending = true;
+        form.error = None;
+
+        if let Some(request) = save_request {
+            match self.connection_store.upsert_remote_desktop_profile(request) {
+                Ok(saved) => {
+                    profile.id = saved.id;
+                    profile.label = saved.name;
+                    profile.credential_ref = saved.credential_ref;
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                }
+                Err(error) => {
+                    if let Some(form) = self.new_connection_form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n
+                                .t("modals.new_connection.remote_desktop_save_failed")
+                        ));
+                    }
+                    cx.notify();
+                    return;
+                }
+            }
+        }
 
         self.new_connection_form = None;
         self.close_new_connection_select();
-        self.open_remote_desktop_connection_tab(profile, password, window, cx);
+        if action != NewConnectionSubmitAction::Save {
+            let runtime_password =
+                password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
+            self.open_remote_desktop_connection_tab(profile, runtime_password, window, cx);
+        }
+        cx.notify();
     }
 
     pub(in crate::workspace) fn start_new_connection_flow(

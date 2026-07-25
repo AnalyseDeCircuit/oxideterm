@@ -136,6 +136,12 @@
       "delete_failed": "Telnet プロファイルを削除できませんでした",
       "confirm_delete": "Telnet プロファイル「{{name}}」を削除しますか？"
     },
+    "remote_desktop_profiles": {
+      "delete": "削除",
+      "open_failed": "リモートデスクトップ接続を開けませんでした",
+      "delete_failed": "リモートデスクトップ接続を削除できませんでした",
+      "confirm_delete": "リモートデスクトップ接続「{{name}}」を削除しますか？"
+    },
     "privilege_credentials": {
       "title": "権限昇格用認証情報",
       "description": "sudo/su プロンプト用の認証情報を別に保存します。シークレットはシステムキーチェーンに保存され、ターミナル補助ボタンをクリックした時だけ読み込まれます。",

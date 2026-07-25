@@ -368,6 +368,7 @@
       "remote_desktop_username": "Username",
       "remote_desktop_username_required": "Enter an RDP username",
       "remote_desktop_password_required": "Enter an RDP password",
+      "remote_desktop_save_failed": "Failed to save remote desktop connection",
       "remote_desktop_password_placeholder": "RDP password",
       "remote_desktop_features_title": "Session features",
       "remote_desktop_features_hint": "Choose which local resources this remote desktop session may use.",
@@ -744,6 +745,9 @@
     "security_passwords_included": "Saved server passwords are included inside this encrypted .oxide file",
     "include_serial_profiles": "Include Serial Profiles",
     "include_serial_profiles_description": "Export saved serial connection profiles ({{count}} profile(s)).",
-    "content_summary_serial_profiles": "Serial profiles: {{count}} profile(s)"
+    "content_summary_serial_profiles": "Serial profiles: {{count}} profile(s)",
+    "include_remote_desktop_profiles": "Include Remote Desktop Connections",
+    "include_remote_desktop_profiles_description": "Export saved RDP and VNC connections ({{count}} connection(s)). Passwords are not included.",
+    "content_summary_remote_desktop_profiles": "Remote desktop connections: {{count}}"
   }
 }

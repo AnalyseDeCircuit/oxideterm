@@ -136,6 +136,12 @@
       "delete_failed": "Impossible de supprimer le profil Telnet",
       "confirm_delete": "Supprimer le profil Telnet \"{{name}}\" ?"
     },
+    "remote_desktop_profiles": {
+      "delete": "Supprimer",
+      "open_failed": "Impossible d’ouvrir la connexion Bureau à distance",
+      "delete_failed": "Impossible de supprimer la connexion Bureau à distance",
+      "confirm_delete": "Supprimer la connexion Bureau à distance « {{name}} » ?"
+    },
     "privilege_credentials": {
       "title": "Identifiants de privilège",
       "description": "Stocke des identifiants séparés pour les invites sudo/su. Les secrets restent dans le trousseau système et ne sont lus qu’après un clic sur l’aide du terminal.",

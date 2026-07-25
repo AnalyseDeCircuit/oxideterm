@@ -195,6 +195,12 @@ impl WorkspaceApp {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.telnet_profiles.delete"),
             ),
+            SessionManagerDeleteConfirm::RemoteDesktopProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.remote_desktop_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.remote_desktop_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::Batch { ids } => (
                 confirm_batch_delete_label(&self.i18n, ids.len()),
                 self.i18n.t("common.actions.confirm"),

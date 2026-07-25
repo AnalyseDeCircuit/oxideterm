@@ -368,6 +368,7 @@
       "remote_desktop_username": "ユーザー名",
       "remote_desktop_username_required": "RDP ユーザー名を入力してください",
       "remote_desktop_password_required": "RDP パスワードを入力してください",
+      "remote_desktop_save_failed": "リモートデスクトップ接続を保存できませんでした",
       "remote_desktop_password_placeholder": "RDP パスワード",
       "remote_desktop_features_title": "セッション機能",
       "remote_desktop_features_hint": "このリモートデスクトップセッションで使用できるローカルリソースを選択します。",
@@ -757,6 +758,9 @@
     "security_passwords_included": "保存済みサーバーパスワードはこの暗号化された .oxide ファイル内に含まれます",
     "include_serial_profiles": "シリアルプロファイルを含める",
     "include_serial_profiles_description": "保存済みのシリアル接続プロファイルをエクスポートします（{{count}} 件）。",
-    "content_summary_serial_profiles": "シリアルプロファイル: {{count}} 件"
+    "content_summary_serial_profiles": "シリアルプロファイル: {{count}} 件",
+    "include_remote_desktop_profiles": "リモートデスクトップ接続を含める",
+    "include_remote_desktop_profiles_description": "保存済みの RDP および VNC 接続をエクスポートします（{{count}} 件）。パスワードは含まれません。",
+    "content_summary_remote_desktop_profiles": "リモートデスクトップ接続: {{count}} 件"
   }
 }

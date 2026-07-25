@@ -368,6 +368,7 @@
       "remote_desktop_username": "Nom d'utilisateur",
       "remote_desktop_username_required": "Saisissez un nom d'utilisateur RDP",
       "remote_desktop_password_required": "Saisissez un mot de passe RDP",
+      "remote_desktop_save_failed": "Impossible d’enregistrer la connexion Bureau à distance",
       "remote_desktop_password_placeholder": "Mot de passe RDP",
       "remote_desktop_features_title": "Fonctions de la session",
       "remote_desktop_features_hint": "Choisissez les ressources locales que cette session de bureau à distance peut utiliser.",
@@ -757,6 +758,9 @@
     "security_passwords_included": "Les mots de passe serveur enregistrés sont inclus dans ce fichier .oxide chiffré",
     "include_serial_profiles": "Inclure les profils série",
     "include_serial_profiles_description": "Exporte les profils de connexion série enregistrés ({{count}} profil(s)).",
-    "content_summary_serial_profiles": "Profils série : {{count}} profil(s)"
+    "content_summary_serial_profiles": "Profils série : {{count}} profil(s)",
+    "include_remote_desktop_profiles": "Inclure les connexions Bureau à distance",
+    "include_remote_desktop_profiles_description": "Exporte les connexions RDP et VNC enregistrées ({{count}}). Les mots de passe sont exclus.",
+    "content_summary_remote_desktop_profiles": "Connexions Bureau à distance : {{count}}"
   }
 }

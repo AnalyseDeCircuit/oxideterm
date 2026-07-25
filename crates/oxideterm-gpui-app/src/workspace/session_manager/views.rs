@@ -6,6 +6,7 @@ pub(super) enum SessionManagerDisplayItem {
     SshConfig(SshConfigHost),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
+    RemoteDesktop(RemoteDesktopProfile),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +35,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
+            Self::RemoteDesktop(profile) => &profile.id,
         }
     }
 
@@ -43,6 +45,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.name,
             Self::Telnet(profile) => &profile.name,
+            Self::RemoteDesktop(profile) => &profile.name,
         }
     }
 
@@ -52,6 +55,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
             Self::Telnet(profile) => profile.group.as_deref(),
+            Self::RemoteDesktop(profile) => profile.group.as_deref(),
         }
     }
 
@@ -61,6 +65,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Telnet(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
+            Self::RemoteDesktop(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
         }
     }
 
@@ -70,6 +75,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
             Self::Serial(profile) => &profile.port_path,
             Self::Telnet(profile) => &profile.host,
+            Self::RemoteDesktop(profile) => &profile.host,
         }
     }
 
@@ -79,6 +85,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
             Self::Serial(profile) => profile.baud_rate,
             Self::Telnet(profile) => u32::from(profile.port),
+            Self::RemoteDesktop(profile) => u32::from(profile.port),
         }
     }
 
@@ -87,6 +94,7 @@ impl SessionManagerDisplayItem {
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
             Self::Serial(_) | Self::Telnet(_) => "",
+            Self::RemoteDesktop(profile) => profile.username.as_deref().unwrap_or_default(),
         }
     }
 
@@ -96,6 +104,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => "ssh config".to_string(),
             Self::Serial(_) => "serial".to_string(),
             Self::Telnet(_) => "telnet".to_string(),
+            Self::RemoteDesktop(profile) => profile.protocol.provider_id().to_string(),
         }
     }
 
@@ -124,6 +133,12 @@ impl SessionManagerDisplayItem {
             },
             Self::Serial(profile) => format!("{} · {}", profile.port_path, profile.baud_rate),
             Self::Telnet(profile) => format!("{}:{}", profile.host, profile.port),
+            Self::RemoteDesktop(profile) => match profile.username.as_deref() {
+                Some(username) if !username.is_empty() => {
+                    format!("{username}@{}:{}", profile.host, profile.port)
+                }
+                _ => format!("{}:{}", profile.host, profile.port),
+            },
         }
     }
 
@@ -151,6 +166,14 @@ impl SessionManagerDisplayItem {
                 profile.port,
                 profile.group.as_deref().unwrap_or_default()
             ),
+            Self::RemoteDesktop(profile) => format!(
+                "{}\n{}\n{}\n{}\n{}",
+                profile.name,
+                profile.protocol.provider_id(),
+                profile.host,
+                profile.port,
+                profile.group.as_deref().unwrap_or_default()
+            ),
         }
     }
 
@@ -163,6 +186,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(_) => LucideIcon::FileTerminal,
             Self::Serial(_) => LucideIcon::Radio,
             Self::Telnet(_) => LucideIcon::Terminal,
+            Self::RemoteDesktop(_) => LucideIcon::Monitor,
         }
     }
 }
@@ -200,6 +224,13 @@ impl WorkspaceApp {
                     .iter()
                     .cloned()
                     .map(SessionManagerDisplayItem::Telnet),
+            )
+            .chain(
+                self.connection_store
+                    .remote_desktop_profiles()
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::RemoteDesktop),
             )
             .chain(
                 self.session_manager
@@ -1072,6 +1103,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::SshConfig(_) => rgba(0x8b5cf633),
             SessionManagerDisplayItem::Serial(_) => rgba(0xf59e0b33),
             SessionManagerDisplayItem::Telnet(_) => rgba(0x22c55e33),
+            SessionManagerDisplayItem::RemoteDesktop(_) => rgba(0x0ea5e933),
         };
         let fg = match item {
             SessionManagerDisplayItem::Connection(connection) => connection
@@ -1083,6 +1115,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::SshConfig(_) => rgb(0xc4b5fd),
             SessionManagerDisplayItem::Serial(_) => rgb(0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => rgb(0x86efac),
+            SessionManagerDisplayItem::RemoteDesktop(_) => rgb(0x7dd3fc),
         };
         div()
             .w(px(MANAGER_ROW_ICON_SIZE))
@@ -1275,6 +1308,46 @@ impl WorkspaceApp {
                         cx,
                     ))
             }
+            SessionManagerDisplayItem::RemoteDesktop(profile) => {
+                let open_id = profile.id.clone();
+                let menu_id = profile.id;
+                div()
+                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(MANAGER_ROW_ACTION_GAP))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.accent),
+                        has_background,
+                        move |this, _event, window, cx| {
+                            this.open_saved_remote_desktop_profile(&open_id, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::MoreVertical,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, event, _window, cx| {
+                            this.open_session_manager_row_action_menu(
+                                SessionManagerRowActionTarget::RemoteDesktop(menu_id.clone()),
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
         }
     }
 
@@ -1290,7 +1363,9 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Connection(_) => {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
-            SessionManagerRowActionTarget::Serial(_) | SessionManagerRowActionTarget::Telnet(_) => {
+            SessionManagerRowActionTarget::Serial(_)
+            | SessionManagerRowActionTarget::Telnet(_)
+            | SessionManagerRowActionTarget::RemoteDesktop(_) => {
                 MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT
             }
         };
@@ -1362,6 +1437,10 @@ impl WorkspaceApp {
                 id.clone(),
                 self.i18n.t("sessionManager.telnet_profiles.delete"),
             ),
+            SessionManagerRowActionTarget::RemoteDesktop(id) => (
+                id.clone(),
+                self.i18n.t("sessionManager.remote_desktop_profiles.delete"),
+            ),
         };
         popup = popup.child(
             self.render_session_manager_menu_action(
@@ -1386,6 +1465,9 @@ impl WorkspaceApp {
                         }
                         SessionManagerRowActionTarget::Telnet(_) => {
                             this.request_delete_telnet_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::RemoteDesktop(_) => {
+                            this.request_delete_remote_desktop_profile(&delete_id, cx)
                         }
                     }
                     cx.stop_propagation();
@@ -1475,6 +1557,9 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Telnet(profile) => {
                 self.open_saved_telnet_profile(&profile.id, window, cx)
+            }
+            SessionManagerDisplayItem::RemoteDesktop(profile) => {
+                self.open_saved_remote_desktop_profile(&profile.id, window, cx)
             }
         }
     }

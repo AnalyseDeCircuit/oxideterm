@@ -368,6 +368,7 @@
       "remote_desktop_username": "Tên người dùng",
       "remote_desktop_username_required": "Nhập tên người dùng RDP",
       "remote_desktop_password_required": "Nhập mật khẩu RDP",
+      "remote_desktop_save_failed": "Không thể lưu kết nối máy tính từ xa",
       "remote_desktop_password_placeholder": "Mật khẩu RDP",
       "remote_desktop_features_title": "Tính năng phiên",
       "remote_desktop_features_hint": "Chọn các tài nguyên cục bộ mà phiên màn hình từ xa này được phép sử dụng.",
@@ -757,6 +758,9 @@
     "security_passwords_included": "Mật khẩu máy chủ đã lưu được bao gồm trong tệp .oxide đã mã hóa này",
     "include_serial_profiles": "Bao gồm hồ sơ serial",
     "include_serial_profiles_description": "Xuất các hồ sơ kết nối serial đã lưu ({{count}} hồ sơ).",
-    "content_summary_serial_profiles": "Hồ sơ serial: {{count}} hồ sơ"
+    "content_summary_serial_profiles": "Hồ sơ serial: {{count}} hồ sơ",
+    "include_remote_desktop_profiles": "Bao gồm kết nối máy tính từ xa",
+    "include_remote_desktop_profiles_description": "Xuất các kết nối RDP và VNC đã lưu ({{count}} kết nối). Không bao gồm mật khẩu.",
+    "content_summary_remote_desktop_profiles": "Kết nối máy tính từ xa: {{count}}"
   }
 }

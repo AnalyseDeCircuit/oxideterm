@@ -14,8 +14,8 @@ use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{Div, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
-    ConnectionStore, ProxyHopDraft, SaveConnectionRequest, SavedAuth, SavedConnection,
-    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    ConnectionStore, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest, SavedAuth,
+    SavedConnection, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
     SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, TelnetProfile,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
@@ -250,6 +250,7 @@ pub(super) enum SessionManagerDeleteConfirm {
     Single { id: String, name: String },
     SerialProfile { id: String, name: String },
     TelnetProfile { id: String, name: String },
+    RemoteDesktopProfile { id: String, name: String },
     Batch { ids: Vec<String> },
 }
 
@@ -258,6 +259,7 @@ pub(super) enum SessionManagerRowActionTarget {
     Connection(String),
     Serial(String),
     Telnet(String),
+    RemoteDesktop(String),
 }
 
 #[derive(Clone, Debug)]
@@ -501,6 +503,7 @@ pub(super) struct OxideExportDialogState {
     pub(super) include_local_terminal_env_vars: bool,
     pub(super) include_quick_commands: bool,
     pub(super) include_serial_profiles: bool,
+    pub(super) include_remote_desktop_profiles: bool,
     pub(super) include_plugin_settings: bool,
     pub(super) plugin_groups: HashMap<String, usize>,
     pub(super) selected_plugin_ids: HashSet<String>,
@@ -539,6 +542,7 @@ impl Default for OxideExportDialogState {
             include_local_terminal_env_vars: false,
             include_quick_commands: true,
             include_serial_profiles: true,
+            include_remote_desktop_profiles: true,
             include_plugin_settings: true,
             plugin_groups: HashMap::new(),
             selected_plugin_ids: HashSet::new(),
@@ -582,6 +586,10 @@ impl std::fmt::Debug for OxideExportDialogState {
             )
             .field("include_quick_commands", &self.include_quick_commands)
             .field("include_serial_profiles", &self.include_serial_profiles)
+            .field(
+                "include_remote_desktop_profiles",
+                &self.include_remote_desktop_profiles,
+            )
             .field("include_plugin_settings", &self.include_plugin_settings)
             .field("plugin_groups", &self.plugin_groups)
             .field("selected_plugin_ids", &self.selected_plugin_ids)

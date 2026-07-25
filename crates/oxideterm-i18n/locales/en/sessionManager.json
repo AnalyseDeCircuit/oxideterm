@@ -136,6 +136,12 @@
       "delete_failed": "Failed to delete Telnet profile",
       "confirm_delete": "Delete Telnet profile \"{{name}}\"?"
     },
+    "remote_desktop_profiles": {
+      "delete": "Delete",
+      "open_failed": "Failed to open remote desktop connection",
+      "delete_failed": "Failed to delete remote desktop connection",
+      "confirm_delete": "Delete remote desktop connection \"{{name}}\"?"
+    },
     "privilege_credentials": {
       "title": "Privilege credentials",
       "description": "Store separate sudo/su prompt credentials. Secrets stay in the system keychain and are only read after you click the terminal helper.",

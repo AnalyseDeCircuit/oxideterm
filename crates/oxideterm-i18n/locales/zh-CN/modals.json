@@ -368,6 +368,7 @@
       "remote_desktop_username": "用户名",
       "remote_desktop_username_required": "请输入 RDP 用户名",
       "remote_desktop_password_required": "请输入 RDP 密码",
+      "remote_desktop_save_failed": "保存远程桌面连接失败",
       "remote_desktop_password_placeholder": "RDP 密码",
       "remote_desktop_features_title": "会话功能",
       "remote_desktop_features_hint": "选择此远程桌面会话可以使用的本地资源。",
@@ -744,6 +745,9 @@
     "security_passwords_included": "已保存的服务器密码会包含在这个加密的 .oxide 文件中",
     "include_serial_profiles": "包含串口配置",
     "include_serial_profiles_description": "导出已保存的串口连接配置（{{count}} 个）。",
-    "content_summary_serial_profiles": "串口配置：{{count}} 个"
+    "content_summary_serial_profiles": "串口配置：{{count}} 个",
+    "include_remote_desktop_profiles": "包含远程桌面连接",
+    "include_remote_desktop_profiles_description": "导出已保存的 RDP 和 VNC 连接（{{count}} 个），不包含密码。",
+    "content_summary_remote_desktop_profiles": "远程桌面连接：{{count}} 个"
   }
 }

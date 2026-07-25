@@ -1015,6 +1015,7 @@ impl WorkspaceApp {
             || (dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty())
             || dialog.include_quick_commands
             || dialog.include_serial_profiles
+            || dialog.include_remote_desktop_profiles
             || (dialog.include_plugin_settings && !dialog.selected_plugin_ids.is_empty())
             || dialog.include_portable_secrets
     }
@@ -1354,6 +1355,19 @@ impl WorkspaceApp {
         } else {
             None
         };
+        let remote_desktop_profiles_json = if dialog.include_remote_desktop_profiles {
+            Some(
+                serde_json::to_string_pretty(
+                    &self
+                        .connection_store
+                        .export_remote_desktop_profiles_snapshot()
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
         let plugin_settings = if dialog.include_plugin_settings {
             oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())?
                 .into_iter()
@@ -1431,6 +1445,7 @@ impl WorkspaceApp {
             app_settings_json,
             quick_commands_json,
             serial_profiles_json,
+            remote_desktop_profiles_json,
             plugin_settings,
             portable_secrets,
             forwards,

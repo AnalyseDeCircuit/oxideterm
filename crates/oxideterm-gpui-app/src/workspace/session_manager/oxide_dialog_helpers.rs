@@ -189,6 +189,7 @@ pub(super) fn oxide_export_has_selected_content(dialog: &OxideExportDialogState)
         || (dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty())
         || dialog.include_quick_commands
         || dialog.include_serial_profiles
+        || dialog.include_remote_desktop_profiles
         || (dialog.include_plugin_settings
             && oxide_export_selected_plugin_setting_count(dialog) > 0)
         || dialog.include_portable_secrets

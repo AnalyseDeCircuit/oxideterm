@@ -136,6 +136,12 @@
       "delete_failed": "Không xóa được hồ sơ Telnet",
       "confirm_delete": "Xóa hồ sơ Telnet \"{{name}}\"?"
     },
+    "remote_desktop_profiles": {
+      "delete": "Xóa",
+      "open_failed": "Không thể mở kết nối máy tính từ xa",
+      "delete_failed": "Không thể xóa kết nối máy tính từ xa",
+      "confirm_delete": "Xóa kết nối máy tính từ xa “{{name}}”?"
+    },
     "privilege_credentials": {
       "title": "Thông tin xác thực đặc quyền",
       "description": "Lưu riêng thông tin xác thực cho lời nhắc sudo/su. Bí mật nằm trong keychain hệ thống và chỉ được đọc sau khi bạn bấm nút hỗ trợ terminal.",

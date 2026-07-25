@@ -943,13 +943,28 @@ impl WorkspaceApp {
                                 && !edit_properties_mode
                                 && self.saved_connection_prompt_action.is_none(),
                             |footer| {
-                                footer.child(self.render_connection_button(
-                                    self.i18n.t("ssh.form.connect"),
-                                    true,
-                                    ConnectionButtonAction::Connect,
-                                    primary_disabled,
-                                    cx,
-                                ))
+                                footer
+                                    .child(self.render_connection_button(
+                                        self.i18n.t("ssh.form.save"),
+                                        false,
+                                        ConnectionButtonAction::Save,
+                                        primary_disabled,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_button(
+                                        self.i18n.t("ssh.form.connect"),
+                                        false,
+                                        ConnectionButtonAction::Connect,
+                                        primary_disabled,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_button(
+                                        self.i18n.t("ssh.form.save_and_connect"),
+                                        true,
+                                        ConnectionButtonAction::SaveAndConnect,
+                                        primary_disabled,
+                                        cx,
+                                    ))
                             },
                         )
                         .when(

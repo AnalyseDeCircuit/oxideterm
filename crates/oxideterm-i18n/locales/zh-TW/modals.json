@@ -368,6 +368,7 @@
       "remote_desktop_username": "使用者名稱",
       "remote_desktop_username_required": "請輸入 RDP 使用者名稱",
       "remote_desktop_password_required": "請輸入 RDP 密碼",
+      "remote_desktop_save_failed": "儲存遠端桌面連線失敗",
       "remote_desktop_password_placeholder": "RDP 密碼",
       "remote_desktop_features_title": "工作階段功能",
       "remote_desktop_features_hint": "選擇此遠端桌面工作階段可以使用的本機資源。",
@@ -757,6 +758,9 @@
     "security_passwords_included": "已儲存的伺服器密碼會包含在這個加密的 .oxide 檔案中",
     "include_serial_profiles": "包含序列埠設定",
     "include_serial_profiles_description": "匯出已儲存的序列埠連線設定（{{count}} 個）。",
-    "content_summary_serial_profiles": "序列埠設定：{{count}} 個"
+    "content_summary_serial_profiles": "序列埠設定：{{count}} 個",
+    "include_remote_desktop_profiles": "包含遠端桌面連線",
+    "include_remote_desktop_profiles_description": "匯出已儲存的 RDP 與 VNC 連線（{{count}} 個），不包含密碼。",
+    "content_summary_remote_desktop_profiles": "遠端桌面連線：{{count}} 個"
   }
 }

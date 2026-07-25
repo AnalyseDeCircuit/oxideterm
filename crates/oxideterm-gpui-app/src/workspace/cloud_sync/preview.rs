@@ -345,6 +345,10 @@ impl WorkspaceApp {
                 CloudSyncUploadSelectionAction::ToggleSerialProfiles,
             ),
             (
+                "plugin.cloud_sync.settings.sync_remote_desktop_profiles",
+                CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles,
+            ),
+            (
                 "plugin.cloud_sync.settings.sync_sensitive_credentials",
                 CloudSyncUploadSelectionAction::ToggleSensitiveCredentials,
             ),
@@ -397,6 +401,10 @@ impl WorkspaceApp {
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.sync_serial_profiles || !selection.serial_profile_item_ids.is_empty()
             }
+            CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
+                selection.sync_remote_desktop_profiles
+                    || !selection.remote_desktop_profile_item_ids.is_empty()
+            }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 selection.sync_sensitive_credentials
             }
@@ -421,6 +429,9 @@ impl WorkspaceApp {
             }
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => {
                 selection.serial_profile_item_ids.len()
+            }
+            CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
+                selection.remote_desktop_profile_item_ids.len()
             }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
                 return self.cloud_sync_upload_sensitive_summary(selection);

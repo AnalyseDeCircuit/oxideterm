@@ -136,6 +136,12 @@
       "delete_failed": "Telnet-Profil konnte nicht gelöscht werden",
       "confirm_delete": "Telnet-Profil \"{{name}}\" löschen?"
     },
+    "remote_desktop_profiles": {
+      "delete": "Löschen",
+      "open_failed": "Remotedesktop-Verbindung konnte nicht geöffnet werden",
+      "delete_failed": "Remotedesktop-Verbindung konnte nicht gelöscht werden",
+      "confirm_delete": "Remotedesktop-Verbindung „{{name}}“ löschen?"
+    },
     "privilege_credentials": {
       "title": "Privileg-Anmeldedaten",
       "description": "Separate Anmeldedaten für sudo/su-Prompts speichern. Secrets bleiben im System-Schlüsselbund und werden erst nach Klick auf die Terminal-Hilfe gelesen.",

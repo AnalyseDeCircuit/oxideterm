@@ -368,6 +368,7 @@
       "remote_desktop_username": "Nome utente",
       "remote_desktop_username_required": "Inserisci un nome utente RDP",
       "remote_desktop_password_required": "Inserisci una password RDP",
+      "remote_desktop_save_failed": "Impossibile salvare la connessione desktop remoto",
       "remote_desktop_password_placeholder": "Password RDP",
       "remote_desktop_features_title": "Funzioni della sessione",
       "remote_desktop_features_hint": "Scegli quali risorse locali può usare questa sessione desktop remoto.",
@@ -757,6 +758,9 @@
     "security_passwords_included": "Le password server salvate sono incluse in questo file .oxide cifrato",
     "include_serial_profiles": "Includi profili seriali",
     "include_serial_profiles_description": "Esporta i profili di connessione seriale salvati ({{count}} profilo/i).",
-    "content_summary_serial_profiles": "Profili seriali: {{count}} profilo/i"
+    "content_summary_serial_profiles": "Profili seriali: {{count}} profilo/i",
+    "include_remote_desktop_profiles": "Includi connessioni desktop remoto",
+    "include_remote_desktop_profiles_description": "Esporta le connessioni RDP e VNC salvate ({{count}}). Le password non sono incluse.",
+    "content_summary_remote_desktop_profiles": "Connessioni desktop remoto: {{count}}"
   }
 }

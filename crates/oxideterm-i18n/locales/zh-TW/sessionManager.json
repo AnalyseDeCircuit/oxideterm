@@ -136,6 +136,12 @@
       "delete_failed": "刪除 Telnet 設定檔失敗",
       "confirm_delete": "刪除 Telnet 設定檔「{{name}}」？"
     },
+    "remote_desktop_profiles": {
+      "delete": "刪除",
+      "open_failed": "開啟遠端桌面連線失敗",
+      "delete_failed": "刪除遠端桌面連線失敗",
+      "confirm_delete": "刪除遠端桌面連線「{{name}}」？"
+    },
     "privilege_credentials": {
       "title": "提權憑證",
       "description": "為 sudo/su 提示單獨儲存憑證。密碼保存在系統鑰匙圈中，只有點擊終端輔助按鈕時才會讀取。",

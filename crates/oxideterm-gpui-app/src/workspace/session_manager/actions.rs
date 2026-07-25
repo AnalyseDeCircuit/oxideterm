@@ -1,4 +1,8 @@
 use super::*;
+use crate::workspace::new_connection::NewConnectionTransport;
+use oxideterm_remote_desktop::{
+    RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
+};
 
 impl WorkspaceApp {
     pub(super) fn filtered_session_connections(&self) -> Vec<ConnectionInfo> {
@@ -59,7 +63,17 @@ impl WorkspaceApp {
                 })
             })
             .count();
-        connection_count + serial_count + telnet_count
+        let remote_desktop_count = self
+            .connection_store
+            .remote_desktop_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
+        connection_count + serial_count + telnet_count + remote_desktop_count
     }
 
     pub(super) fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
@@ -78,6 +92,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.telnet_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.remote_desktop_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -278,6 +297,23 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn request_delete_remote_desktop_profile(
+        &mut self,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self.connection_store.get_remote_desktop_profile(id) else {
+            return;
+        };
+        self.session_manager.delete_confirm =
+            Some(SessionManagerDeleteConfirm::RemoteDesktopProfile {
+                id: profile.id.clone(),
+                name: profile.name.clone(),
+            });
+        self.close_session_row_menus();
+        cx.notify();
+    }
+
     pub(super) fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let ids = self
             .session_manager
@@ -312,6 +348,9 @@ impl WorkspaceApp {
             }
             SessionManagerDeleteConfirm::TelnetProfile { id, .. } => {
                 self.delete_telnet_profile(&id, cx)
+            }
+            SessionManagerDeleteConfirm::RemoteDesktopProfile { id, .. } => {
+                self.delete_remote_desktop_profile(&id, cx)
             }
             SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
         }
@@ -352,6 +391,30 @@ impl WorkspaceApp {
                 self.session_manager.status = Some(format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.telnet_profiles.delete_failed")
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn delete_remote_desktop_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        match self.connection_store.delete_remote_desktop_profile(id) {
+            Ok(true) => {
+                self.session_manager.status =
+                    Some(self.i18n.t("sessionManager.remote_desktop_profiles.delete"));
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Ok(false) => {
+                self.session_manager.status = Some(
+                    self.i18n
+                        .t("sessionManager.remote_desktop_profiles.delete_failed"),
+                );
+            }
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n
+                        .t("sessionManager.remote_desktop_profiles.delete_failed")
                 ));
             }
         }
@@ -426,6 +489,72 @@ impl WorkspaceApp {
                 ));
             }
         }
+        cx.notify();
+    }
+
+    pub(super) fn open_saved_remote_desktop_profile(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self
+            .connection_store
+            .get_remote_desktop_profile(id)
+            .cloned()
+        else {
+            return;
+        };
+        let password = match self.connection_store.get_remote_desktop_credential(id) {
+            Ok(secret) => secret
+                .map(SecretString::into_zeroizing)
+                .map(RemoteDesktopSecret::from),
+            Err(error) => {
+                self.session_manager.status = Some(format!(
+                    "{}: {error}",
+                    self.i18n
+                        .t("sessionManager.remote_desktop_profiles.open_failed")
+                ));
+                cx.notify();
+                return;
+            }
+        };
+        if saved.protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp
+            && password.is_none()
+        {
+            // Synced and imported assets intentionally omit device-local credentials.
+            // Reopen the regular form so the user can authenticate on this device.
+            self.open_new_connection_form(window, cx);
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.transport = NewConnectionTransport::Rdp;
+                form.name = saved.name;
+                form.host = saved.host;
+                form.port = saved.port.to_string();
+                form.username = saved.username.unwrap_or_default();
+                form.group = saved.group.unwrap_or_default();
+                form.remote_desktop_session_options = saved.session_options;
+                form.error = Some(
+                    self.i18n
+                        .t("modals.new_connection.remote_desktop_password_required"),
+                );
+                form.focused_field = NewConnectionField::Password;
+            }
+            return;
+        }
+        let profile = RemoteDesktopConnectionProfile {
+            id: saved.id.clone(),
+            label: saved.name,
+            protocol: saved.protocol,
+            endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
+            username: saved.username,
+            domain: saved.domain,
+            credential_ref: saved.credential_ref,
+            read_only: saved.read_only,
+            session_options: saved.session_options,
+        };
+        self.open_remote_desktop_connection_tab(profile, password, window, cx);
+        let _ = self.connection_store.mark_remote_desktop_profile_used(id);
+        self.queue_cloud_sync_dirty_refresh(cx);
         cx.notify();
     }
 

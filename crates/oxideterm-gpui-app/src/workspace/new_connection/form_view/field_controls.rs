@@ -1814,6 +1814,12 @@ impl WorkspaceApp {
                 true,
                 cx,
             ))
+            .child(self.render_connection_checkbox(
+                self.i18n.t("ssh.form.save_password"),
+                form.save_password,
+                |form| form.save_password = !form.save_password,
+                cx,
+            ))
             .when(
                 protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
                 |section| section.child(self.render_vnc_connection_preferences(cx)),

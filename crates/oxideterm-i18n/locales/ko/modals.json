@@ -368,6 +368,7 @@
       "remote_desktop_username": "사용자 이름",
       "remote_desktop_username_required": "RDP 사용자 이름을 입력하세요",
       "remote_desktop_password_required": "RDP 비밀번호를 입력하세요",
+      "remote_desktop_save_failed": "원격 데스크톱 연결을 저장하지 못했습니다",
       "remote_desktop_password_placeholder": "RDP 비밀번호",
       "remote_desktop_features_title": "세션 기능",
       "remote_desktop_features_hint": "이 원격 데스크톱 세션에서 사용할 로컬 리소스를 선택하세요.",
@@ -757,6 +758,9 @@
     "security_passwords_included": "저장된 서버 비밀번호가 이 암호화된 .oxide 파일 안에 포함됩니다",
     "include_serial_profiles": "시리얼 프로필 포함",
     "include_serial_profiles_description": "저장된 시리얼 연결 프로필을 내보냅니다({{count}}개).",
-    "content_summary_serial_profiles": "시리얼 프로필: {{count}}개"
+    "content_summary_serial_profiles": "시리얼 프로필: {{count}}개",
+    "include_remote_desktop_profiles": "원격 데스크톱 연결 포함",
+    "include_remote_desktop_profiles_description": "저장된 RDP 및 VNC 연결을 내보냅니다({{count}}개). 비밀번호는 포함되지 않습니다.",
+    "content_summary_remote_desktop_profiles": "원격 데스크톱 연결: {{count}}개"
   }
 }

@@ -368,6 +368,7 @@
       "remote_desktop_username": "Nome de usuário",
       "remote_desktop_username_required": "Informe um nome de usuário RDP",
       "remote_desktop_password_required": "Informe uma senha RDP",
+      "remote_desktop_save_failed": "Não foi possível salvar a conexão de área de trabalho remota",
       "remote_desktop_password_placeholder": "Senha RDP",
       "remote_desktop_features_title": "Recursos da sessão",
       "remote_desktop_features_hint": "Escolha quais recursos locais esta sessão de área de trabalho remota pode usar.",
@@ -757,6 +758,9 @@
     "security_passwords_included": "Senhas de servidor salvas estão incluídas neste arquivo .oxide criptografado",
     "include_serial_profiles": "Incluir perfis seriais",
     "include_serial_profiles_description": "Exporta perfis de conexão serial salvos ({{count}} perfil(is)).",
-    "content_summary_serial_profiles": "Perfis seriais: {{count}} perfil(is)"
+    "content_summary_serial_profiles": "Perfis seriais: {{count}} perfil(is)",
+    "include_remote_desktop_profiles": "Incluir conexões de área de trabalho remota",
+    "include_remote_desktop_profiles_description": "Exporta conexões RDP e VNC salvas ({{count}}). As senhas não são incluídas.",
+    "content_summary_remote_desktop_profiles": "Conexões de área de trabalho remota: {{count}}"
   }
 }

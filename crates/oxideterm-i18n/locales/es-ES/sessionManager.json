@@ -136,6 +136,12 @@
       "delete_failed": "No se pudo eliminar el perfil Telnet",
       "confirm_delete": "¿Eliminar el perfil Telnet \"{{name}}\"?"
     },
+    "remote_desktop_profiles": {
+      "delete": "Eliminar",
+      "open_failed": "No se pudo abrir la conexión de escritorio remoto",
+      "delete_failed": "No se pudo eliminar la conexión de escritorio remoto",
+      "confirm_delete": "¿Eliminar la conexión de escritorio remoto «{{name}}»?"
+    },
     "privilege_credentials": {
       "title": "Credenciales de privilegios",
       "description": "Guarda credenciales separadas para prompts sudo/su. Los secretos permanecen en el llavero del sistema y solo se leen tras hacer clic en el asistente del terminal.",

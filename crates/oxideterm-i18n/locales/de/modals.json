@@ -368,6 +368,7 @@
       "remote_desktop_username": "Benutzername",
       "remote_desktop_username_required": "RDP-Benutzernamen eingeben",
       "remote_desktop_password_required": "RDP-Passwort eingeben",
+      "remote_desktop_save_failed": "Remotedesktop-Verbindung konnte nicht gespeichert werden",
       "remote_desktop_password_placeholder": "RDP-Passwort",
       "remote_desktop_features_title": "Sitzungsfunktionen",
       "remote_desktop_features_hint": "Wählen Sie aus, welche lokalen Ressourcen diese Remotedesktopsitzung verwenden darf.",
@@ -757,6 +758,9 @@
     "security_passwords_included": "Gespeicherte Serverpasswörter sind in dieser verschlüsselten .oxide-Datei enthalten",
     "include_serial_profiles": "Serielle Profile einschließen",
     "include_serial_profiles_description": "Gespeicherte serielle Verbindungsprofile exportieren ({{count}} Profil(e)).",
-    "content_summary_serial_profiles": "Serielle Profile: {{count}} Profil(e)"
+    "content_summary_serial_profiles": "Serielle Profile: {{count}} Profil(e)",
+    "include_remote_desktop_profiles": "Remotedesktop-Verbindungen einschließen",
+    "include_remote_desktop_profiles_description": "Gespeicherte RDP- und VNC-Verbindungen exportieren ({{count}}). Passwörter werden nicht einbezogen.",
+    "content_summary_remote_desktop_profiles": "Remotedesktop-Verbindungen: {{count}}"
   }
 }
