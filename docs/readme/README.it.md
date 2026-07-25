@@ -301,7 +301,7 @@ OxideTerm è distribuito con licenza GPL-3.0-only senza ulteriori restrizioni di
 
 ## Contribuire
 
-Sono benvenuti contributi a codice, documentazione, traduzioni, plugin, test e segnalazioni. Discuti le modifiche più ampie in una issue oppure invia una pull request mirata per una correzione ben delimitata.
+Sono benvenuti contributi a codice, documentazione, traduzioni, plugin, test e segnalazioni. Discuti le modifiche più ampie o le correzioni ben delimitate in una issue.
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -319,7 +319,7 @@ Le segnalazioni di bug e le regressioni riproducibili con diagnostica oscurata h
   </a>
 </p>
 
-Se OxideTerm aiuta il tuo workflow, una star GitHub, una riproduzione issue, una correzione di traduzione, un plugin o una pull request aiutano il progetto a proseguire.
+Se OxideTerm aiuta il tuo workflow, una star GitHub, una riproduzione issue, una correzione di traduzione o un plugin aiutano il progetto a proseguire.
 
 ---
 

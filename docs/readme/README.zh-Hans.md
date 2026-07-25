@@ -304,7 +304,7 @@ OxideTerm 按 GPL-3.0-only 许可发布，不附加额外的许可证限制。�
 
 ## 贡献
 
-欢迎贡献代码、文档、翻译、插件、测试与问题复现。较大的改动请先通过 Issue 讨论，范围明确的修复可以直接提交 Pull Request。
+欢迎贡献代码、文档、翻译、插件、测试与问题复现。较大的改动或范围明确的修复请先通过 Issue 讨论。
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -322,7 +322,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
   </a>
 </p>
 
-如果 OxideTerm 帮助了你的工作流，GitHub Star、问题复现、翻译修正、插件或 PR 都能让项目更容易继续推进。
+如果 OxideTerm 帮助了你的工作流，GitHub Star、问题复现、翻译修正或插件都能让项目更容易继续推进。
 
 ---
 

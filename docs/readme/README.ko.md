@@ -297,7 +297,7 @@ OxideTerm은 추가 라이선스 제한 없이 GPL-3.0-only로 배포됩니다. 
 
 ## 기여
 
-코드, 문서, 번역, 플러그인, 테스트, 버그 재현 기여를 환영합니다. 큰 변경은 Issue에서 먼저 논의하고, 범위가 명확한 수정은 Pull Request로 보내 주세요.
+코드, 문서, 번역, 플러그인, 테스트, 버그 재현 기여를 환영합니다. 큰 변경이나 범위가 명확한 수정은 Issue에서 먼저 논의해 주세요.
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -315,7 +315,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
   </a>
 </p>
 
-OxideTerm이 작업 흐름에 도움이 된다면 GitHub 스타, 문제 재현 보고, 번역 수정, 플러그인, 풀 리퀘스트가 프로젝트 지속에 도움이 됩니다.
+OxideTerm이 작업 흐름에 도움이 된다면 GitHub 스타, 문제 재현 보고, 번역 수정, 플러그인이 프로젝트 지속에 도움이 됩니다.
 
 ---
 

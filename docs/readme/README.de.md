@@ -301,7 +301,7 @@ OxideTerm ist unter GPL-3.0-only ohne zusätzliche Lizenzbeschränkungen lizenzi
 
 ## Beiträge
 
-Beiträge zu Code, Dokumentation, Übersetzungen, Plugins, Tests und Fehlerberichten sind willkommen. Größere Änderungen sollten zuerst in einem Issue abgestimmt werden; klar begrenzte Korrekturen können direkt als Pull Request eingereicht werden.
+Beiträge zu Code, Dokumentation, Übersetzungen, Plugins, Tests und Fehlerberichten sind willkommen. Größere Änderungen oder klar begrenzte Korrekturen sollten zuerst in einem Issue abgestimmt werden.
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -319,7 +319,7 @@ Reproduzierbare Bug Reports und Regressionen mit redigierten Diagnosen werden pr
   </a>
 </p>
 
-Wenn OxideTerm Ihrem Workflow hilft, machen GitHub Star, Reproduktion, Übersetzungskorrektur, Plugin oder Pull Request das Projekt leichter weiterzuführen.
+Wenn OxideTerm Ihrem Workflow hilft, machen GitHub Star, Reproduktion, Übersetzungskorrektur oder Plugin das Projekt leichter weiterzuführen.
 
 ---
 

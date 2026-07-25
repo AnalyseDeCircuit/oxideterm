@@ -339,7 +339,7 @@ OxideTerm is licensed under GPL-3.0-only without additional license restrictions
 
 ## Contributing
 
-Contributions are welcome across Rust code, documentation, translations, plugins, testing, and issue reproduction. Open an issue to discuss larger changes, or send a focused pull request for a well-scoped fix.
+Contributions are welcome across Rust code, documentation, translations, plugins, testing, and issue reproduction. Open an issue to discuss larger changes or well-scoped fixes.
 
 Bug reports are most useful with a redacted CLI bundle:
 
@@ -359,7 +359,7 @@ Reproducible bug reports and regressions with redacted diagnostics are prioritiz
   </a>
 </p>
 
-If OxideTerm helps your workflow, a GitHub star, issue reproduction, translation fix, plugin, or pull request all make the project easier to keep moving.
+If OxideTerm helps your workflow, a GitHub star, issue reproduction, translation fix, or plugin all make the project easier to keep moving.
 
 ---
 

@@ -301,7 +301,7 @@ OxideTerm được cấp phép theo GPL-3.0-only và không kèm hạn chế gi�
 
 ## Đóng góp
 
-Chúng tôi hoan nghênh đóng góp về mã nguồn, tài liệu, bản dịch, plugin, kiểm thử và tái hiện lỗi. Hãy thảo luận thay đổi lớn trong issue hoặc gửi pull request tập trung cho một bản sửa lỗi có phạm vi rõ ràng.
+Chúng tôi hoan nghênh đóng góp về mã nguồn, tài liệu, bản dịch, plugin, kiểm thử và tái hiện lỗi. Hãy thảo luận thay đổi lớn hoặc bản sửa lỗi có phạm vi rõ ràng trong issue.
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -319,7 +319,7 @@ Báo cáo lỗi và hồi quy có bước tái hiện cùng chẩn đoán đã c
   </a>
 </p>
 
-Nếu OxideTerm hỗ trợ quy trình làm việc của bạn, một ngôi sao GitHub, báo cáo tái hiện lỗi, bản sửa dịch thuật, plugin hoặc pull request đều giúp dự án tiếp tục phát triển.
+Nếu OxideTerm hỗ trợ quy trình làm việc của bạn, một ngôi sao GitHub, báo cáo tái hiện lỗi, bản sửa dịch thuật hoặc plugin đều giúp dự án tiếp tục phát triển.
 
 ---
 

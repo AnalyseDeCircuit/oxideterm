@@ -296,7 +296,7 @@ OxideTerm は、追加のライセンス制限を設けず GPL-3.0-only の下�
 
 ## コントリビューション
 
-コード、ドキュメント、翻訳、プラグイン、テスト、不具合報告への貢献を歓迎します。大きな変更は Issue で相談し、範囲が明確な修正はプルリクエストで送ってください。
+コード、ドキュメント、翻訳、プラグイン、テスト、不具合報告への貢献を歓迎します。大きな変更や範囲が明確な修正は Issue で相談してください。
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -314,7 +314,7 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
   </a>
 </p>
 
-OxideTerm が役立ったなら、GitHub のスター、問題の再現報告、翻訳の修正、プラグイン、プルリクエストがプロジェクトの継続を支えます。
+OxideTerm が役立ったなら、GitHub のスター、問題の再現報告、翻訳の修正、プラグインがプロジェクトの継続を支えます。
 
 ---
 

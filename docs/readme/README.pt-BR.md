@@ -301,7 +301,7 @@ O OxideTerm é licenciado sob a GPL-3.0-only, sem restrições adicionais de lic
 
 ## Contribuição
 
-Contribuições de código, documentação, traduções, plugins, testes e relatos de erros são bem-vindas. Discuta mudanças maiores em uma issue ou envie um pull request focado para uma correção bem delimitada.
+Contribuições de código, documentação, traduções, plugins, testes e relatos de erros são bem-vindas. Discuta mudanças maiores ou correções bem delimitadas em uma issue.
 
 ```sh
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
@@ -319,7 +319,7 @@ Bugs e regressões reproduzíveis com diagnósticos ocultados são priorizados. 
   </a>
 </p>
 
-Se OxideTerm ajuda seu workflow, uma estrela no GitHub, reprodução de issue, correção de tradução, plugin ou pull request ajudam o projeto a continuar.
+Se OxideTerm ajuda seu workflow, uma estrela no GitHub, reprodução de issue, correção de tradução ou plugin ajudam o projeto a continuar.
 
 ---
 
