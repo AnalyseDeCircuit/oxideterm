@@ -730,14 +730,17 @@ impl TerminalPane {
             .get(point.row)
             .and_then(|row| row.cells.get(point.col))?;
 
-        display_link_ranges(&self.snapshot)
-            .into_iter()
-            .find(|link| {
-                link.row == point.row
-                    && point.col >= link.start_col
-                    && point.col < link.end_col
-                    && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
-            })
+        display_link_ranges_with_path_detection(
+            &self.snapshot,
+            self.settings.detect_file_paths_as_links,
+        )
+        .into_iter()
+        .find(|link| {
+            link.row == point.row
+                && point.col >= link.start_col
+                && point.col < link.end_col
+                && (cell.hyperlink.is_some() || is_link_stylable_cell(cell))
+        })
     }
 
     fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {

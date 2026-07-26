@@ -259,6 +259,8 @@
       "middle_click_paste_hint": "终端未处于鼠标跟踪模式时，使用中键粘贴当前剪贴板内容",
       "open_links_with_modifier": "按住修饰键打开链接",
       "open_links_with_modifier_hint": "仅在按住 Ctrl 单击时打开终端链接；macOS 使用 Command 单击。关闭后可直接单击打开链接",
+      "detect_file_paths_as_links": "将文件路径识别为链接",
+      "detect_file_paths_as_links_hint": "自动将终端中形似路径的文本识别为可点击文件；关闭后仍保留网页地址和明确的 OSC 8 链接",
       "selection_requires_shift": "按住 Shift 才能选择文本",
       "selection_requires_shift_hint": "启用后，普通拖拽会优先保持终端交互；只有 Shift + 拖拽才会开始文本选择",
       "free_type_mode": "自由输入模式",

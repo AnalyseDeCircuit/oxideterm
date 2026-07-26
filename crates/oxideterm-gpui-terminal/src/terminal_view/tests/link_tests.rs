@@ -23,6 +23,32 @@ fn link_detection_finds_path_like_targets() {
 }
 
 #[test]
+fn disabling_path_detection_preserves_urls_and_osc8_links() {
+    let source = "./logs/server.log https://example.com/docs click";
+    let osc_start = source.find("click").unwrap();
+    let mut snapshot = selection_snapshot(source);
+    for cell in &mut snapshot.lines[0].cells_mut()[osc_start..osc_start + "click".len()] {
+        cell.hyperlink = Some("file:///tmp/report.txt".to_string());
+    }
+    snapshot.lines[0].refresh_signature();
+
+    let links = display_link_ranges_with_path_detection(&snapshot, false);
+
+    assert_eq!(links.len(), 2);
+    assert!(
+        links
+            .iter()
+            .any(|link| link.target == "https://example.com/docs")
+    );
+    assert!(
+        links
+            .iter()
+            .any(|link| link.target == "file:///tmp/report.txt")
+    );
+    assert!(!links.iter().any(|link| link.target == "./logs/server.log"));
+}
+
+#[test]
 fn link_detection_preserves_unicode_wide_path_segments() {
     let target = "~/Documents/OxideTerm/tauri版本代码/src";
     let snapshot = wide_snapshot(target);

@@ -234,6 +234,10 @@ fn default_open_links_with_modifier() -> bool {
     true
 }
 
+fn default_detect_file_paths_as_links() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
@@ -272,6 +276,8 @@ pub struct TerminalSettings {
     pub middle_click_paste: bool,
     #[serde(default = "default_open_links_with_modifier")]
     pub open_links_with_modifier: bool,
+    #[serde(default = "default_detect_file_paths_as_links")]
+    pub detect_file_paths_as_links: bool,
     pub selection_requires_shift: bool,
     // Keep the legacy JSON key so local and cloud-synced settings remain compatible.
     #[serde(default, rename = "freeTypeCursorPositioning")]
@@ -328,6 +334,7 @@ impl Default for TerminalSettings {
             copy_on_select: false,
             middle_click_paste: false,
             open_links_with_modifier: true,
+            detect_file_paths_as_links: true,
             selection_requires_shift: false,
             free_type_mode: false,
             autosuggest: TerminalAutosuggestSettings::default(),
@@ -475,6 +482,20 @@ mod tests {
 
         // Missing settings retain the safer native behavior that avoids accidental link opens.
         assert!(settings.open_links_with_modifier);
+    }
+
+    #[test]
+    fn terminal_settings_detect_file_paths_when_setting_is_missing() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("detectFilePathsAsLinks");
+
+        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+
+        // Existing installations retain file path recognition until the user disables it.
+        assert!(settings.detect_file_paths_as_links);
     }
 
     #[test]

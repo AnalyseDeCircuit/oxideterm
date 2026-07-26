@@ -52,6 +52,10 @@ pub fn set_open_links_with_modifier(settings: &mut PersistedSettings, value: boo
     settings.terminal.open_links_with_modifier = value;
 }
 
+pub fn set_detect_file_paths_as_links(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.detect_file_paths_as_links = value;
+}
+
 pub fn set_selection_requires_shift(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.selection_requires_shift = value;
 }

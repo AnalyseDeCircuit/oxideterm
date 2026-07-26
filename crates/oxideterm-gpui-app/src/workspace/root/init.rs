@@ -869,6 +869,7 @@ impl WorkspaceApp {
             copy_on_select: terminal.copy_on_select,
             middle_click_paste: terminal.middle_click_paste,
             open_links_with_modifier: terminal.open_links_with_modifier,
+            detect_file_paths_as_links: terminal.detect_file_paths_as_links,
             selection_requires_shift: terminal.selection_requires_shift,
             free_type_mode: terminal.free_type_mode,
             backspace_sequence: terminal.backspace_sequence,

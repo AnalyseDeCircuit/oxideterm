@@ -259,6 +259,8 @@
       "open_links_with_modifier_hint": "僅在按住 Ctrl 點擊時開啟終端機連結；macOS 使用 Command 點擊。關閉後可直接點擊開啟連結",
       "smart_copy": "智慧 Ctrl+C 複製",
       "smart_copy_hint": "在 Windows 和 Linux 上，Ctrl+C 會複製目前選取內容，只有在未選取任何內容時才送出 SIGINT",
+      "detect_file_paths_as_links": "將檔案路徑辨識為連結",
+      "detect_file_paths_as_links_hint": "自動將終端機中類似路徑的文字辨識為可點擊檔案；關閉後仍保留網址與明確的 OSC 8 連結",
       "selection_requires_shift": "按住 Shift 才能選取文字",
       "selection_requires_shift_hint": "啟用後，普通拖曳會優先保留終端互動；只有 Shift + 拖曳才會開始文字選取",
       "free_type_mode": "自由輸入模式",

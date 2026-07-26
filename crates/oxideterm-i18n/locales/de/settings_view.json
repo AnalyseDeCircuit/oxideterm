@@ -259,6 +259,8 @@
       "open_links_with_modifier_hint": "Terminal-Links nur mit Strg + Klick öffnen, unter macOS mit Befehl + Klick; deaktivieren, um Links direkt anzuklicken",
       "smart_copy": "Smartes Strg+C-Kopieren",
       "smart_copy_hint": "Unter Windows und Linux kopiert Strg+C die aktuelle Auswahl und sendet nur dann SIGINT, wenn nichts ausgewählt ist",
+      "detect_file_paths_as_links": "Dateipfade als Links erkennen",
+      "detect_file_paths_as_links_hint": "Pfadähnlichen Terminaltext automatisch als anklickbare Datei erkennen; Webadressen und explizite OSC-8-Links bleiben nach dem Deaktivieren verfügbar",
       "selection_requires_shift": "Shift zum Auswählen von Text erforderlich",
       "selection_requires_shift_hint": "Wenn aktiviert, bleibt die Terminalinteraktion bei normalem Ziehen erhalten und nur Shift + Ziehen startet eine Textauswahl",
       "free_type_mode": "Freier Eingabemodus",

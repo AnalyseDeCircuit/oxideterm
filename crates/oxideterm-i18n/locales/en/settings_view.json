@@ -259,6 +259,8 @@
       "middle_click_paste_hint": "Paste the current clipboard contents with middle click when the terminal is not in mouse-tracking mode",
       "open_links_with_modifier": "Require Modifier to Open Links",
       "open_links_with_modifier_hint": "Open terminal links only with Ctrl + click, or Command + click on macOS; disable to open links with a direct click",
+      "detect_file_paths_as_links": "Detect File Paths as Links",
+      "detect_file_paths_as_links_hint": "Automatically recognize path-like terminal text as clickable files; web URLs and explicit OSC 8 links remain available when disabled",
       "selection_requires_shift": "Require Shift to Select Text",
       "selection_requires_shift_hint": "When enabled, plain drag keeps terminal interaction intact and only Shift + drag starts a text selection",
       "free_type_mode": "Free Type Mode",

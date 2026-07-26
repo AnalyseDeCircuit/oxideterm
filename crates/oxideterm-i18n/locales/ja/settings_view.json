@@ -259,6 +259,8 @@
       "open_links_with_modifier_hint": "ターミナルのリンクを Ctrl + クリックでのみ開きます。macOS では Command + クリックを使用します。無効にすると直接クリックで開きます",
       "smart_copy": "スマート Ctrl+C コピー",
       "smart_copy_hint": "Windows と Linux では、Ctrl+C で現在の選択範囲をコピーし、何も選択されていない場合のみ SIGINT を送信します",
+      "detect_file_paths_as_links": "ファイルパスをリンクとして検出",
+      "detect_file_paths_as_links_hint": "パス形式のターミナル文字列をクリック可能なファイルとして自動認識します。無効にしても Web URL と明示的な OSC 8 リンクは利用できます",
       "selection_requires_shift": "テキスト選択に Shift を必須にする",
       "selection_requires_shift_hint": "有効にすると、通常のドラッグは端末操作を維持し、Shift + ドラッグでのみテキスト選択を開始します",
       "free_type_mode": "自由入力モード",

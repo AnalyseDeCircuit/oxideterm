@@ -206,6 +206,7 @@ impl Render for TerminalPane {
                 view: cx.entity(),
             }),
         )
+        .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)
         .precomputed_search_matches()
         .command_marks(
             if command_mark_ui_visible {

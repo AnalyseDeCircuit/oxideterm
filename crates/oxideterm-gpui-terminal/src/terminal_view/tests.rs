@@ -415,6 +415,7 @@ fn copy_policy_defaults_keep_current_terminal_behavior() {
     assert!(!settings.copy_on_select);
     assert!(!settings.osc52_clipboard_read);
     assert!(settings.open_links_with_modifier);
+    assert!(settings.detect_file_paths_as_links);
     assert!(settings.keep_selection_on_copy);
     assert_eq!(settings.blink_mode, TerminalBlinkMode::On);
 
@@ -422,6 +423,7 @@ fn copy_policy_defaults_keep_current_terminal_behavior() {
     assert_eq!(preferences.scrollback_lines, DEFAULT_SCROLLBACK_LINES);
     assert!(!preferences.osc52_clipboard_read);
     assert!(preferences.open_links_with_modifier);
+    assert!(preferences.detect_file_paths_as_links);
 }
 
 #[test]

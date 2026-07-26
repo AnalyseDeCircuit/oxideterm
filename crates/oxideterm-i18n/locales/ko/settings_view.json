@@ -259,6 +259,8 @@
       "open_links_with_modifier_hint": "터미널 링크를 Ctrl + 클릭으로만 엽니다. macOS에서는 Command + 클릭을 사용합니다. 끄면 직접 클릭으로 엽니다",
       "smart_copy": "스마트 Ctrl+C 복사",
       "smart_copy_hint": "Windows와 Linux에서는 Ctrl+C로 현재 선택 영역을 복사하고, 선택된 내용이 없을 때만 SIGINT를 보냅니다",
+      "detect_file_paths_as_links": "파일 경로를 링크로 감지",
+      "detect_file_paths_as_links_hint": "경로 형태의 터미널 텍스트를 클릭 가능한 파일로 자동 인식합니다. 꺼도 웹 URL과 명시적인 OSC 8 링크는 계속 사용할 수 있습니다",
       "selection_requires_shift": "텍스트 선택 시 Shift 필요",
       "selection_requires_shift_hint": "활성화하면 일반 드래그는 터미널 상호작용을 유지하고, Shift + 드래그로만 텍스트 선택이 시작됩니다",
       "free_type_mode": "자유 입력 모드",

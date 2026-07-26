@@ -259,6 +259,8 @@
       "open_links_with_modifier_hint": "Chỉ mở liên kết terminal bằng Ctrl + nhấp, hoặc Command + nhấp trên macOS; tắt để mở bằng cách nhấp trực tiếp",
       "smart_copy": "Sao chép Ctrl+C thông minh",
       "smart_copy_hint": "Trên Windows và Linux, Ctrl+C sẽ sao chép vùng chọn hiện tại và chỉ gửi SIGINT khi không có gì được chọn",
+      "detect_file_paths_as_links": "Nhận diện đường dẫn tệp dưới dạng liên kết",
+      "detect_file_paths_as_links_hint": "Tự động nhận diện văn bản giống đường dẫn trong terminal thành tệp có thể nhấp; URL web và liên kết OSC 8 rõ ràng vẫn dùng được khi tắt",
       "selection_requires_shift": "Yêu cầu giữ Shift để chọn văn bản",
       "selection_requires_shift_hint": "Khi bật, thao tác kéo thông thường vẫn giữ nguyên tương tác với terminal và chỉ Shift + kéo mới bắt đầu chọn văn bản",
       "free_type_mode": "Chế độ nhập tự do",

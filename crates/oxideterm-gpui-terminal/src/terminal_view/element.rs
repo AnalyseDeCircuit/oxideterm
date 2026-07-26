@@ -54,6 +54,7 @@ pub(crate) struct TerminalElement {
     hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
     hovered_link: Option<TerminalLinkRange>,
+    detect_file_paths_as_links: bool,
     bidi_enabled: bool,
     input: Option<TerminalElementInput>,
     transparent_background: bool,
@@ -372,6 +373,7 @@ impl TerminalElement {
             hovered_command_mark_id: None,
             highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
             hovered_link,
+            detect_file_paths_as_links: true,
             bidi_enabled,
             input,
             transparent_background: false,
@@ -390,6 +392,11 @@ impl TerminalElement {
         rules: impl Into<Arc<[TerminalHighlightRule]>>,
     ) -> Self {
         self.highlight_rules = rules.into();
+        self
+    }
+
+    pub(crate) fn detect_file_paths_as_links(mut self, enabled: bool) -> Self {
+        self.detect_file_paths_as_links = enabled;
         self
     }
 
@@ -552,7 +559,11 @@ impl TerminalElement {
         let link_ranges = if let Some(cache) = cache.as_deref_mut() {
             self.cached_link_ranges_for_rows(visible_rows.clone(), cache)
         } else {
-            display_link_ranges_for_rows(&self.snapshot, visible_rows.clone())
+            display_link_ranges_for_rows_with_path_detection(
+                &self.snapshot,
+                visible_rows.clone(),
+                self.detect_file_paths_as_links,
+            )
         };
 
         for row_index in visible_rows {
@@ -712,9 +723,10 @@ impl TerminalElement {
             }
             let key = self.row_link_cache_key(row_index);
             let row_layout = cache.get_or_insert_links_with(key, || {
-                relative_link_layout(display_link_ranges_for_rows(
+                relative_link_layout(display_link_ranges_for_rows_with_path_detection(
                     &self.snapshot,
                     row_index..row_index + 1,
+                    self.detect_file_paths_as_links,
                 ))
             });
             ranges.extend(row_layout.ranges.iter().map(|range| TerminalLinkRange {
@@ -946,6 +958,7 @@ impl TerminalElement {
             row.absolute_line.hash(&mut hasher);
             row.signature.hash(&mut hasher);
         }
+        self.detect_file_paths_as_links.hash(&mut hasher);
         TerminalRowLinkCacheKey {
             signature: hasher.finish(),
         }

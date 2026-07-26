@@ -259,6 +259,8 @@
       "open_links_with_modifier_hint": "Apri i link del terminale solo con Ctrl + clic, o Comando + clic su macOS; disattiva per aprirli con un clic diretto",
       "smart_copy": "Copia intelligente con Ctrl+C",
       "smart_copy_hint": "Su Windows e Linux, Ctrl+C copia la selezione corrente e invia SIGINT solo quando non c'è nulla di selezionato",
+      "detect_file_paths_as_links": "Rileva i percorsi file come link",
+      "detect_file_paths_as_links_hint": "Riconosce automaticamente il testo simile a un percorso come file selezionabile; gli URL web e i link OSC 8 espliciti restano disponibili quando è disattivato",
       "selection_requires_shift": "Richiedi Shift per selezionare il testo",
       "selection_requires_shift_hint": "Quando è abilitato, il trascinamento normale mantiene intatta l'interazione del terminale e solo Shift + trascinamento avvia una selezione di testo",
       "free_type_mode": "Modalità di input libero",

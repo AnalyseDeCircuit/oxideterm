@@ -228,6 +228,16 @@ impl WorkspaceApp {
             ))
             .child(self.settings_row_with_margin(
                 self.checkbox_row(
+                    "settings_view.terminal.detect_file_paths_as_links",
+                    "settings_view.terminal.detect_file_paths_as_links_hint",
+                    settings.terminal.detect_file_paths_as_links,
+                    set_detect_file_paths_as_links,
+                    cx,
+                ),
+                16.0,
+            ))
+            .child(self.settings_row_with_margin(
+                self.checkbox_row(
                     "settings_view.terminal.selection_requires_shift",
                     "settings_view.terminal.selection_requires_shift_hint",
                     settings.terminal.selection_requires_shift,

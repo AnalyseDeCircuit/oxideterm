@@ -37,19 +37,39 @@ pub(crate) fn is_link_stylable_cell(cell: &TerminalCell) -> bool {
     cell.bg == TerminalColor::rgb(0x0d, 0x0f, 0x12)
 }
 
+#[cfg(test)]
 pub(crate) fn detect_link_ranges(snapshot: &TerminalSnapshot) -> Vec<TerminalLinkRange> {
     detect_link_ranges_for_rows(snapshot, 0..snapshot.lines.len())
 }
 
+#[cfg(test)]
 pub(crate) fn display_link_ranges(snapshot: &TerminalSnapshot) -> Vec<TerminalLinkRange> {
-    filter_display_link_ranges(snapshot, detect_link_ranges(snapshot))
+    display_link_ranges_with_path_detection(snapshot, true)
 }
 
-pub(crate) fn display_link_ranges_for_rows(
+pub(crate) fn display_link_ranges_with_path_detection(
+    snapshot: &TerminalSnapshot,
+    detect_file_paths: bool,
+) -> Vec<TerminalLinkRange> {
+    filter_display_link_ranges(
+        snapshot,
+        detect_link_ranges_for_rows_with_path_detection(
+            snapshot,
+            0..snapshot.lines.len(),
+            detect_file_paths,
+        ),
+    )
+}
+
+pub(crate) fn display_link_ranges_for_rows_with_path_detection(
     snapshot: &TerminalSnapshot,
     rows: Range<usize>,
+    detect_file_paths: bool,
 ) -> Vec<TerminalLinkRange> {
-    filter_display_link_ranges(snapshot, detect_link_ranges_for_rows(snapshot, rows))
+    filter_display_link_ranges(
+        snapshot,
+        detect_link_ranges_for_rows_with_path_detection(snapshot, rows, detect_file_paths),
+    )
 }
 
 fn filter_display_link_ranges(
@@ -70,9 +90,18 @@ fn should_display_link(snapshot: &TerminalSnapshot, link: &TerminalLinkRange) ->
             .is_some_and(|row| row.active_input)
 }
 
+#[cfg(test)]
 pub(crate) fn detect_link_ranges_for_rows(
     snapshot: &TerminalSnapshot,
     rows: Range<usize>,
+) -> Vec<TerminalLinkRange> {
+    detect_link_ranges_for_rows_with_path_detection(snapshot, rows, true)
+}
+
+fn detect_link_ranges_for_rows_with_path_detection(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+    detect_file_paths: bool,
 ) -> Vec<TerminalLinkRange> {
     let mut links = Vec::new();
     for row_index in rows {
@@ -82,7 +111,9 @@ pub(crate) fn detect_link_ranges_for_rows(
         let link_text = link_text_for_row(row);
         links.extend(detect_osc8_ranges(row_index, row));
         links.extend(detect_url_ranges(row_index, &link_text, &links));
-        links.extend(detect_path_ranges(row_index, &link_text, &links));
+        if detect_file_paths {
+            links.extend(detect_path_ranges(row_index, &link_text, &links));
+        }
     }
     links
 }
