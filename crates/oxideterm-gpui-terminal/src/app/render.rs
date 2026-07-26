@@ -9,8 +9,8 @@ use gpui::{
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
     context_menu_event_boundary, context_menu_item, context_menu_item_height_estimate,
-    context_menu_separator, context_menu_separator_height_estimate, context_menu_sub_content,
-    context_menu_sub_trigger,
+    context_menu_item_with_shortcut, context_menu_separator,
+    context_menu_separator_height_estimate, context_menu_sub_content, context_menu_sub_trigger,
 };
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
 use oxideterm_gpui_ui::progress::progress;
@@ -835,6 +835,11 @@ impl TerminalPane {
             .command_selection_labels
             .clear_screen
             .clone();
+        let clear_screen_shortcut = self
+            .preferences
+            .command_selection_labels
+            .clear_screen_shortcut
+            .clone();
         let modem_labels = self.preferences.modem_labels.clone();
         let paste_label = self.preferences.paste_labels.paste.clone();
         let command_mark_id = menu.command_mark_id.clone();
@@ -1004,12 +1009,13 @@ impl TerminalPane {
                     cx,
                 ))
                 .child(context_menu_separator(tokens))
-                .child(self.render_terminal_context_menu_item(
+                .child(self.render_terminal_context_menu_item_with_shortcut(
                     clear_screen_label,
+                    clear_screen_shortcut,
                     false,
                     |this, _event, _window, cx| {
                         this.dismiss_terminal_context_menu(cx);
-                        this.clear_screen_from_context_menu(cx);
+                        this.clear_screen(cx);
                     },
                     cx,
                 )),
@@ -1202,6 +1208,53 @@ impl TerminalPane {
         self.render_terminal_context_menu_item_with_submenu_policy(
             label, disabled, true, listener, cx,
         )
+    }
+
+    fn render_terminal_context_menu_item_with_shortcut(
+        &self,
+        label: String,
+        shortcut: Option<String>,
+        disabled: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let disabled = disabled
+            || self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
+        let item = if let Some(shortcut) = shortcut {
+            context_menu_item_with_shortcut(
+                &self.theme.tokens,
+                label,
+                div()
+                    .text_size(px(self.theme.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.theme.tokens.ui.text_muted))
+                    .child(shortcut),
+            )
+        } else {
+            context_menu_item(
+                &self.theme.tokens,
+                label,
+                ContextMenuItemKind::Plain,
+                false,
+                disabled,
+            )
+        }
+        .w_full();
+
+        context_menu_action(
+            item,
+            disabled,
+            false,
+            cx.listener(move |this, event, window, cx| {
+                window.prevent_default();
+                listener(this, event, window, cx);
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
+            this.set_terminal_modem_submenu_open(false, cx);
+        }))
+        .into_any_element()
     }
 
     fn render_terminal_context_menu_item_with_submenu_policy(

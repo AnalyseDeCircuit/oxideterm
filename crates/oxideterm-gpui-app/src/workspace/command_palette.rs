@@ -1005,12 +1005,13 @@ impl WorkspaceApp {
     fn command_palette_spec_item(&self, spec: CommandSpec, section: PaletteSection) -> PaletteItem {
         let label = self.i18n.t(spec.label_key.as_ref());
         let shortcut = spec.shortcut_action.and_then(|action_id| {
-            crate::keybindings::action_definition(action_id).map(|definition| {
-                crate::keybindings::format_combo(&crate::keybindings::effective_combo(
+            crate::keybindings::action_definition(action_id).and_then(|definition| {
+                crate::keybindings::effective_combo(
                     definition,
                     &self.settings_store.settings().keybindings.overrides,
                     crate::keybindings::KeybindingSide::current(),
-                ))
+                )
+                .map(|combo| crate::keybindings::format_combo(&combo))
             })
         });
         PaletteItem {
@@ -1773,10 +1774,9 @@ impl WorkspaceApp {
         let side = crate::keybindings::KeybindingSide::current();
         let overrides = &self.settings_store.settings().keybindings.overrides;
         let binding = |action_id: &str| {
-            crate::keybindings::action_definition(action_id).map(|definition| {
-                crate::keybindings::format_combo(&crate::keybindings::effective_combo(
-                    definition, overrides, side,
-                ))
+            crate::keybindings::action_definition(action_id).and_then(|definition| {
+                crate::keybindings::effective_combo(definition, overrides, side)
+                    .map(|combo| crate::keybindings::format_combo(&combo))
             })
         };
         let registry_row = |action_id: &str, label_key: &str| {

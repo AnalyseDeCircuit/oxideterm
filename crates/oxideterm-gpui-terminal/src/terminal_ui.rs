@@ -229,6 +229,7 @@ pub struct TerminalCommandSelectionLabels {
     pub previous_command: String,
     pub next_command: String,
     pub clear_screen: String,
+    pub clear_screen_shortcut: Option<String>,
 }
 
 impl Default for TerminalCommandSelectionLabels {
@@ -247,6 +248,7 @@ impl Default for TerminalCommandSelectionLabels {
             previous_command: "Previous command".to_string(),
             next_command: "Next command".to_string(),
             clear_screen: "Clear screen".to_string(),
+            clear_screen_shortcut: Some("Ctrl+L".to_string()),
         }
     }
 }

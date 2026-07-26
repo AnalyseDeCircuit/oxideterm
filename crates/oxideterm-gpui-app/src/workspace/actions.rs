@@ -327,6 +327,20 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn clear_active_terminal_screen(&mut self, cx: &mut Context<Self>) -> bool {
+        let terminal_active = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        if !terminal_active {
+            return false;
+        }
+        let Some(pane) = self.active_pane() else {
+            return false;
+        };
+        pane.update(cx, |pane, cx| pane.clear_screen(cx));
+        true
+    }
+
     pub(super) fn cut(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(pane) = self.active_pane() else {
             return false;
@@ -509,6 +523,9 @@ impl WorkspaceApp {
                 let _ = self.cut(cx);
             }
             "terminal.paste" => self.paste(cx),
+            "terminal.clearScreen" => {
+                self.clear_active_terminal_screen(cx);
+            }
             "terminal.aiPanel" => {
                 self.toggle_terminal_ai_inline_panel(window, cx);
             }
@@ -1443,8 +1460,11 @@ impl WorkspaceApp {
             &self.settings_store.settings().keybindings.overrides,
             side,
         );
-        let runtime_bindings =
-            crate::keybindings::runtime_rebind_key_bindings(&action_id, &previous, &combo);
+        let runtime_bindings = crate::keybindings::runtime_rebind_key_bindings(
+            &action_id,
+            previous.as_ref(),
+            Some(&combo),
+        );
 
         self.edit_settings(
             |settings| {
@@ -1484,11 +1504,47 @@ impl WorkspaceApp {
             side,
         );
         let next = definition.default_combo(side).clone();
-        let runtime_bindings =
-            crate::keybindings::runtime_rebind_key_bindings(action_id, &previous, &next);
+        let runtime_bindings = crate::keybindings::runtime_rebind_key_bindings(
+            action_id,
+            previous.as_ref(),
+            Some(&next),
+        );
         self.edit_settings(
             |settings| {
                 crate::keybindings::reset_override(
+                    &mut settings.keybindings.overrides,
+                    action_id,
+                    side,
+                );
+            },
+            cx,
+        );
+        self.settings_page.stop_keybinding_recording();
+        self.keybinding_recording_combo = None;
+        self.keybinding_recording_footer_focus = None;
+        self.apply_runtime_key_bindings(runtime_bindings, window, cx);
+    }
+
+    pub(super) fn unbind_keybinding(
+        &mut self,
+        action_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(definition) = crate::keybindings::action_definition(action_id) else {
+            return;
+        };
+        let side = crate::keybindings::KeybindingSide::current();
+        let previous = crate::keybindings::effective_combo(
+            definition,
+            &self.settings_store.settings().keybindings.overrides,
+            side,
+        );
+        let runtime_bindings =
+            crate::keybindings::runtime_rebind_key_bindings(action_id, previous.as_ref(), None);
+        self.edit_settings(
+            |settings| {
+                crate::keybindings::set_unbound_override(
                     &mut settings.keybindings.overrides,
                     action_id,
                     side,
@@ -1510,7 +1566,11 @@ impl WorkspaceApp {
             .flat_map(|definition| {
                 let previous = crate::keybindings::effective_combo(definition, &overrides, side);
                 let next = definition.default_combo(side).clone();
-                crate::keybindings::runtime_rebind_key_bindings(definition.id, &previous, &next)
+                crate::keybindings::runtime_rebind_key_bindings(
+                    definition.id,
+                    previous.as_ref(),
+                    Some(&next),
+                )
             })
             .collect::<Vec<_>>();
         self.edit_settings(|settings| settings.keybindings.overrides.clear(), cx);
@@ -1600,8 +1660,8 @@ impl WorkspaceApp {
                                 );
                                 crate::keybindings::runtime_rebind_key_bindings(
                                     definition.id,
-                                    &previous,
-                                    &next,
+                                    previous.as_ref(),
+                                    next.as_ref(),
                                 )
                             })
                             .collect::<Vec<_>>();

@@ -10,7 +10,7 @@ pub(super) fn effective_shortcut_label(
         definition,
         overrides,
         crate::keybindings::KeybindingSide::current(),
-    );
+    )?;
     Some(crate::keybindings::format_combo(&combo))
 }
 
@@ -48,6 +48,12 @@ mod tests {
         assert_eq!(
             effective_shortcut_label("app.commandPalette", &overrides),
             Some(expected)
+        );
+
+        crate::keybindings::set_unbound_override(&mut overrides, "app.commandPalette", side);
+        assert_eq!(
+            effective_shortcut_label("app.commandPalette", &overrides),
+            None
         );
     }
 }

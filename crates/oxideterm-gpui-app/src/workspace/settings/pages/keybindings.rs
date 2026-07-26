@@ -480,7 +480,7 @@ impl WorkspaceApp {
         let current =
             crate::keybindings::effective_combo(definition, &settings.keybindings.overrides, side);
         let default = definition.default_combo(side);
-        let modified = current != *default;
+        let modified = current.as_ref() != Some(default);
         let recording = self
             .settings_page
             .keybinding_recording_action_id
@@ -488,6 +488,7 @@ impl WorkspaceApp {
             .is_some_and(|id| id == definition.id);
         let action_id = definition.id.to_string();
         let record_action_id = action_id.clone();
+        let unbind_action_id = action_id.clone();
         let reset_action_id = action_id;
         let conflicts = if recording {
             self.settings_page.keybinding_conflict_action_ids.as_slice()
@@ -561,11 +562,18 @@ impl WorkspaceApp {
                                     .py(px(4.0))
                                     .cursor_pointer()
                                     .hover(|style| style.bg(self.keybinding_hover_background()))
-                                    .child(self.keybinding_kbd_badge(
-                                        &crate::keybindings::format_combo(&current),
-                                        false,
-                                        cx,
-                                    ))
+                                    .child(
+                                        self.keybinding_kbd_badge(
+                                            &current
+                                                .as_ref()
+                                                .map(crate::keybindings::format_combo)
+                                                .unwrap_or_else(|| {
+                                                    self.i18n.t("settings_view.keybindings.unbound")
+                                                }),
+                                            false,
+                                            cx,
+                                        ),
+                                    )
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _event, _window, cx| {
@@ -579,6 +587,22 @@ impl WorkspaceApp {
                                         }),
                                     ),
                             )
+                            .when(current.is_some(), |controls| {
+                                controls.child(self.workspace_icon_action_button(
+                                    LucideIcon::Trash2,
+                                    14.0,
+                                    rgb(self.tokens.ui.text_muted),
+                                    IconButtonOptions {
+                                        hover_background: Some(self.keybinding_hover_background()),
+                                        ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                                    },
+                                    move |this, _event, window, cx| {
+                                        this.unbind_keybinding(&unbind_action_id, window, cx);
+                                        cx.stop_propagation();
+                                    },
+                                    cx,
+                                ))
+                            })
                             .when(modified, |controls| {
                                 controls.child(self.workspace_icon_action_button(
                                     LucideIcon::RotateCcw,

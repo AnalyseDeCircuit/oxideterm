@@ -79,6 +79,7 @@ actions!(
         SplitNavLeft,
         SplitNavRight,
         TerminalAiPanel,
+        TerminalClearScreen,
         TerminalRecording,
         TerminalFreeTypeMode,
         PaletteEventLog,

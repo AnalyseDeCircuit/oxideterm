@@ -273,7 +273,7 @@ impl TerminalPane {
         self.scroll_to_absolute_line(target_line, cx);
     }
 
-    pub(crate) fn clear_screen_from_context_menu(&mut self, cx: &mut Context<Self>) {
+    pub fn clear_screen(&mut self, cx: &mut Context<Self>) {
         // Ctrl-L asks the running shell/TUI to redraw without deleting scrollback
         // or invalidating command facts the way a terminal reset would.
         self.send_user_protocol_bytes(&[0x0c], cx);

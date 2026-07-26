@@ -757,6 +757,9 @@ impl Render for WorkspaceApp {
             .on_action(cx.listener(|this, _: &TerminalAiPanel, _window, cx| {
                 this.toggle_terminal_ai_inline_panel(_window, cx);
             }))
+            .on_action(cx.listener(|this, _: &TerminalClearScreen, _window, cx| {
+                this.clear_active_terminal_screen(cx);
+            }))
             .on_action(cx.listener(|this, _: &TerminalRecording, _window, cx| {
                 this.toggle_active_terminal_recording(cx);
             }))

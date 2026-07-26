@@ -846,6 +846,17 @@ impl WorkspaceApp {
                     max_total_bytes: in_band_transfer.max_total_bytes.max(1) as u64,
                 }
             });
+        let clear_screen_shortcut = crate::keybindings::action_definition("terminal.clearScreen")
+            .and_then(|definition| {
+                crate::keybindings::effective_combo(
+                    definition,
+                    &settings.keybindings.overrides,
+                    crate::keybindings::KeybindingSide::current(),
+                )
+            });
+        let clear_screen_shortcut = clear_screen_shortcut
+            .as_ref()
+            .map(crate::keybindings::format_combo);
         TerminalUiPreferences {
             font_family: terminal
                 .font_family
@@ -910,6 +921,7 @@ impl WorkspaceApp {
                 previous_command: self.i18n.t("terminal.command_selection.previous_command"),
                 next_command: self.i18n.t("terminal.command_selection.next_command"),
                 clear_screen: self.i18n.t("terminal.command_selection.clear_screen"),
+                clear_screen_shortcut,
             },
             modem_labels: TerminalModemLabels {
                 binary_transfer: self.i18n.t("terminal.modem.binary_transfer"),

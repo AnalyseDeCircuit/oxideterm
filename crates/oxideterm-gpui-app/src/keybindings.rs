@@ -9,7 +9,7 @@ use crate::{
     GoToTab9, NewConnection, NewTerminal, NextTab, OpenSettings, PaletteAiSidebar,
     PaletteBroadcast, PaletteEventLog, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts,
     SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical, TerminalAiPanel,
-    TerminalFreeTypeMode, TerminalRecording, ToggleSidebar, ZenMode,
+    TerminalClearScreen, TerminalFreeTypeMode, TerminalRecording, ToggleSidebar, ZenMode,
 };
 
 const CONTEXT: &str = "Workspace";
@@ -331,6 +331,12 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             KeyCombo::ctrl_shift("v"),
         ),
         def(
+            "terminal.clearScreen",
+            ActionScope::Terminal,
+            KeyCombo::ctrl("l"),
+            KeyCombo::ctrl("l"),
+        ),
+        def(
             "terminal.aiPanel",
             ActionScope::Terminal,
             KeyCombo::cmd("i"),
@@ -437,20 +443,41 @@ pub(crate) fn effective_combo(
     definition: &ActionDefinition,
     overrides: &Map<String, Value>,
     side: KeybindingSide,
-) -> KeyCombo {
-    override_combo(definition.id, overrides, side)
-        .unwrap_or_else(|| definition.default_combo(side).clone())
+) -> Option<KeyCombo> {
+    override_binding(definition.id, overrides, side)
+        .unwrap_or_else(|| Some(definition.default_combo(side).clone()))
 }
 
-pub(crate) fn override_combo(
+fn override_binding(
     action_id: &str,
     overrides: &Map<String, Value>,
     side: KeybindingSide,
-) -> Option<KeyCombo> {
-    let side_value = overrides.get(action_id)?.get(side.json_key())?.clone();
-    serde_json::from_value::<KeyCombo>(side_value)
+) -> Option<Option<KeyCombo>> {
+    let side_value = overrides.get(action_id)?.get(side.json_key())?;
+    if side_value.is_null() {
+        return Some(None);
+    }
+    serde_json::from_value::<KeyCombo>(side_value.clone())
         .ok()
         .map(normalize_combo)
+        .map(Some)
+}
+
+pub(crate) fn set_unbound_override(
+    overrides: &mut Map<String, Value>,
+    action_id: &str,
+    side: KeybindingSide,
+) {
+    if action_definition(action_id).is_none() {
+        return;
+    }
+    let mut entry = overrides
+        .get(action_id)
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    // JSON null is an explicit tombstone that suppresses the built-in default.
+    entry.insert(side.json_key().to_string(), Value::Null);
+    overrides.insert(action_id.to_string(), Value::Object(entry));
 }
 
 pub(crate) fn set_override(
@@ -512,6 +539,10 @@ pub(crate) fn sanitize_imported_overrides(value: Value) -> Result<Map<String, Va
         let mut entry = Map::new();
         for side in [KeybindingSide::Mac, KeybindingSide::Other] {
             if let Some(combo_value) = object.get(side.json_key()) {
+                if combo_value.is_null() {
+                    entry.insert(side.json_key().to_string(), Value::Null);
+                    continue;
+                }
                 let combo = serde_json::from_value::<KeyCombo>(combo_value.clone())
                     .map_err(|_| format!("invalid shortcut for {action_id}"))?;
                 let normalized = normalize_combo(combo);
@@ -544,7 +575,7 @@ pub(crate) fn conflicts_for_combo(
     ACTION_DEFINITIONS
         .iter()
         .filter(|definition| definition.id != action_id)
-        .filter(|definition| effective_combo(definition, overrides, side) == *combo)
+        .filter(|definition| effective_combo(definition, overrides, side).as_ref() == Some(combo))
         .collect()
 }
 
@@ -559,7 +590,7 @@ pub(crate) fn keystroke_matches_action(
     let Some(combo) = combo_from_keystroke(keystroke) else {
         return false;
     };
-    combo == effective_combo(definition, overrides, KeybindingSide::current())
+    effective_combo(definition, overrides, KeybindingSide::current()).as_ref() == Some(&combo)
 }
 
 pub(crate) fn matched_action_for_keystroke(
@@ -570,7 +601,7 @@ pub(crate) fn matched_action_for_keystroke(
     let side = KeybindingSide::current();
     ACTION_DEFINITIONS
         .iter()
-        .find(|definition| effective_combo(definition, overrides, side) == combo)
+        .find(|definition| effective_combo(definition, overrides, side).as_ref() == Some(&combo))
         .map(|definition| (definition, combo))
 }
 
@@ -827,7 +858,7 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
     for definition in ACTION_DEFINITIONS.iter() {
         let default = definition.default_combo(side).clone();
         let effective = effective_combo(definition, overrides, side);
-        if effective != default {
+        if effective.as_ref() != Some(&default) {
             let default_keystroke = combo_to_gpui(&default);
             bindings.push(KeyBinding::new(
                 &default_keystroke,
@@ -841,6 +872,9 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
         if definition.terminal_behavior != TerminalBehavior::Always {
             continue;
         }
+        let Some(effective) = effective else {
+            continue;
+        };
         if definition.id == "split.closePane" && effective == default {
             continue;
         }
@@ -851,21 +885,26 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
 
 pub(crate) fn runtime_rebind_key_bindings(
     action_id: &str,
-    previous: &KeyCombo,
-    next: &KeyCombo,
+    previous: Option<&KeyCombo>,
+    next: Option<&KeyCombo>,
 ) -> Vec<KeyBinding> {
     let mut bindings = Vec::new();
     if previous != next {
-        let previous_keystroke = combo_to_gpui(previous);
-        bindings.push(KeyBinding::new(
-            &previous_keystroke,
-            NoAction {},
-            Some(CONTEXT),
-        ));
-        if matches!(action_id, "app.commandPalette" | "app.quit") {
-            bindings.push(KeyBinding::new(&previous_keystroke, NoAction {}, None));
+        if let Some(previous) = previous {
+            let previous_keystroke = combo_to_gpui(previous);
+            bindings.push(KeyBinding::new(
+                &previous_keystroke,
+                NoAction {},
+                Some(CONTEXT),
+            ));
+            if matches!(action_id, "app.commandPalette" | "app.quit") {
+                bindings.push(KeyBinding::new(&previous_keystroke, NoAction {}, None));
+            }
         }
     }
+    let Some(next) = next else {
+        return bindings;
+    };
     if action_id == "split.closePane"
         && action_definition(action_id)
             .is_some_and(|definition| next == definition.default_combo(KeybindingSide::current()))
@@ -925,6 +964,7 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         "terminal.copy" => push_binding!(Copy),
         "terminal.cut" => push_binding!(Cut),
         "terminal.paste" => push_binding!(Paste),
+        "terminal.clearScreen" => push_binding!(TerminalClearScreen),
         "terminal.aiPanel" => push_binding!(TerminalAiPanel),
         "terminal.recording" => push_binding!(TerminalRecording),
         "terminal.toggleFreeTypeMode" => push_binding!(TerminalFreeTypeMode),
@@ -949,7 +989,7 @@ mod tests {
 
     #[test]
     fn tauri_default_registry_contains_all_orchestrated_actions() {
-        assert_eq!(ACTION_DEFINITIONS.len(), 43);
+        assert_eq!(ACTION_DEFINITIONS.len(), 44);
         assert!(action_definition("app.commandPalette").is_some());
         assert_eq!(
             action_definition("app.quit")
@@ -959,6 +999,11 @@ mod tests {
         assert!(action_definition("terminal.closePanel").is_some());
         assert!(action_definition("terminal.copy").is_some());
         assert!(action_definition("terminal.cut").is_some());
+        assert_eq!(
+            action_definition("terminal.clearScreen")
+                .map(|definition| definition.default_combo(KeybindingSide::Mac)),
+            Some(&KeyCombo::ctrl("l"))
+        );
         assert!(action_definition("terminal.toggleFreeTypeMode").is_some());
         assert!(action_definition("palette.broadcast").is_some());
         assert_eq!(
@@ -1037,6 +1082,46 @@ mod tests {
 
         reset_override(&mut overrides, "app.newTerminal", KeybindingSide::Mac);
         assert!(overrides.is_empty());
+    }
+
+    #[test]
+    fn explicit_unbound_override_suppresses_default_and_round_trips_import() {
+        let action_id = "terminal.clearScreen";
+        let side = KeybindingSide::current();
+        let definition = action_definition(action_id).unwrap();
+        let default = definition.default_combo(side).clone();
+        let mut overrides = Map::new();
+
+        set_unbound_override(&mut overrides, action_id, side);
+
+        assert_eq!(effective_combo(definition, &overrides, side), None);
+        assert_eq!(modified_count(&overrides), 1);
+        let serialized = Value::Object(overrides.clone());
+        let sanitized = sanitize_imported_overrides(serialized).unwrap();
+        assert_eq!(effective_combo(definition, &sanitized, side), None);
+
+        let default_keystroke = Keystroke {
+            modifiers: Modifiers {
+                control: default.ctrl,
+                shift: default.shift,
+                alt: default.alt,
+                platform: default.meta,
+                ..Default::default()
+            },
+            key: default.key,
+            key_char: None,
+        };
+        assert!(!keystroke_matches_action(
+            &default_keystroke,
+            action_id,
+            &sanitized,
+        ));
+
+        reset_override(&mut overrides, action_id, side);
+        assert_eq!(
+            effective_combo(definition, &overrides, side),
+            Some(definition.default_combo(side).clone())
+        );
     }
 
     #[test]
