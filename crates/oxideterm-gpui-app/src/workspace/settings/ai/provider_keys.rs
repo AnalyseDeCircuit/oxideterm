@@ -244,15 +244,14 @@ impl WorkspaceApp {
             .unwrap_or(false)
     }
 
-    pub(in crate::workspace) fn ensure_ai_provider_key_statuses(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn ensure_ai_provider_key_statuses(&mut self) {
         let provider_views = ai_provider_views(self.settings_store.settings());
-        self.ensure_ai_provider_key_statuses_for_views(&provider_views, cx);
+        self.ensure_ai_provider_key_statuses_for_views(&provider_views);
     }
 
     pub(in crate::workspace) fn ensure_ai_provider_key_statuses_for_views(
         &mut self,
         provider_views: &[AiProviderView],
-        cx: &mut Context<Self>,
     ) {
         // Rendering OxideSens already derives provider views, so reuse that
         // snapshot when available instead of parsing the same JSON again.
@@ -283,7 +282,9 @@ impl WorkspaceApp {
                 .provider_key_status_pending
                 .insert(provider_id.clone());
             if self.ai.models.provider_key_status_tx.is_none() {
-                let (tx, rx) = std::sync::mpsc::channel();
+                let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                    self.ai.delivery_wake.clone(),
+                );
                 self.ai.models.provider_key_status_tx = Some(tx);
                 self.ai.models.provider_key_status_rx = Some(rx);
             }
@@ -304,20 +305,25 @@ impl WorkspaceApp {
                 });
             });
         }
-
-        if !self.ai.models.provider_key_status_pending.is_empty() {
-            self.schedule_ai_provider_key_status_poll(cx);
-        }
     }
 
-    pub(in crate::workspace) fn poll_ai_provider_key_statuses(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_ai_provider_key_statuses(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(rx) = self.ai.models.provider_key_status_rx.take() else {
-            return;
+            return false;
         };
         let mut changed = false;
-        loop {
+        let mut source_exhausted = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
+            .allows_next(processed, started_at.elapsed())
+        {
             match rx.try_recv() {
                 Ok(delivery) => {
+                    processed += 1;
                     self.ai
                         .models
                         .provider_key_status_pending
@@ -329,8 +335,12 @@ impl WorkspaceApp {
                         .insert(delivery.provider_id, delivery.has_key);
                     changed |= previous != Some(delivery.has_key);
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     self.ai.models.provider_key_status_pending.clear();
                     self.ai.models.provider_key_status_tx = None;
                     break;
@@ -345,27 +355,7 @@ impl WorkspaceApp {
         } else {
             self.ai.models.provider_key_status_rx = Some(rx);
         }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_provider_key_status_poll(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.models.provider_key_status_polling {
-            return;
-        }
-        self.ai.models.provider_key_status_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.models.provider_key_status_polling = false;
-                this.poll_ai_provider_key_statuses(cx);
-                if !this.ai.models.provider_key_status_pending.is_empty() {
-                    this.schedule_ai_provider_key_status_poll(cx);
-                }
-            });
-        })
-        .detach();
+        !self.ai.models.provider_key_status_pending.is_empty() && !source_exhausted
     }
 
     pub(in crate::workspace) fn save_ai_provider_api_key(

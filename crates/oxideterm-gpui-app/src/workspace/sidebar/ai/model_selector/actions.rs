@@ -121,7 +121,10 @@ impl WorkspaceApp {
             return;
         }
         if self.ai.models.acp_model_discovery_tx.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) =
+                crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                    self.ai.delivery_wake.clone(),
+                );
             self.ai.models.acp_model_discovery_tx = Some(tx);
             self.ai.models.acp_model_discovery_rx = Some(rx);
         }
@@ -157,21 +160,26 @@ impl WorkspaceApp {
                 config_options,
             });
         });
-        self.schedule_ai_acp_model_discovery_poll(cx);
         cx.notify();
     }
 
     pub(in crate::workspace) fn poll_ai_acp_model_discovery_results(
         &mut self,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(rx) = self.ai.models.acp_model_discovery_rx.take() else {
-            return;
+            return false;
         };
         let mut keep_rx = true;
-        loop {
+        let mut source_exhausted = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
+            .allows_next(processed, started_at.elapsed())
+        {
             match rx.try_recv() {
                 Ok(delivery) => {
+                    processed += 1;
                     let key = (delivery.conversation_id.clone(), delivery.agent_id);
                     self.ai.models.acp_model_discovery_pending.remove(&key);
                     if let Some(options) = delivery.config_options
@@ -187,8 +195,12 @@ impl WorkspaceApp {
                     }
                     cx.notify();
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     keep_rx = false;
                     self.ai.models.acp_model_discovery_tx = None;
                     self.ai.models.acp_model_discovery_pending.clear();
@@ -201,33 +213,10 @@ impl WorkspaceApp {
         } else if self.ai.models.acp_model_discovery_pending.is_empty() {
             self.ai.models.acp_model_discovery_tx = None;
         }
+        keep_rx && !self.ai.models.acp_model_discovery_pending.is_empty() && !source_exhausted
     }
 
-    pub(in crate::workspace) fn schedule_ai_acp_model_discovery_poll(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.models.acp_model_discovery_polling {
-            return;
-        }
-        self.ai.models.acp_model_discovery_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.models.acp_model_discovery_polling = false;
-                this.poll_ai_acp_model_discovery_results(cx);
-                if !this.ai.models.acp_model_discovery_pending.is_empty() {
-                    this.schedule_ai_acp_model_discovery_poll(cx);
-                }
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn ensure_ai_model_selector_mount_statuses(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn ensure_ai_model_selector_mount_statuses(&mut self) {
         let providers = self.ai_model_selector_providers();
         let signature = ai_model_selector_status_signature(&providers);
         if self.ai.models.selector_status_signature == signature {
@@ -236,7 +225,7 @@ impl WorkspaceApp {
         self.ai.models.selector_status_signature = signature;
         // Mirrors Tauri ModelSelector's mount/provider-change checkAllKeys
         // effect: the trigger indicator starts probing before the user opens it.
-        self.refresh_ai_model_selector_provider_statuses(cx);
+        self.refresh_ai_model_selector_provider_statuses();
     }
 
     pub(in crate::workspace) fn toggle_ai_model_selector(
@@ -271,7 +260,7 @@ impl WorkspaceApp {
             self.ai.models.selector_highlighted_model = None;
             self.ai.chat.input_focused = false;
             self.ai.chat.inline_panel.prompt_focused = false;
-            self.refresh_ai_model_selector_provider_statuses(cx);
+            self.refresh_ai_model_selector_provider_statuses();
 window.focus(&self.focus_handle, cx);
         } else {
             self.close_ai_model_selector();
@@ -364,11 +353,8 @@ window.focus(&self.focus_handle, cx);
         true
     }
 
-    pub(in crate::workspace) fn refresh_ai_model_selector_provider_statuses(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        self.ensure_ai_provider_key_statuses(cx);
+    pub(in crate::workspace) fn refresh_ai_model_selector_provider_statuses(&mut self) {
+        self.ensure_ai_provider_key_statuses();
         let providers = self.ai_model_selector_providers();
         for provider in providers {
             if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {

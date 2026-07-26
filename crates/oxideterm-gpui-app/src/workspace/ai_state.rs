@@ -82,9 +82,9 @@ pub(super) struct AiRuntimeWorkspaceState {
     pub(super) mcp_registry: oxideterm_ai::McpRegistry,
     pub(super) acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
     pub(super) acp_agent_probe_pending: HashSet<String>,
-    pub(super) acp_agent_probe_tx: Option<std::sync::mpsc::Sender<AcpAgentProbeDelivery>>,
+    pub(super) acp_agent_probe_tx:
+        Option<crate::workspace::delivery::ActiveDeliverySender<AcpAgentProbeDelivery>>,
     pub(super) acp_agent_probe_rx: Option<std::sync::mpsc::Receiver<AcpAgentProbeDelivery>>,
-    pub(super) acp_agent_probe_polling: bool,
 }
 
 /// Owns provider/model settings, selectors, key status, and model refresh state.
@@ -110,17 +110,17 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) acp_model_options:
         HashMap<(String, String), Vec<oxideterm_ai::AcpSessionConfigOption>>,
     pub(super) acp_model_discovery_pending: HashSet<(String, String)>,
-    pub(super) acp_model_discovery_tx: Option<std::sync::mpsc::Sender<AcpModelDiscoveryDelivery>>,
+    pub(super) acp_model_discovery_tx:
+        Option<crate::workspace::delivery::ActiveDeliverySender<AcpModelDiscoveryDelivery>>,
     pub(super) acp_model_discovery_rx: Option<std::sync::mpsc::Receiver<AcpModelDiscoveryDelivery>>,
-    pub(super) acp_model_discovery_polling: bool,
     pub(super) mcp_add_dialog: Option<AiMcpServerDraft>,
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
     pub(super) provider_key_status: HashMap<String, bool>,
     pub(super) provider_key_status_pending: HashSet<String>,
-    pub(super) provider_key_status_tx: Option<std::sync::mpsc::Sender<AiProviderKeyStatusDelivery>>,
+    pub(super) provider_key_status_tx:
+        Option<crate::workspace::delivery::ActiveDeliverySender<AiProviderKeyStatusDelivery>>,
     pub(super) provider_key_status_rx:
         Option<std::sync::mpsc::Receiver<AiProviderKeyStatusDelivery>>,
-    pub(super) provider_key_status_polling: bool,
     pub(super) refresh_generations: HashMap<String, u64>,
     pub(super) refreshing: HashSet<String>,
     pub(super) refresh_tx:
@@ -140,7 +140,6 @@ pub(super) struct AiKnowledgeWorkspaceState {
     pub(super) rag_store: LazyAiRagStore,
     pub(super) reindex_cancel: Option<Arc<AtomicBool>>,
     pub(super) reindex_rx: Option<std::sync::mpsc::Receiver<KnowledgeReindexDelivery>>,
-    pub(super) reindex_polling: bool,
     pub(super) window_activation_subscription: Option<Subscription>,
 }
 
@@ -241,7 +240,6 @@ impl AiRuntimeWorkspaceState {
             acp_agent_probe_pending: HashSet::new(),
             acp_agent_probe_tx: None,
             acp_agent_probe_rx: None,
-            acp_agent_probe_polling: false,
         }
     }
 }
@@ -289,14 +287,12 @@ impl AiModelWorkspaceState {
             acp_model_discovery_pending: HashSet::new(),
             acp_model_discovery_tx: None,
             acp_model_discovery_rx: None,
-            acp_model_discovery_polling: false,
             mcp_add_dialog: None,
             key_store,
             provider_key_status: HashMap::new(),
             provider_key_status_pending: HashSet::new(),
             provider_key_status_tx: None,
             provider_key_status_rx: None,
-            provider_key_status_polling: false,
             refresh_generations: HashMap::new(),
             refreshing: HashSet::new(),
             refresh_tx: None,
@@ -317,7 +313,6 @@ impl AiKnowledgeWorkspaceState {
             rag_store: LazyAiRagStore::default(),
             reindex_cancel: None,
             reindex_rx: None,
-            reindex_polling: false,
             window_activation_subscription: None,
         }
     }

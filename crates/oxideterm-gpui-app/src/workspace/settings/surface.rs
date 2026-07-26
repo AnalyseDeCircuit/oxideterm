@@ -221,7 +221,7 @@ impl WorkspaceApp {
             }
             (AiSettingsPage::General, 1) => self.ai_privacy_settings_card(),
             (AiSettingsPage::Providers, 0) => {
-                let provider_views = self.ai_provider_views_for_settings_render(cx);
+                let provider_views = self.ai_provider_views_for_settings_render();
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_provider_settings_section(&provider_views, cx),
@@ -337,10 +337,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_provider_views_for_settings_render(
         &mut self,
-        cx: &mut Context<Self>,
     ) -> Vec<AiProviderView> {
         let provider_views = ai_provider_views(self.settings_store.settings());
-        self.ensure_ai_provider_key_statuses_for_views(&provider_views, cx);
+        self.ensure_ai_provider_key_statuses_for_views(&provider_views);
         provider_views
     }
 

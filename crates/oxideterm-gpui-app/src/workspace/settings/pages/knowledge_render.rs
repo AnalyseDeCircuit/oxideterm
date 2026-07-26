@@ -6,7 +6,7 @@ impl WorkspaceApp {
         section_index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.ensure_ai_provider_key_statuses(cx);
+        self.ensure_ai_provider_key_statuses();
         let collections =
             oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
                 .unwrap_or_default();

@@ -32,17 +32,32 @@ impl WorkspaceApp {
                             let selector_backlog =
                                 workspace.poll_ai_model_selector_probe_results(cx);
                             let refresh_backlog = workspace.poll_ai_model_refresh_results(cx);
+                            let agent_probe_backlog =
+                                workspace.poll_ai_acp_agent_probe_results(cx);
+                            let model_discovery_backlog =
+                                workspace.poll_ai_acp_model_discovery_results(cx);
+                            let key_status_backlog =
+                                workspace.poll_ai_provider_key_statuses(cx);
+                            let knowledge_backlog =
+                                workspace.poll_knowledge_reindex_results(cx);
+                            let inline_backlog =
+                                workspace.poll_terminal_ai_inline_delivery(cx);
                             stream_backlog
                                 || compaction_backlog
                                 || selector_backlog
                                 || refresh_backlog
+                                || agent_probe_backlog
+                                || model_discovery_backlog
+                                || key_status_backlog
+                                || knowledge_backlog
+                                || inline_backlog
                         })
                     },
                 ) else {
                     break;
                 };
                 if backlog_remaining {
-                    // Preserve one continuation permit across the four independently bounded queues.
+                    // Preserve one continuation permit across independently bounded AI queues.
                     delivery_wake.mark();
                 } else if stopped {
                     break;

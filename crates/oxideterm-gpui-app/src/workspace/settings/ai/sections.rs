@@ -658,7 +658,9 @@ impl WorkspaceApp {
             .acp_agent_probe_pending
             .insert(agent_id.clone());
         if self.ai.runtime.acp_agent_probe_tx.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
             self.ai.runtime.acp_agent_probe_tx = Some(tx);
             self.ai.runtime.acp_agent_probe_rx = Some(rx);
         }
@@ -711,18 +713,26 @@ impl WorkspaceApp {
             };
             let _ = ui_tx.send(AcpAgentProbeDelivery { agent_id, result });
         });
-        self.schedule_ai_acp_agent_probe_poll(cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_ai_acp_agent_probe_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_ai_acp_agent_probe_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(rx) = self.ai.runtime.acp_agent_probe_rx.take() else {
-            return;
+            return false;
         };
         let mut keep_rx = true;
-        loop {
+        let mut source_exhausted = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
+            .allows_next(processed, started_at.elapsed())
+        {
             match rx.try_recv() {
                 Ok(delivery) => {
+                    processed += 1;
                     self.ai
                         .runtime
                         .acp_agent_probe_pending
@@ -744,8 +754,12 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     keep_rx = false;
                     self.ai.runtime.acp_agent_probe_tx = None;
                     self.ai.runtime.acp_agent_probe_pending.clear();
@@ -758,27 +772,7 @@ impl WorkspaceApp {
         } else if self.ai.runtime.acp_agent_probe_pending.is_empty() {
             self.ai.runtime.acp_agent_probe_tx = None;
         }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_acp_agent_probe_poll(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.runtime.acp_agent_probe_polling {
-            return;
-        }
-        self.ai.runtime.acp_agent_probe_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.runtime.acp_agent_probe_polling = false;
-                this.poll_ai_acp_agent_probe_results(cx);
-                if !this.ai.runtime.acp_agent_probe_pending.is_empty() {
-                    this.schedule_ai_acp_agent_probe_poll(cx);
-                }
-            });
-        })
-        .detach();
+        keep_rx && !self.ai.runtime.acp_agent_probe_pending.is_empty() && !source_exhausted
     }
 
     pub(in crate::workspace) fn ai_acp_agent_capabilities(

@@ -7,8 +7,9 @@ pub(in crate::workspace) const AI_INLINE_PANEL_VERTICAL_OFFSET: f32 = 4.0;
 pub(in crate::workspace) const AI_INLINE_PANEL_COLLAPSED_HEIGHT: f32 = 56.0;
 pub(in crate::workspace) const AI_INLINE_PANEL_EXPANDED_HEIGHT: f32 = 160.0;
 pub(in crate::workspace) const AI_INLINE_PANEL_LOADING_BAR_HEIGHT: f32 = 2.0;
-pub(in crate::workspace) const AI_INLINE_POLL_INTERVAL_MS: u64 = 50;
-pub(in crate::workspace) const AI_INLINE_MAX_EVENTS_PER_POLL: usize = 128;
+pub(in crate::workspace) const AI_INLINE_DELIVERY_BUDGET:
+    crate::workspace::delivery::DeliveryBudget =
+    crate::workspace::delivery::DeliveryBudget::new(128, Duration::from_millis(4));
 
 #[derive(Default)]
 pub(in crate::workspace) struct AiInlinePanelState {
@@ -24,7 +25,6 @@ pub(in crate::workspace) struct AiInlinePanelState {
     pub(in crate::workspace) selection_context: String,
     pub(in crate::workspace) generation: u64,
     pub(in crate::workspace) rx: Option<Receiver<AiInlinePanelDelivery>>,
-    pub(in crate::workspace) polling: bool,
 }
 
 pub(in crate::workspace) enum AiInlinePanelDelivery {
@@ -72,7 +72,6 @@ impl WorkspaceApp {
         self.ai.chat.inline_panel.has_api_key = None;
         self.ai.chat.inline_panel.generation = self.ai.chat.inline_panel.generation.wrapping_add(1);
         self.ai.chat.inline_panel.rx = None;
-        self.ai.chat.inline_panel.polling = false;
 
         let selection = self
             .active_pane()
@@ -86,7 +85,7 @@ impl WorkspaceApp {
         self.ai.chat.inline_panel.selection_context = sanitized_selection;
 
 window.focus(&self.focus_handle, cx);
-        self.refresh_terminal_ai_inline_key_status(cx);
+        self.refresh_terminal_ai_inline_key_status();
         cx.notify();
     }
 
@@ -100,7 +99,6 @@ window.focus(&self.focus_handle, cx);
         self.ai.chat.inline_panel.loading = false;
         self.ai.chat.inline_panel.error = None;
         self.ai.chat.inline_panel.rx = None;
-        self.ai.chat.inline_panel.polling = false;
         self.ai.chat.inline_panel.generation = self.ai.chat.inline_panel.generation.wrapping_add(1);
         self.ime_marked_text = None;
         self.close_ai_model_selector();
@@ -632,9 +630,11 @@ window.focus(&this.focus_handle, cx);
         let key_store = self.ai.models.key_store.clone();
         let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
-        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        let (ui_tx, ui_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
         self.ai.chat.inline_panel.rx = Some(ui_rx);
-        self.schedule_terminal_ai_inline_poll(cx);
         self.forwarding_runtime.spawn(async move {
             if let Some(provider_id) = provider_id {
                 let key_result =
@@ -775,10 +775,7 @@ window.focus(&this.focus_handle, cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn refresh_terminal_ai_inline_key_status(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn refresh_terminal_ai_inline_key_status(&mut self) {
         let Ok(config) = self.resolve_terminal_ai_inline_config() else {
             self.ai.chat.inline_panel.has_api_key = Some(false);
             return;
@@ -794,9 +791,11 @@ window.focus(&this.focus_handle, cx);
         }
         let generation = self.ai.chat.inline_panel.generation;
         let key_store = self.ai.models.key_store.clone();
-        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        let (ui_tx, ui_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
         self.ai.chat.inline_panel.rx = Some(ui_rx);
-        self.schedule_terminal_ai_inline_poll(cx);
         self.forwarding_runtime.spawn(async move {
             // Opening the inline panel only needs the key existence hint; reading
             // the secret here would trigger Touch ID before the user sends a prompt.
@@ -814,22 +813,28 @@ window.focus(&this.focus_handle, cx);
     pub(in crate::workspace) fn poll_terminal_ai_inline_delivery(
         &mut self,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(rx) = self.ai.chat.inline_panel.rx.take() else {
-            self.ai.chat.inline_panel.polling = false;
-            return;
+            return false;
         };
         let mut keep_rx = true;
-        let mut processed = 0;
-        loop {
-            if processed >= AI_INLINE_MAX_EVENTS_PER_POLL {
-                break;
-            }
-            processed += 1;
+        let mut source_exhausted = false;
+        let mut changed = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while AI_INLINE_DELIVERY_BUDGET.allows_next(processed, started_at.elapsed()) {
             match rx.try_recv() {
-                Ok(delivery) => self.apply_terminal_ai_inline_delivery(delivery, &mut keep_rx, cx),
-                Err(TryRecvError::Empty) => break,
+                Ok(delivery) => {
+                    processed += 1;
+                    changed = true;
+                    self.apply_terminal_ai_inline_delivery(delivery, &mut keep_rx, cx);
+                }
+                Err(TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     keep_rx = false;
                     self.ai.chat.inline_panel.loading = false;
                     break;
@@ -838,10 +843,11 @@ window.focus(&this.focus_handle, cx);
         }
         if keep_rx && self.ai.chat.inline_panel.open {
             self.ai.chat.inline_panel.rx = Some(rx);
-        } else {
-            self.ai.chat.inline_panel.polling = false;
         }
-        cx.notify();
+        if changed {
+            cx.notify();
+        }
+        keep_rx && self.ai.chat.inline_panel.open && !source_exhausted
     }
 
     pub(in crate::workspace) fn apply_terminal_ai_inline_delivery(
@@ -878,31 +884,6 @@ window.focus(&this.focus_handle, cx);
             }
             _ => {}
         }
-    }
-
-    pub(in crate::workspace) fn schedule_terminal_ai_inline_poll(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.chat.inline_panel.polling {
-            return;
-        }
-        self.ai.chat.inline_panel.polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(Duration::from_millis(AI_INLINE_POLL_INTERVAL_MS)).await;
-                let keep_polling = weak
-                    .update(cx, |this, cx| {
-                        this.poll_terminal_ai_inline_delivery(cx);
-                        this.ai.chat.inline_panel.polling
-                    })
-                    .unwrap_or(false);
-                if !keep_polling {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(in crate::workspace) fn resolve_terminal_ai_inline_config(

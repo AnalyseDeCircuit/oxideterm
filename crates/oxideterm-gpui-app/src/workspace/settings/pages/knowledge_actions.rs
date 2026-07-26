@@ -131,11 +131,12 @@ impl WorkspaceApp {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_task = cancel.clone();
         let store = self.ai.knowledge.rag_store.get();
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.ai.delivery_wake.clone(),
+        );
         self.settings_page.start_knowledge_reindex();
         self.ai.knowledge.reindex_cancel = Some(cancel);
         self.ai.knowledge.reindex_rx = Some(rx);
-        self.schedule_knowledge_reindex_poll(cx);
         self.forwarding_runtime.spawn(async move {
             let mut last_emitted = 0usize;
             let mut on_progress = |current: usize, total: usize| {
@@ -162,12 +163,35 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_knowledge_reindex_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_knowledge_reindex_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(rx) = self.ai.knowledge.reindex_rx.take() else {
-            return;
+            return false;
         };
         let mut keep_rx = true;
-        while let Ok(delivery) = rx.try_recv() {
+        let mut source_exhausted = false;
+        let mut changed = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while crate::workspace::delivery::LIFECYCLE_DELIVERY_BUDGET
+            .allows_next(processed, started_at.elapsed())
+        {
+            let delivery = match rx.try_recv() {
+                Ok(delivery) => delivery,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
+                    keep_rx = false;
+                    break;
+                }
+            };
+            processed += 1;
+            changed = true;
             match delivery {
                 KnowledgeReindexDelivery::Progress { current, total } => {
                     self.settings_page.update_knowledge_reindex(current, total);
@@ -191,25 +215,10 @@ impl WorkspaceApp {
         if keep_rx {
             self.ai.knowledge.reindex_rx = Some(rx);
         }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn schedule_knowledge_reindex_poll(&mut self, cx: &mut Context<Self>) {
-        if self.ai.knowledge.reindex_polling {
-            return;
+        if changed {
+            cx.notify();
         }
-        self.ai.knowledge.reindex_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(33)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.knowledge.reindex_polling = false;
-                if this.ai.knowledge.reindex_rx.is_some() {
-                    this.poll_knowledge_reindex_results(cx);
-                    this.schedule_knowledge_reindex_poll(cx);
-                }
-            });
-        })
-        .detach();
+        keep_rx && !source_exhausted
     }
 
     pub(in crate::workspace) fn knowledge_import_files(
