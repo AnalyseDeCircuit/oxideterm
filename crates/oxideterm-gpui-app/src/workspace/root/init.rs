@@ -722,6 +722,7 @@ impl WorkspaceApp {
         workspace.schedule_terminal_notice_delivery(cx);
         workspace.schedule_connection_trace_delivery(cx);
         let window_handle = window.window_handle();
+        workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {
             loop {

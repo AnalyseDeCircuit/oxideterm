@@ -15,7 +15,7 @@ use oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use crate::workspace::{plugin_host, plugin_runtime};
+use crate::workspace::{delivery, plugin_host, plugin_runtime};
 
 /// Owns native plugin runtime coordination and emitted host snapshots.
 pub(in crate::workspace) struct NativePluginRuntimeState {
@@ -31,6 +31,7 @@ pub(in crate::workspace) struct NativePluginRuntimeState {
     pub(in crate::workspace) terminal_ui_requests: VecDeque<NativePluginTerminalRequest>,
     pub(in crate::workspace) terminal_polling: bool,
     pub(in crate::workspace) product_ui_effects: VecDeque<NativePluginProductUiEffect>,
+    pub(in crate::workspace) ui_wake: delivery::ActiveDeliveryWake,
     pub(in crate::workspace) sync_tx: mpsc::Sender<NativePluginSyncRequest>,
     pub(in crate::workspace) sync_rx: mpsc::Receiver<NativePluginSyncRequest>,
     pub(in crate::workspace) sync_polling: bool,
@@ -77,6 +78,7 @@ impl NativePluginRuntimeState {
             terminal_ui_requests: VecDeque::new(),
             terminal_polling: false,
             product_ui_effects: VecDeque::new(),
+            ui_wake: delivery::ActiveDeliveryWake::default(),
             sync_tx,
             sync_rx,
             sync_polling: false,

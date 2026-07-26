@@ -5,10 +5,13 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use gpui::{AnyElement, Context, IntoElement, KeyDownEvent, ParentElement, Timer, Window, div};
+use gpui::{
+    AnyElement, AnyWindowHandle, AppContext, Context, IntoElement, KeyDownEvent, ParentElement,
+    Timer, Window, div,
+};
 use oxideterm_connections::{SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_gpui_ui::{ConfirmDialogVariant, ConfirmDialogView};
@@ -18,7 +21,7 @@ use zeroize::Zeroizing;
 
 use super::{
     TabKind, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
-    TerminalSessionId, WorkspaceApp, WorkspaceToast, plugin_host, plugin_runtime,
+    TerminalSessionId, WorkspaceApp, WorkspaceToast, delivery, plugin_host, plugin_runtime,
     plugin_runtime::PluginResponseResult,
 };
 
@@ -218,7 +221,7 @@ impl WorkspaceApp {
             self.native_plugin_runtime
                 .terminal_ui_requests
                 .push_back(request);
-            cx.notify();
+            self.native_plugin_runtime.ui_wake.mark();
             return;
         }
 
@@ -244,8 +247,13 @@ impl WorkspaceApp {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        while let Some(request) = self.native_plugin_runtime.terminal_ui_requests.pop_front() {
+    ) -> bool {
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while delivery::USER_ACTION_DELIVERY_BUDGET.allows_next(processed, started_at.elapsed()) {
+            let Some(request) = self.native_plugin_runtime.terminal_ui_requests.pop_front() else {
+                break;
+            };
             let response = match request.action {
                 NativePluginTerminalAction::OpenTelnet { host, port } => self
                     .open_native_plugin_telnet_terminal(
@@ -264,7 +272,54 @@ impl WorkspaceApp {
                 ),
             };
             let _ = request.response_tx.send(response);
+            processed += 1;
         }
+        !self.native_plugin_runtime.terminal_ui_requests.is_empty()
+    }
+
+    pub(super) fn schedule_native_plugin_ui_delivery(
+        &self,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        let ui_wake = self.native_plugin_runtime.ui_wake.clone();
+        let release_wake = ui_wake.clone();
+        cx.on_release(move |_, _| {
+            // Plugin runtime may continue shutting down, but its window waiter ends here.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                ui_wake.wait().await;
+                let should_drain = ui_wake.take();
+                let stopped = ui_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(Ok(backlog_remaining)) = cx.update_window(window_handle, |_, window, cx| {
+                    weak.update(cx, |workspace, cx| {
+                        let terminal_backlog =
+                            workspace.poll_native_plugin_terminal_ui_requests(window, cx);
+                        let product_backlog =
+                            workspace.poll_native_plugin_product_ui_effects(window, cx);
+                        terminal_backlog || product_backlog
+                    })
+                }) else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Both reliable queues share one continuation permit and keep FIFO locally.
+                    ui_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn open_native_plugin_telnet_terminal(

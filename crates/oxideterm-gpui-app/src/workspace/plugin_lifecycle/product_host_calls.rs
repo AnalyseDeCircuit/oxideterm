@@ -3,13 +3,15 @@
 
 //! Workspace-owned side effects for stable product plugin APIs.
 
+use std::time::Instant;
+
 use gpui::{Context, Window};
 use oxideterm_quick_commands::QuickCommandDraft;
 use oxideterm_ssh::NodeId;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use super::{NativePluginProductUiEffect, WorkspaceApp};
+use super::{NativePluginProductUiEffect, WorkspaceApp, delivery};
 
 impl WorkspaceApp {
     pub(super) fn handle_native_plugin_product_host_call(
@@ -33,7 +35,7 @@ impl WorkspaceApp {
                         args,
                     },
                 );
-                cx.notify();
+                self.native_plugin_runtime.ui_wake.mark();
             }
             ("notifications", method) => {
                 self.apply_native_plugin_notification_effect(method, &args, cx)
@@ -55,8 +57,13 @@ impl WorkspaceApp {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        while let Some(effect) = self.native_plugin_runtime.product_ui_effects.pop_front() {
+    ) -> bool {
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while delivery::USER_ACTION_DELIVERY_BUDGET.allows_next(processed, started_at.elapsed()) {
+            let Some(effect) = self.native_plugin_runtime.product_ui_effects.pop_front() else {
+                break;
+            };
             match (effect.namespace.as_str(), effect.method.as_str()) {
                 ("connections", "connect") => {
                     if let Some(connection_id) = string_arg(&effect.args, "connectionId") {
@@ -93,7 +100,9 @@ impl WorkspaceApp {
                     "Unsupported queued product plugin effect".to_string(),
                 ),
             }
+            processed += 1;
         }
+        !self.native_plugin_runtime.product_ui_effects.is_empty()
     }
 
     fn apply_native_plugin_notification_effect(
