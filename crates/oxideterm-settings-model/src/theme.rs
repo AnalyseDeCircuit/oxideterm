@@ -688,7 +688,15 @@ fn slugify_import_theme_name(name: &str) -> String {
     }
 }
 
-fn theme_display_name(id: &str) -> String {
+pub fn theme_display_name(id: &str) -> String {
+    // Preserve product capitalization that title-casing an identifier cannot infer.
+    if let Some(display_name) = match id {
+        "github-dark" => Some("GitHub Dark"),
+        _ => None,
+    } {
+        return display_name.to_string();
+    }
+
     id.split(['-', '_'])
         .filter(|word| !word.is_empty())
         .map(|word| {
@@ -735,10 +743,12 @@ mod tests {
     }
 
     #[test]
-    fn builtin_material_theme_display_names_remain_stable() {
-        // Theme names encode product and material identity and must not drift
-        // when their internal palettes are recalibrated.
+    fn builtin_theme_display_names_remain_stable() {
+        // Theme names encode product, source, and material identity and must not
+        // drift when their internal palettes are recalibrated.
         for (id, display_name) in [
+            ("github-dark", "GitHub Dark"),
+            ("code-light", "Code Light"),
             ("oxide", "Oxide"),
             ("verdigris", "Verdigris"),
             ("silver-oxide", "Silver Oxide"),

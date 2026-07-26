@@ -2,19 +2,25 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-07-23T11:28:22.606302Z
+Generated: 2026-07-26T08:58:23.727433Z
+
+## Theme Acknowledgments
+
+Built-in color schemes are derived from:
+- Solarized (MIT) — Copyright (c) 2011 Ethan Schoonover
+- VS Code Light/Dark (MIT) — Copyright (c) 2015 Microsoft Corporation
 
 ## Summary
 
-- MIT: 1052
-- Apache-2.0: 843
+- MIT: 1057
+- Apache-2.0: 848
 - Apache-2.0 WITH LLVM-exception: 60
-- Zlib: 41
+- Zlib: 43
 - BSD-3-Clause: 21
 - MPL-2.0: 20
 - Unicode-3.0: 19
 - ISC: 12
-- BSD-2-Clause: 9
+- BSD-2-Clause: 11
 - Unlicense: 9
 - CC0-1.0: 5
 - BSL-1.0: 3
@@ -35,363 +41,363 @@ This section is a review prompt for binary distribution; it does not replace leg
 
 | Crate | Version | Licenses | Source |
 |---|---:|---|---|
-| r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | registry+https://github.com/rust-lang/crates.io-index |
-| r-efi | 6.0.0 | MIT, Apache-2.0, LGPL-2.1-or-later | registry+https://github.com/rust-lang/crates.io-index |
-| self_cell | 1.2.2 | Apache-2.0, GPL-2.0-only | registry+https://github.com/rust-lang/crates.io-index |
-| unescaper | 0.1.8 | GPL-3.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
+| r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | https://crates.io/crates/r-efi |
+| r-efi | 6.0.0 | MIT, Apache-2.0, LGPL-2.1-or-later | https://crates.io/crates/r-efi |
+| self_cell | 1.2.2 | Apache-2.0, GPL-2.0-only | https://crates.io/crates/self_cell |
+| unescaper | 0.1.8 | GPL-3.0, MIT | https://crates.io/crates/unescaper |
 
 ## Crates
 
 | Crate | Version | Licenses | Source |
 |---|---:|---|---|
-| ab_glyph | 0.2.32 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ab_glyph_rasterizer | 0.1.10 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit | 0.24.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit_atspi_common | 0.19.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit_consumer | 0.35.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit_consumer | 0.38.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit_macos | 0.26.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit_unix | 0.22.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| accesskit_windows | 0.32.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| addchain | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| addr2line | 0.25.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| adler2 | 2.0.1 | 0BSD, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aead | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aead | 0.6.0-rc.10 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aes | 0.8.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aes | 0.9.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aes-gcm | 0.11.0-rc.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| aes-kw | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| agent-client-protocol | 0.14.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| agent-client-protocol-derive | 0.14.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| agent-client-protocol-schema | 0.13.6 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ahash | 0.8.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aho-corasick | 1.1.4 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| alacritty_terminal | 0.26.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aligned | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aligned-vec | 0.6.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| allocator-api2 | 0.2.21 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| alsa | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| alsa-sys | 0.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ambient-authority | 0.0.2 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| android_system_properties | 0.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| anstream | 1.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| anstyle | 1.0.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| anstyle-parse | 1.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| anstyle-query | 1.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| anstyle-wincon | 3.0.11 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| anyhow | 1.0.103 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ar_archive_writer | 0.5.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| arbitrary | 1.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| arg_enum_proc_macro | 0.3.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| argon2 | 0.5.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| argon2 | 0.6.0-rc.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| arrayref | 0.3.9 | BSD-2-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| arrayvec | 0.7.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| as-raw-xcb-connection | 1.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| as-slice | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ash | 0.38.0+1.3.281 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ashpd | 0.13.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| asn1-rs | 0.7.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| asn1-rs-derive | 0.6.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| asn1-rs-impl | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async-broadcast | 0.7.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async-channel | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-compression | 0.4.42 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async-dnssd | 0.5.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-executor | 1.14.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-fs | 2.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-io | 2.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-lock | 3.4.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-net | 2.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-process | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-recursion | 1.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async-signal | 0.2.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-task | 4.7.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| async-trait | 0.1.89 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| async_zip | 0.0.18 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| atomic | 0.5.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| atomic-polyfill | 1.0.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| atomic-waker | 1.1.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| atomic_refcell | 0.1.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| atspi | 0.29.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| atspi-common | 0.13.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| atspi-proxies | 0.13.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| autocfg | 1.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| av-scenechange | 0.14.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| av1-grain | 0.2.5 | BSD-2-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| avif-serialize | 0.8.8 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| aws-lc-rs | 1.16.3 | ISC, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| aws-lc-sys | 0.40.0 | ISC, Apache-2.0, MIT, BSD-3-Clause, MIT-0 | registry+https://github.com/rust-lang/crates.io-index |
-| backtrace | 0.3.76 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| base16ct | 1.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| base64 | 0.22.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| base64ct | 1.8.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bcrypt-pbkdf | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bincode | 1.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bindgen | 0.71.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| bit-set | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bit-set | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bit-vec | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bit-vec | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bit_field | 0.10.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bitflags | 1.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bitflags | 2.11.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bitstream-io | 4.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bitvec | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| blake2 | 0.10.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| blake2 | 0.11.0-rc.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| block | 0.1.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| block-buffer | 0.10.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| block-buffer | 0.12.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| block-padding | 0.3.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| block-padding | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| block2 | 0.6.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| blocking | 1.6.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| blowfish | 0.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bstr | 1.12.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| built | 0.8.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bumpalo | 3.20.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| by_address | 1.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| bytemuck | 1.25.0 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bytemuck_derive | 1.10.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| byteorder | 1.5.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| byteorder-lite | 0.1.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| bytes | 1.11.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| calloop | 0.14.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| calloop-wayland-source | 0.4.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cap-fs-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cap-net-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cap-primitives | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cap-std | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cap-time-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cbc | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cbc | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cbindgen | 0.28.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cc | 1.2.61 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cesu8 | 1.1.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cexpr | 0.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cfg-expr | 0.20.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cfg-if | 1.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cfg_aliases | 0.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cgl | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| chacha20 | 0.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| chacha20 | 0.9.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| chacha20poly1305 | 0.10.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| chardetng | 0.1.17 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| chrono | 0.4.44 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cipher | 0.4.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cipher | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| clang-sys | 1.8.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| clap | 4.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| clap_builder | 4.6.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| clap_complete | 4.6.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| clap_derive | 4.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| clap_lex | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cmake | 0.1.58 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cmov | 0.5.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cobs | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cocoa | 0.26.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cocoa-foundation | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| codespan-reporting | 0.13.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| color_quant | 1.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| colorchoice | 1.0.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| combine | 4.6.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| command-fds | 0.3.3 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| compression-codecs | 0.4.38 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| compression-core | 0.4.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| concurrent-queue | 2.5.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| const-oid | 0.10.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| const-oid | 0.9.6 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| const-random | 0.1.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| const-random-macro | 0.1.16 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| convert_case | 0.10.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| convert_case | 0.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| core-foundation | 0.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-foundation | 0.9.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-foundation-sys | 0.8.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-graphics | 0.24.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-graphics-types | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-graphics2 | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-text | 21.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core-video | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| core_maths | 0.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| coreaudio-rs | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cosmic-text | 0.19.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cpal | 0.16.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cpubits | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cpufeatures | 0.2.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cpufeatures | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-assembler-x64 | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-assembler-x64-meta | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-bforest | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-bitset | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-codegen | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-codegen-meta | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-codegen-shared | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-control | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-entity | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-frontend | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-isle | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-native | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| cranelift-srcgen | 0.133.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| crc32fast | 1.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| critical-section | 1.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crossbeam-channel | 0.5.15 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crossbeam-deque | 0.8.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crossbeam-epoch | 0.9.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crossbeam-queue | 0.3.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crossbeam-utils | 0.8.21 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crunchy | 0.2.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| crypto-bigint | 0.7.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| crypto-common | 0.1.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crypto-common | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crypto-mac | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| crypto-primes | 0.7.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cryptoki | 0.12.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cryptoki-sys | 0.5.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cssparser | 0.37.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| cssparser-macros | 0.7.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ctor | 1.0.9 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ctr | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ctutils | 0.4.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| cursor-icon | 1.2.0 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| curve25519-dalek | 5.0.0-rc.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| curve25519-dalek-derive | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| darling | 0.23.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| darling_core | 0.23.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| darling_macro | 0.23.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| dashmap | 6.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| dasp_sample | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| data-encoding | 2.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| data-url | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dbus | 0.9.11 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| dbus-secret-service | 4.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| deflate64 | 0.1.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| delegate | 0.13.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| der | 0.7.10 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| der | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| der-parser | 10.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| der_derive | 0.7.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| deranged | 0.5.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| derive_arbitrary | 1.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| derive_more | 2.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| derive_more-impl | 2.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| des | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| digest | 0.10.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| digest | 0.11.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dirs | 5.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dirs | 6.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dirs-sys | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dirs-sys | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dispatch2 | 0.3.1 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| displaydoc | 0.2.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dlib | 0.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| document-features | 0.2.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| downcast-rs | 1.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dtoa | 1.0.11 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dtoa-short | 0.3.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dunce | 1.0.5 | CC0-1.0, MIT-0, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dwrote | 0.11.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| dyn-clone | 1.0.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ecdsa | 0.17.0-rc.22 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ed25519 | 3.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ed25519-dalek | 3.0.0-rc.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| ego-tree | 0.11.0 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| either | 1.15.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| elliptic-curve | 0.14.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| embed-resource | 3.0.9 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| encoding_rs | 0.8.35 | Apache-2.0, MIT, BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| endi | 1.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| enum_dispatch | 0.3.13 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| enumflags2 | 0.7.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| enumflags2_derive | 0.7.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| equator | 0.4.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| equator-macro | 0.4.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| equivalent | 1.0.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| erased-serde | 0.4.10 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| errno | 0.3.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| etagere | 0.2.15 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| euclid | 0.22.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| event-listener | 5.4.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| event-listener-strategy | 0.5.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| eventsource-stream | 0.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| exr | 1.74.0 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| extended | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fancy-regex | 0.14.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fast-srgb8 | 1.0.0 | MIT, Apache-2.0, CC0-1.0 | registry+https://github.com/rust-lang/crates.io-index |
-| fastrand | 1.9.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fastrand | 2.4.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fax | 0.2.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fdeflate | 0.3.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ff | 0.14.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| fiat-crypto | 0.3.0 | MIT, Apache-2.0, BSD-1-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| filedescriptor | 0.8.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| filetime | 0.2.27 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| find-msvc-tools | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| fixedbitset | 0.5.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| flagset | 0.4.7 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| flate2 | 1.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| float-cmp | 0.9.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| float-ord | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| float_next_after | 1.0.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| flume | 0.11.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fnv | 1.0.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| foldhash | 0.1.5 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| foldhash | 0.2.0 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| font-types | 0.11.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| fontconfig-parser | 0.5.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fontdb | 0.23.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| foreign-types | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| foreign-types | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| foreign-types-macros | 0.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| foreign-types-shared | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| foreign-types-shared | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| form_urlencoded | 1.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| freetype-sys | 0.20.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fs-set-times | 0.20.3 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| fs2 | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| fs_extra | 1.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| funty | 2.0.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| futf | 0.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-channel | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-concurrency | 7.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-core | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-executor | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-io | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-lite | 1.13.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| futures-lite | 2.6.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| futures-macro | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-sink | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-task | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| futures-util | 0.3.32 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| generic-array | 0.14.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| generic-array | 1.4.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gethostname | 1.1.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| getopts | 0.2.24 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| getrandom | 0.2.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| getrandom | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| getrandom | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ghash | 0.6.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gif | 0.13.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gif | 0.14.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gimli | 0.32.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gimli | 0.33.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gio-sys | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gl_generator | 0.14.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| glib | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| glib-macros | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| glib-sys | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| glob | 0.3.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| globset | 0.4.18 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gloo-timers | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| glow | 0.17.0 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| glutin_wgl_sys | 0.6.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gobject-sys | 0.21.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gpu-allocator | 0.28.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpu-descriptor | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gpu-descriptor-types | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| ab_glyph | 0.2.32 | Apache-2.0 | https://crates.io/crates/ab_glyph |
+| ab_glyph_rasterizer | 0.1.10 | Apache-2.0 | https://crates.io/crates/ab_glyph_rasterizer |
+| accesskit | 0.24.1 | MIT, Apache-2.0 | https://crates.io/crates/accesskit |
+| accesskit_atspi_common | 0.19.1 | MIT, Apache-2.0 | https://crates.io/crates/accesskit_atspi_common |
+| accesskit_consumer | 0.35.0 | MIT, Apache-2.0 | https://crates.io/crates/accesskit_consumer |
+| accesskit_consumer | 0.38.0 | MIT, Apache-2.0 | https://crates.io/crates/accesskit_consumer |
+| accesskit_macos | 0.26.3 | MIT, Apache-2.0 | https://crates.io/crates/accesskit_macos |
+| accesskit_unix | 0.22.1 | MIT, Apache-2.0 | https://crates.io/crates/accesskit_unix |
+| accesskit_windows | 0.32.1 | MIT, Apache-2.0 | https://crates.io/crates/accesskit_windows |
+| addchain | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/addchain |
+| addr2line | 0.25.1 | Apache-2.0, MIT | https://crates.io/crates/addr2line |
+| adler2 | 2.0.1 | 0BSD, MIT, Apache-2.0 | https://crates.io/crates/adler2 |
+| aead | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/aead |
+| aead | 0.6.0-rc.10 | MIT, Apache-2.0 | https://crates.io/crates/aead |
+| aes | 0.8.4 | MIT, Apache-2.0 | https://crates.io/crates/aes |
+| aes | 0.9.1 | MIT, Apache-2.0 | https://crates.io/crates/aes |
+| aes-gcm | 0.11.0-rc.4 | Apache-2.0, MIT | https://crates.io/crates/aes-gcm |
+| aes-kw | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/aes-kw |
+| agent-client-protocol | 0.14.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol |
+| agent-client-protocol-derive | 0.14.0 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-derive |
+| agent-client-protocol-schema | 0.13.6 | Apache-2.0 | https://crates.io/crates/agent-client-protocol-schema |
+| ahash | 0.8.12 | MIT, Apache-2.0 | https://crates.io/crates/ahash |
+| aho-corasick | 1.1.4 | Unlicense, MIT | https://crates.io/crates/aho-corasick |
+| alacritty_terminal | 0.26.0 | Apache-2.0 | https://crates.io/crates/alacritty_terminal |
+| aligned | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/aligned |
+| aligned-vec | 0.6.4 | MIT | https://crates.io/crates/aligned-vec |
+| allocator-api2 | 0.2.21 | MIT, Apache-2.0 | https://crates.io/crates/allocator-api2 |
+| alsa | 0.9.1 | Apache-2.0, MIT | https://crates.io/crates/alsa |
+| alsa-sys | 0.3.1 | MIT | https://crates.io/crates/alsa-sys |
+| ambient-authority | 0.0.2 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/ambient-authority |
+| android_system_properties | 0.1.5 | MIT, Apache-2.0 | https://crates.io/crates/android_system_properties |
+| anstream | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/anstream |
+| anstyle | 1.0.14 | MIT, Apache-2.0 | https://crates.io/crates/anstyle |
+| anstyle-parse | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-parse |
+| anstyle-query | 1.1.5 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-query |
+| anstyle-wincon | 3.0.11 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-wincon |
+| anyhow | 1.0.103 | MIT, Apache-2.0 | https://crates.io/crates/anyhow |
+| ar_archive_writer | 0.5.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/ar_archive_writer |
+| arbitrary | 1.4.2 | MIT, Apache-2.0 | https://crates.io/crates/arbitrary |
+| arg_enum_proc_macro | 0.3.4 | MIT | https://crates.io/crates/arg_enum_proc_macro |
+| argon2 | 0.5.3 | MIT, Apache-2.0 | https://crates.io/crates/argon2 |
+| argon2 | 0.6.0-rc.8 | MIT, Apache-2.0 | https://crates.io/crates/argon2 |
+| arrayref | 0.3.9 | BSD-2-Clause | https://crates.io/crates/arrayref |
+| arrayvec | 0.7.6 | MIT, Apache-2.0 | https://crates.io/crates/arrayvec |
+| as-raw-xcb-connection | 1.0.1 | MIT, Apache-2.0 | https://crates.io/crates/as-raw-xcb-connection |
+| as-slice | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/as-slice |
+| ash | 0.38.0+1.3.281 | MIT, Apache-2.0 | https://crates.io/crates/ash |
+| ashpd | 0.13.12 | MIT | https://crates.io/crates/ashpd |
+| asn1-rs | 0.7.2 | MIT, Apache-2.0 | https://crates.io/crates/asn1-rs |
+| asn1-rs-derive | 0.6.0 | MIT, Apache-2.0 | https://crates.io/crates/asn1-rs-derive |
+| asn1-rs-impl | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/asn1-rs-impl |
+| async-broadcast | 0.7.2 | MIT, Apache-2.0 | https://crates.io/crates/async-broadcast |
+| async-channel | 2.5.0 | Apache-2.0, MIT | https://crates.io/crates/async-channel |
+| async-compression | 0.4.42 | MIT, Apache-2.0 | https://crates.io/crates/async-compression |
+| async-dnssd | 0.5.1 | MIT | https://crates.io/crates/async-dnssd |
+| async-executor | 1.14.0 | Apache-2.0, MIT | https://crates.io/crates/async-executor |
+| async-fs | 2.2.0 | Apache-2.0, MIT | https://crates.io/crates/async-fs |
+| async-io | 2.6.0 | Apache-2.0, MIT | https://crates.io/crates/async-io |
+| async-lock | 3.4.2 | Apache-2.0, MIT | https://crates.io/crates/async-lock |
+| async-net | 2.0.0 | Apache-2.0, MIT | https://crates.io/crates/async-net |
+| async-process | 2.5.0 | Apache-2.0, MIT | https://crates.io/crates/async-process |
+| async-recursion | 1.1.1 | MIT, Apache-2.0 | https://crates.io/crates/async-recursion |
+| async-signal | 0.2.14 | Apache-2.0, MIT | https://crates.io/crates/async-signal |
+| async-task | 4.7.1 | Apache-2.0, MIT | https://crates.io/crates/async-task |
+| async-trait | 0.1.89 | MIT, Apache-2.0 | https://crates.io/crates/async-trait |
+| async_zip | 0.0.18 | MIT | https://crates.io/crates/async_zip |
+| atomic | 0.5.3 | Apache-2.0, MIT | https://crates.io/crates/atomic |
+| atomic-polyfill | 1.0.3 | MIT, Apache-2.0 | https://crates.io/crates/atomic-polyfill |
+| atomic-waker | 1.1.2 | Apache-2.0, MIT | https://crates.io/crates/atomic-waker |
+| atomic_refcell | 0.1.14 | Apache-2.0, MIT | https://crates.io/crates/atomic_refcell |
+| atspi | 0.29.0 | Apache-2.0, MIT | https://crates.io/crates/atspi |
+| atspi-common | 0.13.0 | Apache-2.0, MIT | https://crates.io/crates/atspi-common |
+| atspi-proxies | 0.13.0 | Apache-2.0, MIT | https://crates.io/crates/atspi-proxies |
+| autocfg | 1.5.0 | Apache-2.0, MIT | https://crates.io/crates/autocfg |
+| av-scenechange | 0.14.1 | MIT | https://crates.io/crates/av-scenechange |
+| av1-grain | 0.2.5 | BSD-2-Clause | https://crates.io/crates/av1-grain |
+| avif-serialize | 0.8.8 | BSD-3-Clause | https://crates.io/crates/avif-serialize |
+| aws-lc-rs | 1.16.3 | ISC, Apache-2.0 | https://crates.io/crates/aws-lc-rs |
+| aws-lc-sys | 0.40.0 | ISC, Apache-2.0, MIT, BSD-3-Clause, MIT-0 | https://crates.io/crates/aws-lc-sys |
+| backtrace | 0.3.76 | MIT, Apache-2.0 | https://crates.io/crates/backtrace |
+| base16ct | 1.0.0 | Apache-2.0, MIT | https://crates.io/crates/base16ct |
+| base64 | 0.22.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
+| base64ct | 1.8.3 | Apache-2.0, MIT | https://crates.io/crates/base64ct |
+| bcrypt-pbkdf | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/bcrypt-pbkdf |
+| bincode | 1.3.3 | MIT | https://crates.io/crates/bincode |
+| bindgen | 0.71.1 | BSD-3-Clause | https://crates.io/crates/bindgen |
+| bit-set | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/bit-set |
+| bit-set | 0.9.1 | Apache-2.0, MIT | https://crates.io/crates/bit-set |
+| bit-vec | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/bit-vec |
+| bit-vec | 0.9.1 | Apache-2.0, MIT | https://crates.io/crates/bit-vec |
+| bit_field | 0.10.3 | Apache-2.0, MIT | https://crates.io/crates/bit_field |
+| bitflags | 1.3.2 | MIT, Apache-2.0 | https://crates.io/crates/bitflags |
+| bitflags | 2.11.1 | MIT, Apache-2.0 | https://crates.io/crates/bitflags |
+| bitstream-io | 4.10.0 | MIT, Apache-2.0 | https://crates.io/crates/bitstream-io |
+| bitvec | 1.0.1 | MIT | https://crates.io/crates/bitvec |
+| blake2 | 0.10.6 | MIT, Apache-2.0 | https://crates.io/crates/blake2 |
+| blake2 | 0.11.0-rc.6 | MIT, Apache-2.0 | https://crates.io/crates/blake2 |
+| block | 0.1.6 | MIT | https://crates.io/crates/block |
+| block-buffer | 0.10.4 | MIT, Apache-2.0 | https://crates.io/crates/block-buffer |
+| block-buffer | 0.12.0 | MIT, Apache-2.0 | https://crates.io/crates/block-buffer |
+| block-padding | 0.3.3 | MIT, Apache-2.0 | https://crates.io/crates/block-padding |
+| block-padding | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/block-padding |
+| block2 | 0.6.2 | MIT | https://crates.io/crates/block2 |
+| blocking | 1.6.2 | Apache-2.0, MIT | https://crates.io/crates/blocking |
+| blowfish | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/blowfish |
+| bstr | 1.12.1 | MIT, Apache-2.0 | https://crates.io/crates/bstr |
+| built | 0.8.0 | MIT | https://crates.io/crates/built |
+| bumpalo | 3.20.2 | MIT, Apache-2.0 | https://crates.io/crates/bumpalo |
+| by_address | 1.2.1 | MIT, Apache-2.0 | https://crates.io/crates/by_address |
+| bytemuck | 1.25.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/bytemuck |
+| bytemuck_derive | 1.10.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/bytemuck_derive |
+| byteorder | 1.5.0 | Unlicense, MIT | https://crates.io/crates/byteorder |
+| byteorder-lite | 0.1.0 | Unlicense, MIT | https://crates.io/crates/byteorder-lite |
+| bytes | 1.11.1 | MIT | https://crates.io/crates/bytes |
+| calloop | 0.14.4 | MIT | https://crates.io/crates/calloop |
+| calloop-wayland-source | 0.4.1 | MIT | https://crates.io/crates/calloop-wayland-source |
+| cap-fs-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-fs-ext |
+| cap-net-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-net-ext |
+| cap-primitives | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-primitives |
+| cap-std | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-std |
+| cap-time-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-time-ext |
+| cbc | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/cbc |
+| cbc | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/cbc |
+| cbindgen | 0.28.0 | MPL-2.0 | https://crates.io/crates/cbindgen |
+| cc | 1.2.61 | MIT, Apache-2.0 | https://crates.io/crates/cc |
+| cesu8 | 1.1.0 | Apache-2.0, MIT | https://crates.io/crates/cesu8 |
+| cexpr | 0.6.0 | Apache-2.0, MIT | https://crates.io/crates/cexpr |
+| cfg-expr | 0.20.7 | MIT, Apache-2.0 | https://crates.io/crates/cfg-expr |
+| cfg-if | 1.0.4 | MIT, Apache-2.0 | https://crates.io/crates/cfg-if |
+| cfg_aliases | 0.2.1 | MIT | https://crates.io/crates/cfg_aliases |
+| cgl | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/cgl |
+| chacha20 | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/chacha20 |
+| chacha20 | 0.9.1 | Apache-2.0, MIT | https://crates.io/crates/chacha20 |
+| chacha20poly1305 | 0.10.1 | Apache-2.0, MIT | https://crates.io/crates/chacha20poly1305 |
+| chardetng | 0.1.17 | Apache-2.0, MIT | https://crates.io/crates/chardetng |
+| chrono | 0.4.44 | MIT, Apache-2.0 | https://crates.io/crates/chrono |
+| cipher | 0.4.4 | MIT, Apache-2.0 | https://crates.io/crates/cipher |
+| cipher | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/cipher |
+| clang-sys | 1.8.1 | Apache-2.0 | https://crates.io/crates/clang-sys |
+| clap | 4.6.1 | MIT, Apache-2.0 | https://crates.io/crates/clap |
+| clap_builder | 4.6.0 | MIT, Apache-2.0 | https://crates.io/crates/clap_builder |
+| clap_complete | 4.6.5 | MIT, Apache-2.0 | https://crates.io/crates/clap_complete |
+| clap_derive | 4.6.1 | MIT, Apache-2.0 | https://crates.io/crates/clap_derive |
+| clap_lex | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/clap_lex |
+| cmake | 0.1.58 | MIT, Apache-2.0 | https://crates.io/crates/cmake |
+| cmov | 0.5.4 | Apache-2.0, MIT | https://crates.io/crates/cmov |
+| cobs | 0.3.0 | MIT, Apache-2.0 | https://crates.io/crates/cobs |
+| cocoa | 0.26.0 | MIT, Apache-2.0 | https://crates.io/crates/cocoa |
+| cocoa-foundation | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/cocoa-foundation |
+| codespan-reporting | 0.13.1 | Apache-2.0 | https://crates.io/crates/codespan-reporting |
+| color_quant | 1.1.0 | MIT | https://crates.io/crates/color_quant |
+| colorchoice | 1.0.5 | MIT, Apache-2.0 | https://crates.io/crates/colorchoice |
+| combine | 4.6.7 | MIT | https://crates.io/crates/combine |
+| command-fds | 0.3.3 | Apache-2.0 | https://crates.io/crates/command-fds |
+| compression-codecs | 0.4.38 | MIT, Apache-2.0 | https://crates.io/crates/compression-codecs |
+| compression-core | 0.4.32 | MIT, Apache-2.0 | https://crates.io/crates/compression-core |
+| concurrent-queue | 2.5.0 | Apache-2.0, MIT | https://crates.io/crates/concurrent-queue |
+| const-oid | 0.10.2 | Apache-2.0, MIT | https://crates.io/crates/const-oid |
+| const-oid | 0.9.6 | Apache-2.0, MIT | https://crates.io/crates/const-oid |
+| const-random | 0.1.18 | MIT, Apache-2.0 | https://crates.io/crates/const-random |
+| const-random-macro | 0.1.16 | MIT, Apache-2.0 | https://crates.io/crates/const-random-macro |
+| convert_case | 0.10.0 | MIT | https://crates.io/crates/convert_case |
+| convert_case | 0.11.0 | MIT | https://crates.io/crates/convert_case |
+| core-foundation | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/core-foundation |
+| core-foundation | 0.9.4 | MIT, Apache-2.0 | https://crates.io/crates/core-foundation |
+| core-foundation-sys | 0.8.7 | MIT, Apache-2.0 | https://crates.io/crates/core-foundation-sys |
+| core-graphics | 0.24.0 | MIT, Apache-2.0 | https://crates.io/crates/core-graphics |
+| core-graphics-types | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/core-graphics-types |
+| core-graphics2 | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/core-graphics2 |
+| core-text | 21.0.0 | MIT, Apache-2.0 | https://crates.io/crates/core-text |
+| core-video | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/core-video |
+| core_maths | 0.1.1 | MIT | https://crates.io/crates/core_maths |
+| coreaudio-rs | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/coreaudio-rs |
+| cosmic-text | 0.19.0 | MIT, Apache-2.0 | https://crates.io/crates/cosmic-text |
+| cpal | 0.16.0 | Apache-2.0 | https://crates.io/crates/cpal |
+| cpubits | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/cpubits |
+| cpufeatures | 0.2.17 | MIT, Apache-2.0 | https://crates.io/crates/cpufeatures |
+| cpufeatures | 0.3.0 | MIT, Apache-2.0 | https://crates.io/crates/cpufeatures |
+| cranelift-assembler-x64 | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-assembler-x64 |
+| cranelift-assembler-x64-meta | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-assembler-x64-meta |
+| cranelift-bforest | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-bforest |
+| cranelift-bitset | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-bitset |
+| cranelift-codegen | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-codegen |
+| cranelift-codegen-meta | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-codegen-meta |
+| cranelift-codegen-shared | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-codegen-shared |
+| cranelift-control | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-control |
+| cranelift-entity | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-entity |
+| cranelift-frontend | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-frontend |
+| cranelift-isle | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-isle |
+| cranelift-native | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-native |
+| cranelift-srcgen | 0.133.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/cranelift-srcgen |
+| crc32fast | 1.5.0 | MIT, Apache-2.0 | https://crates.io/crates/crc32fast |
+| critical-section | 1.2.0 | MIT, Apache-2.0 | https://crates.io/crates/critical-section |
+| crossbeam-channel | 0.5.15 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-channel |
+| crossbeam-deque | 0.8.6 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-deque |
+| crossbeam-epoch | 0.9.20 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-epoch |
+| crossbeam-queue | 0.3.12 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-queue |
+| crossbeam-utils | 0.8.21 | MIT, Apache-2.0 | https://crates.io/crates/crossbeam-utils |
+| crunchy | 0.2.4 | MIT | https://crates.io/crates/crunchy |
+| crypto-bigint | 0.7.5 | Apache-2.0, MIT | https://crates.io/crates/crypto-bigint |
+| crypto-common | 0.1.7 | MIT, Apache-2.0 | https://crates.io/crates/crypto-common |
+| crypto-common | 0.2.2 | MIT, Apache-2.0 | https://crates.io/crates/crypto-common |
+| crypto-mac | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/crypto-mac |
+| crypto-primes | 0.7.0 | Apache-2.0, MIT | https://crates.io/crates/crypto-primes |
+| cryptoki | 0.12.0 | Apache-2.0 | https://crates.io/crates/cryptoki |
+| cryptoki-sys | 0.5.0 | Apache-2.0 | https://crates.io/crates/cryptoki-sys |
+| cssparser | 0.37.0 | MPL-2.0 | https://crates.io/crates/cssparser |
+| cssparser-macros | 0.7.0 | MPL-2.0 | https://crates.io/crates/cssparser-macros |
+| ctor | 1.0.9 | Apache-2.0, MIT | https://crates.io/crates/ctor |
+| ctr | 0.10.1 | MIT, Apache-2.0 | https://crates.io/crates/ctr |
+| ctutils | 0.4.2 | Apache-2.0, MIT | https://crates.io/crates/ctutils |
+| cursor-icon | 1.2.0 | MIT, Apache-2.0, Zlib | https://crates.io/crates/cursor-icon |
+| curve25519-dalek | 5.0.0-rc.1 | BSD-3-Clause | https://crates.io/crates/curve25519-dalek |
+| curve25519-dalek-derive | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/curve25519-dalek-derive |
+| darling | 0.23.0 | MIT | https://crates.io/crates/darling |
+| darling_core | 0.23.0 | MIT | https://crates.io/crates/darling_core |
+| darling_macro | 0.23.0 | MIT | https://crates.io/crates/darling_macro |
+| dashmap | 6.1.0 | MIT | https://crates.io/crates/dashmap |
+| dasp_sample | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/dasp_sample |
+| data-encoding | 2.11.0 | MIT | https://crates.io/crates/data-encoding |
+| data-url | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/data-url |
+| dbus | 0.9.11 | Apache-2.0, MIT | https://crates.io/crates/dbus |
+| dbus-secret-service | 4.1.0 | MIT, Apache-2.0 | https://crates.io/crates/dbus-secret-service |
+| deflate64 | 0.1.12 | MIT | https://crates.io/crates/deflate64 |
+| delegate | 0.13.5 | MIT, Apache-2.0 | https://crates.io/crates/delegate |
+| der | 0.7.10 | Apache-2.0, MIT | https://crates.io/crates/der |
+| der | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/der |
+| der-parser | 10.0.0 | MIT, Apache-2.0 | https://crates.io/crates/der-parser |
+| der_derive | 0.7.3 | Apache-2.0, MIT | https://crates.io/crates/der_derive |
+| deranged | 0.5.8 | MIT, Apache-2.0 | https://crates.io/crates/deranged |
+| derive_arbitrary | 1.4.2 | MIT, Apache-2.0 | https://crates.io/crates/derive_arbitrary |
+| derive_more | 2.1.1 | MIT | https://crates.io/crates/derive_more |
+| derive_more-impl | 2.1.1 | MIT | https://crates.io/crates/derive_more-impl |
+| des | 0.9.0 | MIT, Apache-2.0 | https://crates.io/crates/des |
+| digest | 0.10.7 | MIT, Apache-2.0 | https://crates.io/crates/digest |
+| digest | 0.11.3 | MIT, Apache-2.0 | https://crates.io/crates/digest |
+| dirs | 5.0.1 | MIT, Apache-2.0 | https://crates.io/crates/dirs |
+| dirs | 6.0.0 | MIT, Apache-2.0 | https://crates.io/crates/dirs |
+| dirs-sys | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/dirs-sys |
+| dirs-sys | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/dirs-sys |
+| dispatch2 | 0.3.1 | Zlib, Apache-2.0, MIT | https://crates.io/crates/dispatch2 |
+| displaydoc | 0.2.5 | MIT, Apache-2.0 | https://crates.io/crates/displaydoc |
+| dlib | 0.5.3 | MIT | https://crates.io/crates/dlib |
+| document-features | 0.2.12 | MIT, Apache-2.0 | https://crates.io/crates/document-features |
+| downcast-rs | 1.2.1 | MIT, Apache-2.0 | https://crates.io/crates/downcast-rs |
+| dtoa | 1.0.11 | MIT, Apache-2.0 | https://crates.io/crates/dtoa |
+| dtoa-short | 0.3.5 | MPL-2.0 | https://crates.io/crates/dtoa-short |
+| dunce | 1.0.5 | CC0-1.0, MIT-0, Apache-2.0 | https://crates.io/crates/dunce |
+| dwrote | 0.11.5 | MPL-2.0 | https://crates.io/crates/dwrote |
+| dyn-clone | 1.0.20 | MIT, Apache-2.0 | https://crates.io/crates/dyn-clone |
+| ecdsa | 0.17.0-rc.22 | Apache-2.0, MIT | https://crates.io/crates/ecdsa |
+| ed25519 | 3.0.0 | Apache-2.0, MIT | https://crates.io/crates/ed25519 |
+| ed25519-dalek | 3.0.0-rc.1 | BSD-3-Clause | https://crates.io/crates/ed25519-dalek |
+| ego-tree | 0.11.0 | ISC | https://crates.io/crates/ego-tree |
+| either | 1.15.0 | MIT, Apache-2.0 | https://crates.io/crates/either |
+| elliptic-curve | 0.14.0 | Apache-2.0, MIT | https://crates.io/crates/elliptic-curve |
+| embed-resource | 3.0.9 | MIT | https://crates.io/crates/embed-resource |
+| encoding_rs | 0.8.35 | Apache-2.0, MIT, BSD-3-Clause | https://crates.io/crates/encoding_rs |
+| endi | 1.1.1 | MIT | https://crates.io/crates/endi |
+| enum_dispatch | 0.3.13 | MIT, Apache-2.0 | https://crates.io/crates/enum_dispatch |
+| enumflags2 | 0.7.12 | MIT, Apache-2.0 | https://crates.io/crates/enumflags2 |
+| enumflags2_derive | 0.7.12 | MIT, Apache-2.0 | https://crates.io/crates/enumflags2_derive |
+| equator | 0.4.2 | MIT | https://crates.io/crates/equator |
+| equator-macro | 0.4.2 | MIT | https://crates.io/crates/equator-macro |
+| equivalent | 1.0.2 | Apache-2.0, MIT | https://crates.io/crates/equivalent |
+| erased-serde | 0.4.10 | MIT, Apache-2.0 | https://crates.io/crates/erased-serde |
+| errno | 0.3.14 | MIT, Apache-2.0 | https://crates.io/crates/errno |
+| etagere | 0.2.15 | MIT, Apache-2.0 | https://crates.io/crates/etagere |
+| euclid | 0.22.14 | MIT, Apache-2.0 | https://crates.io/crates/euclid |
+| event-listener | 5.4.1 | Apache-2.0, MIT | https://crates.io/crates/event-listener |
+| event-listener-strategy | 0.5.4 | Apache-2.0, MIT | https://crates.io/crates/event-listener-strategy |
+| eventsource-stream | 0.2.3 | MIT, Apache-2.0 | https://crates.io/crates/eventsource-stream |
+| exr | 1.74.0 | BSD-3-Clause | https://crates.io/crates/exr |
+| extended | 0.1.0 | MIT | https://crates.io/crates/extended |
+| fancy-regex | 0.14.0 | MIT | https://crates.io/crates/fancy-regex |
+| fast-srgb8 | 1.0.0 | MIT, Apache-2.0, CC0-1.0 | https://crates.io/crates/fast-srgb8 |
+| fastrand | 1.9.0 | Apache-2.0, MIT | https://crates.io/crates/fastrand |
+| fastrand | 2.4.1 | Apache-2.0, MIT | https://crates.io/crates/fastrand |
+| fax | 0.2.7 | MIT | https://crates.io/crates/fax |
+| fdeflate | 0.3.7 | MIT, Apache-2.0 | https://crates.io/crates/fdeflate |
+| ff | 0.14.0 | MIT, Apache-2.0 | https://crates.io/crates/ff |
+| fiat-crypto | 0.3.0 | MIT, Apache-2.0, BSD-1-Clause | https://crates.io/crates/fiat-crypto |
+| filedescriptor | 0.8.3 | MIT | https://crates.io/crates/filedescriptor |
+| filetime | 0.2.27 | MIT, Apache-2.0 | https://crates.io/crates/filetime |
+| find-msvc-tools | 0.1.9 | MIT, Apache-2.0 | https://crates.io/crates/find-msvc-tools |
+| fixedbitset | 0.5.7 | MIT, Apache-2.0 | https://crates.io/crates/fixedbitset |
+| flagset | 0.4.7 | Apache-2.0 | https://crates.io/crates/flagset |
+| flate2 | 1.1.9 | MIT, Apache-2.0 | https://crates.io/crates/flate2 |
+| float-cmp | 0.9.0 | MIT | https://crates.io/crates/float-cmp |
+| float-ord | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/float-ord |
+| float_next_after | 1.0.0 | MIT | https://crates.io/crates/float_next_after |
+| flume | 0.11.1 | Apache-2.0, MIT | https://crates.io/crates/flume |
+| fnv | 1.0.7 | Apache-2.0, MIT | https://crates.io/crates/fnv |
+| foldhash | 0.1.5 | Zlib | https://crates.io/crates/foldhash |
+| foldhash | 0.2.0 | Zlib | https://crates.io/crates/foldhash |
+| font-types | 0.11.3 | MIT, Apache-2.0 | https://crates.io/crates/font-types |
+| fontconfig-parser | 0.5.8 | MIT | https://crates.io/crates/fontconfig-parser |
+| fontdb | 0.23.0 | MIT | https://crates.io/crates/fontdb |
+| foreign-types | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/foreign-types |
+| foreign-types | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/foreign-types |
+| foreign-types-macros | 0.2.3 | MIT, Apache-2.0 | https://crates.io/crates/foreign-types-macros |
+| foreign-types-shared | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/foreign-types-shared |
+| foreign-types-shared | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/foreign-types-shared |
+| form_urlencoded | 1.2.2 | MIT, Apache-2.0 | https://crates.io/crates/form_urlencoded |
+| freetype-sys | 0.20.1 | MIT | https://crates.io/crates/freetype-sys |
+| fs-set-times | 0.20.3 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/fs-set-times |
+| fs2 | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/fs2 |
+| fs_extra | 1.3.0 | MIT | https://crates.io/crates/fs_extra |
+| funty | 2.0.0 | MIT | https://crates.io/crates/funty |
+| futf | 0.1.5 | MIT, Apache-2.0 | https://crates.io/crates/futf |
+| futures | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures |
+| futures-channel | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-channel |
+| futures-concurrency | 7.7.1 | MIT, Apache-2.0 | https://crates.io/crates/futures-concurrency |
+| futures-core | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-core |
+| futures-executor | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-executor |
+| futures-io | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-io |
+| futures-lite | 1.13.0 | Apache-2.0, MIT | https://crates.io/crates/futures-lite |
+| futures-lite | 2.6.1 | Apache-2.0, MIT | https://crates.io/crates/futures-lite |
+| futures-macro | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-macro |
+| futures-sink | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-sink |
+| futures-task | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-task |
+| futures-util | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-util |
+| generic-array | 0.14.7 | MIT | https://crates.io/crates/generic-array |
+| generic-array | 1.4.1 | MIT | https://crates.io/crates/generic-array |
+| gethostname | 1.1.0 | Apache-2.0 | https://crates.io/crates/gethostname |
+| getopts | 0.2.24 | MIT, Apache-2.0 | https://crates.io/crates/getopts |
+| getrandom | 0.2.17 | MIT, Apache-2.0 | https://crates.io/crates/getrandom |
+| getrandom | 0.3.4 | MIT, Apache-2.0 | https://crates.io/crates/getrandom |
+| getrandom | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/getrandom |
+| ghash | 0.6.0 | Apache-2.0, MIT | https://crates.io/crates/ghash |
+| gif | 0.13.3 | MIT, Apache-2.0 | https://crates.io/crates/gif |
+| gif | 0.14.2 | MIT, Apache-2.0 | https://crates.io/crates/gif |
+| gimli | 0.32.3 | MIT, Apache-2.0 | https://crates.io/crates/gimli |
+| gimli | 0.33.0 | MIT, Apache-2.0 | https://crates.io/crates/gimli |
+| gio-sys | 0.21.5 | MIT | https://crates.io/crates/gio-sys |
+| gl_generator | 0.14.0 | Apache-2.0 | https://crates.io/crates/gl_generator |
+| glib | 0.21.5 | MIT | https://crates.io/crates/glib |
+| glib-macros | 0.21.5 | MIT | https://crates.io/crates/glib-macros |
+| glib-sys | 0.21.5 | MIT | https://crates.io/crates/glib-sys |
+| glob | 0.3.3 | MIT, Apache-2.0 | https://crates.io/crates/glob |
+| globset | 0.4.18 | Unlicense, MIT | https://crates.io/crates/globset |
+| gloo-timers | 0.4.0 | MIT, Apache-2.0 | https://crates.io/crates/gloo-timers |
+| glow | 0.17.0 | MIT, Apache-2.0, Zlib | https://crates.io/crates/glow |
+| glutin_wgl_sys | 0.6.1 | Apache-2.0 | https://crates.io/crates/glutin_wgl_sys |
+| gobject-sys | 0.21.5 | MIT | https://crates.io/crates/gobject-sys |
+| gpu-allocator | 0.28.0 | MIT, Apache-2.0 | https://crates.io/crates/gpu-allocator |
+| gpu-descriptor | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/gpu-descriptor |
+| gpu-descriptor-types | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/gpu-descriptor-types |
 | gpui | 0.2.2 | Apache-2.0 | vendored in repository |
 | gpui_ce_util | 0.2.2 | Apache-2.0 | vendored in repository |
 | gpui_collections | 0.2.2 | Apache-2.0 | vendored in repository |
@@ -408,855 +414,862 @@ This section is a review prompt for binary distribution; it does not replace leg
 | gpui_wgpu | 0.1.0 | Apache-2.0 | vendored in repository |
 | gpui_windows | 0.1.0 | Apache-2.0 | vendored in repository |
 | gpui_zed_util | 0.2.2 | Apache-2.0 | vendored in repository |
-| grid | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| group | 0.14.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gstreamer | 0.24.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gstreamer-base | 0.24.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gstreamer-base-sys | 0.24.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gstreamer-sys | 0.24.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| gstreamer-video | 0.24.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| gstreamer-video-sys | 0.24.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| h2 | 0.4.13 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| half | 2.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| harfrust | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| hash32 | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hash32 | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hashbrown | 0.14.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hashbrown | 0.15.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hashbrown | 0.16.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hashbrown | 0.17.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| heapless | 0.7.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| heapless | 0.9.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| heck | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| heck | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hermit-abi | 0.5.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hex | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hex-literal | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hexf-parse | 0.2.1 | CC0-1.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hkdf | 0.12.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hkdf | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hmac | 0.12.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hmac | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| home | 0.5.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| html5ever | 0.39.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| http | 1.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| http-body | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| http-body-util | 0.1.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| httparse | 1.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| httpdate | 1.0.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hybrid-array | 0.4.13 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| hyper | 1.9.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| hyper-rustls | 0.27.9 | Apache-2.0, ISC, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| hyper-util | 0.1.20 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| iana-time-zone | 0.1.65 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| iana-time-zone-haiku | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_collections | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_locale_core | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_normalizer | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_normalizer_data | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_properties | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_properties_data | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icu_provider | 2.2.0 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| icy_sixel | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| id-arena | 2.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ident_case | 1.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| idna | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| idna_adapter | 1.2.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| image | 0.25.10 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| image-webp | 0.2.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| imagesize | 0.13.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| imgref | 1.12.1 | CC0-1.0, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| indexmap | 2.14.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| inout | 0.1.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| inout | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| instant | 0.1.13 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| instant-distance | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| internal-russh-num-bigint | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| interpolate_name | 0.2.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| inventory | 0.3.24 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| io-extras | 0.18.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| io-kit-sys | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| io-lifetimes | 2.0.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| io-surface | 0.16.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ipnet | 2.12.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ironrdp | 0.16.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-async | 0.9.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-bulk | 0.1.1 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-cliprdr | 0.6.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-cliprdr-format | 0.2.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-connector | 0.9.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-core | 0.2.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-displaycontrol | 0.7.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-dvc | 0.7.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-error | 0.2.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-graphics | 0.8.1 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-input | 0.6.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-pdu | 0.8.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-session | 0.10.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-svc | 0.7.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-tls | 0.2.1 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| ironrdp-tokio | 0.9.0 | MIT, Apache-2.0 | git+https://github.com/Devolutions/IronRDP?rev=9d206a3da7756fdf8ed13087592eb2298d73e0cc |
-| is-docker | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| is-wsl | 0.4.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| is_terminal_polyfill | 1.70.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| iso7816 | 0.1.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| iso7816-tlv | 0.4.4 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| itertools | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| itertools | 0.14.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| itoa | 1.0.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| jni | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| jni-sys | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| jni-sys | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| jni-sys-macros | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| jobserver | 0.1.34 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| js-sys | 0.3.99 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| jsonrpcmsg | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| keccak | 0.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| kem | 0.3.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| keyring | 3.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| khronos-egl | 6.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| khronos_api | 3.1.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| kstring | 2.0.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| kurbo | 0.11.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| lazy_static | 1.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| leak | 0.1.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| leaky-cow | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| leb128 | 0.2.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| leb128fmt | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lebe | 0.5.3 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| libc | 0.2.186 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| libdbus-sys | 0.2.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| libfuzzer-sys | 0.4.12 | MIT, Apache-2.0, NCSA | registry+https://github.com/rust-lang/crates.io-index |
-| libloading | 0.8.9 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| libm | 0.2.16 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| libredox | 0.1.16 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| libudev | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| libudev-sys | 0.1.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| libz-sys | 1.1.28 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| linebender_resource_handle | 0.1.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| link-section | 0.19.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| linktime-proc-macro | 0.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| litemap | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| litrs | 1.0.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lock_api | 0.4.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| log | 0.4.29 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| loop9 | 0.1.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| lyon | 1.0.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lyon_algorithms | 1.0.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lyon_extra | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lyon_geom | 1.0.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lyon_path | 1.0.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| lyon_tessellation | 1.0.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mac | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mach2 | 0.4.3 | BSD-2-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mach2 | 0.5.0 | BSD-2-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mach2 | 0.6.0 | BSD-2-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| malloc_buf | 0.0.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| markup5ever | 0.39.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| matchers | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| maybe-owned | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| maybe-rayon | 0.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| md-5 | 0.10.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| md-5 | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| md4 | 0.10.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| md5 | 0.7.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| md5 | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| memchr | 2.8.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| memfd | 0.6.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| memmap2 | 0.9.11 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| memoffset | 0.9.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| metal | 0.33.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mime | 0.3.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mime_guess | 2.0.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| minimal-lexical | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| minisign-verify | 0.2.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| miniz_oxide | 0.8.9 | MIT, Zlib, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| mio | 1.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| miow | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ml-kem | 0.3.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| module-lattice | 0.2.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| moxcms | 0.8.1 | BSD-3-Clause, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| muldiv | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| naga | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| nanorand | 0.7.0 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| native-tls | 0.2.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ndk | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ndk-context | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ndk-sys | 0.6.0+11769913 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| new_debug_unreachable | 1.0.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| nix | 0.26.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| nix | 0.29.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| nix | 0.31.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| no_std_io2 | 0.9.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| nom | 7.1.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| nom | 8.0.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| noop_proc_macro | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ntapi | 0.4.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| nu-ansi-term | 0.50.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| num | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-bigint | 0.3.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-bigint | 0.4.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-bigint-dig | 0.9.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-complex | 0.4.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-conv | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-derive | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-integer | 0.1.46 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-iter | 0.1.45 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-rational | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num-traits | 0.2.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num_cpus | 1.17.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num_enum | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num_enum_derive | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| num_threads | 0.1.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| objc | 0.2.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc-sys | 0.3.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2 | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2 | 0.6.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-app-kit | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-app-kit | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-audio-toolbox | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-av-foundation | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-av-kit | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-avf-audio | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-cloud-kit | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-audio | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-audio-types | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-data | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-foundation | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-graphics | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-image | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-media | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-text | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-core-video | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-encode | 4.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-foundation | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-foundation | 0.3.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-image-io | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-media-toolbox | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-metal | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-quartz-core | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| objc2-service-management | 0.3.2 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| object | 0.37.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| object | 0.39.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| oid | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| once_cell | 1.21.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| once_cell_polyfill | 1.70.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| onig | 6.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| onig_sys | 69.9.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| oo7 | 0.6.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| opaque-debug | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| open | 5.3.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| openssl | 0.10.81 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| openssl-macros | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| openssl-probe | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| openssl-src | 300.6.1+3.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| openssl-sys | 0.9.117 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| option-ext | 0.2.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| option-operations | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ordered-float | 3.9.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ordered-float | 5.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ordered-stream | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| owned_ttf_parser | 0.25.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| p256 | 0.14.0-rc.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| p384 | 0.14.0-rc.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| p521 | 0.14.0-rc.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pageant | 0.2.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| palette | 0.7.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| palette_derive | 0.7.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| parking | 2.2.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| parking_lot | 0.12.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| parking_lot_core | 0.9.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| password-hash | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| paste | 1.0.15 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pastey | 0.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pastey | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pathdiff | 0.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pathfinder_geometry | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pathfinder_simd | 0.5.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pbkdf2 | 0.12.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pbkdf2 | 0.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pem-rfc7468 | 1.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| percent-encoding | 2.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| phf | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_codegen | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_generator | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_generator | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_macros | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_macros | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_shared | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| phf_shared | 0.13.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| picky | 7.0.0-rc.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| picky-asn1 | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| picky-asn1-der | 0.5.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| picky-asn1-x509 | 0.15.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| picky-krb | 0.12.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pico-args | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pin-project | 1.1.11 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pin-project-internal | 1.1.11 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pin-project-lite | 0.2.17 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pin-utils | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| piper | 0.2.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pkcs1 | 0.7.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pkcs1 | 0.8.0-rc.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pkcs5 | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pkcs8 | 0.11.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pkg-config | 0.3.33 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| plain | 0.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| png | 0.17.16 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| png | 0.18.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| polling | 3.11.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pollster | 0.2.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pollster | 0.4.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| poly1305 | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| poly1305 | 0.9.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| polyval | 0.7.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| portable-atomic | 1.13.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| portable-atomic-util | 0.2.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| postage | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| postcard | 1.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| potential_utf | 0.1.5 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| powerfmt | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ppv-lite86 | 0.2.21 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| precomputed-hash | 0.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| presser | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| prettyplease | 0.2.37 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| primefield | 0.14.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| primeorder | 0.14.0-rc.14 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| proc-macro-crate | 3.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| proc-macro2 | 1.0.106 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| profiling | 1.0.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| profiling-procmacros | 1.0.17 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| proptest | 1.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| proptest-macro | 0.5.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| psm | 0.1.31 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| pulldown-cmark | 0.12.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pulldown-cmark-escape | 0.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| pulley-interpreter | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| pulley-macros | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| pxfm | 0.1.29 | BSD-3-Clause, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| qoi | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| quantette | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| quick-error | 1.2.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| quick-error | 2.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| quick-xml | 0.39.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| quote | 1.0.45 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | registry+https://github.com/rust-lang/crates.io-index |
-| r-efi | 6.0.0 | MIT, Apache-2.0, LGPL-2.1-or-later | registry+https://github.com/rust-lang/crates.io-index |
-| radium | 0.7.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rand | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand | 0.8.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand | 0.9.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_chacha | 0.10.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_chacha | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_chacha | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_core | 0.10.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_core | 0.6.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_core | 0.9.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_xorshift | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rand_xoshiro | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| range-alloc | 0.1.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rangemap | 1.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-font | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-font-loader | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-katex-fonts | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-layout | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-lexer | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-parser | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-svg | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-types | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ratex-unicode-font | 0.1.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rav1e | 0.8.1 | BSD-2-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| ravif | 0.13.0 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| raw-window-handle | 0.6.2 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| raw-window-metal | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rayon | 1.12.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rayon-core | 1.13.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rc2 | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| read-fonts | 0.37.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| redb | 2.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| redox_syscall | 0.5.18 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| redox_users | 0.4.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| redox_users | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ref-cast | 1.0.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ref-cast-impl | 1.0.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| regalloc2 | 0.15.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| regex | 1.12.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| regex-automata | 0.4.14 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| regex-lite | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| regex-syntax | 0.8.10 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| renderdoc-sys | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| reqwest | 0.12.28 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| resvg | 0.45.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rfc6979 | 0.6.0-pre.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rgb | 0.8.53 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ring | 0.17.14 | Apache-2.0, ISC | registry+https://github.com/rust-lang/crates.io-index |
-| rmp | 0.8.15 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rmp-serde | 1.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rodio | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| roxmltree | 0.20.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rsa | 0.10.0-rc.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
+| grid | 1.0.1 | MIT | https://crates.io/crates/grid |
+| group | 0.14.0 | MIT, Apache-2.0 | https://crates.io/crates/group |
+| gstreamer | 0.24.5 | MIT, Apache-2.0 | https://crates.io/crates/gstreamer |
+| gstreamer-base | 0.24.5 | MIT, Apache-2.0 | https://crates.io/crates/gstreamer-base |
+| gstreamer-base-sys | 0.24.5 | MIT | https://crates.io/crates/gstreamer-base-sys |
+| gstreamer-sys | 0.24.5 | MIT | https://crates.io/crates/gstreamer-sys |
+| gstreamer-video | 0.24.5 | MIT, Apache-2.0 | https://crates.io/crates/gstreamer-video |
+| gstreamer-video-sys | 0.24.5 | MIT | https://crates.io/crates/gstreamer-video-sys |
+| h2 | 0.4.13 | MIT | https://crates.io/crates/h2 |
+| half | 2.7.1 | MIT, Apache-2.0 | https://crates.io/crates/half |
+| harfrust | 0.5.2 | MIT | https://crates.io/crates/harfrust |
+| hash32 | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/hash32 |
+| hash32 | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/hash32 |
+| hashbrown | 0.14.5 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
+| hashbrown | 0.15.5 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
+| hashbrown | 0.16.1 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
+| hashbrown | 0.17.0 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
+| heapless | 0.7.17 | MIT, Apache-2.0 | https://crates.io/crates/heapless |
+| heapless | 0.9.3 | MIT, Apache-2.0 | https://crates.io/crates/heapless |
+| heck | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/heck |
+| heck | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/heck |
+| hermit-abi | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/hermit-abi |
+| hex | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/hex |
+| hex-literal | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/hex-literal |
+| hexf-parse | 0.2.1 | CC0-1.0 | https://crates.io/crates/hexf-parse |
+| hkdf | 0.12.4 | MIT, Apache-2.0 | https://crates.io/crates/hkdf |
+| hkdf | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/hkdf |
+| hmac | 0.12.1 | MIT, Apache-2.0 | https://crates.io/crates/hmac |
+| hmac | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/hmac |
+| home | 0.5.12 | MIT, Apache-2.0 | https://crates.io/crates/home |
+| html5ever | 0.39.0 | MIT, Apache-2.0 | https://crates.io/crates/html5ever |
+| http | 1.4.0 | MIT, Apache-2.0 | https://crates.io/crates/http |
+| http-body | 1.0.1 | MIT | https://crates.io/crates/http-body |
+| http-body-util | 0.1.3 | MIT | https://crates.io/crates/http-body-util |
+| httparse | 1.10.1 | MIT, Apache-2.0 | https://crates.io/crates/httparse |
+| httpdate | 1.0.3 | MIT, Apache-2.0 | https://crates.io/crates/httpdate |
+| hybrid-array | 0.4.13 | MIT, Apache-2.0 | https://crates.io/crates/hybrid-array |
+| hyper | 1.9.0 | MIT | https://crates.io/crates/hyper |
+| hyper-rustls | 0.27.9 | Apache-2.0, ISC, MIT | https://crates.io/crates/hyper-rustls |
+| hyper-util | 0.1.20 | MIT | https://crates.io/crates/hyper-util |
+| iana-time-zone | 0.1.65 | MIT, Apache-2.0 | https://crates.io/crates/iana-time-zone |
+| iana-time-zone-haiku | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/iana-time-zone-haiku |
+| icu_collections | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_collections |
+| icu_locale_core | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_locale_core |
+| icu_normalizer | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_normalizer |
+| icu_normalizer_data | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_normalizer_data |
+| icu_properties | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_properties |
+| icu_properties_data | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_properties_data |
+| icu_provider | 2.2.0 | Unicode-3.0 | https://crates.io/crates/icu_provider |
+| icy_sixel | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/icy_sixel |
+| id-arena | 2.3.0 | MIT, Apache-2.0 | https://crates.io/crates/id-arena |
+| ident_case | 1.0.1 | MIT, Apache-2.0 | https://crates.io/crates/ident_case |
+| idna | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/idna |
+| idna_adapter | 1.2.2 | Apache-2.0, MIT | https://crates.io/crates/idna_adapter |
+| image | 0.25.10 | MIT, Apache-2.0 | https://crates.io/crates/image |
+| image-webp | 0.2.4 | MIT, Apache-2.0 | https://crates.io/crates/image-webp |
+| imagesize | 0.13.0 | MIT | https://crates.io/crates/imagesize |
+| imgref | 1.12.1 | CC0-1.0, Apache-2.0 | https://crates.io/crates/imgref |
+| indexmap | 2.14.0 | Apache-2.0, MIT | https://crates.io/crates/indexmap |
+| inout | 0.1.4 | MIT, Apache-2.0 | https://crates.io/crates/inout |
+| inout | 0.2.2 | MIT, Apache-2.0 | https://crates.io/crates/inout |
+| instant | 0.1.13 | BSD-3-Clause | https://crates.io/crates/instant |
+| instant-distance | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/instant-distance |
+| internal-russh-num-bigint | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/internal-russh-num-bigint |
+| interpolate_name | 0.2.4 | MIT | https://crates.io/crates/interpolate_name |
+| inventory | 0.3.24 | MIT, Apache-2.0 | https://crates.io/crates/inventory |
+| io-extras | 0.18.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/io-extras |
+| io-kit-sys | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/io-kit-sys |
+| io-lifetimes | 2.0.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/io-lifetimes |
+| io-surface | 0.16.1 | MIT, Apache-2.0 | https://crates.io/crates/io-surface |
+| ipnet | 2.12.0 | MIT, Apache-2.0 | https://crates.io/crates/ipnet |
+| ironrdp | 0.16.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-async | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-bulk | 0.1.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-cliprdr | 0.6.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-cliprdr-format | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-connector | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-core | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-displaycontrol | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-dvc | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-egfx | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-error | 0.2.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-graphics | 0.8.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-input | 0.6.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-pdu | 0.8.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-rdpsnd | 0.8.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-session | 0.10.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-svc | 0.7.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-tls | 0.2.1 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| ironrdp-tokio | 0.9.0 | MIT, Apache-2.0 | https://github.com/AnalyseDeCircuit/IronRDP?rev=82c4acf89a173d38442f859e18963c39350ee74b |
+| is-docker | 0.2.0 | MIT | https://crates.io/crates/is-docker |
+| is-wsl | 0.4.0 | MIT | https://crates.io/crates/is-wsl |
+| is_terminal_polyfill | 1.70.2 | MIT, Apache-2.0 | https://crates.io/crates/is_terminal_polyfill |
+| iso7816 | 0.1.4 | Apache-2.0, MIT | https://crates.io/crates/iso7816 |
+| iso7816-tlv | 0.4.4 | ISC | https://crates.io/crates/iso7816-tlv |
+| itertools | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
+| itertools | 0.14.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
+| itoa | 1.0.18 | MIT, Apache-2.0 | https://crates.io/crates/itoa |
+| jni | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/jni |
+| jni-sys | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys |
+| jni-sys | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys |
+| jni-sys-macros | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys-macros |
+| jobserver | 0.1.34 | MIT, Apache-2.0 | https://crates.io/crates/jobserver |
+| js-sys | 0.3.99 | MIT, Apache-2.0 | https://crates.io/crates/js-sys |
+| jsonrpcmsg | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/jsonrpcmsg |
+| keccak | 0.2.0 | Apache-2.0, MIT | https://crates.io/crates/keccak |
+| kem | 0.3.0 | Apache-2.0, MIT | https://crates.io/crates/kem |
+| keyring | 3.6.3 | MIT, Apache-2.0 | https://crates.io/crates/keyring |
+| khronos-egl | 6.0.0 | MIT, Apache-2.0 | https://crates.io/crates/khronos-egl |
+| khronos_api | 3.1.0 | Apache-2.0 | https://crates.io/crates/khronos_api |
+| kstring | 2.0.2 | MIT, Apache-2.0 | https://crates.io/crates/kstring |
+| kurbo | 0.11.3 | Apache-2.0, MIT | https://crates.io/crates/kurbo |
+| lazy_static | 1.5.0 | MIT, Apache-2.0 | https://crates.io/crates/lazy_static |
+| leak | 0.1.2 | Apache-2.0, MIT | https://crates.io/crates/leak |
+| leaky-cow | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/leaky-cow |
+| leb128 | 0.2.6 | MIT, Apache-2.0 | https://crates.io/crates/leb128 |
+| leb128fmt | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/leb128fmt |
+| lebe | 0.5.3 | BSD-3-Clause | https://crates.io/crates/lebe |
+| libc | 0.2.186 | MIT, Apache-2.0 | https://crates.io/crates/libc |
+| libdbus-sys | 0.2.7 | Apache-2.0, MIT | https://crates.io/crates/libdbus-sys |
+| libfuzzer-sys | 0.4.12 | MIT, Apache-2.0, NCSA | https://crates.io/crates/libfuzzer-sys |
+| libloading | 0.8.9 | ISC | https://crates.io/crates/libloading |
+| libm | 0.2.16 | MIT | https://crates.io/crates/libm |
+| libredox | 0.1.16 | MIT | https://crates.io/crates/libredox |
+| libudev | 0.3.0 | MIT | https://crates.io/crates/libudev |
+| libudev-sys | 0.1.4 | MIT | https://crates.io/crates/libudev-sys |
+| libz-sys | 1.1.28 | MIT, Apache-2.0 | https://crates.io/crates/libz-sys |
+| linebender_resource_handle | 0.1.1 | Apache-2.0, MIT | https://crates.io/crates/linebender_resource_handle |
+| link-section | 0.19.0 | Apache-2.0, MIT | https://crates.io/crates/link-section |
+| linktime-proc-macro | 0.2.0 | Apache-2.0, MIT | https://crates.io/crates/linktime-proc-macro |
+| linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/linux-raw-sys |
+| linux-raw-sys | 0.4.15 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/linux-raw-sys |
+| litemap | 0.8.2 | Unicode-3.0 | https://crates.io/crates/litemap |
+| litrs | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/litrs |
+| lock_api | 0.4.14 | MIT, Apache-2.0 | https://crates.io/crates/lock_api |
+| log | 0.4.29 | MIT, Apache-2.0 | https://crates.io/crates/log |
+| loop9 | 0.1.5 | MIT | https://crates.io/crates/loop9 |
+| lyon | 1.0.19 | MIT, Apache-2.0 | https://crates.io/crates/lyon |
+| lyon_algorithms | 1.0.19 | MIT, Apache-2.0 | https://crates.io/crates/lyon_algorithms |
+| lyon_extra | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/lyon_extra |
+| lyon_geom | 1.0.19 | MIT, Apache-2.0 | https://crates.io/crates/lyon_geom |
+| lyon_path | 1.0.19 | MIT, Apache-2.0 | https://crates.io/crates/lyon_path |
+| lyon_tessellation | 1.0.20 | MIT, Apache-2.0 | https://crates.io/crates/lyon_tessellation |
+| mac | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/mac |
+| mach2 | 0.4.3 | BSD-2-Clause, MIT, Apache-2.0 | https://crates.io/crates/mach2 |
+| mach2 | 0.5.0 | BSD-2-Clause, MIT, Apache-2.0 | https://crates.io/crates/mach2 |
+| mach2 | 0.6.0 | BSD-2-Clause, MIT, Apache-2.0 | https://crates.io/crates/mach2 |
+| malloc_buf | 0.0.6 | MIT | https://crates.io/crates/malloc_buf |
+| markup5ever | 0.39.0 | MIT, Apache-2.0 | https://crates.io/crates/markup5ever |
+| matchers | 0.2.0 | MIT | https://crates.io/crates/matchers |
+| maybe-owned | 0.3.4 | MIT, Apache-2.0 | https://crates.io/crates/maybe-owned |
+| maybe-rayon | 0.1.1 | MIT | https://crates.io/crates/maybe-rayon |
+| md-5 | 0.10.6 | MIT, Apache-2.0 | https://crates.io/crates/md-5 |
+| md-5 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/md-5 |
+| md4 | 0.10.2 | MIT, Apache-2.0 | https://crates.io/crates/md4 |
+| md5 | 0.7.0 | Apache-2.0, MIT | https://crates.io/crates/md5 |
+| md5 | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/md5 |
+| memchr | 2.8.0 | Unlicense, MIT | https://crates.io/crates/memchr |
+| memfd | 0.6.5 | MIT, Apache-2.0 | https://crates.io/crates/memfd |
+| memmap2 | 0.9.11 | MIT, Apache-2.0 | https://crates.io/crates/memmap2 |
+| memoffset | 0.9.1 | MIT | https://crates.io/crates/memoffset |
+| metal | 0.33.0 | MIT, Apache-2.0 | https://crates.io/crates/metal |
+| mime | 0.3.17 | MIT, Apache-2.0 | https://crates.io/crates/mime |
+| mime_guess | 2.0.5 | MIT | https://crates.io/crates/mime_guess |
+| minimal-lexical | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/minimal-lexical |
+| minisign-verify | 0.2.5 | MIT | https://crates.io/crates/minisign-verify |
+| miniz_oxide | 0.8.9 | MIT, Zlib, Apache-2.0 | https://crates.io/crates/miniz_oxide |
+| mio | 1.2.0 | MIT | https://crates.io/crates/mio |
+| miow | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/miow |
+| ml-kem | 0.3.2 | Apache-2.0, MIT | https://crates.io/crates/ml-kem |
+| module-lattice | 0.2.3 | Apache-2.0, MIT | https://crates.io/crates/module-lattice |
+| moxcms | 0.8.1 | BSD-3-Clause, Apache-2.0 | https://crates.io/crates/moxcms |
+| muldiv | 1.0.1 | MIT | https://crates.io/crates/muldiv |
+| naga | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/naga |
+| nanorand | 0.7.0 | Zlib | https://crates.io/crates/nanorand |
+| native-tls | 0.2.18 | MIT, Apache-2.0 | https://crates.io/crates/native-tls |
+| ndk | 0.9.0 | MIT, Apache-2.0 | https://crates.io/crates/ndk |
+| ndk-context | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/ndk-context |
+| ndk-sys | 0.6.0+11769913 | MIT, Apache-2.0 | https://crates.io/crates/ndk-sys |
+| new_debug_unreachable | 1.0.6 | MIT | https://crates.io/crates/new_debug_unreachable |
+| nix | 0.26.4 | MIT | https://crates.io/crates/nix |
+| nix | 0.29.0 | MIT | https://crates.io/crates/nix |
+| nix | 0.31.2 | MIT | https://crates.io/crates/nix |
+| no_std_io2 | 0.9.3 | Apache-2.0, MIT | https://crates.io/crates/no_std_io2 |
+| nom | 7.1.3 | MIT | https://crates.io/crates/nom |
+| nom | 8.0.0 | MIT | https://crates.io/crates/nom |
+| noop_proc_macro | 0.3.0 | MIT | https://crates.io/crates/noop_proc_macro |
+| ntapi | 0.4.3 | Apache-2.0, MIT | https://crates.io/crates/ntapi |
+| nu-ansi-term | 0.50.3 | MIT | https://crates.io/crates/nu-ansi-term |
+| num | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/num |
+| num-bigint | 0.3.3 | MIT, Apache-2.0 | https://crates.io/crates/num-bigint |
+| num-bigint | 0.4.6 | MIT, Apache-2.0 | https://crates.io/crates/num-bigint |
+| num-bigint-dig | 0.9.1 | MIT, Apache-2.0 | https://crates.io/crates/num-bigint-dig |
+| num-complex | 0.4.6 | MIT, Apache-2.0 | https://crates.io/crates/num-complex |
+| num-conv | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/num-conv |
+| num-derive | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/num-derive |
+| num-integer | 0.1.46 | MIT, Apache-2.0 | https://crates.io/crates/num-integer |
+| num-iter | 0.1.45 | MIT, Apache-2.0 | https://crates.io/crates/num-iter |
+| num-rational | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/num-rational |
+| num-traits | 0.2.19 | MIT, Apache-2.0 | https://crates.io/crates/num-traits |
+| num_cpus | 1.17.0 | MIT, Apache-2.0 | https://crates.io/crates/num_cpus |
+| num_enum | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | https://crates.io/crates/num_enum |
+| num_enum_derive | 0.7.6 | BSD-3-Clause, MIT, Apache-2.0 | https://crates.io/crates/num_enum_derive |
+| num_threads | 0.1.7 | MIT, Apache-2.0 | https://crates.io/crates/num_threads |
+| objc | 0.2.7 | MIT | https://crates.io/crates/objc |
+| objc-sys | 0.3.5 | MIT | https://crates.io/crates/objc-sys |
+| objc2 | 0.5.2 | MIT | https://crates.io/crates/objc2 |
+| objc2 | 0.6.4 | MIT | https://crates.io/crates/objc2 |
+| objc2-app-kit | 0.2.2 | MIT | https://crates.io/crates/objc2-app-kit |
+| objc2-app-kit | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-app-kit |
+| objc2-audio-toolbox | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-audio-toolbox |
+| objc2-av-foundation | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-av-foundation |
+| objc2-av-kit | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-av-kit |
+| objc2-avf-audio | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-avf-audio |
+| objc2-cloud-kit | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-cloud-kit |
+| objc2-core-audio | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-audio |
+| objc2-core-audio-types | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-audio-types |
+| objc2-core-data | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-data |
+| objc2-core-foundation | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-foundation |
+| objc2-core-graphics | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-graphics |
+| objc2-core-image | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-image |
+| objc2-core-media | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-media |
+| objc2-core-text | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-text |
+| objc2-core-video | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-core-video |
+| objc2-encode | 4.1.0 | MIT | https://crates.io/crates/objc2-encode |
+| objc2-foundation | 0.2.2 | MIT | https://crates.io/crates/objc2-foundation |
+| objc2-foundation | 0.3.2 | MIT | https://crates.io/crates/objc2-foundation |
+| objc2-image-io | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-image-io |
+| objc2-media-toolbox | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-media-toolbox |
+| objc2-metal | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-metal |
+| objc2-quartz-core | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-quartz-core |
+| objc2-service-management | 0.3.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/objc2-service-management |
+| object | 0.37.3 | Apache-2.0, MIT | https://crates.io/crates/object |
+| object | 0.39.1 | Apache-2.0, MIT | https://crates.io/crates/object |
+| oid | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/oid |
+| once_cell | 1.21.4 | MIT, Apache-2.0 | https://crates.io/crates/once_cell |
+| once_cell_polyfill | 1.70.2 | MIT, Apache-2.0 | https://crates.io/crates/once_cell_polyfill |
+| onig | 6.5.3 | MIT | https://crates.io/crates/onig |
+| onig_sys | 69.9.3 | MIT | https://crates.io/crates/onig_sys |
+| oo7 | 0.6.0 | MIT | https://crates.io/crates/oo7 |
+| opaque-debug | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/opaque-debug |
+| open | 5.3.4 | MIT | https://crates.io/crates/open |
+| openh264 | 0.9.7 | BSD-2-Clause | https://crates.io/crates/openh264 |
+| openh264-sys2 | 0.9.7 | BSD-2-Clause | https://crates.io/crates/openh264-sys2 |
+| openssl | 0.10.81 | Apache-2.0 | https://crates.io/crates/openssl |
+| openssl-macros | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/openssl-macros |
+| openssl-probe | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/openssl-probe |
+| openssl-src | 300.6.1+3.6.3 | MIT, Apache-2.0 | https://crates.io/crates/openssl-src |
+| openssl-sys | 0.9.117 | MIT | https://crates.io/crates/openssl-sys |
+| option-ext | 0.2.0 | MPL-2.0 | https://crates.io/crates/option-ext |
+| option-operations | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/option-operations |
+| ordered-float | 3.9.2 | MIT | https://crates.io/crates/ordered-float |
+| ordered-float | 5.3.0 | MIT | https://crates.io/crates/ordered-float |
+| ordered-stream | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/ordered-stream |
+| owned_ttf_parser | 0.25.1 | Apache-2.0 | https://crates.io/crates/owned_ttf_parser |
+| p256 | 0.14.0-rc.14 | Apache-2.0, MIT | https://crates.io/crates/p256 |
+| p384 | 0.14.0-rc.14 | Apache-2.0, MIT | https://crates.io/crates/p384 |
+| p521 | 0.14.0-rc.14 | Apache-2.0, MIT | https://crates.io/crates/p521 |
+| pageant | 0.2.0 | Apache-2.0 | https://crates.io/crates/pageant |
+| palette | 0.7.6 | MIT, Apache-2.0 | https://crates.io/crates/palette |
+| palette_derive | 0.7.6 | MIT, Apache-2.0 | https://crates.io/crates/palette_derive |
+| parking | 2.2.1 | Apache-2.0, MIT | https://crates.io/crates/parking |
+| parking_lot | 0.12.5 | MIT, Apache-2.0 | https://crates.io/crates/parking_lot |
+| parking_lot_core | 0.9.12 | MIT, Apache-2.0 | https://crates.io/crates/parking_lot_core |
+| password-hash | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/password-hash |
+| paste | 1.0.15 | MIT, Apache-2.0 | https://crates.io/crates/paste |
+| pastey | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/pastey |
+| pastey | 0.2.2 | MIT, Apache-2.0 | https://crates.io/crates/pastey |
+| pathdiff | 0.2.3 | MIT, Apache-2.0 | https://crates.io/crates/pathdiff |
+| pathfinder_geometry | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/pathfinder_geometry |
+| pathfinder_simd | 0.5.6 | MIT, Apache-2.0 | https://crates.io/crates/pathfinder_simd |
+| pbkdf2 | 0.12.2 | MIT, Apache-2.0 | https://crates.io/crates/pbkdf2 |
+| pbkdf2 | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/pbkdf2 |
+| pem-rfc7468 | 0.7.0 | Apache-2.0, MIT | https://crates.io/crates/pem-rfc7468 |
+| pem-rfc7468 | 1.0.0 | Apache-2.0, MIT | https://crates.io/crates/pem-rfc7468 |
+| percent-encoding | 2.3.2 | MIT, Apache-2.0 | https://crates.io/crates/percent-encoding |
+| phf | 0.11.3 | MIT | https://crates.io/crates/phf |
+| phf | 0.13.1 | MIT | https://crates.io/crates/phf |
+| phf_codegen | 0.13.1 | MIT | https://crates.io/crates/phf_codegen |
+| phf_generator | 0.11.3 | MIT | https://crates.io/crates/phf_generator |
+| phf_generator | 0.13.1 | MIT | https://crates.io/crates/phf_generator |
+| phf_macros | 0.11.3 | MIT | https://crates.io/crates/phf_macros |
+| phf_macros | 0.13.1 | MIT | https://crates.io/crates/phf_macros |
+| phf_shared | 0.11.3 | MIT | https://crates.io/crates/phf_shared |
+| phf_shared | 0.13.1 | MIT | https://crates.io/crates/phf_shared |
+| picky | 7.0.0-rc.25 | MIT, Apache-2.0 | https://crates.io/crates/picky |
+| picky-asn1 | 0.10.1 | MIT, Apache-2.0 | https://crates.io/crates/picky-asn1 |
+| picky-asn1-der | 0.5.6 | MIT, Apache-2.0 | https://crates.io/crates/picky-asn1-der |
+| picky-asn1-x509 | 0.15.4 | MIT, Apache-2.0 | https://crates.io/crates/picky-asn1-x509 |
+| picky-krb | 0.12.4 | MIT, Apache-2.0 | https://crates.io/crates/picky-krb |
+| pico-args | 0.5.0 | MIT | https://crates.io/crates/pico-args |
+| pin-project | 1.1.11 | Apache-2.0, MIT | https://crates.io/crates/pin-project |
+| pin-project-internal | 1.1.11 | Apache-2.0, MIT | https://crates.io/crates/pin-project-internal |
+| pin-project-lite | 0.2.17 | Apache-2.0, MIT | https://crates.io/crates/pin-project-lite |
+| pin-utils | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/pin-utils |
+| piper | 0.2.5 | MIT, Apache-2.0 | https://crates.io/crates/piper |
+| pkcs1 | 0.7.5 | Apache-2.0, MIT | https://crates.io/crates/pkcs1 |
+| pkcs1 | 0.8.0-rc.4 | Apache-2.0, MIT | https://crates.io/crates/pkcs1 |
+| pkcs5 | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/pkcs5 |
+| pkcs8 | 0.11.0 | Apache-2.0, MIT | https://crates.io/crates/pkcs8 |
+| pkg-config | 0.3.33 | MIT, Apache-2.0 | https://crates.io/crates/pkg-config |
+| plain | 0.2.3 | MIT, Apache-2.0 | https://crates.io/crates/plain |
+| png | 0.17.16 | MIT, Apache-2.0 | https://crates.io/crates/png |
+| png | 0.18.1 | MIT, Apache-2.0 | https://crates.io/crates/png |
+| polling | 3.11.0 | Apache-2.0, MIT | https://crates.io/crates/polling |
+| pollster | 0.2.5 | Apache-2.0, MIT | https://crates.io/crates/pollster |
+| pollster | 0.4.0 | Apache-2.0, MIT | https://crates.io/crates/pollster |
+| poly1305 | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/poly1305 |
+| poly1305 | 0.9.0 | Apache-2.0, MIT | https://crates.io/crates/poly1305 |
+| polyval | 0.7.1 | Apache-2.0, MIT | https://crates.io/crates/polyval |
+| portable-atomic | 1.13.1 | Apache-2.0, MIT | https://crates.io/crates/portable-atomic |
+| portable-atomic-util | 0.2.7 | Apache-2.0, MIT | https://crates.io/crates/portable-atomic-util |
+| postage | 0.5.0 | MIT | https://crates.io/crates/postage |
+| postcard | 1.1.3 | MIT, Apache-2.0 | https://crates.io/crates/postcard |
+| potential_utf | 0.1.5 | Unicode-3.0 | https://crates.io/crates/potential_utf |
+| powerfmt | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/powerfmt |
+| ppv-lite86 | 0.2.21 | MIT, Apache-2.0 | https://crates.io/crates/ppv-lite86 |
+| precomputed-hash | 0.1.1 | MIT | https://crates.io/crates/precomputed-hash |
+| presser | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/presser |
+| prettyplease | 0.2.37 | MIT, Apache-2.0 | https://crates.io/crates/prettyplease |
+| primefield | 0.14.0 | Apache-2.0, MIT | https://crates.io/crates/primefield |
+| primeorder | 0.14.0-rc.14 | Apache-2.0, MIT | https://crates.io/crates/primeorder |
+| proc-macro-crate | 3.5.0 | MIT, Apache-2.0 | https://crates.io/crates/proc-macro-crate |
+| proc-macro2 | 1.0.106 | MIT, Apache-2.0 | https://crates.io/crates/proc-macro2 |
+| profiling | 1.0.17 | MIT, Apache-2.0 | https://crates.io/crates/profiling |
+| profiling-procmacros | 1.0.17 | MIT, Apache-2.0 | https://crates.io/crates/profiling-procmacros |
+| proptest | 1.11.0 | MIT, Apache-2.0 | https://crates.io/crates/proptest |
+| proptest-macro | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/proptest-macro |
+| psm | 0.1.31 | MIT, Apache-2.0 | https://crates.io/crates/psm |
+| pulldown-cmark | 0.12.2 | MIT | https://crates.io/crates/pulldown-cmark |
+| pulldown-cmark-escape | 0.11.0 | MIT | https://crates.io/crates/pulldown-cmark-escape |
+| pulley-interpreter | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/pulley-interpreter |
+| pulley-macros | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/pulley-macros |
+| pxfm | 0.1.29 | BSD-3-Clause, Apache-2.0 | https://crates.io/crates/pxfm |
+| qoi | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/qoi |
+| quantette | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/quantette |
+| quick-error | 1.2.3 | MIT, Apache-2.0 | https://crates.io/crates/quick-error |
+| quick-error | 2.0.1 | MIT, Apache-2.0 | https://crates.io/crates/quick-error |
+| quick-xml | 0.39.4 | MIT | https://crates.io/crates/quick-xml |
+| quote | 1.0.45 | MIT, Apache-2.0 | https://crates.io/crates/quote |
+| r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | https://crates.io/crates/r-efi |
+| r-efi | 6.0.0 | MIT, Apache-2.0, LGPL-2.1-or-later | https://crates.io/crates/r-efi |
+| radium | 0.7.0 | MIT | https://crates.io/crates/radium |
+| rand | 0.10.1 | MIT, Apache-2.0 | https://crates.io/crates/rand |
+| rand | 0.8.6 | MIT, Apache-2.0 | https://crates.io/crates/rand |
+| rand | 0.9.4 | MIT, Apache-2.0 | https://crates.io/crates/rand |
+| rand_chacha | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/rand_chacha |
+| rand_chacha | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/rand_chacha |
+| rand_chacha | 0.9.0 | MIT, Apache-2.0 | https://crates.io/crates/rand_chacha |
+| rand_core | 0.10.1 | MIT, Apache-2.0 | https://crates.io/crates/rand_core |
+| rand_core | 0.6.4 | MIT, Apache-2.0 | https://crates.io/crates/rand_core |
+| rand_core | 0.9.5 | MIT, Apache-2.0 | https://crates.io/crates/rand_core |
+| rand_xorshift | 0.4.0 | MIT, Apache-2.0 | https://crates.io/crates/rand_xorshift |
+| rand_xoshiro | 0.7.0 | MIT, Apache-2.0 | https://crates.io/crates/rand_xoshiro |
+| range-alloc | 0.1.5 | MIT, Apache-2.0 | https://crates.io/crates/range-alloc |
+| rangemap | 1.7.1 | MIT, Apache-2.0 | https://crates.io/crates/rangemap |
+| ratex-font | 0.1.8 | MIT | https://crates.io/crates/ratex-font |
+| ratex-font-loader | 0.1.8 | MIT | https://crates.io/crates/ratex-font-loader |
+| ratex-katex-fonts | 0.1.8 | MIT | https://crates.io/crates/ratex-katex-fonts |
+| ratex-layout | 0.1.8 | MIT | https://crates.io/crates/ratex-layout |
+| ratex-lexer | 0.1.8 | MIT | https://crates.io/crates/ratex-lexer |
+| ratex-parser | 0.1.8 | MIT | https://crates.io/crates/ratex-parser |
+| ratex-svg | 0.1.8 | MIT | https://crates.io/crates/ratex-svg |
+| ratex-types | 0.1.8 | MIT | https://crates.io/crates/ratex-types |
+| ratex-unicode-font | 0.1.8 | MIT | https://crates.io/crates/ratex-unicode-font |
+| rav1e | 0.8.1 | BSD-2-Clause | https://crates.io/crates/rav1e |
+| ravif | 0.13.0 | BSD-3-Clause | https://crates.io/crates/ravif |
+| raw-window-handle | 0.6.2 | MIT, Apache-2.0, Zlib | https://crates.io/crates/raw-window-handle |
+| raw-window-metal | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/raw-window-metal |
+| rayon | 1.12.0 | MIT, Apache-2.0 | https://crates.io/crates/rayon |
+| rayon-core | 1.13.0 | MIT, Apache-2.0 | https://crates.io/crates/rayon-core |
+| rc2 | 0.9.0 | MIT, Apache-2.0 | https://crates.io/crates/rc2 |
+| read-fonts | 0.37.0 | MIT, Apache-2.0 | https://crates.io/crates/read-fonts |
+| redb | 2.6.3 | MIT, Apache-2.0 | https://crates.io/crates/redb |
+| redox_syscall | 0.5.18 | MIT | https://crates.io/crates/redox_syscall |
+| redox_users | 0.4.6 | MIT | https://crates.io/crates/redox_users |
+| redox_users | 0.5.2 | MIT | https://crates.io/crates/redox_users |
+| ref-cast | 1.0.25 | MIT, Apache-2.0 | https://crates.io/crates/ref-cast |
+| ref-cast-impl | 1.0.25 | MIT, Apache-2.0 | https://crates.io/crates/ref-cast-impl |
+| regalloc2 | 0.15.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/regalloc2 |
+| regex | 1.12.3 | MIT, Apache-2.0 | https://crates.io/crates/regex |
+| regex-automata | 0.4.14 | MIT, Apache-2.0 | https://crates.io/crates/regex-automata |
+| regex-lite | 0.1.9 | MIT, Apache-2.0 | https://crates.io/crates/regex-lite |
+| regex-syntax | 0.8.10 | MIT, Apache-2.0 | https://crates.io/crates/regex-syntax |
+| renderdoc-sys | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/renderdoc-sys |
+| reqwest | 0.12.28 | MIT, Apache-2.0 | https://crates.io/crates/reqwest |
+| resvg | 0.45.1 | Apache-2.0, MIT | https://crates.io/crates/resvg |
+| rfc6979 | 0.6.0-pre.0 | Apache-2.0, MIT | https://crates.io/crates/rfc6979 |
+| rgb | 0.8.53 | MIT | https://crates.io/crates/rgb |
+| ring | 0.17.14 | Apache-2.0, ISC | https://crates.io/crates/ring |
+| rmp | 0.8.15 | MIT | https://crates.io/crates/rmp |
+| rmp-serde | 1.3.1 | MIT | https://crates.io/crates/rmp-serde |
+| rodio | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/rodio |
+| roxmltree | 0.20.0 | MIT, Apache-2.0 | https://crates.io/crates/roxmltree |
+| rsa | 0.10.0-rc.18 | MIT, Apache-2.0 | https://crates.io/crates/rsa |
 | russh | 0.61.2 | Apache-2.0 | vendored in repository |
-| russh-cryptovec | 0.61.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| russh-util | 0.52.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rust-embed | 8.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rust-embed-impl | 8.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rust-embed-utils | 8.11.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rust-stemmers | 1.2.0 | MIT, BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| rustc-demangle | 0.1.27 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustc-hash | 1.1.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustc-hash | 2.1.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustc_version | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustcrypto-ff | 0.14.0-rc.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustcrypto-ff_derive | 0.14.0-rc.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustcrypto-group | 0.14.0-rc.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rusticata-macros | 4.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustix | 0.38.44 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustix-linux-procfs | 0.1.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustix-openpty | 0.2.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustls | 0.23.40 | Apache-2.0, ISC, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| rustls-pki-types | 1.14.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustls-webpki | 0.103.13 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| rustversion | 1.0.22 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rusty-fork | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| rustybuzz | 0.20.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ryu | 1.0.23 | Apache-2.0, BSL-1.0 | registry+https://github.com/rust-lang/crates.io-index |
-| safe_arch | 0.9.3 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| salsa20 | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| same-file | 1.0.6 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| schannel | 0.1.29 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| schemars | 1.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| schemars_derive | 1.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| scoped-tls | 1.0.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| scopeguard | 1.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| scraper | 0.27.0 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| scrypt | 0.12.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| seahash | 4.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| sec1 | 0.8.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| secrecy | 0.10.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| security-framework | 2.11.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| security-framework | 3.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| security-framework-sys | 2.17.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| selectors | 0.38.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| self_cell | 1.2.2 | Apache-2.0, GPL-2.0-only | registry+https://github.com/rust-lang/crates.io-index |
-| semver | 1.0.28 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde | 1.0.228 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde-big-array | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_bytes | 0.11.19 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_core | 1.0.228 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_derive | 1.0.228 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_derive_internals | 0.29.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_fmt | 1.1.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| serde_json | 1.0.149 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_json_lenient | 0.2.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_repr | 0.1.20 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_spanned | 0.6.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_spanned | 1.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_urlencoded | 0.7.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_with | 3.21.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serde_with_macros | 3.21.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| serialport | 4.9.0 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| servo_arc | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sha1 | 0.10.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sha1 | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sha1_smol | 1.0.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| sha2 | 0.10.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sha2 | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sha3 | 0.11.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sha3 | 0.12.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sharded-slab | 0.1.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| shell-words | 1.1.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| shlex | 1.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| signal-hook | 0.4.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| signal-hook-registry | 1.4.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| signature | 3.0.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| simd-adler32 | 0.3.9 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| simd_helpers | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| simplecss | 0.2.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| siphasher | 1.0.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| skrifa | 0.40.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| slab | 0.4.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| slotmap | 1.1.1 | Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| smallvec | 1.15.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| smol | 2.0.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| smol_str | 0.3.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sntrup | 0.3.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| socket2 | 0.6.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| spin | 0.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| spin | 0.9.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| spki | 0.7.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| spki | 0.8.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| sponge-cursor | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| ssh-cipher | 0.3.0-rc.9 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ssh-encoding | 0.3.0-rc.9 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ssh-key | 0.7.0-rc.10 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| sspi | 0.21.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| stable_deref_trait | 1.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| stacker | 0.1.24 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| stacksafe | 1.0.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| stacksafe-macro | 1.0.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| static_assertions | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| streaming-iterator | 0.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| strict-num | 0.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| string_cache | 0.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| string_cache_codegen | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| strsim | 0.11.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| strum | 0.27.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| strum | 0.28.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| strum_macros | 0.27.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| strum_macros | 0.28.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| subtle | 2.6.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| svg_fmt | 0.4.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| svgtypes | 0.15.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| swash | 0.2.7 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| symlink | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-bundle-flac | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-bundle-mp3 | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-codec-aac | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-codec-pcm | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-codec-vorbis | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-core | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-format-isomp4 | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-format-ogg | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-format-riff | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-metadata | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| symphonia-utils-xiph | 0.5.5 | MPL-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| syn | 1.0.109 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| syn | 2.0.117 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sync_wrapper | 1.0.2 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| synstructure | 0.13.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| syntect | 5.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| sys-locale | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| sysinfo | 0.33.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| system-configuration | 0.7.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| system-configuration-sys | 0.6.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| system-deps | 7.0.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| system-fonts | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| taffy | 0.10.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| take-until | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tap | 1.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tar | 0.4.45 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| target-lexicon | 0.13.3 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| tempfile | 3.27.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tendril | 0.4.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tendril | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| termcolor | 1.4.1 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| thiserror | 1.0.69 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| thiserror | 2.0.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| thiserror-impl | 1.0.69 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| thiserror-impl | 2.0.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| thread_local | 1.1.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tiff | 0.11.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| time | 0.3.47 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| time-core | 0.1.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tiny-keccak | 2.0.2 | CC0-1.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tiny-skia | 0.11.4 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| tiny-skia-path | 0.11.4 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| tinystr | 0.8.3 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tinyvec | 1.11.0 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tinyvec_macros | 0.1.1 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| tokio | 1.52.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tokio-macros | 2.7.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tokio-native-tls | 0.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tokio-rustls | 0.26.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tokio-util | 0.7.18 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| toml | 0.8.23 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_datetime | 0.6.11 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_datetime | 1.1.1+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_edit | 0.22.27 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_edit | 0.25.11+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_parser | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_write | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| toml_writer | 1.1.1+spec-1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tower | 0.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tower-http | 0.6.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tower-layer | 0.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tower-service | 0.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tracing | 0.1.44 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tracing-appender | 0.2.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tracing-attributes | 0.1.31 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tracing-core | 0.1.36 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tracing-log | 0.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tracing-subscriber | 0.3.23 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter | 0.25.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-bash | 0.23.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-c | 0.24.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-c-sharp | 0.23.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-cmake | 0.7.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-commonlisp | 0.4.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-containerfile | 0.8.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-cpp | 0.23.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-css | 0.23.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-diff | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-elixir | 0.3.5 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-fish | 3.6.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-go | 0.23.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-html | 0.23.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-java | 0.23.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-javascript | 0.23.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-json | 0.24.8 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-language | 0.1.7 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-lua | 0.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-make | 1.1.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-md | 0.5.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-objc | 3.0.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-php | 0.24.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-powershell | 0.26.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-python | 0.23.6 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-r | 1.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-ruby | 0.23.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-rust | 0.24.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-scala | 0.23.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-sequel | 0.3.11 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-swift | 0.7.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-toml-ng | 0.7.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-typescript | 0.23.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-yaml | 0.7.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-zig | 1.1.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| tree-sitter-zsh | 0.63.4 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| try-lock | 0.2.5 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ts-parser-perl | 1.0.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| ttf-parser | 0.25.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| typeid | 1.0.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| typenum | 1.20.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| uds_windows | 1.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| unarray | 0.1.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unescaper | 0.1.8 | GPL-3.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| unicase | 2.9.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-bidi | 0.3.18 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-bidi-mirroring | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-ccc | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-ident | 1.0.24 | MIT, Apache-2.0, Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-linebreak | 0.1.5 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-normalization | 0.1.25 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-properties | 0.1.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-script | 0.5.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-segmentation | 1.13.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-vo | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-width | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| unicode-xid | 0.2.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| universal-hash | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| universal-hash | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| untrusted | 0.7.1 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| untrusted | 0.9.0 | ISC | registry+https://github.com/rust-lang/crates.io-index |
-| url | 2.5.8 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| usvg | 0.45.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| utf-8 | 0.7.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| utf8_iter | 1.0.4 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| utf8parse | 0.2.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| uuid | 1.23.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| v_frame | 0.3.9 | BSD-2-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| value-bag | 1.12.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| value-bag-serde1 | 1.12.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| vcpkg | 0.2.15 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| version-compare | 0.2.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| version_check | 0.9.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| vswhom | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| vswhom-sys | 0.1.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| vte | 0.15.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wait-timeout | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| waker-fn | 1.2.0 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| walkdir | 2.5.0 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| want | 0.3.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasip2 | 1.0.3+wasi-0.2.9 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasip3 | 0.4.0+wasi-0.3.0-rc-2026-01-06 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasite | 0.1.0 | Apache-2.0, BSL-1.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen | 0.2.122 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-futures | 0.4.72 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-macro | 0.2.122 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-macro-support | 0.2.122 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-bindgen-shared | 0.2.122 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-encoder | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasm-streams | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wasmparser | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasmprinter | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-environ | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-component-macro | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-component-util | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-core | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-cranelift | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-fiber | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-jit-icache-coherence | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-unwinder | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-versioned-export-macros | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-internal-wit-bindgen | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-wasi | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wasmtime-wasi-io | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wast | 35.0.2 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-backend | 0.3.15 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-client | 0.31.14 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-cursor | 0.31.14 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-protocols | 0.32.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-protocols-plasma | 0.3.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-protocols-wlr | 0.3.12 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-scanner | 0.31.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wayland-sys | 0.31.11 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| web-sys | 0.3.99 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| web-time | 1.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| web_atoms | 0.2.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| webpki-roots | 1.0.7 | CDLA-Permissive-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| weezl | 0.1.12 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-core | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-core-deps-apple | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-core-deps-emscripten | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-core-deps-windows-linux-android | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-hal | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-naga-bridge | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wgpu-types | 29.0.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| which | 6.0.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| whoami | 1.6.1 | Apache-2.0, BSL-1.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wide | 0.8.3 | Zlib, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| widestring | 1.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wiggle | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wiggle-generate | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wiggle-macro | 46.0.1 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| winapi | 0.3.9 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| winapi-i686-pc-windows-gnu | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| winapi-util | 0.1.11 | Unlicense, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows | 0.54.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows | 0.61.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows | 0.62.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-collections | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-collections | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-core | 0.54.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-core | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-core | 0.61.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-core | 0.62.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-future | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-future | 0.3.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-implement | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-implement | 0.60.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-interface | 0.57.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-interface | 0.59.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-link | 0.1.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-link | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-numerics | 0.2.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-numerics | 0.3.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-registry | 0.5.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-registry | 0.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-result | 0.1.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-result | 0.3.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-result | 0.4.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-strings | 0.4.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-strings | 0.5.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-sys | 0.45.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-sys | 0.48.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-sys | 0.52.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-sys | 0.59.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-sys | 0.60.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-sys | 0.61.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-targets | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-targets | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-targets | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-targets | 0.53.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-threading | 0.1.0 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows-threading | 0.2.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_gnullvm | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_gnullvm | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_gnullvm | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_gnullvm | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_msvc | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_msvc | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_msvc | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_aarch64_msvc | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_gnu | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_gnu | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_gnu | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_gnu | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_gnullvm | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_gnullvm | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_msvc | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_msvc | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_msvc | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_i686_msvc | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnu | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnu | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnu | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnu | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnullvm | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnullvm | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnullvm | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_gnullvm | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_msvc | 0.42.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_msvc | 0.48.5 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_msvc | 0.52.6 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| windows_x86_64_msvc | 0.53.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| winnow | 0.7.15 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| winnow | 1.0.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| winreg | 0.55.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| winsafe | 0.0.19 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| winscard | 0.3.3 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| winx | 0.36.4 | Apache-2.0 WITH LLVM-exception | registry+https://github.com/rust-lang/crates.io-index |
-| wio | 0.2.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wit-bindgen | 0.51.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wit-bindgen | 0.57.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| wit-parser | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| witx | 0.9.1 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| writeable | 0.6.3 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| wyz | 0.5.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| x11-clipboard | 0.9.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| x11-dl | 2.21.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| x11rb | 0.13.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| x11rb-protocol | 0.13.2 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| x25519-dalek | 3.0.0-rc.1 | BSD-3-Clause | registry+https://github.com/rust-lang/crates.io-index |
-| x509-cert | 0.2.5 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xattr | 1.6.1 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| xcursor | 0.3.10 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xim-ctext | 0.3.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xim-parser | 0.2.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xkbcommon | 0.8.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xkeysym | 0.2.1 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| xml-rs | 0.8.28 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| xmlwriter | 0.1.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| y4m | 0.8.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| yazi | 0.2.1 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| yeslogic-fontconfig-sys | 6.0.1 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| yoke | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| yoke-derive | 0.8.2 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| yuv | 0.8.16 | BSD-3-Clause, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zbus | 5.15.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus-lockstep | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus-lockstep-macros | 0.5.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus_macros | 5.15.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus_names | 4.3.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zbus_xml | 5.2.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zed-font-kit | 0.14.1-zed | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zed-xim | 0.4.0-zed | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zeno | 0.3.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zerocopy | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zerocopy-derive | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zerofrom | 0.1.7 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zerofrom-derive | 0.1.7 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zeroize | 1.8.2 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zeroize_derive | 1.4.3 | Apache-2.0, MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zerotrie | 0.2.4 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zerovec | 0.11.6 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zerovec-derive | 0.11.3 | Unicode-3.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zip | 2.4.2 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zmij | 1.0.21 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zopfli | 0.8.3 | Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zstd | 0.13.3 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zstd-safe | 7.2.4 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zstd-sys | 2.0.16+zstd.1.5.7 | MIT, Apache-2.0 | registry+https://github.com/rust-lang/crates.io-index |
-| zune-core | 0.4.12 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| zune-core | 0.5.1 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| zune-inflate | 0.2.54 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| zune-jpeg | 0.4.21 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| zune-jpeg | 0.5.15 | MIT, Apache-2.0, Zlib | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant | 5.13.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant_derive | 5.13.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
-| zvariant_utils | 3.5.0 | MIT | registry+https://github.com/rust-lang/crates.io-index |
+| russh-cryptovec | 0.61.0 | Apache-2.0 | https://crates.io/crates/russh-cryptovec |
+| russh-util | 0.52.0 | Apache-2.0 | https://crates.io/crates/russh-util |
+| rust-embed | 8.11.0 | MIT | https://crates.io/crates/rust-embed |
+| rust-embed-impl | 8.11.0 | MIT | https://crates.io/crates/rust-embed-impl |
+| rust-embed-utils | 8.11.0 | MIT | https://crates.io/crates/rust-embed-utils |
+| rust-stemmers | 1.2.0 | MIT, BSD-3-Clause | https://crates.io/crates/rust-stemmers |
+| rustc-demangle | 0.1.27 | MIT, Apache-2.0 | https://crates.io/crates/rustc-demangle |
+| rustc-hash | 1.1.0 | Apache-2.0, MIT | https://crates.io/crates/rustc-hash |
+| rustc-hash | 2.1.2 | Apache-2.0, MIT | https://crates.io/crates/rustc-hash |
+| rustc_version | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/rustc_version |
+| rustcrypto-ff | 0.14.0-rc.1 | MIT, Apache-2.0 | https://crates.io/crates/rustcrypto-ff |
+| rustcrypto-ff_derive | 0.14.0-rc.0 | MIT, Apache-2.0 | https://crates.io/crates/rustcrypto-ff_derive |
+| rustcrypto-group | 0.14.0-rc.1 | MIT, Apache-2.0 | https://crates.io/crates/rustcrypto-group |
+| rusticata-macros | 4.1.0 | MIT, Apache-2.0 | https://crates.io/crates/rusticata-macros |
+| rustix | 0.38.44 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/rustix |
+| rustix | 1.1.4 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/rustix |
+| rustix-linux-procfs | 0.1.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/rustix-linux-procfs |
+| rustix-openpty | 0.2.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/rustix-openpty |
+| rustls | 0.23.40 | Apache-2.0, ISC, MIT | https://crates.io/crates/rustls |
+| rustls-pki-types | 1.14.1 | MIT, Apache-2.0 | https://crates.io/crates/rustls-pki-types |
+| rustls-webpki | 0.103.13 | ISC | https://crates.io/crates/rustls-webpki |
+| rustversion | 1.0.22 | MIT, Apache-2.0 | https://crates.io/crates/rustversion |
+| rusty-fork | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/rusty-fork |
+| rustybuzz | 0.20.1 | MIT | https://crates.io/crates/rustybuzz |
+| ryu | 1.0.23 | Apache-2.0, BSL-1.0 | https://crates.io/crates/ryu |
+| safe_arch | 0.9.3 | Zlib, Apache-2.0, MIT | https://crates.io/crates/safe_arch |
+| safe_arch | 1.1.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/safe_arch |
+| salsa20 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/salsa20 |
+| same-file | 1.0.6 | Unlicense, MIT | https://crates.io/crates/same-file |
+| schannel | 0.1.29 | MIT | https://crates.io/crates/schannel |
+| schemars | 1.2.1 | MIT | https://crates.io/crates/schemars |
+| schemars_derive | 1.2.1 | MIT | https://crates.io/crates/schemars_derive |
+| scoped-tls | 1.0.1 | MIT, Apache-2.0 | https://crates.io/crates/scoped-tls |
+| scopeguard | 1.2.0 | MIT, Apache-2.0 | https://crates.io/crates/scopeguard |
+| scraper | 0.27.0 | ISC | https://crates.io/crates/scraper |
+| scrypt | 0.12.0 | MIT, Apache-2.0 | https://crates.io/crates/scrypt |
+| seahash | 4.1.0 | MIT | https://crates.io/crates/seahash |
+| sec1 | 0.8.1 | Apache-2.0, MIT | https://crates.io/crates/sec1 |
+| secrecy | 0.10.3 | Apache-2.0, MIT | https://crates.io/crates/secrecy |
+| security-framework | 2.11.1 | MIT, Apache-2.0 | https://crates.io/crates/security-framework |
+| security-framework | 3.7.0 | MIT, Apache-2.0 | https://crates.io/crates/security-framework |
+| security-framework-sys | 2.17.0 | MIT, Apache-2.0 | https://crates.io/crates/security-framework-sys |
+| selectors | 0.38.0 | MPL-2.0 | https://crates.io/crates/selectors |
+| self_cell | 1.2.2 | Apache-2.0, GPL-2.0-only | https://crates.io/crates/self_cell |
+| semver | 1.0.28 | MIT, Apache-2.0 | https://crates.io/crates/semver |
+| serde | 1.0.228 | MIT, Apache-2.0 | https://crates.io/crates/serde |
+| serde-big-array | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/serde-big-array |
+| serde_bytes | 0.11.19 | MIT, Apache-2.0 | https://crates.io/crates/serde_bytes |
+| serde_core | 1.0.228 | MIT, Apache-2.0 | https://crates.io/crates/serde_core |
+| serde_derive | 1.0.228 | MIT, Apache-2.0 | https://crates.io/crates/serde_derive |
+| serde_derive_internals | 0.29.1 | MIT, Apache-2.0 | https://crates.io/crates/serde_derive_internals |
+| serde_fmt | 1.1.0 | Apache-2.0, MIT | https://crates.io/crates/serde_fmt |
+| serde_json | 1.0.149 | MIT, Apache-2.0 | https://crates.io/crates/serde_json |
+| serde_json_lenient | 0.2.4 | MIT, Apache-2.0 | https://crates.io/crates/serde_json_lenient |
+| serde_repr | 0.1.20 | MIT, Apache-2.0 | https://crates.io/crates/serde_repr |
+| serde_spanned | 0.6.9 | MIT, Apache-2.0 | https://crates.io/crates/serde_spanned |
+| serde_spanned | 1.1.1 | MIT, Apache-2.0 | https://crates.io/crates/serde_spanned |
+| serde_urlencoded | 0.7.1 | MIT, Apache-2.0 | https://crates.io/crates/serde_urlencoded |
+| serde_with | 3.21.0 | MIT, Apache-2.0 | https://crates.io/crates/serde_with |
+| serde_with_macros | 3.21.0 | MIT, Apache-2.0 | https://crates.io/crates/serde_with_macros |
+| serialport | 4.9.0 | MPL-2.0 | https://crates.io/crates/serialport |
+| servo_arc | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/servo_arc |
+| sha1 | 0.10.6 | MIT, Apache-2.0 | https://crates.io/crates/sha1 |
+| sha1 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/sha1 |
+| sha1_smol | 1.0.1 | BSD-3-Clause | https://crates.io/crates/sha1_smol |
+| sha2 | 0.10.9 | MIT, Apache-2.0 | https://crates.io/crates/sha2 |
+| sha2 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/sha2 |
+| sha3 | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/sha3 |
+| sha3 | 0.12.0 | MIT, Apache-2.0 | https://crates.io/crates/sha3 |
+| sharded-slab | 0.1.7 | MIT | https://crates.io/crates/sharded-slab |
+| shell-words | 1.1.1 | MIT, Apache-2.0 | https://crates.io/crates/shell-words |
+| shlex | 1.3.0 | MIT, Apache-2.0 | https://crates.io/crates/shlex |
+| signal-hook | 0.4.4 | MIT, Apache-2.0 | https://crates.io/crates/signal-hook |
+| signal-hook-registry | 1.4.8 | MIT, Apache-2.0 | https://crates.io/crates/signal-hook-registry |
+| signature | 3.0.0 | Apache-2.0, MIT | https://crates.io/crates/signature |
+| simd-adler32 | 0.3.9 | MIT | https://crates.io/crates/simd-adler32 |
+| simd_helpers | 0.1.0 | MIT | https://crates.io/crates/simd_helpers |
+| simplecss | 0.2.2 | Apache-2.0, MIT | https://crates.io/crates/simplecss |
+| siphasher | 1.0.2 | MIT, Apache-2.0 | https://crates.io/crates/siphasher |
+| skrifa | 0.40.0 | MIT, Apache-2.0 | https://crates.io/crates/skrifa |
+| slab | 0.4.12 | MIT | https://crates.io/crates/slab |
+| slotmap | 1.1.1 | Zlib | https://crates.io/crates/slotmap |
+| smallvec | 1.15.1 | MIT, Apache-2.0 | https://crates.io/crates/smallvec |
+| smol | 2.0.2 | Apache-2.0, MIT | https://crates.io/crates/smol |
+| smol_str | 0.3.6 | MIT, Apache-2.0 | https://crates.io/crates/smol_str |
+| sntrup | 0.3.0 | MIT, Apache-2.0 | https://crates.io/crates/sntrup |
+| socket2 | 0.6.3 | MIT, Apache-2.0 | https://crates.io/crates/socket2 |
+| spin | 0.10.1 | MIT | https://crates.io/crates/spin |
+| spin | 0.9.8 | MIT | https://crates.io/crates/spin |
+| spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 | https://crates.io/crates/spirv |
+| spki | 0.7.3 | Apache-2.0, MIT | https://crates.io/crates/spki |
+| spki | 0.8.0 | Apache-2.0, MIT | https://crates.io/crates/spki |
+| sponge-cursor | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/sponge-cursor |
+| ssh-cipher | 0.3.0-rc.9 | Apache-2.0, MIT | https://crates.io/crates/ssh-cipher |
+| ssh-encoding | 0.3.0-rc.9 | Apache-2.0, MIT | https://crates.io/crates/ssh-encoding |
+| ssh-key | 0.7.0-rc.10 | Apache-2.0, MIT | https://crates.io/crates/ssh-key |
+| sspi | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/sspi |
+| stable_deref_trait | 1.2.1 | MIT, Apache-2.0 | https://crates.io/crates/stable_deref_trait |
+| stacker | 0.1.24 | MIT, Apache-2.0 | https://crates.io/crates/stacker |
+| stacksafe | 1.0.2 | Apache-2.0 | https://crates.io/crates/stacksafe |
+| stacksafe-macro | 1.0.2 | Apache-2.0 | https://crates.io/crates/stacksafe-macro |
+| static_assertions | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/static_assertions |
+| streaming-iterator | 0.1.9 | MIT, Apache-2.0 | https://crates.io/crates/streaming-iterator |
+| strict-num | 0.1.1 | MIT | https://crates.io/crates/strict-num |
+| string_cache | 0.9.0 | MIT, Apache-2.0 | https://crates.io/crates/string_cache |
+| string_cache_codegen | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/string_cache_codegen |
+| strsim | 0.11.1 | MIT | https://crates.io/crates/strsim |
+| strum | 0.27.2 | MIT | https://crates.io/crates/strum |
+| strum | 0.28.0 | MIT | https://crates.io/crates/strum |
+| strum_macros | 0.27.2 | MIT | https://crates.io/crates/strum_macros |
+| strum_macros | 0.28.0 | MIT | https://crates.io/crates/strum_macros |
+| subtle | 2.6.1 | BSD-3-Clause | https://crates.io/crates/subtle |
+| svg_fmt | 0.4.5 | MIT, Apache-2.0 | https://crates.io/crates/svg_fmt |
+| svgtypes | 0.15.3 | Apache-2.0, MIT | https://crates.io/crates/svgtypes |
+| swash | 0.2.7 | Apache-2.0, MIT | https://crates.io/crates/swash |
+| symlink | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/symlink |
+| symphonia | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia |
+| symphonia-bundle-flac | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-bundle-flac |
+| symphonia-bundle-mp3 | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-bundle-mp3 |
+| symphonia-codec-aac | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-codec-aac |
+| symphonia-codec-pcm | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-codec-pcm |
+| symphonia-codec-vorbis | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-codec-vorbis |
+| symphonia-core | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-core |
+| symphonia-format-isomp4 | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-format-isomp4 |
+| symphonia-format-ogg | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-format-ogg |
+| symphonia-format-riff | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-format-riff |
+| symphonia-metadata | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-metadata |
+| symphonia-utils-xiph | 0.5.5 | MPL-2.0 | https://crates.io/crates/symphonia-utils-xiph |
+| syn | 1.0.109 | MIT, Apache-2.0 | https://crates.io/crates/syn |
+| syn | 2.0.117 | MIT, Apache-2.0 | https://crates.io/crates/syn |
+| sync_wrapper | 1.0.2 | Apache-2.0 | https://crates.io/crates/sync_wrapper |
+| synstructure | 0.13.2 | MIT | https://crates.io/crates/synstructure |
+| syntect | 5.3.0 | MIT | https://crates.io/crates/syntect |
+| sys-locale | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/sys-locale |
+| sysinfo | 0.33.1 | MIT | https://crates.io/crates/sysinfo |
+| system-configuration | 0.7.0 | MIT, Apache-2.0 | https://crates.io/crates/system-configuration |
+| system-configuration-sys | 0.6.0 | MIT, Apache-2.0 | https://crates.io/crates/system-configuration-sys |
+| system-deps | 7.0.8 | MIT, Apache-2.0 | https://crates.io/crates/system-deps |
+| system-fonts | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/system-fonts |
+| taffy | 0.10.1 | MIT | https://crates.io/crates/taffy |
+| take-until | 0.2.0 | MIT | https://crates.io/crates/take-until |
+| tap | 1.0.1 | MIT | https://crates.io/crates/tap |
+| tar | 0.4.45 | MIT, Apache-2.0 | https://crates.io/crates/tar |
+| target-lexicon | 0.13.3 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/target-lexicon |
+| tempfile | 3.27.0 | MIT, Apache-2.0 | https://crates.io/crates/tempfile |
+| tendril | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/tendril |
+| tendril | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/tendril |
+| termcolor | 1.4.1 | Unlicense, MIT | https://crates.io/crates/termcolor |
+| thiserror | 1.0.69 | MIT, Apache-2.0 | https://crates.io/crates/thiserror |
+| thiserror | 2.0.18 | MIT, Apache-2.0 | https://crates.io/crates/thiserror |
+| thiserror-impl | 1.0.69 | MIT, Apache-2.0 | https://crates.io/crates/thiserror-impl |
+| thiserror-impl | 2.0.18 | MIT, Apache-2.0 | https://crates.io/crates/thiserror-impl |
+| thread_local | 1.1.9 | MIT, Apache-2.0 | https://crates.io/crates/thread_local |
+| tiff | 0.11.3 | MIT | https://crates.io/crates/tiff |
+| time | 0.3.47 | MIT, Apache-2.0 | https://crates.io/crates/time |
+| time-core | 0.1.8 | MIT, Apache-2.0 | https://crates.io/crates/time-core |
+| tiny-keccak | 2.0.2 | CC0-1.0 | https://crates.io/crates/tiny-keccak |
+| tiny-skia | 0.11.4 | BSD-3-Clause | https://crates.io/crates/tiny-skia |
+| tiny-skia-path | 0.11.4 | BSD-3-Clause | https://crates.io/crates/tiny-skia-path |
+| tinystr | 0.8.3 | Unicode-3.0 | https://crates.io/crates/tinystr |
+| tinyvec | 1.11.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/tinyvec |
+| tinyvec_macros | 0.1.1 | MIT, Apache-2.0, Zlib | https://crates.io/crates/tinyvec_macros |
+| tokio | 1.52.1 | MIT | https://crates.io/crates/tokio |
+| tokio-macros | 2.7.0 | MIT | https://crates.io/crates/tokio-macros |
+| tokio-native-tls | 0.3.1 | MIT | https://crates.io/crates/tokio-native-tls |
+| tokio-rustls | 0.26.4 | MIT, Apache-2.0 | https://crates.io/crates/tokio-rustls |
+| tokio-util | 0.7.18 | MIT | https://crates.io/crates/tokio-util |
+| toml | 0.8.23 | MIT, Apache-2.0 | https://crates.io/crates/toml |
+| toml | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml |
+| toml_datetime | 0.6.11 | MIT, Apache-2.0 | https://crates.io/crates/toml_datetime |
+| toml_datetime | 1.1.1+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml_datetime |
+| toml_edit | 0.22.27 | MIT, Apache-2.0 | https://crates.io/crates/toml_edit |
+| toml_edit | 0.25.11+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml_edit |
+| toml_parser | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml_parser |
+| toml_write | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/toml_write |
+| toml_writer | 1.1.1+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml_writer |
+| tower | 0.5.3 | MIT | https://crates.io/crates/tower |
+| tower-http | 0.6.10 | MIT | https://crates.io/crates/tower-http |
+| tower-layer | 0.3.3 | MIT | https://crates.io/crates/tower-layer |
+| tower-service | 0.3.3 | MIT | https://crates.io/crates/tower-service |
+| tracing | 0.1.44 | MIT | https://crates.io/crates/tracing |
+| tracing-appender | 0.2.5 | MIT | https://crates.io/crates/tracing-appender |
+| tracing-attributes | 0.1.31 | MIT | https://crates.io/crates/tracing-attributes |
+| tracing-core | 0.1.36 | MIT | https://crates.io/crates/tracing-core |
+| tracing-log | 0.2.0 | MIT | https://crates.io/crates/tracing-log |
+| tracing-subscriber | 0.3.23 | MIT | https://crates.io/crates/tracing-subscriber |
+| tree-sitter | 0.25.10 | MIT | https://crates.io/crates/tree-sitter |
+| tree-sitter-bash | 0.23.3 | MIT | https://crates.io/crates/tree-sitter-bash |
+| tree-sitter-c | 0.24.2 | MIT | https://crates.io/crates/tree-sitter-c |
+| tree-sitter-c-sharp | 0.23.5 | MIT | https://crates.io/crates/tree-sitter-c-sharp |
+| tree-sitter-cmake | 0.7.1 | MIT | https://crates.io/crates/tree-sitter-cmake |
+| tree-sitter-commonlisp | 0.4.1 | MIT | https://crates.io/crates/tree-sitter-commonlisp |
+| tree-sitter-containerfile | 0.8.0 | MIT | https://crates.io/crates/tree-sitter-containerfile |
+| tree-sitter-cpp | 0.23.4 | MIT | https://crates.io/crates/tree-sitter-cpp |
+| tree-sitter-css | 0.23.2 | MIT | https://crates.io/crates/tree-sitter-css |
+| tree-sitter-diff | 0.1.0 | MIT | https://crates.io/crates/tree-sitter-diff |
+| tree-sitter-elixir | 0.3.5 | Apache-2.0 | https://crates.io/crates/tree-sitter-elixir |
+| tree-sitter-fish | 3.6.0 | MIT | https://crates.io/crates/tree-sitter-fish |
+| tree-sitter-go | 0.23.4 | MIT | https://crates.io/crates/tree-sitter-go |
+| tree-sitter-html | 0.23.2 | MIT | https://crates.io/crates/tree-sitter-html |
+| tree-sitter-java | 0.23.5 | MIT | https://crates.io/crates/tree-sitter-java |
+| tree-sitter-javascript | 0.23.1 | MIT | https://crates.io/crates/tree-sitter-javascript |
+| tree-sitter-json | 0.24.8 | MIT | https://crates.io/crates/tree-sitter-json |
+| tree-sitter-language | 0.1.7 | MIT | https://crates.io/crates/tree-sitter-language |
+| tree-sitter-lua | 0.5.0 | MIT | https://crates.io/crates/tree-sitter-lua |
+| tree-sitter-make | 1.1.1 | MIT | https://crates.io/crates/tree-sitter-make |
+| tree-sitter-md | 0.5.3 | MIT | https://crates.io/crates/tree-sitter-md |
+| tree-sitter-objc | 3.0.2 | MIT | https://crates.io/crates/tree-sitter-objc |
+| tree-sitter-php | 0.24.2 | MIT | https://crates.io/crates/tree-sitter-php |
+| tree-sitter-powershell | 0.26.4 | MIT | https://crates.io/crates/tree-sitter-powershell |
+| tree-sitter-python | 0.23.6 | MIT | https://crates.io/crates/tree-sitter-python |
+| tree-sitter-r | 1.2.0 | MIT | https://crates.io/crates/tree-sitter-r |
+| tree-sitter-ruby | 0.23.1 | MIT | https://crates.io/crates/tree-sitter-ruby |
+| tree-sitter-rust | 0.24.2 | MIT | https://crates.io/crates/tree-sitter-rust |
+| tree-sitter-scala | 0.23.4 | MIT | https://crates.io/crates/tree-sitter-scala |
+| tree-sitter-sequel | 0.3.11 | MIT | https://crates.io/crates/tree-sitter-sequel |
+| tree-sitter-swift | 0.7.2 | MIT | https://crates.io/crates/tree-sitter-swift |
+| tree-sitter-toml-ng | 0.7.0 | MIT | https://crates.io/crates/tree-sitter-toml-ng |
+| tree-sitter-typescript | 0.23.2 | MIT | https://crates.io/crates/tree-sitter-typescript |
+| tree-sitter-yaml | 0.7.2 | MIT | https://crates.io/crates/tree-sitter-yaml |
+| tree-sitter-zig | 1.1.2 | MIT | https://crates.io/crates/tree-sitter-zig |
+| tree-sitter-zsh | 0.63.4 | MIT | https://crates.io/crates/tree-sitter-zsh |
+| try-lock | 0.2.5 | MIT | https://crates.io/crates/try-lock |
+| ts-parser-perl | 1.0.2 | MIT | https://crates.io/crates/ts-parser-perl |
+| ttf-parser | 0.25.1 | MIT, Apache-2.0 | https://crates.io/crates/ttf-parser |
+| typeid | 1.0.3 | MIT, Apache-2.0 | https://crates.io/crates/typeid |
+| typenum | 1.20.0 | MIT, Apache-2.0 | https://crates.io/crates/typenum |
+| uds_windows | 1.2.1 | MIT | https://crates.io/crates/uds_windows |
+| unarray | 0.1.4 | MIT, Apache-2.0 | https://crates.io/crates/unarray |
+| unescaper | 0.1.8 | GPL-3.0, MIT | https://crates.io/crates/unescaper |
+| unicase | 2.9.0 | MIT, Apache-2.0 | https://crates.io/crates/unicase |
+| unicode-bidi | 0.3.18 | MIT, Apache-2.0 | https://crates.io/crates/unicode-bidi |
+| unicode-bidi-mirroring | 0.4.0 | MIT, Apache-2.0 | https://crates.io/crates/unicode-bidi-mirroring |
+| unicode-ccc | 0.4.0 | MIT, Apache-2.0 | https://crates.io/crates/unicode-ccc |
+| unicode-ident | 1.0.24 | MIT, Apache-2.0, Unicode-3.0 | https://crates.io/crates/unicode-ident |
+| unicode-linebreak | 0.1.5 | Apache-2.0 | https://crates.io/crates/unicode-linebreak |
+| unicode-normalization | 0.1.25 | MIT, Apache-2.0 | https://crates.io/crates/unicode-normalization |
+| unicode-properties | 0.1.4 | MIT, Apache-2.0 | https://crates.io/crates/unicode-properties |
+| unicode-script | 0.5.8 | MIT, Apache-2.0 | https://crates.io/crates/unicode-script |
+| unicode-segmentation | 1.13.2 | MIT, Apache-2.0 | https://crates.io/crates/unicode-segmentation |
+| unicode-vo | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/unicode-vo |
+| unicode-width | 0.2.2 | MIT, Apache-2.0 | https://crates.io/crates/unicode-width |
+| unicode-xid | 0.2.6 | MIT, Apache-2.0 | https://crates.io/crates/unicode-xid |
+| universal-hash | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/universal-hash |
+| universal-hash | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/universal-hash |
+| untrusted | 0.7.1 | ISC | https://crates.io/crates/untrusted |
+| untrusted | 0.9.0 | ISC | https://crates.io/crates/untrusted |
+| url | 2.5.8 | MIT, Apache-2.0 | https://crates.io/crates/url |
+| usvg | 0.45.1 | Apache-2.0, MIT | https://crates.io/crates/usvg |
+| utf-8 | 0.7.6 | MIT, Apache-2.0 | https://crates.io/crates/utf-8 |
+| utf8_iter | 1.0.4 | Apache-2.0, MIT | https://crates.io/crates/utf8_iter |
+| utf8parse | 0.2.2 | Apache-2.0, MIT | https://crates.io/crates/utf8parse |
+| uuid | 1.23.1 | Apache-2.0, MIT | https://crates.io/crates/uuid |
+| v_frame | 0.3.9 | BSD-2-Clause | https://crates.io/crates/v_frame |
+| value-bag | 1.12.0 | Apache-2.0, MIT | https://crates.io/crates/value-bag |
+| value-bag-serde1 | 1.12.0 | Apache-2.0, MIT | https://crates.io/crates/value-bag-serde1 |
+| vcpkg | 0.2.15 | MIT, Apache-2.0 | https://crates.io/crates/vcpkg |
+| version-compare | 0.2.1 | MIT | https://crates.io/crates/version-compare |
+| version_check | 0.9.5 | MIT, Apache-2.0 | https://crates.io/crates/version_check |
+| vswhom | 0.1.0 | MIT | https://crates.io/crates/vswhom |
+| vswhom-sys | 0.1.3 | MIT | https://crates.io/crates/vswhom-sys |
+| vte | 0.15.0 | Apache-2.0, MIT | https://crates.io/crates/vte |
+| wait-timeout | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/wait-timeout |
+| waker-fn | 1.2.0 | Apache-2.0, MIT | https://crates.io/crates/waker-fn |
+| walkdir | 2.5.0 | Unlicense, MIT | https://crates.io/crates/walkdir |
+| want | 0.3.1 | MIT | https://crates.io/crates/want |
+| wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wasi |
+| wasip2 | 1.0.3+wasi-0.2.9 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wasip2 |
+| wasip3 | 0.4.0+wasi-0.3.0-rc-2026-01-06 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wasip3 |
+| wasite | 0.1.0 | Apache-2.0, BSL-1.0, MIT | https://crates.io/crates/wasite |
+| wasm-bindgen | 0.2.122 | MIT, Apache-2.0 | https://crates.io/crates/wasm-bindgen |
+| wasm-bindgen-futures | 0.4.72 | MIT, Apache-2.0 | https://crates.io/crates/wasm-bindgen-futures |
+| wasm-bindgen-macro | 0.2.122 | MIT, Apache-2.0 | https://crates.io/crates/wasm-bindgen-macro |
+| wasm-bindgen-macro-support | 0.2.122 | MIT, Apache-2.0 | https://crates.io/crates/wasm-bindgen-macro-support |
+| wasm-bindgen-shared | 0.2.122 | MIT, Apache-2.0 | https://crates.io/crates/wasm-bindgen-shared |
+| wasm-encoder | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wasm-encoder |
+| wasm-streams | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/wasm-streams |
+| wasmparser | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wasmparser |
+| wasmprinter | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wasmprinter |
+| wasmtime | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime |
+| wasmtime-environ | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-environ |
+| wasmtime-internal-component-macro | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-component-macro |
+| wasmtime-internal-component-util | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-component-util |
+| wasmtime-internal-core | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-core |
+| wasmtime-internal-cranelift | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-cranelift |
+| wasmtime-internal-fiber | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-fiber |
+| wasmtime-internal-jit-icache-coherence | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-jit-icache-coherence |
+| wasmtime-internal-unwinder | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-unwinder |
+| wasmtime-internal-versioned-export-macros | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-versioned-export-macros |
+| wasmtime-internal-wit-bindgen | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-internal-wit-bindgen |
+| wasmtime-wasi | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-wasi |
+| wasmtime-wasi-io | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wasmtime-wasi-io |
+| wast | 35.0.2 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wast |
+| wayland-backend | 0.3.15 | MIT | https://crates.io/crates/wayland-backend |
+| wayland-client | 0.31.14 | MIT | https://crates.io/crates/wayland-client |
+| wayland-cursor | 0.31.14 | MIT | https://crates.io/crates/wayland-cursor |
+| wayland-protocols | 0.32.12 | MIT | https://crates.io/crates/wayland-protocols |
+| wayland-protocols-plasma | 0.3.12 | MIT | https://crates.io/crates/wayland-protocols-plasma |
+| wayland-protocols-wlr | 0.3.12 | MIT | https://crates.io/crates/wayland-protocols-wlr |
+| wayland-scanner | 0.31.10 | MIT | https://crates.io/crates/wayland-scanner |
+| wayland-sys | 0.31.11 | MIT | https://crates.io/crates/wayland-sys |
+| web-sys | 0.3.99 | MIT, Apache-2.0 | https://crates.io/crates/web-sys |
+| web-time | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/web-time |
+| web_atoms | 0.2.5 | MIT, Apache-2.0 | https://crates.io/crates/web_atoms |
+| webpki-roots | 1.0.7 | CDLA-Permissive-2.0 | https://crates.io/crates/webpki-roots |
+| weezl | 0.1.12 | MIT, Apache-2.0 | https://crates.io/crates/weezl |
+| wgpu | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu |
+| wgpu-core | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-core |
+| wgpu-core-deps-apple | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-core-deps-apple |
+| wgpu-core-deps-emscripten | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-core-deps-emscripten |
+| wgpu-core-deps-windows-linux-android | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-core-deps-windows-linux-android |
+| wgpu-hal | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-hal |
+| wgpu-naga-bridge | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-naga-bridge |
+| wgpu-types | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-types |
+| which | 6.0.3 | MIT | https://crates.io/crates/which |
+| whoami | 1.6.1 | Apache-2.0, BSL-1.0, MIT | https://crates.io/crates/whoami |
+| wide | 0.8.3 | Zlib, Apache-2.0, MIT | https://crates.io/crates/wide |
+| wide | 1.5.0 | Zlib, Apache-2.0, MIT | https://crates.io/crates/wide |
+| widestring | 1.2.1 | MIT, Apache-2.0 | https://crates.io/crates/widestring |
+| wiggle | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wiggle |
+| wiggle-generate | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wiggle-generate |
+| wiggle-macro | 46.0.1 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/wiggle-macro |
+| winapi | 0.3.9 | MIT, Apache-2.0 | https://crates.io/crates/winapi |
+| winapi-i686-pc-windows-gnu | 0.4.0 | MIT, Apache-2.0 | https://crates.io/crates/winapi-i686-pc-windows-gnu |
+| winapi-util | 0.1.11 | Unlicense, MIT | https://crates.io/crates/winapi-util |
+| winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT, Apache-2.0 | https://crates.io/crates/winapi-x86_64-pc-windows-gnu |
+| windows | 0.54.0 | MIT, Apache-2.0 | https://crates.io/crates/windows |
+| windows | 0.57.0 | MIT, Apache-2.0 | https://crates.io/crates/windows |
+| windows | 0.61.3 | MIT, Apache-2.0 | https://crates.io/crates/windows |
+| windows | 0.62.2 | MIT, Apache-2.0 | https://crates.io/crates/windows |
+| windows-collections | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-collections |
+| windows-collections | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-collections |
+| windows-core | 0.54.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-core |
+| windows-core | 0.57.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-core |
+| windows-core | 0.61.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-core |
+| windows-core | 0.62.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-core |
+| windows-future | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-future |
+| windows-future | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-future |
+| windows-implement | 0.57.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-implement |
+| windows-implement | 0.60.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-implement |
+| windows-interface | 0.57.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-interface |
+| windows-interface | 0.59.3 | MIT, Apache-2.0 | https://crates.io/crates/windows-interface |
+| windows-link | 0.1.3 | MIT, Apache-2.0 | https://crates.io/crates/windows-link |
+| windows-link | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-link |
+| windows-numerics | 0.2.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-numerics |
+| windows-numerics | 0.3.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-numerics |
+| windows-registry | 0.5.3 | MIT, Apache-2.0 | https://crates.io/crates/windows-registry |
+| windows-registry | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-registry |
+| windows-result | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-result |
+| windows-result | 0.3.4 | MIT, Apache-2.0 | https://crates.io/crates/windows-result |
+| windows-result | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-result |
+| windows-strings | 0.4.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-strings |
+| windows-strings | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-strings |
+| windows-sys | 0.45.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-sys |
+| windows-sys | 0.48.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-sys |
+| windows-sys | 0.52.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-sys |
+| windows-sys | 0.59.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-sys |
+| windows-sys | 0.60.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-sys |
+| windows-sys | 0.61.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-sys |
+| windows-targets | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows-targets |
+| windows-targets | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows-targets |
+| windows-targets | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows-targets |
+| windows-targets | 0.53.5 | MIT, Apache-2.0 | https://crates.io/crates/windows-targets |
+| windows-threading | 0.1.0 | MIT, Apache-2.0 | https://crates.io/crates/windows-threading |
+| windows-threading | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/windows-threading |
+| windows_aarch64_gnullvm | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_gnullvm |
+| windows_aarch64_gnullvm | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_gnullvm |
+| windows_aarch64_gnullvm | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_gnullvm |
+| windows_aarch64_gnullvm | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_gnullvm |
+| windows_aarch64_msvc | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_msvc |
+| windows_aarch64_msvc | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_msvc |
+| windows_aarch64_msvc | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_msvc |
+| windows_aarch64_msvc | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_aarch64_msvc |
+| windows_i686_gnu | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_gnu |
+| windows_i686_gnu | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_gnu |
+| windows_i686_gnu | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_gnu |
+| windows_i686_gnu | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_gnu |
+| windows_i686_gnullvm | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_gnullvm |
+| windows_i686_gnullvm | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_gnullvm |
+| windows_i686_msvc | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_msvc |
+| windows_i686_msvc | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_msvc |
+| windows_i686_msvc | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_msvc |
+| windows_i686_msvc | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_i686_msvc |
+| windows_x86_64_gnu | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnu |
+| windows_x86_64_gnu | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnu |
+| windows_x86_64_gnu | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnu |
+| windows_x86_64_gnu | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnu |
+| windows_x86_64_gnullvm | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnullvm |
+| windows_x86_64_gnullvm | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnullvm |
+| windows_x86_64_gnullvm | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnullvm |
+| windows_x86_64_gnullvm | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_gnullvm |
+| windows_x86_64_msvc | 0.42.2 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_msvc |
+| windows_x86_64_msvc | 0.48.5 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_msvc |
+| windows_x86_64_msvc | 0.52.6 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_msvc |
+| windows_x86_64_msvc | 0.53.1 | MIT, Apache-2.0 | https://crates.io/crates/windows_x86_64_msvc |
+| winnow | 0.7.15 | MIT | https://crates.io/crates/winnow |
+| winnow | 1.0.2 | MIT | https://crates.io/crates/winnow |
+| winreg | 0.55.0 | MIT | https://crates.io/crates/winreg |
+| winsafe | 0.0.19 | MIT | https://crates.io/crates/winsafe |
+| winscard | 0.3.3 | MIT, Apache-2.0 | https://crates.io/crates/winscard |
+| winx | 0.36.4 | Apache-2.0 WITH LLVM-exception | https://crates.io/crates/winx |
+| wio | 0.2.2 | MIT, Apache-2.0 | https://crates.io/crates/wio |
+| wit-bindgen | 0.51.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wit-bindgen |
+| wit-bindgen | 0.57.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wit-bindgen |
+| wit-parser | 0.251.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/wit-parser |
+| witx | 0.9.1 | Apache-2.0 | https://crates.io/crates/witx |
+| writeable | 0.6.3 | Unicode-3.0 | https://crates.io/crates/writeable |
+| wyz | 0.5.1 | MIT | https://crates.io/crates/wyz |
+| x11-clipboard | 0.9.3 | MIT | https://crates.io/crates/x11-clipboard |
+| x11-dl | 2.21.0 | MIT | https://crates.io/crates/x11-dl |
+| x11rb | 0.13.2 | MIT, Apache-2.0 | https://crates.io/crates/x11rb |
+| x11rb-protocol | 0.13.2 | MIT, Apache-2.0 | https://crates.io/crates/x11rb-protocol |
+| x25519-dalek | 3.0.0-rc.1 | BSD-3-Clause | https://crates.io/crates/x25519-dalek |
+| x509-cert | 0.2.5 | Apache-2.0, MIT | https://crates.io/crates/x509-cert |
+| xattr | 1.6.1 | MIT, Apache-2.0 | https://crates.io/crates/xattr |
+| xcursor | 0.3.10 | MIT | https://crates.io/crates/xcursor |
+| xim-ctext | 0.3.0 | MIT | https://crates.io/crates/xim-ctext |
+| xim-parser | 0.2.2 | MIT | https://crates.io/crates/xim-parser |
+| xkbcommon | 0.8.0 | MIT | https://crates.io/crates/xkbcommon |
+| xkeysym | 0.2.1 | MIT, Apache-2.0, Zlib | https://crates.io/crates/xkeysym |
+| xml-rs | 0.8.28 | MIT | https://crates.io/crates/xml-rs |
+| xmlwriter | 0.1.0 | MIT | https://crates.io/crates/xmlwriter |
+| y4m | 0.8.0 | MIT | https://crates.io/crates/y4m |
+| yazi | 0.2.1 | Apache-2.0, MIT | https://crates.io/crates/yazi |
+| yeslogic-fontconfig-sys | 6.0.1 | MIT | https://crates.io/crates/yeslogic-fontconfig-sys |
+| yoke | 0.8.2 | Unicode-3.0 | https://crates.io/crates/yoke |
+| yoke-derive | 0.8.2 | Unicode-3.0 | https://crates.io/crates/yoke-derive |
+| yuv | 0.8.16 | BSD-3-Clause, Apache-2.0 | https://crates.io/crates/yuv |
+| zbus | 5.15.0 | MIT | https://crates.io/crates/zbus |
+| zbus-lockstep | 0.5.2 | MIT | https://crates.io/crates/zbus-lockstep |
+| zbus-lockstep-macros | 0.5.2 | MIT | https://crates.io/crates/zbus-lockstep-macros |
+| zbus_macros | 5.15.0 | MIT | https://crates.io/crates/zbus_macros |
+| zbus_names | 4.3.3 | MIT | https://crates.io/crates/zbus_names |
+| zbus_xml | 5.2.0 | MIT | https://crates.io/crates/zbus_xml |
+| zed-font-kit | 0.14.1-zed | MIT, Apache-2.0 | https://crates.io/crates/zed-font-kit |
+| zed-xim | 0.4.0-zed | MIT | https://crates.io/crates/zed-xim |
+| zeno | 0.3.3 | Apache-2.0, MIT | https://crates.io/crates/zeno |
+| zerocopy | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | https://crates.io/crates/zerocopy |
+| zerocopy-derive | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | https://crates.io/crates/zerocopy-derive |
+| zerofrom | 0.1.7 | Unicode-3.0 | https://crates.io/crates/zerofrom |
+| zerofrom-derive | 0.1.7 | Unicode-3.0 | https://crates.io/crates/zerofrom-derive |
+| zeroize | 1.8.2 | Apache-2.0, MIT | https://crates.io/crates/zeroize |
+| zeroize_derive | 1.4.3 | Apache-2.0, MIT | https://crates.io/crates/zeroize_derive |
+| zerotrie | 0.2.4 | Unicode-3.0 | https://crates.io/crates/zerotrie |
+| zerovec | 0.11.6 | Unicode-3.0 | https://crates.io/crates/zerovec |
+| zerovec-derive | 0.11.3 | Unicode-3.0 | https://crates.io/crates/zerovec-derive |
+| zip | 2.4.2 | MIT | https://crates.io/crates/zip |
+| zmij | 1.0.21 | MIT | https://crates.io/crates/zmij |
+| zopfli | 0.8.3 | Apache-2.0 | https://crates.io/crates/zopfli |
+| zstd | 0.13.3 | MIT | https://crates.io/crates/zstd |
+| zstd-safe | 7.2.4 | MIT, Apache-2.0 | https://crates.io/crates/zstd-safe |
+| zstd-sys | 2.0.16+zstd.1.5.7 | MIT, Apache-2.0 | https://crates.io/crates/zstd-sys |
+| zune-core | 0.4.12 | MIT, Apache-2.0, Zlib | https://crates.io/crates/zune-core |
+| zune-core | 0.5.1 | MIT, Apache-2.0, Zlib | https://crates.io/crates/zune-core |
+| zune-inflate | 0.2.54 | MIT, Apache-2.0, Zlib | https://crates.io/crates/zune-inflate |
+| zune-jpeg | 0.4.21 | MIT, Apache-2.0, Zlib | https://crates.io/crates/zune-jpeg |
+| zune-jpeg | 0.5.15 | MIT, Apache-2.0, Zlib | https://crates.io/crates/zune-jpeg |
+| zvariant | 5.13.0 | MIT | https://crates.io/crates/zvariant |
+| zvariant_derive | 5.13.0 | MIT | https://crates.io/crates/zvariant_derive |
+| zvariant_utils | 3.5.0 | MIT | https://crates.io/crates/zvariant_utils |
 
 ## Adapted Source
 

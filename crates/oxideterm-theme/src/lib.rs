@@ -565,7 +565,7 @@ pub struct ThemeTokens {
 
 impl ThemeTokens {
     pub fn from_builtin(theme: BuiltInTheme) -> Self {
-        let mut ui = apply_tauri_ui_overrides(
+        let mut ui = apply_builtin_ui_overrides(
             if theme.id == "default" {
                 "neutral"
             } else {
@@ -875,8 +875,8 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn has_all_tauri_builtin_themes() {
-        const EXPECTED_THEME_IDS: [&str; 31] = [
+    fn has_all_builtin_themes() {
+        const EXPECTED_THEME_IDS: [&str; 33] = [
             "default",
             "oxide",
             "dracula",
@@ -908,6 +908,8 @@ mod tests {
             "hot-pink",
             "spring-rice",
             "spring-green",
+            "code-light",
+            "solarized-light",
         ];
         assert_eq!(BUILT_IN_THEMES.len(), EXPECTED_THEME_IDS.len());
         assert_eq!(
@@ -924,6 +926,8 @@ mod tests {
         assert_eq!(unique_ids.len(), BUILT_IN_THEMES.len());
         assert_eq!(theme_by_id("default").terminal.background, 0x09090b);
         assert_eq!(theme_by_id("spring-green").terminal.cursor, 0x16a34a);
+        assert_eq!(theme_by_id("code-light").terminal.green, 0x107c10);
+        assert_eq!(theme_by_id("solarized-light").terminal.background, 0xfdf6e3);
     }
 
     #[test]
@@ -936,7 +940,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_tauri_css_theme_overrides() {
+    fn applies_builtin_theme_overrides() {
         let oxide = ThemeTokens::from_builtin(theme_by_id("oxide")).ui;
         assert_eq!(oxide.bg_panel, 0x291c16);
         assert_eq!(oxide.bg_card, 0x33231b);
@@ -947,6 +951,11 @@ mod tests {
         assert_eq!(github.bg_panel, 0x161b22);
         assert_eq!(github.bg_elevated, 0x1c2332);
         assert_eq!(github.accent, 0x58a6ff);
+
+        let code_light = ThemeTokens::from_builtin(theme_by_id("code-light")).ui;
+        assert_eq!(code_light.bg_panel, 0xf3f3f3);
+        assert_eq!(code_light.bg_active, 0xcce8ff);
+        assert_eq!(code_light.accent, 0x007acc);
     }
 
     #[test]
@@ -1030,6 +1039,8 @@ mod tests {
                 "cuprite",
                 "chromium-oxide",
                 "paper-oxide",
+                "code-light",
+                "solarized-light",
                 "magnetite",
                 "cobalt",
                 "ochre",

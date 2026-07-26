@@ -8,6 +8,7 @@ use oxideterm_settings::{
     TerminalBackspaceSequence, TerminalDeleteSequence, TerminalEncoding, UiDensity, UpdateChannel,
     UpdateProxyMode, UpdateProxyProtocol,
 };
+pub use oxideterm_settings_model::theme_display_name;
 use oxideterm_theme::BUILT_IN_THEMES;
 
 use crate::{SettingsBackgroundTabIcon, SettingsSlider};
@@ -265,20 +266,6 @@ pub fn background_tab_options() -> &'static [(&'static str, &'static str, Settin
             SettingsBackgroundTabIcon::Settings,
         ),
     ]
-}
-
-pub fn theme_display_name(id: &str) -> String {
-    id.split(['-', '_'])
-        .filter(|word| !word.is_empty())
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 pub const OXIDE_THEME_IDS: &[&str] = &[

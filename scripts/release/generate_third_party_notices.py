@@ -134,6 +134,17 @@ def parse_cargo_deny_key(key: str) -> tuple[str, str, str]:
     return name, version, source
 
 
+def normalize_source_url(name: str, source: str) -> str:
+    """Convert registry index URLs to crates.io links so readers can find the crate."""
+    if source.startswith("registry+https://github.com/rust-lang/crates.io-index"):
+        return f"https://crates.io/crates/{name}"
+    if source.startswith("registry+"):
+        return source.removeprefix("registry+")
+    if source.startswith("git+"):
+        return source.removeprefix("git+")
+    return source
+
+
 def is_excluded(crate: CrateNotice, exclude_names: set[str], exclude_prefixes: list[str]) -> bool:
     return crate.name in exclude_names or any(crate.name.startswith(prefix) for prefix in exclude_prefixes)
 
@@ -202,18 +213,22 @@ def bundled_asset_notices(cwd: Path) -> list[BundledAssetNotice]:
 
 def adapted_source_notices(cwd: Path) -> list[AdaptedSourceNotice]:
     """Describe source-derived code that cargo metadata cannot attribute."""
-    license_file = cwd / "licenses" / "third-party" / "MICROSOFT-TERMINAL-LICENSE-MIT"
-    if not license_file.is_file():
-        raise RuntimeError(f"missing adapted-source license: {license_file}")
-    return [
+    sources = [
         AdaptedSourceNotice(
             component="Microsoft Terminal text contrast and gamma correction",
             source_revision=MICROSOFT_TERMINAL_REVISION,
             license_name="MIT",
             # Release packages flatten legal documents into their license directory.
-            license_file=license_file.name,
+            license_file="MICROSOFT-TERMINAL-LICENSE-MIT",
         )
     ]
+    # Theme palettes are independently represented, but retain upstream
+    # attribution and pinned provenance alongside other adapted sources.
+    for source in sources:
+        license_path = cwd / "licenses" / "third-party" / source.license_file
+        if not license_path.is_file():
+            raise RuntimeError(f"missing adapted-source license: {license_path}")
+    return sources
 
 
 def bundled_asset_table(assets: list[BundledAssetNotice]) -> str:
@@ -253,6 +268,8 @@ def build_notices(args: argparse.Namespace) -> tuple[str, int, int]:
         if name in VENDORED_WORKSPACE_PACKAGES:
             # Absolute path sources make generated notices depend on the build checkout.
             source = "vendored in repository"
+        else:
+            source = normalize_source_url(name, source)
         crate = CrateNotice(
             name=name,
             version=version,
@@ -319,6 +336,7 @@ def build_notices(args: argparse.Namespace) -> tuple[str, int, int]:
     if adapted_sources:
         output += "## Adapted Source\n\n"
         output += adapted_source_table(adapted_sources)
+
     if bundled_assets:
         output += "## Bundled Fonts / Assets\n\n"
         output += bundled_asset_table(bundled_assets)

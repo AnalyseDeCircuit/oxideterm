@@ -1,7 +1,7 @@
-// @generated from OxideTerm Tauri src/styles.css theme CSS variables.
-// Keep this file aligned with the Tauri theme token names.
+// Built-in UI overrides initially ported from OxideTerm Tauri theme CSS variables.
+// New palettes live here when terminal colors alone cannot produce accessible light surfaces.
 
-pub(crate) fn apply_tauri_ui_overrides(theme_id: &str, mut ui: AppUiColors) -> AppUiColors {
+pub(crate) fn apply_builtin_ui_overrides(theme_id: &str, mut ui: AppUiColors) -> AppUiColors {
     match theme_id {
         "neutral" => {
             ui.bg = 0x09090b;
@@ -567,6 +567,58 @@ pub(crate) fn apply_tauri_ui_overrides(theme_id: &str, mut ui: AppUiColors) -> A
             ui.success = 0x16a34a;
             ui.warning = 0xca8a04;
             ui.error = 0xdc2626;
+        }
+        "code-light" => {
+            // Neutral surfaces evoke a code editor while explicit states avoid white-on-white controls.
+            ui.bg = 0xffffff;
+            ui.bg_panel = 0xf3f3f3;
+            ui.bg_card = 0xffffff;
+            ui.bg_hover = 0xe8e8e8;
+            ui.bg_active = 0xcce8ff;
+            ui.bg_secondary = 0xf3f3f3;
+            ui.bg_elevated = 0xffffff;
+            ui.bg_sunken = 0xeeeeee;
+            ui.text = 0x333333;
+            ui.text_muted = 0x616161;
+            ui.text_secondary = 0x555555;
+            ui.text_heading = 0x1f1f1f;
+            ui.border = 0xd4d4d4;
+            ui.border_strong = 0xb7b7b7;
+            ui.divider = 0xe5e5e5;
+            ui.accent = 0x007acc;
+            ui.accent_hover = 0x0062a3;
+            ui.accent_text = 0xffffff;
+            ui.accent_secondary = 0x616161;
+            ui.success = 0x107c10;
+            ui.warning = 0x7a6f00;
+            ui.error = 0xcd3131;
+            ui.info = 0x0451a5;
+        }
+        "solarized-light" => {
+            // Darker base tones retain Solarized's character while meeting UI contrast requirements.
+            ui.bg = 0xfdf6e3;
+            ui.bg_panel = 0xeee8d5;
+            ui.bg_card = 0xf8f1de;
+            ui.bg_hover = 0xe5decb;
+            ui.bg_active = 0xded7c4;
+            ui.bg_secondary = 0xf4edda;
+            ui.bg_elevated = 0xfffbeb;
+            ui.bg_sunken = 0xe7e0cd;
+            ui.text = 0x586e75;
+            ui.text_muted = 0x657b83;
+            ui.text_secondary = 0x657b83;
+            ui.text_heading = 0x073642;
+            ui.border = 0xd8d1bd;
+            ui.border_strong = 0xb8b09a;
+            ui.divider = 0xe2dbc8;
+            ui.accent = 0x268bd2;
+            ui.accent_hover = 0x1b6f9f;
+            ui.accent_text = 0x002b36;
+            ui.accent_secondary = 0x657b83;
+            ui.success = 0x6b7900;
+            ui.warning = 0x8a6700;
+            ui.error = 0xc52b2a;
+            ui.info = 0x1b6f9f;
         }
         _ => {}
     }

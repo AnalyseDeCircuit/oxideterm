@@ -1,4 +1,5 @@
-// Built-in terminal themes mechanically ported from the Tauri app's src/lib/themes.ts.
+// Built-in terminal themes, initially ported from the Tauri app's src/lib/themes.ts.
+// Additional palettes are independently specified from their public color values.
 
 pub const DEFAULT_THEME: BuiltInTheme = BUILT_IN_THEMES[0];
 
@@ -776,6 +777,58 @@ pub const BUILT_IN_THEMES: &[BuiltInTheme] = &[
             bright_magenta: 0x8b5cf6,
             bright_cyan: 0x06b6d4,
             bright_white: 0x052e16,
+        },
+    },
+    // Code Light independently applies the public VS Code light terminal palette.
+    BuiltInTheme {
+        id: "code-light",
+        terminal: TerminalTheme {
+            background: 0xffffff,
+            foreground: 0x333333,
+            cursor: 0x007acc,
+            selection_background: "rgba(0, 122, 204, 0.25)",
+            black: 0x000000,
+            red: 0xcd3131,
+            green: 0x107c10,
+            yellow: 0x949800,
+            blue: 0x0451a5,
+            magenta: 0xbc05bc,
+            cyan: 0x0598bc,
+            white: 0x555555,
+            bright_black: 0x666666,
+            bright_red: 0xcd3131,
+            bright_green: 0x14ce14,
+            bright_yellow: 0xb5ba00,
+            bright_blue: 0x0451a5,
+            bright_magenta: 0xbc05bc,
+            bright_cyan: 0x0598bc,
+            bright_white: 0xa5a5a5,
+        },
+    },
+    // Solarized shares one ANSI table across modes and changes only the light-mode surfaces.
+    BuiltInTheme {
+        id: "solarized-light",
+        terminal: TerminalTheme {
+            background: 0xfdf6e3,
+            foreground: 0x657b83,
+            cursor: 0x657b83,
+            selection_background: "#eee8d5",
+            black: 0x073642,
+            red: 0xdc322f,
+            green: 0x859900,
+            yellow: 0xb58900,
+            blue: 0x268bd2,
+            magenta: 0xd33682,
+            cyan: 0x2aa198,
+            white: 0xeee8d5,
+            bright_black: 0x002b36,
+            bright_red: 0xcb4b16,
+            bright_green: 0x586e75,
+            bright_yellow: 0x657b83,
+            bright_blue: 0x839496,
+            bright_magenta: 0x6c71c4,
+            bright_cyan: 0x93a1a1,
+            bright_white: 0xfdf6e3,
         },
     },
 ];
