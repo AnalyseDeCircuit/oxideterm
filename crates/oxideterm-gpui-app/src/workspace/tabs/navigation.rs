@@ -362,6 +362,32 @@ impl WorkspaceApp {
             });
     }
 
+    pub(super) fn register_existing_ssh_terminal_session(
+        &mut self,
+        node_id: &NodeId,
+        session_id: TerminalSessionId,
+    ) -> Result<()> {
+        let node = self
+            .ssh_nodes
+            .get_mut(node_id)
+            .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        if !node.terminal_ids.contains(&session_id) {
+            node.terminal_ids.push(session_id);
+        }
+        let saved_connection_id = node.saved_connection_id.clone();
+
+        // Existing terminals register only their consumer identity. The node
+        // and registry keep owning the authentication config and transport.
+        self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        self.expanded_ssh_nodes.insert(node_id.clone());
+        self.active_ssh_node_id = Some(node_id.clone());
+        if let Some(saved_connection_id) = saved_connection_id {
+            self.saved_ssh_nodes
+                .insert(saved_connection_id, node_id.clone());
+        }
+        Ok(())
+    }
+
     pub(in crate::workspace) fn unregister_ssh_terminal_session(
         &mut self,
         session_id: TerminalSessionId,

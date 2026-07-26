@@ -900,7 +900,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+        if !self.ssh_nodes.contains_key(&node_id) {
             self.push_host_package_toast(
                 self.i18n
                     .t("sidebar.host_packages.toast.exec_terminal_missing"),
@@ -908,15 +908,11 @@ impl WorkspaceApp {
             );
             cx.notify();
             return;
-        };
-        match self.queue_ssh_terminal_tab_for_node_with_mark_used(
+        }
+        match self.queue_ssh_terminal_tab_for_existing_node(
             node_id,
             Some(command.command),
-            node.config,
             title,
-            node.saved_connection_id,
-            None,
-            None,
             window,
             cx,
         ) {

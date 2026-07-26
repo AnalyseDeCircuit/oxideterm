@@ -769,71 +769,55 @@ impl WorkspaceApp {
     pub(super) fn create_ssh_terminal_pane_for_existing_node(
         &mut self,
         node_id: &NodeId,
+        post_connect_command: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(PaneId, TerminalSessionId)> {
-        let node = self
+        let (host, port, username) = self
             .ssh_nodes
             .get(node_id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
-        let origin = self
-            .node_runtime_store
-            .snapshot(node_id)
-            .map(|snapshot| snapshot.origin)
-            .or_else(|| {
-                node.saved_connection_id
-                    .as_ref()
-                    .map(|id| NodeOrigin::Restored {
-                        saved_connection_id: id.clone(),
-                    })
+            .map(|node| {
+                (
+                    node.config.host.clone(),
+                    node.config.port,
+                    node.config.username.clone(),
+                )
             })
-            .unwrap_or(NodeOrigin::Direct);
+            .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        let connection_id = self
+            .node_router
+            .connection_id_for_node(node_id)
+            .ok_or_else(|| anyhow::anyhow!("SSH node {} is not connected", node_id.0))?;
         if self.node_runtime_store.snapshot(node_id).is_none() {
-            self.node_runtime_store.upsert_node_with_origin(
-                node_id.clone(),
-                node.config.clone(),
-                origin,
-            );
-        }
-        if self.node_router.connection_id_for_node(node_id).is_none() {
-            self.ensure_node_connection_started(node_id);
+            return Err(anyhow::anyhow!(
+                "SSH node {} has no runtime owner",
+                node_id.0
+            ));
         }
 
         let pane_id = self.alloc_pane_id();
         let session_id = self.alloc_session_id();
-        self.register_ssh_terminal_session(
-            node_id.clone(),
-            node.saved_connection_id.clone(),
-            node.config.clone(),
-            node.title.clone(),
-            session_id,
-        );
+        self.register_existing_ssh_terminal_session(node_id, session_id)?;
 
         // Tauri remounts terminal tabs by replacing the old session id in the
         // pane tree after reconnect. The new GPUI pane is only a consumer of
         // the node-owned SSH connection; node liveness stays with NodeRouter.
         let preferences = self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
-        let prompt_handler =
-            std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
-        let managed_key_resolver =
-            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
         // Opening another terminal for an already-connected node mirrors
         // Tauri's createTerminalForNode(nodeId) path: no post-connect command
         // is replayed unless the caller explicitly supplies one.
-        let session_config = SshSessionConfig::from(node.config)
-            .with_post_connect_command(None)
-            .with_registry(self.ssh_registry.clone(), consumer)
-            .with_prompt_handler(prompt_handler)
-            .with_managed_key_resolver(managed_key_resolver)
-            // Reopened node terminals are consumers of the same backend runtime
-            // as the node-owned SSH transport.
-            // Keep remounted tabs on the same deferred PTY boundary as fresh
-            // SSH terminals so reconnects do not briefly start at fallback size.
-            .with_deferred_pty(true)
-            .with_runtime_handle(self.forwarding_runtime.handle().clone())
-            .with_trzsz_policy(preferences.trzsz_policy.clone());
+        let session_config =
+            SshSessionConfig::for_existing_connection(connection_id, host, port, username)
+                .with_post_connect_command(post_connect_command)
+                .with_registry(self.ssh_registry.clone(), consumer)
+                // Reopened node terminals are consumers of the same backend runtime
+                // as the node-owned SSH transport.
+                // Keep remounted tabs on the same deferred PTY boundary as fresh
+                // SSH terminals so reconnects do not briefly start at fallback size.
+                .with_deferred_pty(true)
+                .with_runtime_handle(self.forwarding_runtime.handle().clone())
+                .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
         self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone());
         let pane = cx.new(|cx| {
@@ -844,6 +828,67 @@ impl WorkspaceApp {
         self.refresh_native_plugin_terminal_hooks(cx);
         self.persist_session_tree_snapshot();
         Ok((pane_id, session_id))
+    }
+
+    pub(in crate::workspace) fn create_ssh_terminal_tab_for_existing_node(
+        &mut self,
+        node_id: &NodeId,
+        post_connect_command: Option<String>,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let tab_id = self.alloc_tab_id();
+        let (pane_id, session_id) = self.create_ssh_terminal_pane_for_existing_node(
+            node_id,
+            post_connect_command,
+            window,
+            cx,
+        )?;
+        self.tabs.push(Tab {
+            id: tab_id,
+            kind: TabKind::SshTerminal,
+            title,
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
+        });
+        self.bind_terminal_location(tab_id, pane_id, session_id);
+        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.active_surface = ActiveSurface::Terminal;
+        if self.sidebar_collapsed {
+            self.set_sidebar_collapsed_with_motion(false, cx);
+        }
+        self.needs_active_pane_focus = true;
+        self.focus_active_pane(window, cx);
+        self.reveal_active_tab(window);
+        self.persist_session_tree_snapshot();
+        // The existing node remains the physical transport owner. This tab
+        // owns only the terminal consumer registered by the pane helper.
+        self.start_remote_shell_integration_terminal_gate(node_id.clone(), false, cx);
+        cx.notify();
+        Ok(session_id)
+    }
+
+    pub(in crate::workspace) fn queue_ssh_terminal_tab_for_existing_node(
+        &mut self,
+        node_id: NodeId,
+        post_connect_command: Option<String>,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        if !self.node_is_ready_for_terminal(&node_id) {
+            return Err(anyhow::anyhow!("SSH node {} is not ready", node_id.0));
+        }
+        self.create_ssh_terminal_tab_for_existing_node(
+            &node_id,
+            post_connect_command,
+            title,
+            window,
+            cx,
+        )?;
+        Ok(())
     }
 
     pub(in crate::workspace) fn queue_ssh_terminal_tab_for_node(
@@ -912,12 +957,10 @@ impl WorkspaceApp {
             self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
         }
         if self.node_is_ready_for_terminal(&node_id) {
-            self.create_ssh_terminal_tab_for_node(
+            self.create_ssh_terminal_tab_for_existing_node(
+                &node_id,
                 post_connect_command,
-                config,
                 title,
-                saved_connection_id,
-                Some(node_id.clone()),
                 window,
                 cx,
             )?;
@@ -984,7 +1027,6 @@ impl WorkspaceApp {
                 .push_back(PendingSshTerminalOpen {
                     node_id: node_id.clone(),
                     post_connect_command,
-                    saved_connection_id,
                     mark_used_connection_id,
                     save_after_open,
                     cleanup_node_id: None,
@@ -1035,16 +1077,11 @@ impl WorkspaceApp {
                 remaining.push_back(request);
                 continue;
             }
-            let Some(node) = self.ssh_nodes.get(&request.node_id).cloned() else {
-                continue;
-            };
             if self
-                .create_ssh_terminal_tab_for_node(
+                .create_ssh_terminal_tab_for_existing_node(
+                    &request.node_id,
                     request.post_connect_command,
-                    node.config,
                     request.title,
-                    request.saved_connection_id,
-                    Some(request.node_id),
                     window,
                     cx,
                 )

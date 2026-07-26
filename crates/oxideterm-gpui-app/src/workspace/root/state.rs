@@ -13,7 +13,6 @@ pub(in crate::workspace) struct WorkspaceSshNode {
 pub(in crate::workspace) struct PendingSshTerminalOpen {
     pub(in crate::workspace) node_id: NodeId,
     pub(in crate::workspace) post_connect_command: Option<String>,
-    pub(in crate::workspace) saved_connection_id: Option<String>,
     pub(in crate::workspace) mark_used_connection_id: Option<String>,
     pub(in crate::workspace) save_after_open: Option<SaveConnectionRequest>,
     pub(in crate::workspace) cleanup_node_id: Option<NodeId>,

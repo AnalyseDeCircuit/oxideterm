@@ -1319,7 +1319,7 @@ impl WorkspaceApp {
             let tab_id = location.tab_id;
             let old_pane_id = location.pane_id;
             let Ok((new_pane_id, new_session_id)) =
-                self.create_ssh_terminal_pane_for_existing_node(node_id, window, cx)
+                self.create_ssh_terminal_pane_for_existing_node(node_id, None, window, cx)
             else {
                 continue;
             };
