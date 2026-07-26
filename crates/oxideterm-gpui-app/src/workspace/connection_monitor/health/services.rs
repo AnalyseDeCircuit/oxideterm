@@ -9,82 +9,32 @@ use oxideterm_connection_monitor::{
 
 impl WorkspaceApp {
     pub(super) fn render_host_services_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = self.tokens;
+        let i18n = self.i18n.clone();
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        let selectable_text = self.selectable_text_render_state(cx);
+        let search = self.render_host_service_search(cx);
         let connections = self.monitor_connections(cx);
-        if connections.is_empty() {
-            return monitor_center_state(
-                self,
-                LucideIcon::WifiOff,
-                self.tokens.ui.text_muted,
-                self.i18n.t("profiler.panel.no_connection"),
-                cx,
-            );
-        }
-
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
-        let selected_id = selected_connection_id
-            .as_deref()
-            .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self.host_tools.read(cx).service_snapshot_for(selected_id);
-        let service_search_query = self
-            .host_tools
-            .read(cx)
-            .ui
-            .host_service_search_query
-            .clone();
-        let rows = snapshot
-            .as_ref()
-            .map(|snapshot| visible_service_rows(&snapshot.services, &service_search_query))
-            .unwrap_or_default();
-        let service_status = snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.status.clone())
-            .unwrap_or_default();
-        self.sync_host_service_list_state(&rows, selected_id, cx);
-
-        div()
-            .id("host-services-panel")
-            .w_full()
-            .min_w_0()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .child(
-                div()
-                    .flex_none()
-                    .w_full()
-                    .min_w_0()
-                    .px_3()
-                    .pt_3()
-                    .pb_2()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_switcher_row(
-                        &connections,
-                        selected_id,
-                        !self.host_tools.read(cx).service_snapshot_polling(),
-                        cx,
-                    ))
-                    .child(self.render_host_service_search(cx))
-                    .child(self.render_host_service_status_row(
-                        rows.len(),
-                        selected_id.to_string(),
-                        service_status.clone(),
-                        cx,
-                    )),
-            )
-            .child(self.render_host_service_list(
-                rows,
-                self.host_tools.read(cx).service_snapshot_polling(),
-                service_status,
-                selected_id,
+        let selected_connection_id = selected_connection_id.as_deref().or_else(|| {
+            connections
+                .first()
+                .map(|connection| connection.connection_id.as_str())
+        });
+        let follow_terminal_available = selected_connection_id
+            .and_then(|connection_id| self.node_router.node_id_for_connection(connection_id))
+            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_services_panel(
+                search,
+                follow_terminal_available,
+                &tokens,
+                &i18n,
+                mono_font_family,
+                &selectable_text,
                 cx,
-            ))
-            .into_any_element()
+            )
+        })
     }
 
     pub(super) fn render_host_service_search(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -137,646 +87,6 @@ impl WorkspaceApp {
             },
         )
         .into_any_element()
-    }
-
-    pub(super) fn render_host_service_status_row(
-        &self,
-        visible_count: usize,
-        selected_id: String,
-        status: ResourceServiceStatus,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let capability_label = match status {
-            ResourceServiceStatus::Available {
-                capability: ServiceCommandCapability::Full,
-                ..
-            } => self.i18n.t("sidebar.host_services.capability.full"),
-            ResourceServiceStatus::Available {
-                capability: ServiceCommandCapability::Partial,
-                ..
-            } => self.i18n.t("sidebar.host_services.capability.partial"),
-            _ => self.i18n.t("sidebar.host_services.capability.unknown"),
-        };
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .min_w_0()
-            .text_size(px(11.0))
-            .text_color(rgb(theme.text_muted))
-            .child(div().flex_none().child(format!(
-                "{} {} · {}",
-                visible_count,
-                self.i18n.t("sidebar.host_services.count_suffix"),
-                capability_label
-            )))
-            .child(host_tools_tooltip_icon_button(
-                &self.tokens,
-                LucideIcon::RefreshCw,
-                13.0,
-                rgb(theme.text),
-                oxideterm_gpui_ui::button::IconButtonOptions {
-                    size: 24.0,
-                    has_background: true,
-                    background: Some(rgb(theme.bg_hover)),
-                    hover_background: Some(rgb(theme.bg_panel)),
-                    idle_opacity: 1.0,
-                    disabled: self.host_tools.read(cx).service_snapshot_polling(),
-                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
-                },
-                self.i18n.t("sidebar.host_services.actions.refresh"),
-                "host-service-refresh",
-                true,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.refresh_host_service_snapshot(selected_id.clone(), cx);
-                    cx.stop_propagation();
-                }),
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_host_service_list(
-        &self,
-        rows: Vec<ResourceService>,
-        loading: bool,
-        status: ResourceServiceStatus,
-        selected_id: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        if loading && rows.is_empty() {
-            return monitor_center_state(
-                self,
-                LucideIcon::Wrench,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_services.sampling"),
-                cx,
-            );
-        }
-        match status {
-            ResourceServiceStatus::Unavailable => {
-                return monitor_center_state(
-                    self,
-                    LucideIcon::Wrench,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_services.unavailable"),
-                    cx,
-                );
-            }
-            ResourceServiceStatus::Error { message } => {
-                return monitor_center_state(
-                    self,
-                    LucideIcon::AlertTriangle,
-                    MONITOR_RED,
-                    self.i18n_replace("sidebar.host_services.error", &[("error", message)]),
-                    cx,
-                );
-            }
-            ResourceServiceStatus::Unknown | ResourceServiceStatus::Available { .. } => {}
-        }
-        if rows.is_empty() {
-            return monitor_center_state(
-                self,
-                LucideIcon::Wrench,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_services.empty"),
-                cx,
-            );
-        }
-
-        let rows = Arc::new(rows);
-        let selected_id = Arc::new(selected_id.to_string());
-        let state = self.host_tools.read(cx).ui.host_service_list_state.clone();
-        let spec = TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8);
-        let workspace = cx.entity();
-        div()
-            .w_full()
-            .min_w_0()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .child(self.render_host_service_table_header())
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .child(tauri_virtual_list(
-                        state,
-                        spec,
-                        move |index, _window, cx| {
-                            let rows = rows.clone();
-                            let selected_id = selected_id.clone();
-                            workspace.update(cx, |this, cx| {
-                                this.render_host_service_row(
-                                    selected_id.as_str(),
-                                    rows.get(index).cloned(),
-                                    cx,
-                                )
-                            })
-                        },
-                    )),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_host_service_table_header(&self) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .flex_none()
-            .w_full()
-            .min_w_0()
-            .h(px(HOST_SERVICE_TABLE_HEADER_HEIGHT))
-            .px_3()
-            .flex()
-            .items_center()
-            .gap_2()
-            .border_b_1()
-            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
-            .bg(rgb(theme.bg))
-            .text_size(px(HOST_PROCESS_TABLE_HEADER_TEXT_SIZE))
-            .text_color(rgb(theme.text_muted))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .truncate()
-                    .child(self.i18n.t("sidebar.host_services.columns.service")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
-                    .child(self.i18n.t("sidebar.host_services.columns.state")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
-                    .child(self.i18n.t("sidebar.host_services.columns.enabled")),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
-                    .flex()
-                    .justify_end()
-                    .child(self.i18n.t("sidebar.host_services.columns.pid")),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_host_service_row(
-        &self,
-        connection_id: &str,
-        service: Option<ResourceService>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(service) = service else {
-            return div().into_any_element();
-        };
-        let expanded = self
-            .host_tools
-            .read(cx)
-            .ui
-            .host_service_expanded_id
-            .as_deref()
-            == Some(service.id.as_str());
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
-        let state_label = self.i18n.t(service_state_label_key(&service.active_state));
-        let enabled_label = self
-            .i18n
-            .t(service_enabled_label_key(&service.enabled_state));
-        let main_pid = service.main_pid.clone().unwrap_or_else(|| "—".to_string());
-        let state_color = service_state_color(&service.active_state, theme.text_muted);
-
-        div()
-            .w_full()
-            .min_w_0()
-            .border_b_1()
-            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
-            .cursor_pointer()
-            .hover(|row| row.bg(rgb(theme.bg_hover)))
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .h(px(HOST_SERVICE_TABLE_MAIN_ROW_HEIGHT))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    // Keep the service identity as the first-level flex item.
-                    // Nested name columns caused Docker names to collapse to `...`.
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .items_center()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
-                            .text_color(rgb(theme.text))
-                            .font_family(mono_font.clone())
-                            .child(service.id.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(state_color))
-                            .font_family(mono_font.clone())
-                            .child(state_label),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
-                            .child(enabled_label),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
-                            .flex()
-                            .justify_end()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
-                            .child(main_pid),
-                    ),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .px_3()
-                    .pb_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
-                            .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font)
-                            .child(format!("{} · {}", service.sub_state, service.description)),
-                    )
-                    .child(self.render_host_service_inline_actions(connection_id, &service, cx)),
-            )
-            .when(expanded, |row| {
-                row.child(self.render_host_service_detail(&service))
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener({
-                    let id = service.id.clone();
-                    move |this, _event, _window, cx| {
-                        this.host_tools.update(cx, |host_tools, _cx| {
-                            let expanded_id = &mut host_tools.ui.host_service_expanded_id;
-                            if expanded_id.as_deref() == Some(id.as_str()) {
-                                *expanded_id = None;
-                            } else {
-                                *expanded_id = Some(id.clone());
-                            }
-                        });
-                        cx.notify();
-                        cx.stop_propagation();
-                    }
-                }),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_host_service_inline_actions(
-        &self,
-        connection_id: &str,
-        service: &ResourceService,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let is_running = self
-            .host_tools
-            .read(cx)
-            .service_action_running_for(&service.id);
-        let availability = service_action_availability(service);
-        div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_end()
-            .gap(px(4.0))
-            .child(self.render_host_service_logs_button(connection_id, service, is_running, cx))
-            .child(self.render_host_service_follow_logs_button(
-                connection_id,
-                service,
-                is_running,
-                cx,
-            ))
-            .child(self.render_host_service_action_button(
-                connection_id,
-                service,
-                ServiceActionKind::Start,
-                LucideIcon::Play,
-                "sidebar.host_services.actions.start",
-                false,
-                is_running || !availability.can_start,
-                cx,
-            ))
-            .child(self.render_host_service_action_button(
-                connection_id,
-                service,
-                ServiceActionKind::Stop,
-                LucideIcon::Square,
-                "sidebar.host_services.actions.stop",
-                true,
-                is_running || !availability.can_stop,
-                cx,
-            ))
-            .child(self.render_host_service_action_button(
-                connection_id,
-                service,
-                ServiceActionKind::Restart,
-                LucideIcon::RefreshCw,
-                "sidebar.host_services.actions.restart",
-                true,
-                is_running || !availability.can_restart,
-                cx,
-            ))
-            .child(self.render_host_service_action_button(
-                connection_id,
-                service,
-                ServiceActionKind::Reload,
-                LucideIcon::RefreshCcw,
-                "sidebar.host_services.actions.reload",
-                false,
-                is_running || !availability.can_reload,
-                cx,
-            ))
-            .child(self.render_host_service_action_button(
-                connection_id,
-                service,
-                ServiceActionKind::Enable,
-                LucideIcon::CheckCircle,
-                "sidebar.host_services.actions.enable",
-                false,
-                is_running || !availability.can_enable,
-                cx,
-            ))
-            .child(self.render_host_service_action_button(
-                connection_id,
-                service,
-                ServiceActionKind::Disable,
-                LucideIcon::ShieldOff,
-                "sidebar.host_services.actions.disable",
-                true,
-                is_running || !availability.can_disable,
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_host_service_action_button(
-        &self,
-        connection_id: &str,
-        service: &ResourceService,
-        action: ServiceActionKind,
-        icon: LucideIcon,
-        label_key: &'static str,
-        danger: bool,
-        disabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let label = self.i18n.t(label_key);
-        let unsupported = !self.host_tools.read(cx).service_action_supported(
-            connection_id,
-            &service.id,
-            action.clone(),
-        );
-        let disabled = disabled || unsupported;
-        let icon_color = if danger { MONITOR_RED } else { theme.text };
-        host_tools_tooltip_icon_button(
-            &self.tokens,
-            icon,
-            13.0,
-            rgb(icon_color),
-            oxideterm_gpui_ui::button::IconButtonOptions {
-                size: 22.0,
-                disabled,
-                has_background: true,
-                background: Some(if danger {
-                    rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)
-                } else {
-                    rgb(theme.bg_hover)
-                }),
-                hover_background: Some(if danger {
-                    rgba((MONITOR_RED << 8) | 0x30)
-                } else {
-                    rgb(theme.bg_panel)
-                }),
-                idle_opacity: 1.0,
-                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
-            },
-            label,
-            "host-service-action",
-            true,
-            cx.listener({
-                let connection_id = connection_id.to_string();
-                let service_id = service.id.clone();
-                let description = service.description.clone();
-                move |this, _event, _window, cx| {
-                    this.request_host_service_action(
-                        connection_id.clone(),
-                        service_id.clone(),
-                        description.clone(),
-                        action.clone(),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }
-            }),
-        )
-    }
-
-    pub(super) fn render_host_service_logs_button(
-        &self,
-        connection_id: &str,
-        service: &ResourceService,
-        disabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let unsupported = !self
-            .host_tools
-            .read(cx)
-            .service_logs_supported(connection_id, &service.id);
-        host_tools_tooltip_icon_button(
-            &self.tokens,
-            LucideIcon::FileText,
-            13.0,
-            rgb(theme.text),
-            oxideterm_gpui_ui::button::IconButtonOptions {
-                size: 22.0,
-                disabled: disabled || unsupported,
-                has_background: true,
-                background: Some(rgb(theme.bg_hover)),
-                hover_background: Some(rgb(theme.bg_panel)),
-                idle_opacity: 1.0,
-                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
-            },
-            self.i18n.t("sidebar.host_services.actions.logs"),
-            "host-service-logs",
-            true,
-            cx.listener({
-                let connection_id = connection_id.to_string();
-                let service_id = service.id.clone();
-                let description = service.description.clone();
-                move |this, _event, _window, cx| {
-                    this.request_host_service_logs(
-                        connection_id.clone(),
-                        service_id.clone(),
-                        description.clone(),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }
-            }),
-        )
-    }
-
-    pub(super) fn render_host_service_follow_logs_button(
-        &self,
-        connection_id: &str,
-        service: &ResourceService,
-        disabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let unsupported = self
-            .host_tools
-            .read(cx)
-            .service_follow_logs_command(connection_id, &service.id)
-            .is_err()
-            || self
-                .node_router
-                .node_id_for_connection(connection_id)
-                .is_none();
-        host_tools_tooltip_icon_button(
-            &self.tokens,
-            LucideIcon::Activity,
-            13.0,
-            rgb(theme.text),
-            oxideterm_gpui_ui::button::IconButtonOptions {
-                size: 22.0,
-                disabled: disabled || unsupported,
-                has_background: true,
-                background: Some(rgb(theme.bg_hover)),
-                hover_background: Some(rgb(theme.bg_panel)),
-                idle_opacity: 1.0,
-                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
-            },
-            self.i18n.t("sidebar.host_services.actions.follow_logs"),
-            "host-service-follow-logs",
-            true,
-            cx.listener({
-                let connection_id = connection_id.to_string();
-                let service_id = service.id.clone();
-                let description = service.description.clone();
-                move |this, _event, window, cx| {
-                    this.open_host_service_follow_logs_terminal(
-                        connection_id.clone(),
-                        service_id.clone(),
-                        description.clone(),
-                        window,
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }
-            }),
-        )
-    }
-
-    pub(super) fn render_host_service_detail(&self, service: &ResourceService) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
-        div()
-            .px_3()
-            .pb_3()
-            .pt_2()
-            .border_t_1()
-            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
-            .flex()
-            .flex_col()
-            .gap_1()
-            .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
-            .text_color(rgb(theme.text_muted))
-            .child(self.render_host_process_detail_line(
-                self.i18n.t("sidebar.host_services.columns.description"),
-                service.description.clone(),
-            ))
-            .child(self.render_host_process_detail_line(
-                self.i18n.t("sidebar.host_services.columns.load"),
-                service.load_state.clone(),
-            ))
-            .child(self.render_host_process_detail_line(
-                self.i18n.t("sidebar.host_services.columns.sub_state"),
-                service.sub_state.clone(),
-            ))
-            .child(
-                div()
-                    .mt_1()
-                    .min_w_0()
-                    .font_family(mono_font)
-                    .text_color(rgb(theme.text))
-                    .child(service.id.clone()),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn sync_host_service_list_state(
-        &self,
-        rows: &[ResourceService],
-        selected_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let signatures = rows.iter().map(service_row_signature).collect::<Vec<_>>();
-        self.host_tools.update(cx, |host_tools, _cx| {
-            let ui = &host_tools.ui;
-            let identity = format!(
-                "host-services:{selected_id}:{}:{}",
-                ui.host_service_search_query,
-                ui.host_service_expanded_id.as_deref().unwrap_or_default()
-            );
-            sync_tauri_variable_list_state_by_signatures(
-                &ui.host_service_list_state,
-                &mut ui.host_service_list_cache.borrow_mut(),
-                &identity,
-                &signatures,
-                TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            );
-        });
-    }
-
-    pub(super) fn refresh_host_service_snapshot(
-        &mut self,
-        connection_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.request_host_service_snapshot(connection_id, cx);
     }
 
     pub(super) fn request_host_services_snapshot_for_selected_connection(
@@ -851,159 +161,6 @@ impl WorkspaceApp {
         false
     }
 
-    pub(super) fn request_host_service_action(
-        &mut self,
-        connection_id: String,
-        service_id: String,
-        description: String,
-        action: ServiceActionKind,
-        cx: &mut Context<Self>,
-    ) {
-        let notice = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.open_service_action_confirm(
-                HostServiceActionRequest {
-                    connection_id,
-                    service_id,
-                    description,
-                    action,
-                },
-                cx,
-            )
-        });
-        if let Some(notice) = notice {
-            self.push_host_tools_notice(notice);
-            return;
-        }
-        self.reset_standard_confirm_focus();
-        cx.notify();
-    }
-
-    pub(super) fn request_host_service_logs(
-        &mut self,
-        connection_id: String,
-        service_id: String,
-        description: String,
-        cx: &mut Context<Self>,
-    ) {
-        let runtime = self.forwarding_runtime.handle().clone();
-        let failure_fallback = self.i18n.t("sidebar.host_services.toast.logs_failed");
-        let empty_fallback = self.i18n.t("sidebar.host_services.logs.empty");
-        let notices = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.request_service_logs(
-                connection_id,
-                service_id,
-                description,
-                runtime,
-                failure_fallback,
-                empty_fallback,
-                cx,
-            )
-        });
-        for notice in notices {
-            self.push_host_tools_notice(notice);
-        }
-    }
-
-    pub(super) fn open_host_service_follow_logs_terminal(
-        &mut self,
-        connection_id: String,
-        service_id: String,
-        description: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(os_type) = self.host_tools.read(cx).connection_os_type(&connection_id) else {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let command = match self
-            .host_tools
-            .read(cx)
-            .service_follow_logs_command(&connection_id, &service_id)
-        {
-            Ok(command) => command,
-            Err(error) => {
-                self.push_host_service_toast(error, TerminalNoticeVariant::Error);
-                cx.notify();
-                return;
-            }
-        };
-        if command.capability == ServiceCommandCapability::Partial {
-            self.push_host_service_toast(
-                self.i18n_replace(
-                    "sidebar.host_services.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-        let title = self.i18n_replace(
-            "sidebar.host_services.follow_title",
-            &[("name", service_id)],
-        );
-        // Follow mode belongs in a visible terminal so Ctrl-C and tab lifecycle stop the stream.
-        self.open_host_service_terminal_command(
-            connection_id,
-            description,
-            command.command,
-            title,
-            "sidebar.host_services.toast.follow_opened",
-            window,
-            cx,
-        );
-    }
-
-    pub(super) fn open_host_service_terminal_command(
-        &mut self,
-        connection_id: String,
-        description: String,
-        command: String,
-        title: String,
-        opened_toast_key: &'static str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        if !self.ssh_nodes.contains_key(&node_id) {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        }
-        match self.queue_ssh_terminal_tab_for_existing_node(
-            node_id,
-            Some(command),
-            title,
-            window,
-            cx,
-        ) {
-            Ok(()) => self.push_host_service_toast(
-                self.i18n_replace(opened_toast_key, &[("name", description)]),
-                TerminalNoticeVariant::Success,
-            ),
-            Err(error) => {
-                self.push_host_service_toast(error.to_string(), TerminalNoticeVariant::Error)
-            }
-        }
-        cx.notify();
-    }
-
     pub(in crate::workspace) fn handle_host_service_confirm_key(
         &mut self,
         event: &KeyDownEvent,
@@ -1053,36 +210,70 @@ impl WorkspaceApp {
         })
     }
 
-    pub(super) fn push_host_service_toast(
-        &mut self,
-        message: String,
-        variant: TerminalNoticeVariant,
-    ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: message,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
-    }
-
     pub(in crate::workspace) fn render_host_service_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let (request, phase) = self.host_tools.read(cx).service_confirm_view()?;
-        let title = self.i18n.t("sidebar.host_services.confirm.title");
-        let description = self.i18n_replace(
-            host_service_confirm_description_key(&request.action),
-            &[
-                ("name", request.description.clone()),
-                ("id", request.service_id.clone()),
-            ],
+        let tokens = self.tokens;
+        let i18n = self.i18n.clone();
+        let focused_action = self.standard_confirm_focus();
+        let exit_delay = oxideterm_gpui_ui::motion::duration(
+            &tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_service_confirm_dialog(
+                &tokens,
+                &i18n,
+                focused_action,
+                exit_delay,
+                cx,
+            )
+        })
+    }
+
+    pub(in crate::workspace) fn render_host_service_logs_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let dialog = self.host_tools.read(cx).service_logs_dialog()?;
+        let follow_terminal_available = self
+            .node_router
+            .node_id_for_connection(&dialog.request.connection_id)
+            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+        let tokens = self.tokens;
+        let i18n = self.i18n.clone();
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_service_logs_dialog(
+                follow_terminal_available,
+                &tokens,
+                &i18n,
+                mono_font_family,
+                cx,
+            )
+        })
+    }
+}
+
+impl HostToolsEntity {
+    pub(in crate::workspace::connection_monitor) fn render_host_service_confirm_dialog(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        focused_action: Option<ConfirmDialogAction>,
+        exit_delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (request, phase) = self.service_confirm_view()?;
+        let title = i18n.t("sidebar.host_services.confirm.title");
+        let description = i18n
+            .t(host_service_confirm_description_key(&request.action))
+            .replace("{{name}}", &request.description)
+            .replace("{{id}}", &request.service_id);
         Some(
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
-                &self.tokens,
+                tokens,
                 "host-service-confirm-motion",
                 phase,
                 ConfirmDialogView {
@@ -1099,48 +290,68 @@ impl WorkspaceApp {
                     title: div().child(title).into_any_element(),
                     description: Some(div().child(description).into_any_element()),
                     cancel_label: div()
-                        .child(self.i18n.t("sidebar.host_services.confirm.cancel"))
+                        .child(i18n.t("sidebar.host_services.confirm.cancel"))
                         .into_any_element(),
                     confirm_label: div()
-                        .child(self.i18n.t(host_service_confirm_label_key(&request.action)))
+                        .child(i18n.t(host_service_confirm_label_key(&request.action)))
                         .into_any_element(),
                 },
-                self.standard_confirm_focus(),
-                cx.listener(|this, _event, _window, cx| {
-                    this.begin_host_service_confirm_exit(cx);
+                focused_action,
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.begin_service_confirm_exit(exit_delay, cx);
                 }),
-                cx.listener(|this, _event, _window, cx| {
-                    this.confirm_host_service_action(cx);
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.confirm_service_action_from_ui(exit_delay, cx);
                 }),
             )
             .into_any_element(),
         )
     }
 
-    pub(in crate::workspace) fn render_host_service_logs_dialog(
+    fn confirm_service_action_from_ui(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::ServiceConnectionMissing,
+            ));
+            return;
+        };
+        for notice in self.confirm_service_action(delay, runtime, cx) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+
+    pub(in crate::workspace::connection_monitor) fn render_host_service_logs_dialog(
         &self,
+        follow_terminal_available: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.host_tools.read(cx).service_logs_dialog()?;
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let dialog = self.service_logs_dialog()?;
+        let theme = tokens.ui;
+        let follow_logs_disabled = !follow_terminal_available
+            || self
+                .service_follow_logs_command(
+                    &dialog.request.connection_id,
+                    &dialog.request.service_id,
+                )
+                .is_err();
         let follow_connection_id = dialog.request.connection_id.clone();
         let follow_service_id = dialog.request.service_id.clone();
         let follow_description = dialog.request.description.clone();
-        let follow_logs_disabled = self
-            .host_tools
-            .read(cx)
-            .service_follow_logs_command(&follow_connection_id, &follow_service_id)
-            .is_err()
-            || self
-                .node_router
-                .node_id_for_connection(&follow_connection_id)
-                .is_none();
+        let follow_title = i18n
+            .t("sidebar.host_services.follow_title")
+            .replace("{{name}}", &follow_service_id);
+        let follow_opened_notice = i18n
+            .t("sidebar.host_services.toast.follow_opened")
+            .replace("{{name}}", &follow_description);
+        let follow_missing_notice = i18n.t("sidebar.host_services.toast.exec_terminal_missing");
         let content = if dialog.loading {
             div()
                 .p_4()
                 .text_color(rgb(theme.text_muted))
-                .child(self.i18n.t("sidebar.host_services.logs.loading"))
+                .child(i18n.t("sidebar.host_services.logs.loading"))
                 .into_any_element()
         } else if let Some(error) = dialog.error.as_ref() {
             div()
@@ -1150,14 +361,13 @@ impl WorkspaceApp {
                 .into_any_element()
         } else {
             let output = dialog.output.clone().unwrap_or_default();
-            // Service logs keep their original line shape, so the dialog body
-            // owns horizontal overflow just like Docker logs.
+            // The zeroizing Arc remains Entity-owned while rows borrow its text.
             let mut lines = div()
                 .p_3()
                 .flex()
                 .flex_col()
                 .gap(px(1.0))
-                .font_family(mono_font)
+                .font_family(mono_font_family)
                 .text_size(px(11.0))
                 .text_color(rgb(theme.text));
             for (index, line) in output.lines().enumerate() {
@@ -1181,16 +391,13 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.host_tools.update(cx, |host_tools, cx| {
-                            host_tools.dismiss_service_logs_dialog(cx);
-                        });
+                    cx.listener(|host_tools, _event, _window, cx| {
+                        host_tools.dismiss_service_logs_dialog(cx);
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                 )
                 .child(oxideterm_gpui_ui::modal::overlay_content_boundary(
-                    oxideterm_gpui_ui::modal::dialog_content(&self.tokens)
+                    oxideterm_gpui_ui::modal::dialog_content(tokens)
                         .w(px(HOST_SERVICE_LOGS_DIALOG_WIDTH))
                         .max_h(px(HOST_SERVICE_LOGS_DIALOG_MAX_HEIGHT))
                         .child(
@@ -1215,10 +422,14 @@ impl WorkspaceApp {
                                                 .text_size(px(14.0))
                                                 .font_weight(gpui::FontWeight::MEDIUM)
                                                 .text_color(rgb(theme.text))
-                                                .child(self.i18n_replace(
-                                                    "sidebar.host_services.logs.title",
-                                                    &[("name", dialog.request.service_id.clone())],
-                                                )),
+                                                .child(
+                                                    i18n
+                                                        .t("sidebar.host_services.logs.title")
+                                                        .replace(
+                                                            "{{name}}",
+                                                            &dialog.request.service_id,
+                                                        ),
+                                                ),
                                         )
                                         .child(
                                             div()
@@ -1234,7 +445,8 @@ impl WorkspaceApp {
                                         .flex()
                                         .items_center()
                                         .gap_1()
-                                        .child(host_tools_tooltip_icon_button(&self.tokens,
+                                        .child(host_tools_tooltip_icon_button(
+                                            tokens,
                                             LucideIcon::Activity,
                                             14.0,
                                             rgb(theme.text),
@@ -1249,34 +461,30 @@ impl WorkspaceApp {
                                                     24.0,
                                                 )
                                             },
-                                            self.i18n
-                                                .t("sidebar.host_services.actions.follow_logs"),
+                                            i18n.t(
+                                                "sidebar.host_services.actions.follow_logs",
+                                            ),
                                             "host-service-logs-follow",
                                             true,
-                                            cx.listener({
-                                                let connection_id = follow_connection_id;
-                                                let service_id = follow_service_id;
-                                                let description = follow_description;
-                                                move |this, _event, window, cx| {
-                                                    this.host_tools.update(
-                                                        cx,
-                                                        |host_tools, cx| {
-                                                            host_tools
-                                                                .dismiss_service_logs_dialog(cx);
-                                                        },
-                                                    );
-                                                    this.open_host_service_follow_logs_terminal(
-                                                        connection_id.clone(),
-                                                        service_id.clone(),
-                                                        description.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
+                                            cx.listener(
+                                                move |host_tools, _event, window, cx| {
+                                                    host_tools.dismiss_service_logs_dialog(cx);
+                                                    host_tools
+                                                        .dispatch_service_follow_logs_from_ui(
+                                                            follow_connection_id.clone(),
+                                                            follow_service_id.clone(),
+                                                            follow_title.clone(),
+                                                            follow_opened_notice.clone(),
+                                                            follow_missing_notice.clone(),
+                                                            window,
+                                                            cx,
+                                                        );
                                                     cx.stop_propagation();
-                                                }
-                                            }),
+                                                },
+                                            ),
                                         ))
-                                        .child(host_tools_tooltip_icon_button(&self.tokens,
+                                        .child(host_tools_tooltip_icon_button(
+                                            tokens,
                                             LucideIcon::X,
                                             14.0,
                                             rgb(theme.text_muted),
@@ -1290,17 +498,16 @@ impl WorkspaceApp {
                                                     24.0,
                                                 )
                                             },
-                                            self.i18n.t("sidebar.host_services.logs.close"),
+                                            i18n.t("sidebar.host_services.logs.close"),
                                             "host-service-logs-close",
                                             true,
-                                            cx.listener(|this, _event, _window, cx| {
-                                                this.host_tools.update(cx, |host_tools, cx| {
+                                            cx.listener(
+                                                |host_tools, _event, _window, cx| {
                                                     host_tools
                                                         .dismiss_service_logs_dialog(cx);
-                                                });
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                            }),
+                                                    cx.stop_propagation();
+                                                },
+                                            ),
                                         )),
                                 ),
                         )
@@ -1318,9 +525,895 @@ impl WorkspaceApp {
                 .into_any_element(),
         )
     }
-}
 
-impl HostToolsEntity {
+    pub(in crate::workspace::connection_monitor) fn render_host_services_panel(
+        &self,
+        search: AnyElement,
+        follow_terminal_available: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.monitor_connections();
+        if connections.is_empty() {
+            return host_tools_center_state(
+                LucideIcon::WifiOff,
+                tokens.ui.text_muted,
+                i18n.t("profiler.panel.no_connection"),
+                selectable_text,
+                cx,
+            );
+        }
+
+        let selected_connection_id = self.selected_connection_id_owned();
+        let selected_id = selected_connection_id
+            .as_deref()
+            .unwrap_or(connections[0].connection_id.as_str());
+        let snapshot = self.service_snapshot_for(selected_id);
+        let rows = snapshot
+            .as_ref()
+            .map(|snapshot| {
+                visible_service_rows(&snapshot.services, &self.ui.host_service_search_query)
+            })
+            .unwrap_or_default();
+        let service_status = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.status.clone())
+            .unwrap_or_default();
+        self.sync_host_service_list_state(&rows, selected_id);
+        let snapshot_polling = self.service_snapshot_polling();
+
+        div()
+            .id("host-services-panel")
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pt_3()
+                    .pb_2()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher(
+                        &connections,
+                        selected_id,
+                        !snapshot_polling,
+                        tokens,
+                        mono_font_family.clone(),
+                        selectable_text,
+                        cx,
+                    ))
+                    // IME composition and anchor tracking remain a workspace service.
+                    .child(search)
+                    .child(self.render_host_service_status_row(
+                        rows.len(),
+                        selected_id.to_string(),
+                        service_status.clone(),
+                        tokens,
+                        i18n,
+                        cx,
+                    )),
+            )
+            .child(self.render_host_service_list(
+                rows,
+                snapshot_polling,
+                service_status,
+                selected_id,
+                follow_terminal_available,
+                tokens,
+                i18n,
+                mono_font_family,
+                selectable_text,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_service_status_row(
+        &self,
+        visible_count: usize,
+        selected_id: String,
+        status: ResourceServiceStatus,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let capability_label = match status {
+            ResourceServiceStatus::Available {
+                capability: ServiceCommandCapability::Full,
+                ..
+            } => i18n.t("sidebar.host_services.capability.full"),
+            ResourceServiceStatus::Available {
+                capability: ServiceCommandCapability::Partial,
+                ..
+            } => i18n.t("sidebar.host_services.capability.partial"),
+            _ => i18n.t("sidebar.host_services.capability.unknown"),
+        };
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .min_w_0()
+            .text_size(px(11.0))
+            .text_color(rgb(theme.text_muted))
+            .child(div().flex_none().child(format!(
+                "{} {} · {}",
+                visible_count,
+                i18n.t("sidebar.host_services.count_suffix"),
+                capability_label
+            )))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::RefreshCw,
+                13.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 24.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    disabled: self.service_snapshot_polling(),
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                },
+                i18n.t("sidebar.host_services.actions.refresh"),
+                "host-service-refresh",
+                true,
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.request_service_snapshot_from_ui(selected_id.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            ))
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_service_list(
+        &self,
+        rows: Vec<ResourceService>,
+        loading: bool,
+        status: ResourceServiceStatus,
+        selected_id: &str,
+        follow_terminal_available: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if loading && rows.is_empty() {
+            return host_tools_center_state(
+                LucideIcon::Wrench,
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_services.sampling"),
+                selectable_text,
+                cx,
+            );
+        }
+        match status {
+            ResourceServiceStatus::Unavailable => {
+                return host_tools_center_state(
+                    LucideIcon::Wrench,
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_services.unavailable"),
+                    selectable_text,
+                    cx,
+                );
+            }
+            ResourceServiceStatus::Error { message } => {
+                return host_tools_center_state(
+                    LucideIcon::AlertTriangle,
+                    MONITOR_RED,
+                    i18n.t("sidebar.host_services.error")
+                        .replace("{{error}}", &message),
+                    selectable_text,
+                    cx,
+                );
+            }
+            ResourceServiceStatus::Unknown | ResourceServiceStatus::Available { .. } => {}
+        }
+        if rows.is_empty() {
+            return host_tools_center_state(
+                LucideIcon::Wrench,
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_services.empty"),
+                selectable_text,
+                cx,
+            );
+        }
+
+        let rows = Arc::new(rows);
+        let selected_id = Arc::new(selected_id.to_string());
+        let state = self.ui.host_service_list_state.clone();
+        let spec = TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8);
+        let host_tools = cx.entity();
+        let row_tokens = *tokens;
+        // I18n clones only the Arc-backed catalog handle for the 'static row factory.
+        let row_i18n = i18n.clone();
+        div()
+            .w_full()
+            .min_w_0()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(Self::render_host_service_table_header(tokens, i18n))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(tauri_virtual_list(
+                        state,
+                        spec,
+                        move |index, _window, cx| {
+                            host_tools.update(cx, |host_tools, cx| {
+                                host_tools.render_host_service_row(
+                                    selected_id.as_str(),
+                                    rows.get(index).cloned(),
+                                    follow_terminal_available,
+                                    &row_tokens,
+                                    &row_i18n,
+                                    mono_font_family.clone(),
+                                    cx,
+                                )
+                            })
+                        },
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_service_table_header(tokens: &ThemeTokens, i18n: &I18n) -> AnyElement {
+        let theme = tokens.ui;
+        div()
+            .flex_none()
+            .w_full()
+            .min_w_0()
+            .h(px(HOST_SERVICE_TABLE_HEADER_HEIGHT))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .bg(rgb(theme.bg))
+            .text_size(px(HOST_PROCESS_TABLE_HEADER_TEXT_SIZE))
+            .text_color(rgb(theme.text_muted))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .child(i18n.t("sidebar.host_services.columns.service")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
+                    .child(i18n.t("sidebar.host_services.columns.state")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
+                    .child(i18n.t("sidebar.host_services.columns.enabled")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
+                    .flex()
+                    .justify_end()
+                    .child(i18n.t("sidebar.host_services.columns.pid")),
+            )
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_service_row(
+        &self,
+        connection_id: &str,
+        service: Option<ResourceService>,
+        follow_terminal_available: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(service) = service else {
+            return div().into_any_element();
+        };
+        let expanded = self.ui.host_service_expanded_id.as_deref() == Some(service.id.as_str());
+        let theme = tokens.ui;
+        let state_label = i18n.t(service_state_label_key(&service.active_state));
+        let enabled_label = i18n.t(service_enabled_label_key(&service.enabled_state));
+        let main_pid = service.main_pid.clone().unwrap_or_else(|| "—".to_string());
+        let state_color = service_state_color(&service.active_state, theme.text_muted);
+
+        div()
+            .w_full()
+            .min_w_0()
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgb(theme.bg_hover)))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h(px(HOST_SERVICE_TABLE_MAIN_ROW_HEIGHT))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    // Keep service identity above secondary metadata under compression.
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
+                            .text_color(rgb(theme.text))
+                            .font_family(mono_font_family.clone())
+                            .child(service.id.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SERVICE_STATE_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(state_color))
+                            .font_family(mono_font_family.clone())
+                            .child(state_label),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SERVICE_ENABLED_COLUMN_WIDTH))
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font_family.clone())
+                            .child(enabled_label),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(HOST_SERVICE_PID_COLUMN_WIDTH))
+                            .flex()
+                            .justify_end()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font_family.clone())
+                            .child(main_pid),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px_3()
+                    .pb_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
+                            .text_color(rgb(theme.text_muted))
+                            .font_family(mono_font_family.clone())
+                            .child(format!("{} · {}", service.sub_state, service.description)),
+                    )
+                    .child(self.render_host_service_inline_actions(
+                        connection_id,
+                        &service,
+                        follow_terminal_available,
+                        tokens,
+                        i18n,
+                        cx,
+                    )),
+            )
+            .when(expanded, |row| {
+                row.child(Self::render_host_service_detail(
+                    &service,
+                    tokens,
+                    i18n,
+                    mono_font_family,
+                ))
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let id = service.id.clone();
+                    move |host_tools, _event, _window, cx| {
+                        let expanded_id = &mut host_tools.ui.host_service_expanded_id;
+                        if expanded_id.as_deref() == Some(id.as_str()) {
+                            *expanded_id = None;
+                        } else {
+                            *expanded_id = Some(id.clone());
+                        }
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_service_inline_actions(
+        &self,
+        connection_id: &str,
+        service: &ResourceService,
+        follow_terminal_available: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_running = self.service_action_running_for(&service.id);
+        let availability = service_action_availability(service);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(4.0))
+            .child(self.render_host_service_logs_button(
+                connection_id,
+                service,
+                is_running,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_follow_logs_button(
+                connection_id,
+                service,
+                is_running || !follow_terminal_available,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_action_button(
+                connection_id,
+                service,
+                ServiceActionKind::Start,
+                LucideIcon::Play,
+                "sidebar.host_services.actions.start",
+                false,
+                is_running || !availability.can_start,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_action_button(
+                connection_id,
+                service,
+                ServiceActionKind::Stop,
+                LucideIcon::Square,
+                "sidebar.host_services.actions.stop",
+                true,
+                is_running || !availability.can_stop,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_action_button(
+                connection_id,
+                service,
+                ServiceActionKind::Restart,
+                LucideIcon::RefreshCw,
+                "sidebar.host_services.actions.restart",
+                true,
+                is_running || !availability.can_restart,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_action_button(
+                connection_id,
+                service,
+                ServiceActionKind::Reload,
+                LucideIcon::RefreshCcw,
+                "sidebar.host_services.actions.reload",
+                false,
+                is_running || !availability.can_reload,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_action_button(
+                connection_id,
+                service,
+                ServiceActionKind::Enable,
+                LucideIcon::CheckCircle,
+                "sidebar.host_services.actions.enable",
+                false,
+                is_running || !availability.can_enable,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .child(self.render_host_service_action_button(
+                connection_id,
+                service,
+                ServiceActionKind::Disable,
+                LucideIcon::ShieldOff,
+                "sidebar.host_services.actions.disable",
+                true,
+                is_running || !availability.can_disable,
+                tokens,
+                i18n,
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_service_action_button(
+        &self,
+        connection_id: &str,
+        service: &ResourceService,
+        action: ServiceActionKind,
+        icon: LucideIcon,
+        label_key: &'static str,
+        danger: bool,
+        disabled: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let unsupported =
+            !self.service_action_supported(connection_id, &service.id, action.clone());
+        let disabled = disabled || unsupported;
+        let icon_color = if danger { MONITOR_RED } else { theme.text };
+        host_tools_tooltip_icon_button(
+            tokens,
+            icon,
+            13.0,
+            rgb(icon_color),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: 22.0,
+                disabled,
+                has_background: true,
+                background: Some(if danger {
+                    rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)
+                } else {
+                    rgb(theme.bg_hover)
+                }),
+                hover_background: Some(if danger {
+                    rgba((MONITOR_RED << 8) | 0x30)
+                } else {
+                    rgb(theme.bg_panel)
+                }),
+                idle_opacity: 1.0,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+            },
+            i18n.t(label_key),
+            "host-service-action",
+            true,
+            cx.listener({
+                let connection_id = connection_id.to_string();
+                let service_id = service.id.clone();
+                let description = service.description.clone();
+                move |host_tools, _event, _window, cx| {
+                    host_tools.request_service_action_from_ui(
+                        connection_id.clone(),
+                        service_id.clone(),
+                        description.clone(),
+                        action.clone(),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }
+            }),
+        )
+    }
+
+    fn render_host_service_logs_button(
+        &self,
+        connection_id: &str,
+        service: &ResourceService,
+        disabled: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let unsupported = !self.service_logs_supported(connection_id, &service.id);
+        let failure_fallback = i18n.t("sidebar.host_services.toast.logs_failed");
+        let empty_fallback = i18n.t("sidebar.host_services.logs.empty");
+        host_tools_tooltip_icon_button(
+            tokens,
+            LucideIcon::FileText,
+            13.0,
+            rgb(theme.text),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: 22.0,
+                disabled: disabled || unsupported,
+                has_background: true,
+                background: Some(rgb(theme.bg_hover)),
+                hover_background: Some(rgb(theme.bg_panel)),
+                idle_opacity: 1.0,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+            },
+            i18n.t("sidebar.host_services.actions.logs"),
+            "host-service-logs",
+            true,
+            cx.listener({
+                let connection_id = connection_id.to_string();
+                let service_id = service.id.clone();
+                let description = service.description.clone();
+                move |host_tools, _event, _window, cx| {
+                    host_tools.request_service_logs_from_ui(
+                        connection_id.clone(),
+                        service_id.clone(),
+                        description.clone(),
+                        failure_fallback.clone(),
+                        empty_fallback.clone(),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }
+            }),
+        )
+    }
+
+    fn render_host_service_follow_logs_button(
+        &self,
+        connection_id: &str,
+        service: &ResourceService,
+        disabled: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let connection_id = connection_id.to_string();
+        let service_id = service.id.clone();
+        let title = i18n
+            .t("sidebar.host_services.follow_title")
+            .replace("{{name}}", &service_id);
+        let opened_notice = i18n
+            .t("sidebar.host_services.toast.follow_opened")
+            .replace("{{name}}", &service.description);
+        let missing_notice = i18n.t("sidebar.host_services.toast.exec_terminal_missing");
+        host_tools_tooltip_icon_button(
+            tokens,
+            LucideIcon::Activity,
+            13.0,
+            rgb(theme.text),
+            oxideterm_gpui_ui::button::IconButtonOptions {
+                size: 22.0,
+                disabled,
+                has_background: true,
+                background: Some(rgb(theme.bg_hover)),
+                hover_background: Some(rgb(theme.bg_panel)),
+                idle_opacity: 1.0,
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+            },
+            i18n.t("sidebar.host_services.actions.follow_logs"),
+            "host-service-follow-logs",
+            true,
+            cx.listener(move |host_tools, _event, window, cx| {
+                host_tools.dispatch_service_follow_logs_from_ui(
+                    connection_id.clone(),
+                    service_id.clone(),
+                    title.clone(),
+                    opened_notice.clone(),
+                    missing_notice.clone(),
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+    }
+
+    fn render_host_service_detail(
+        service: &ResourceService,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        div()
+            .px_3()
+            .pb_3()
+            .pt_2()
+            .border_t_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
+            .text_color(rgb(theme.text_muted))
+            .child(Self::render_host_service_detail_line(
+                i18n.t("sidebar.host_services.columns.description"),
+                service.description.clone(),
+            ))
+            .child(Self::render_host_service_detail_line(
+                i18n.t("sidebar.host_services.columns.load"),
+                service.load_state.clone(),
+            ))
+            .child(Self::render_host_service_detail_line(
+                i18n.t("sidebar.host_services.columns.sub_state"),
+                service.sub_state.clone(),
+            ))
+            .child(
+                div()
+                    .mt_1()
+                    .min_w_0()
+                    .font_family(mono_font_family)
+                    .text_color(rgb(theme.text))
+                    .child(service.id.clone()),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_service_detail_line(label: String, value: String) -> AnyElement {
+        div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_none().w(px(92.0)).child(label))
+            .child(div().min_w_0().flex_1().truncate().child(value))
+            .into_any_element()
+    }
+
+    fn sync_host_service_list_state(&self, rows: &[ResourceService], selected_id: &str) {
+        let signatures = rows.iter().map(service_row_signature).collect::<Vec<_>>();
+        let identity = format!(
+            "host-services:{selected_id}:{}:{}",
+            self.ui.host_service_search_query,
+            self.ui
+                .host_service_expanded_id
+                .as_deref()
+                .unwrap_or_default()
+        );
+        sync_tauri_variable_list_state_by_signatures(
+            &self.ui.host_service_list_state,
+            &mut self.ui.host_service_list_cache.borrow_mut(),
+            &identity,
+            &signatures,
+            TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    fn request_service_snapshot_from_ui(&mut self, connection_id: String, cx: &mut Context<Self>) {
+        let (Some(runtime), Some(messages)) =
+            (self.lifecycle_runtime.clone(), self.messages.as_ref())
+        else {
+            return;
+        };
+        self.request_service_snapshot(
+            connection_id,
+            runtime,
+            messages.service_connection_missing.clone(),
+            messages.service_action_failed.clone(),
+            cx,
+        );
+    }
+
+    fn request_service_action_from_ui(
+        &mut self,
+        connection_id: String,
+        service_id: String,
+        description: String,
+        action: ServiceActionKind,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(notice) = self.open_service_action_confirm(
+            HostServiceActionRequest {
+                connection_id,
+                service_id,
+                description,
+                action,
+            },
+            cx,
+        ) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+
+    fn request_service_logs_from_ui(
+        &mut self,
+        connection_id: String,
+        service_id: String,
+        description: String,
+        failure_fallback: String,
+        empty_fallback: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::ServiceConnectionMissing,
+            ));
+            return;
+        };
+        for notice in self.request_service_logs(
+            connection_id,
+            service_id,
+            description,
+            runtime,
+            failure_fallback,
+            empty_fallback,
+            cx,
+        ) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+
+    fn dispatch_service_follow_logs_from_ui(
+        &mut self,
+        connection_id: String,
+        service_id: String,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::ServiceConnectionMissing,
+            ));
+            return;
+        };
+        let command = match build_service_follow_logs_command(&os_type, &service_id) {
+            Ok(command) => command,
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::ServiceLogsFailed,
+                ));
+                return;
+            }
+        };
+        if command.capability == ServiceCommandCapability::Partial {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::ServicePartialSupport { os_type },
+            ));
+        }
+        // The command moves into a one-shot action so GPUI cloning never duplicates its contents.
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::OpenExistingNodeTerminal {
+                    connection_id,
+                    command: command.command,
+                    title,
+                    opened_notice,
+                    missing_notice,
+                },
+            )),
+            cx,
+        );
+    }
+
     pub(super) fn service_snapshot_for(
         &self,
         connection_id: &str,

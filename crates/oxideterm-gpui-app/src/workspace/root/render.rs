@@ -268,6 +268,13 @@ impl Render for WorkspaceApp {
             })
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
+            // Host Tools actions bubble here from both sidebar pages and portaled dialogs.
+            .on_action(
+                cx.listener(|this, request: &HostToolsWindowRequest, window, cx| {
+                    this.handle_host_tools_window_request(request, window, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, _window, cx| {

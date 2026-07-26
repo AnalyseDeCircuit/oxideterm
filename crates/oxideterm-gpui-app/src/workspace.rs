@@ -34,6 +34,7 @@ mod remote_desktop;
 mod root {
     pub(super) mod background;
     pub(super) mod helpers;
+    pub(super) mod host_tools;
     pub(super) mod init;
     pub(super) mod render;
     pub(super) mod state;
@@ -246,6 +247,7 @@ use oxideterm_workspace::{
 use self::actions::SearchBarState;
 use self::connection_monitor::{
     ConnectionRuntimeSection, HostToolsEntity, HostToolsEvent, HostToolsMessages,
+    HostToolsWindowIntent, HostToolsWindowRequest,
 };
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
