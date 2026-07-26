@@ -24,6 +24,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) host_gpu: HostGpuViewState,
     pub(super) host_logs: HostLogsState,
     pub(super) host_ports: HostPortsState,
+    pub(super) host_filesystems: HostFilesystemsState,
     pub(in crate::workspace) active_runtime_section: ConnectionRuntimeSection,
     pub(in crate::workspace) previous_runtime_section: ConnectionRuntimeSection,
     selected_connection_id: Option<String>,
@@ -82,6 +83,7 @@ impl HostToolsEntity {
             host_gpu: HostGpuViewState::new(gpu_update_tx),
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
+            host_filesystems: HostFilesystemsState::new(),
             active_runtime_section: ConnectionRuntimeSection::Overview,
             previous_runtime_section: ConnectionRuntimeSection::Overview,
             selected_connection_id: None,
@@ -248,6 +250,34 @@ impl HostToolsEntity {
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::PortSnapshot(
                 HostPortSnapshotDelivery { request, result },
             ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_filesystem_snapshot_capture(
+        &self,
+        command: String,
+        request: HostFilesystemSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Filesystem capture uses the registry-owned transport without moving
+        // credentials or node lifecycle control into the page task.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(
+                super::delivery::HostToolsReliableDelivery::FilesystemSnapshot(
+                    HostFilesystemSnapshotDelivery { request, result },
+                ),
+            );
         });
         true
     }
@@ -983,6 +1013,70 @@ mod tests {
         assert_eq!(
             notice,
             HostToolsEvent::ShowNotice(HostToolsNotice::PortSnapshotFailed)
+        );
+        assert!(!format!("{notice:?}").contains(secret_marker));
+    }
+
+    #[gpui::test]
+    fn filesystem_snapshot_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let request = HostFilesystemSnapshotRequest {
+            connection_id: "connection-1".to_string(),
+            feedback: HostSnapshotFeedback::Toast,
+            failure_fallback: "Filesystem capture failed".to_string(),
+        };
+        let sender = entity.update(cx, |entity, cx| {
+            assert!(entity.select_filesystem_filter(FilesystemFilter::Attention, cx));
+            entity.toggle_filesystem_expanded(3, cx);
+            assert_eq!(entity.filesystem_filter(), FilesystemFilter::Attention);
+            assert_eq!(entity.filesystem_expanded_index(), Some(3));
+            entity.host_filesystems.running = Some(request.clone());
+            entity.host_filesystems.polling = true;
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "private-key-material-should-not-reach-ui";
+
+        sender
+            .send(
+                super::delivery::HostToolsReliableDelivery::FilesystemSnapshot(
+                    HostFilesystemSnapshotDelivery {
+                        request,
+                        result: Ok(SshCommandOutput {
+                            stdout: secret_marker.to_string(),
+                            stderr: secret_marker.to_string(),
+                            exit_code: Some(1),
+                            truncated: false,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(!entity.host_filesystems.polling);
+            let snapshot = entity.host_filesystems.snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status,
+                ResourceFilesystemStatus::Error {
+                    message: "Filesystem capture failed".to_string(),
+                }
+            );
+            assert!(!format!("{:?}", snapshot.status).contains(secret_marker));
+        });
+        let notice = events.try_recv().unwrap();
+        assert_eq!(
+            notice,
+            HostToolsEvent::ShowNotice(HostToolsNotice::FilesystemSnapshotFailed)
         );
         assert!(!format!("{notice:?}").contains(secret_marker));
     }

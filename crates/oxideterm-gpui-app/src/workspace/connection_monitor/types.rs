@@ -489,12 +489,42 @@ pub(super) struct HostScheduleSnapshotDelivery {
 pub(super) struct HostFilesystemSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostFilesystemSnapshotDelivery {
     pub(super) request: HostFilesystemSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostFilesystemsState {
+    pub(super) filter: FilesystemFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceFilesystemSnapshot>,
+    pub(super) running: Option<HostFilesystemSnapshotRequest>,
+    pub(super) polling: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostFilesystemsState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: FilesystemFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            polling: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -723,17 +753,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_schedule_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_filesystem_search_query: String,
     pub(in crate::workspace) host_filesystem_search_focused: bool,
-    pub(super) host_filesystem_filter: FilesystemFilter,
-    pub(in crate::workspace) host_filesystem_expanded_index: Option<usize>,
-    pub(super) host_filesystem_snapshot_connection_id: Option<String>,
-    pub(super) host_filesystem_snapshot: Option<ResourceFilesystemSnapshot>,
-    pub(super) host_filesystem_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostFilesystemSnapshotDelivery>>,
-    pub(super) host_filesystem_snapshot_running: Option<HostFilesystemSnapshotRequest>,
-    pub(super) host_filesystem_snapshot_polling: bool,
-    pub(super) host_filesystem_last_error: Option<String>,
-    pub(super) host_filesystem_list_state: ListState,
-    pub(super) host_filesystem_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_package_search_query: String,
     pub(in crate::workspace) host_package_search_focused: bool,
     pub(super) host_package_filter: PackageFilter,
@@ -861,20 +880,6 @@ impl ConnectionMonitorState {
             host_schedule_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_filesystem_search_query: String::new(),
             host_filesystem_search_focused: false,
-            host_filesystem_filter: FilesystemFilter::All,
-            host_filesystem_expanded_index: None,
-            host_filesystem_snapshot_connection_id: None,
-            host_filesystem_snapshot: None,
-            host_filesystem_snapshot_rx: None,
-            host_filesystem_snapshot_running: None,
-            host_filesystem_snapshot_polling: false,
-            host_filesystem_last_error: None,
-            host_filesystem_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_filesystem_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_package_search_query: String::new(),
             host_package_search_focused: false,
             host_package_filter: PackageFilter::All,

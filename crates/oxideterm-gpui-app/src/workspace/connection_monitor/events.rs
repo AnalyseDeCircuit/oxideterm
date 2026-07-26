@@ -23,6 +23,12 @@ pub(in crate::workspace) enum HostToolsNotice {
     PortSnapshotLoaded { count: usize },
     PortUnavailable,
     PortSnapshotFailed,
+    FilesystemSnapshotAlreadyRunning,
+    FilesystemConnectionMissing,
+    FilesystemPartialSupport { os_type: String },
+    FilesystemSnapshotLoaded { count: usize },
+    FilesystemUnavailable,
+    FilesystemSnapshotFailed,
 }
 
 impl EventEmitter<HostToolsEvent> for HostToolsEntity {}

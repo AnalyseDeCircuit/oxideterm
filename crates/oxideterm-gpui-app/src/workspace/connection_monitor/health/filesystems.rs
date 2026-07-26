@@ -2,7 +2,7 @@
 
 use super::*;
 
-use oxideterm_connection_monitor::{filesystem_capture_snapshot, filesystem_percent_severity};
+use oxideterm_connection_monitor::{filesystem_percent_severity, parse_filesystem_snapshot};
 
 impl WorkspaceApp {
     pub(super) fn render_host_filesystems_panel(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -22,28 +22,25 @@ impl WorkspaceApp {
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
         let snapshot = self
-            .connection_monitor
-            .host_filesystem_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_filesystem_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+            .host_tools
+            .read(cx)
+            .filesystem_snapshot_for(selected_id);
+        let filter = self.host_tools.read(cx).filesystem_filter();
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_filesystem_rows(
                     &snapshot.entries,
                     &self.connection_monitor.host_filesystem_search_query,
-                    self.connection_monitor.host_filesystem_filter,
+                    filter,
                 )
             })
             .unwrap_or_default();
         let status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_filesystem_list_state(&rows, selected_id);
+        self.sync_host_filesystem_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-filesystems-panel")
@@ -70,7 +67,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_filesystem_snapshot_polling,
+                        !self.host_tools.read(cx).filesystem_snapshot_polling(),
                         cx,
                     ))
                     .child(self.render_host_filesystem_search(cx))
@@ -84,7 +81,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_filesystem_list(
                 rows,
-                self.connection_monitor.host_filesystem_snapshot_polling,
+                self.host_tools.read(cx).filesystem_snapshot_polling(),
                 status,
                 selected_id,
                 cx,
@@ -173,17 +170,15 @@ impl WorkspaceApp {
         filter: FilesystemFilter,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_filesystem_filter == filter;
+        let active = self.host_tools.read(cx).filesystem_filter() == filter;
         self.host_tools_filter_chip(active)
             .child(self.i18n.t(filesystem_filter_label_key(filter)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_filesystem_filter != filter {
-                        this.connection_monitor.host_filesystem_filter = filter;
-                        this.connection_monitor.host_filesystem_expanded_index = None;
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_filesystem_filter(filter, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -263,7 +258,7 @@ impl WorkspaceApp {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.connection_monitor.host_filesystem_snapshot_polling,
+                            disabled: self.host_tools.read(cx).filesystem_snapshot_polling(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -337,7 +332,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_filesystem_list_state.clone();
+        let state = self.host_tools.read(cx).filesystem_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         let show_context_columns =
@@ -465,7 +460,7 @@ impl WorkspaceApp {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_filesystem_expanded_index == Some(index);
+        let expanded = self.host_tools.read(cx).filesystem_expanded_index() == Some(index);
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let kind = host_filesystem_kind_display(&self.i18n, &entry.kind);
@@ -613,12 +608,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_filesystem_expanded_index == Some(index) {
-                        this.connection_monitor.host_filesystem_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_filesystem_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.toggle_filesystem_expanded(index, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -830,6 +822,7 @@ impl WorkspaceApp {
         &self,
         rows: &[ResourceFilesystemEntry],
         selected_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let signatures = rows
             .iter()
@@ -838,48 +831,15 @@ impl WorkspaceApp {
         let identity = format!(
             "host-filesystems:{selected_id}:{}:{}:{}",
             self.connection_monitor.host_filesystem_search_query,
-            self.connection_monitor.host_filesystem_filter as u8,
-            self.connection_monitor
-                .host_filesystem_expanded_index
+            self.host_tools.read(cx).filesystem_filter() as u8,
+            self.host_tools
+                .read(cx)
+                .filesystem_expanded_index()
                 .unwrap_or(usize::MAX)
         );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_filesystem_list_state,
-            &mut self
-                .connection_monitor
-                .host_filesystem_list_cache
-                .borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
-    }
-
-    pub(super) fn host_filesystem_snapshot_command(
-        &self,
-        connection_id: &str,
-    ) -> (
-        oxideterm_connection_monitor::FilesystemCaptureCommand,
-        String,
-    ) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_filesystem_snapshot_command(&os_type), os_type)
-    }
-
-    pub(super) fn host_filesystem_diagnostic_command(
-        &self,
-        connection_id: &str,
-    ) -> (String, String) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_filesystem_diagnostic_command(&os_type), os_type)
+        self.host_tools
+            .read(cx)
+            .sync_filesystem_list_signatures(&identity, &signatures);
     }
 
     pub(in crate::workspace) fn handle_host_filesystem_search_key(
@@ -926,68 +886,22 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Filesystems) {
-            return;
-        }
-        if self.connection_monitor.host_filesystem_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_filesystem_toast(
-                    self.i18n
-                        .t("sidebar.host_filesystems.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_filesystem_toast(
-                    self.i18n
-                        .t("sidebar.host_filesystems.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
-        };
-        let (command, os_type) = self.host_filesystem_snapshot_command(&connection_id);
-        if feedback.should_toast() && command.capability == FilesystemCommandCapability::Partial {
-            self.push_host_filesystem_toast(
-                self.i18n_replace(
-                    "sidebar.host_filesystems.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let request = HostFilesystemSnapshotRequest {
-            connection_id: connection_id.clone(),
-            feedback,
-        };
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor
-            .host_filesystem_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_filesystem_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
-        self.connection_monitor.host_filesystem_snapshot_polling = true;
-        self.connection_monitor.host_filesystem_last_error = None;
-        // Filesystem scans can touch du/find, so they stay manual snapshot work
-        // instead of joining the high-frequency resource profiler loop.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_FILESYSTEM_SNAPSHOT_TIMEOUT,
-                    HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostFilesystemSnapshotDelivery { request, result });
+        let monitoring_enabled = self.host_tool_monitoring_enabled(ContextSidebarTool::Filesystems);
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_filesystems.toast.unknown_error");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_filesystem_snapshot(
+                connection_id,
+                feedback,
+                monitoring_enabled,
+                runtime,
+                failure_fallback,
+                cx,
+            )
         });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn copy_host_filesystem_path(&mut self, path: String, cx: &mut Context<Self>) {
@@ -1008,7 +922,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (command, _os_type) = self.host_filesystem_diagnostic_command(&connection_id);
+        let command = self
+            .host_tools
+            .read(cx)
+            .filesystem_diagnostic_command(&connection_id);
         let title = self.i18n.t("sidebar.host_filesystems.diagnostic_title");
         let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
             self.push_host_filesystem_toast(
@@ -1047,144 +964,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_host_filesystems_snapshot_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_filesystem_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_filesystem_snapshot_rx.take() else {
-            self.connection_monitor.host_filesystem_snapshot_polling = false;
-            self.connection_monitor.host_filesystem_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_filesystems_snapshot(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_filesystem_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_filesystem_snapshot_polling = false;
-                self.connection_monitor.host_filesystem_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_filesystems.toast.unknown_error");
-                self.connection_monitor.host_filesystem_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_filesystem_toast(
-                        self.i18n_replace(
-                            "sidebar.host_filesystems.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_filesystems_snapshot(
-        &mut self,
-        delivery: HostFilesystemSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_filesystem_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
-            return;
-        }
-        let feedback = delivery.request.feedback;
-        self.connection_monitor.host_filesystem_snapshot_polling = false;
-        self.connection_monitor.host_filesystem_snapshot_running = None;
-        self.connection_monitor.host_filesystem_snapshot_rx = None;
-        match delivery.result {
-            Ok(output) => {
-                let snapshot =
-                    filesystem_capture_snapshot(&output.stdout, &output.stderr, output.exit_code);
-                let visible_count = visible_filesystem_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_filesystem_search_query,
-                    self.connection_monitor.host_filesystem_filter,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourceFilesystemStatus::Available { .. } => {
-                        self.connection_monitor.host_filesystem_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_filesystem_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_filesystems.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourceFilesystemStatus::Unavailable => {
-                        self.connection_monitor.host_filesystem_last_error =
-                            Some(self.i18n.t("sidebar.host_filesystems.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_filesystem_toast(
-                                self.i18n.t("sidebar.host_filesystems.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourceFilesystemStatus::Error { message } => {
-                        self.connection_monitor.host_filesystem_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_filesystem_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_filesystems.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourceFilesystemStatus::Unknown => {}
-                }
-                self.connection_monitor
-                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
-                self.connection_monitor.host_filesystem_snapshot = Some(snapshot);
-            }
-            Err(error) => {
-                self.connection_monitor.host_filesystem_last_error = Some(error.clone());
-                self.connection_monitor
-                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
-                self.connection_monitor.host_filesystem_snapshot =
-                    Some(ResourceFilesystemSnapshot {
-                        status: ResourceFilesystemStatus::Error {
-                            message: error.clone(),
-                        },
-                        entries: Vec::new(),
-                    });
-                if feedback.should_toast() {
-                    self.push_host_filesystem_toast(
-                        self.i18n_replace(
-                            "sidebar.host_filesystems.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-        }
-        cx.notify();
-    }
-
     pub(super) fn push_host_filesystem_toast(
         &mut self,
         message: String,
@@ -1197,6 +976,205 @@ impl WorkspaceApp {
             progress: None,
             variant,
         });
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn filesystem_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<ResourceFilesystemSnapshot> {
+        self.host_filesystems
+            .snapshot
+            .as_ref()
+            .filter(|_| {
+                self.host_filesystems.snapshot_connection_id.as_deref() == Some(connection_id)
+            })
+            .cloned()
+    }
+
+    pub(super) fn filesystem_snapshot_polling(&self) -> bool {
+        self.host_filesystems.polling
+    }
+
+    pub(in crate::workspace::connection_monitor) fn filesystem_filter(&self) -> FilesystemFilter {
+        self.host_filesystems.filter
+    }
+
+    pub(super) fn filesystem_list_state(&self) -> ListState {
+        self.host_filesystems.list_state.clone()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn filesystem_expanded_index(
+        &self,
+    ) -> Option<usize> {
+        self.host_filesystems.expanded_index
+    }
+
+    pub(in crate::workspace::connection_monitor) fn select_filesystem_filter(
+        &mut self,
+        filter: FilesystemFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_filesystems.filter == filter {
+            return false;
+        }
+        self.host_filesystems.filter = filter;
+        self.host_filesystems.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::connection_monitor) fn toggle_filesystem_expanded(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_filesystems.expanded_index =
+            (self.host_filesystems.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_filesystem_expanded(&mut self, cx: &mut Context<Self>) {
+        if self.host_filesystems.expanded_index.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_filesystem_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_filesystems.list_state,
+            &mut self.host_filesystems.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn filesystem_diagnostic_command(&self, connection_id: &str) -> String {
+        let os_type = self
+            .connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_filesystem_diagnostic_command(&os_type)
+    }
+
+    pub(super) fn request_filesystem_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
+        }
+        if self.host_filesystems.polling {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::FilesystemSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
+        }
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::FilesystemConnectionMissing)
+                .into_iter()
+                .collect();
+        };
+        let command = build_filesystem_snapshot_command(&os_type);
+        let mut notices = Vec::new();
+        if feedback.should_toast() && command.capability == FilesystemCommandCapability::Partial {
+            notices.push(HostToolsNotice::FilesystemPartialSupport { os_type });
+        }
+
+        let request = HostFilesystemSnapshotRequest {
+            connection_id: connection_id.clone(),
+            feedback,
+            failure_fallback,
+        };
+        self.host_filesystems.snapshot_connection_id = Some(connection_id);
+        self.host_filesystems.running = Some(request.clone());
+        self.host_filesystems.polling = true;
+        // Filesystem scans may touch du/find and remain manual user work.
+        let spawned = self.spawn_filesystem_snapshot_capture(
+            command.command,
+            request,
+            HOST_FILESYSTEM_SNAPSHOT_TIMEOUT,
+            HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_filesystems.polling = false;
+            self.host_filesystems.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::FilesystemConnectionMissing)
+                .into_iter()
+                .collect();
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_filesystems_snapshot(
+        &mut self,
+        delivery: HostFilesystemSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_filesystems.running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        let feedback = delivery.request.feedback;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_filesystems.polling = false;
+        self.host_filesystems.running = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_filesystem_snapshot(&output.stdout);
+                if feedback.should_toast() {
+                    match &snapshot.status {
+                        ResourceFilesystemStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::FilesystemSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourceFilesystemStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::FilesystemUnavailable,
+                            ));
+                        }
+                        ResourceFilesystemStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::FilesystemSnapshotFailed,
+                            ));
+                        }
+                        ResourceFilesystemStatus::Unknown => {}
+                    }
+                }
+                self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_filesystems.snapshot = Some(snapshot);
+            }
+            Ok(_) | Err(()) => {
+                self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_filesystems.snapshot = Some(ResourceFilesystemSnapshot {
+                    status: ResourceFilesystemStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::FilesystemSnapshotFailed,
+                    ));
+                }
+            }
+        }
+        cx.notify();
     }
 }
 

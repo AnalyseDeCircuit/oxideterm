@@ -841,6 +841,44 @@ impl WorkspaceApp {
                 ),
                 TerminalNoticeVariant::Error,
             ),
+            HostToolsNotice::FilesystemSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::FilesystemConnectionMissing => (
+                self.i18n
+                    .t("sidebar.host_filesystems.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::FilesystemPartialSupport { os_type } => (
+                self.i18n_replace(
+                    "sidebar.host_filesystems.toast.partial_support",
+                    &[("os", os_type)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::FilesystemSnapshotLoaded { count } => (
+                self.i18n_replace(
+                    "sidebar.host_filesystems.toast.snapshot_loaded",
+                    &[("count", count.to_string())],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::FilesystemUnavailable => (
+                self.i18n.t("sidebar.host_filesystems.toast.unavailable"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::FilesystemSnapshotFailed => (
+                self.i18n_replace(
+                    "sidebar.host_filesystems.toast.snapshot_failed",
+                    &[(
+                        "reason",
+                        self.i18n.t("sidebar.host_filesystems.toast.unknown_error"),
+                    )],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
         };
         self.push_host_log_toast(message, variant);
     }
