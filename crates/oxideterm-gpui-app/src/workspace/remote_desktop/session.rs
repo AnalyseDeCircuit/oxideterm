@@ -49,6 +49,28 @@ impl RemoteDesktopSessionEntity {
         cx.notify();
     }
 
+    fn force_recover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.release_inputs();
+        if self.request_tx.is_some() {
+            self.send_request(RemoteDesktopHelperRequest::RequestFrame);
+        }
+        self.restart_worker(window, cx);
+    }
+
+    fn reconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match remote_desktop_reconnect_mode(self.state.snapshot().status) {
+            Some(RemoteDesktopReconnectMode::ProtocolRequest) => {
+                self.release_inputs();
+                self.send_request(RemoteDesktopHelperRequest::Reconnect);
+            }
+            Some(RemoteDesktopReconnectMode::RestartHelper) => {
+                self.release_inputs();
+                self.restart_worker(window, cx);
+            }
+            None => {}
+        }
+    }
+
     fn poll_deliveries(
         &mut self,
         visible: bool,
@@ -580,8 +602,7 @@ impl WorkspaceApp {
         let _ = cx.update_window(window_handle, move |_, window, cx| {
             workspace.update(cx, |workspace, cx| match &event {
                 RemoteDesktopSessionEvent::DeliveryReady { generation } => {
-                    if !workspace.remote_desktop_worker_generation_matches(tab_id, *generation, cx)
-                    {
+                    if session_entity.read(cx).worker_generation != *generation {
                         return;
                     }
                     let backlog_remaining =
@@ -1088,24 +1109,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.release_remote_desktop_inputs_for_tab(tab_id, cx);
-        let has_live_worker = self
-            .remote_desktop_session_entity(tab_id, cx)
-            .is_some_and(|session| session.read(cx).request_tx.is_some());
-        if has_live_worker {
-            self.send_remote_desktop_request(tab_id, RemoteDesktopHelperRequest::RequestFrame, cx);
-        }
-        self.restart_remote_desktop_worker(tab_id, window, cx);
-    }
-
-    pub(in crate::workspace) fn send_remote_desktop_request(
-        &mut self,
-        tab_id: TabId,
-        request: RemoteDesktopHelperRequest,
-        cx: &mut Context<Self>,
-    ) {
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
-            session.update(cx, |session, _cx| session.send_request(request));
+            session.update(cx, |session, cx| session.force_recover(window, cx));
         }
     }
 
@@ -1126,47 +1131,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(status) = self
-            .remote_desktop_session_entity(tab_id, cx)
-            .map(|session| session.read(cx).state.snapshot().status)
-        else {
-            return;
-        };
-
-        match remote_desktop_reconnect_mode(status) {
-            Some(RemoteDesktopReconnectMode::ProtocolRequest) => {
-                self.release_remote_desktop_inputs_for_tab(tab_id, cx);
-                self.send_remote_desktop_request(tab_id, RemoteDesktopHelperRequest::Reconnect, cx);
-            }
-            Some(RemoteDesktopReconnectMode::RestartHelper) => {
-                self.release_remote_desktop_inputs_for_tab(tab_id, cx);
-                self.restart_remote_desktop_worker(tab_id, window, cx);
-            }
-            None => {}
+        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+            session.update(cx, |session, cx| session.reconnect(window, cx));
         }
-    }
-
-    pub(in crate::workspace) fn restart_remote_desktop_worker(
-        &mut self,
-        tab_id: TabId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
-            session_entity.update(cx, |session, cx| {
-                session.restart_worker(window, cx);
-            });
-        }
-    }
-
-    pub(in crate::workspace) fn remote_desktop_worker_generation_matches(
-        &self,
-        tab_id: TabId,
-        generation: u64,
-        cx: &App,
-    ) -> bool {
-        self.remote_desktop_session_entity(tab_id, cx)
-            .is_some_and(|session| session.read(cx).worker_generation == generation)
     }
 }
 
