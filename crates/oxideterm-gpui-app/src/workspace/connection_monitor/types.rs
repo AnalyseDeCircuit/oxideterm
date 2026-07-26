@@ -801,6 +801,56 @@ pub(in crate::workspace) enum ConnectionRuntimeSection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostToolsVisibility {
+    Hidden,
+    VisibleMainTab,
+    VisibleSidebar,
+    VisibleDetachedWindow,
+    VisibleMultiple {
+        main_tab: bool,
+        sidebar: bool,
+        detached_window: bool,
+    },
+    Dropped,
+}
+
+impl HostToolsVisibility {
+    pub(in crate::workspace) fn from_mounts(
+        main_tab: bool,
+        sidebar: bool,
+        detached_window: bool,
+    ) -> Self {
+        match (
+            usize::from(main_tab) + usize::from(sidebar) + usize::from(detached_window),
+            main_tab,
+            sidebar,
+            detached_window,
+        ) {
+            (0, _, _, _) => Self::Hidden,
+            (1, true, _, _) => Self::VisibleMainTab,
+            (1, _, true, _) => Self::VisibleSidebar,
+            (1, _, _, true) => Self::VisibleDetachedWindow,
+            _ => Self::VisibleMultiple {
+                main_tab,
+                sidebar,
+                detached_window,
+            },
+        }
+    }
+
+    pub(in crate::workspace) fn is_visible(self) -> bool {
+        !matches!(self, Self::Hidden | Self::Dropped)
+    }
+
+    pub(in crate::workspace) fn sidebar_is_visible(self) -> bool {
+        matches!(
+            self,
+            Self::VisibleSidebar | Self::VisibleMultiple { sidebar: true, .. }
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CompactMonitorLayout {
     Inline,
     Stacked,

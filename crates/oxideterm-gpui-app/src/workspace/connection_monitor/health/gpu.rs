@@ -582,32 +582,20 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn sync_host_gpu_sampling(&mut self, cx: &mut Context<Self>) {
-        let enabled = self.settings_store.settings().host_tools.gpu_enabled;
-        let visible = enabled
-            && self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-            && self.host_tools.read(cx).active_tool() == ContextSidebarTool::Gpu;
-        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
-        let runtime = self.forwarding_runtime.handle().clone();
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.sync_gpu_sampling(visible, selected_connection_id, runtime, cx);
-        });
-    }
-
     pub(in crate::workspace) fn restart_host_gpu_sampling(
         &mut self,
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
         let enabled = self.settings_store.settings().host_tools.gpu_enabled;
+        let visibility = self.host_tools_visibility();
         let visible = enabled
-            && self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            && visibility.sidebar_is_visible()
             && self.host_tools.read(cx).active_tool() == ContextSidebarTool::Gpu;
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.visibility = visibility;
             host_tools.restart_gpu_sampling(
                 connection_id,
                 visible,

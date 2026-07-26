@@ -7,16 +7,128 @@ fn is_host_tools_tab_kind(tab_kind: &TabKind) -> bool {
     )
 }
 
-fn host_tools_surface_visible(
+fn host_tools_visibility(
     main_tab_visible: bool,
     detached_tab_visible: bool,
     sidebar_visible: bool,
-) -> bool {
-    main_tab_visible || detached_tab_visible || sidebar_visible
+) -> HostToolsVisibility {
+    HostToolsVisibility::from_mounts(main_tab_visible, sidebar_visible, detached_tab_visible)
+}
+
+impl HostToolsEntity {
+    pub(in crate::workspace) fn update_lifecycle(
+        &mut self,
+        visibility: HostToolsVisibility,
+        gpu_enabled: bool,
+        sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+        runtime: tokio::runtime::Handle,
+        force_pool_refresh: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.visibility = visibility;
+        let gpu_visible = gpu_enabled
+            && visibility.sidebar_is_visible()
+            && self.active_tool() == ContextSidebarTool::Gpu;
+        let selected_connection_id = self.selected_connection_id_owned();
+        self.sync_gpu_sampling(gpu_visible, selected_connection_id, runtime.clone(), cx);
+
+        let stale = self.pool_refresh_is_stale(MONITOR_POOL_REFRESH_INTERVAL);
+        if force_pool_refresh || stale {
+            self.refresh_pool_snapshot(cx);
+        }
+        if !visibility.is_visible() {
+            // Hidden Host Tools stop page samplers only. The registry keeps
+            // shared nodes, SFTP sessions, and forwarding tasks alive.
+            self.stop_profiler_sampling();
+            self.pause_service_refreshes();
+            return;
+        }
+
+        let connections = self.monitor_connections();
+        let selected_missing = self.selected_connection_id().is_none_or(|selected| {
+            !connections
+                .iter()
+                .any(|connection| connection.connection_id == selected)
+        });
+        if force_pool_refresh || stale || selected_missing {
+            self.sync_live_connections(connections, sampling_config, runtime, cx);
+        }
+    }
+
+    pub(super) fn sync_live_connections(
+        &mut self,
+        connections: Vec<MonitorConnectionOption>,
+        sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) {
+        let live_connection_ids = connections
+            .iter()
+            .map(|connection| connection.connection_id.as_str())
+            .collect::<HashSet<_>>();
+        for connection_id in self.profiler_connection_ids() {
+            if !live_connection_ids.contains(connection_id.as_str()) {
+                self.remove_profiler_connection(&connection_id);
+            }
+        }
+        if connections.is_empty() {
+            if let Some(connection_id) = self.take_selected_connection(cx) {
+                self.remove_profiler_connection(&connection_id);
+            }
+            return;
+        }
+
+        let live_connection_ids = connections
+            .into_iter()
+            .map(|connection| connection.connection_id)
+            .collect::<Vec<_>>();
+        let Some(connection_id) = self.ensure_selected_connection(&live_connection_ids, cx) else {
+            return;
+        };
+        if !self.visibility.is_visible() || sampling_config.is_empty() {
+            self.stop_profiler_sampling();
+            return;
+        }
+        if self.profiler_connection_missing(&connection_id) {
+            self.start_profiler(connection_id, sampling_config, runtime, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn apply_monitoring_settings(
+        &mut self,
+        visibility: HostToolsVisibility,
+        gpu_enabled: bool,
+        sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) {
+        self.visibility = visibility;
+        if sampling_config.is_empty() || !visibility.is_visible() {
+            self.stop_profiler_sampling();
+        } else {
+            for connection_id in self.profiler_connection_ids() {
+                self.start_profiler(connection_id, sampling_config.clone(), runtime.clone(), cx);
+            }
+            self.sync_live_connections(
+                self.monitor_connections(),
+                sampling_config,
+                runtime.clone(),
+                cx,
+            );
+        }
+
+        let gpu_visible = gpu_enabled
+            && visibility.sidebar_is_visible()
+            && self.active_tool() == ContextSidebarTool::Gpu;
+        let selected_connection_id = self.selected_connection_id_owned();
+        self.sync_gpu_sampling(gpu_visible, selected_connection_id, runtime, cx);
+    }
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn host_tools_surface_visible(&self) -> bool {
+    pub(in crate::workspace::connection_monitor) fn host_tools_visibility(
+        &self,
+    ) -> HostToolsVisibility {
         let main_tab_visible = self.tabs.iter().any(|tab| {
             is_host_tools_tab_kind(&tab.kind)
                 && self.main_window_tabs.active_tab_id == Some(tab.id)
@@ -28,7 +140,11 @@ impl WorkspaceApp {
         let sidebar_visible = self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
 
-        host_tools_surface_visible(main_tab_visible, detached_tab_visible, sidebar_visible)
+        host_tools_visibility(main_tab_visible, detached_tab_visible, sidebar_visible)
+    }
+
+    pub(in crate::workspace) fn host_tools_surface_visible(&self) -> bool {
+        self.host_tools_visibility().is_visible()
     }
 
     pub(in crate::workspace) fn set_connection_runtime_section(
@@ -63,8 +179,7 @@ impl WorkspaceApp {
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);
-        self.refresh_connection_monitor_pool_stats(cx);
-        self.sync_connection_monitor_selection(cx);
+        self.sync_host_tools_lifecycle(true, cx);
     }
 
     pub(in crate::workspace) fn open_connection_monitor_tab(
@@ -95,90 +210,29 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.sync_host_gpu_sampling(cx);
-        if !self.host_tools_surface_visible() {
-            // Profilers own only sampling shells. Shared SSH nodes and user-triggered
-            // Host Tools operations continue independently while every surface is hidden.
-            self.host_tools.read(cx).stop_profiler_sampling();
-            self.host_tools
-                .update(cx, |host_tools, _cx| host_tools.pause_service_refreshes());
-            return;
-        }
+        self.sync_host_tools_lifecycle(false, cx);
+    }
 
-        let stale = self
-            .host_tools
-            .read(cx)
-            .pool_refresh_is_stale(MONITOR_POOL_REFRESH_INTERVAL);
-        if stale {
-            self.refresh_connection_monitor_pool_stats(cx);
-        }
-        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
-        let connections = self.monitor_connections(cx);
-        let selected_missing = selected_connection_id.as_ref().is_none_or(|selected| {
-            !connections
-                .iter()
-                .any(|connection| connection.connection_id == *selected)
+    pub(in crate::workspace) fn sync_host_tools_lifecycle(
+        &mut self,
+        force_pool_refresh: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let visibility = self.host_tools_visibility();
+        let host_tools_settings = &self.settings_store.settings().host_tools;
+        let gpu_enabled = host_tools_settings.gpu_enabled;
+        let sampling_config = self.resource_sampling_config();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.update_lifecycle(
+                visibility,
+                gpu_enabled,
+                sampling_config,
+                runtime,
+                force_pool_refresh,
+                cx,
+            );
         });
-        if stale || selected_missing {
-            // Selection sync scans the registry and may start profilers. Keep it
-            // tied to pool refreshes instead of every terminal-driven repaint.
-            self.sync_connection_monitor_selection(cx);
-        }
-    }
-
-    pub(in crate::workspace) fn refresh_connection_monitor_pool_stats(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        self.host_tools
-            .update(cx, |host_tools, cx| host_tools.refresh_pool_snapshot(cx));
-    }
-
-    pub(in crate::workspace) fn sync_connection_monitor_selection(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let connections = self.monitor_connections(cx);
-        let live_connection_ids = connections
-            .iter()
-            .map(|connection| connection.connection_id.as_str())
-            .collect::<HashSet<_>>();
-        for connection_id in self.host_tools.read(cx).profiler_connection_ids() {
-            if !live_connection_ids.contains(connection_id.as_str()) {
-                self.host_tools
-                    .read(cx)
-                    .remove_profiler_connection(&connection_id);
-            }
-        }
-        if connections.is_empty() {
-            self.host_tools.update(cx, |host_tools, cx| {
-                if let Some(connection_id) = host_tools.take_selected_connection(cx) {
-                    host_tools.remove_profiler_connection(&connection_id);
-                }
-            });
-            return;
-        }
-
-        let live_connection_ids = connections
-            .iter()
-            .map(|connection| connection.connection_id.clone())
-            .collect::<Vec<_>>();
-        let Some(connection_id) = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.ensure_selected_connection(&live_connection_ids, cx)
-        }) else {
-            return;
-        };
-        if !self.host_tools_surface_visible() || self.resource_sampling_config().is_empty() {
-            self.host_tools.read(cx).stop_profiler_sampling();
-            return;
-        }
-        if self
-            .host_tools
-            .read(cx)
-            .profiler_connection_missing(&connection_id)
-        {
-            self.start_connection_monitor_profiler(connection_id, cx);
-        }
     }
 
     pub(in crate::workspace) fn start_connection_monitor_profiler(
@@ -197,17 +251,20 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let config = self.resource_sampling_config();
-        if config.is_empty() || !self.host_tools_surface_visible() {
-            // The registry owns persistent shells, so stop them at the settings boundary.
-            self.host_tools.read(cx).stop_profiler_sampling();
-        } else {
-            for connection_id in self.host_tools.read(cx).profiler_connection_ids() {
-                self.start_connection_monitor_profiler(connection_id, cx);
-            }
-            self.sync_connection_monitor_selection(cx);
-        }
-        self.sync_host_gpu_sampling(cx);
+        let visibility = self.host_tools_visibility();
+        let host_tools_settings = &self.settings_store.settings().host_tools;
+        let gpu_enabled = host_tools_settings.gpu_enabled;
+        let sampling_config = self.resource_sampling_config();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.apply_monitoring_settings(
+                visibility,
+                gpu_enabled,
+                sampling_config,
+                runtime,
+                cx,
+            );
+        });
     }
 
     fn resource_sampling_config(&self) -> oxideterm_connection_monitor::ResourceSamplingConfig {
@@ -231,14 +288,34 @@ impl WorkspaceApp {
 
 #[cfg(test)]
 mod tests {
-    use super::host_tools_surface_visible;
+    use super::{HostToolsVisibility, host_tools_visibility};
 
     #[test]
     fn host_tools_visibility_covers_main_detached_and_sidebar_surfaces() {
-        assert!(host_tools_surface_visible(true, false, false));
-        assert!(host_tools_surface_visible(false, true, false));
-        assert!(host_tools_surface_visible(false, false, true));
-        assert!(host_tools_surface_visible(true, true, true));
-        assert!(!host_tools_surface_visible(false, false, false));
+        assert_eq!(
+            host_tools_visibility(true, false, false),
+            HostToolsVisibility::VisibleMainTab
+        );
+        assert_eq!(
+            host_tools_visibility(false, true, false),
+            HostToolsVisibility::VisibleDetachedWindow
+        );
+        assert_eq!(
+            host_tools_visibility(false, false, true),
+            HostToolsVisibility::VisibleSidebar
+        );
+        assert!(matches!(
+            host_tools_visibility(true, true, true),
+            HostToolsVisibility::VisibleMultiple {
+                main_tab: true,
+                sidebar: true,
+                detached_window: true,
+            }
+        ));
+        assert_eq!(
+            host_tools_visibility(false, false, false),
+            HostToolsVisibility::Hidden
+        );
+        assert!(!HostToolsVisibility::Dropped.is_visible());
     }
 }

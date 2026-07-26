@@ -299,11 +299,9 @@ impl WorkspaceApp {
             self.host_tools.update(cx, |host_tools, cx| {
                 host_tools.reset_active_tool(cx);
             });
-            self.refresh_connection_monitor_pool_stats(cx);
-            self.sync_connection_monitor_selection(cx);
         }
+        self.sync_host_tools_lifecycle(panel == ContextSidebarPanel::HostTools, cx);
         self.clear_ai_sidebar_keyboard_focus();
-        self.sync_host_gpu_sampling(cx);
         self.persist_sidebar_settings_store();
         cx.notify();
         true
@@ -317,7 +315,7 @@ impl WorkspaceApp {
         self.set_context_sidebar_rendered_with_motion(false, cx);
         self.ai.chat.sidebar_resizing = false;
         self.sidebar_resize_hotzone_hovered = false;
-        self.sync_host_gpu_sampling(cx);
+        self.sync_host_tools_lifecycle(false, cx);
         self.clear_ai_sidebar_keyboard_focus();
         self.close_ai_sidebar_popovers();
         self.persist_sidebar_settings_store();

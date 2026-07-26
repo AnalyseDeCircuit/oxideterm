@@ -204,8 +204,7 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
-                this.refresh_connection_monitor_pool_stats(cx);
-                this.sync_connection_monitor_selection(cx);
+                this.sync_host_tools_lifecycle(true, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),

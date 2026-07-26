@@ -76,6 +76,7 @@ impl HostToolsEntity {
         let release_wake = delivery_wake.clone();
         cx.on_release(move |entity, _| {
             // Releasing the page owner stops sampling shells, never shared SSH nodes.
+            entity.visibility = HostToolsVisibility::Dropped;
             entity.profiler_registry.stop_all();
             if let Some(task) = entity.host_gpu.sampling_task.take() {
                 task.stop();

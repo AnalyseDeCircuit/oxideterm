@@ -999,9 +999,7 @@ impl WorkspaceApp {
                         // the selected connection profiler. Waiting for the
                         // heartbeat made data appear only after another
                         // layout event, such as entering fullscreen.
-                        this.refresh_connection_monitor_pool_stats(cx);
-                        this.sync_connection_monitor_selection(cx);
-                        this.sync_host_gpu_sampling(cx);
+                        this.sync_host_tools_lifecycle(true, cx);
                         if tool == ContextSidebarTool::Services {
                             this.request_host_services_snapshot_for_selected_connection(cx);
                         }
@@ -1210,8 +1208,7 @@ impl WorkspaceApp {
             host_tools.dismiss_tmux_confirm(cx);
             host_tools.dismiss_schedule_confirm(cx);
         });
-        self.sync_connection_monitor_selection(cx);
-        self.sync_host_gpu_sampling(cx);
+        self.sync_host_tools_lifecycle(true, cx);
         let active_tool = self.host_tools.read(cx).active_tool();
         if active_tool == ContextSidebarTool::Services {
             self.request_host_service_snapshot(connection_id.clone(), cx);

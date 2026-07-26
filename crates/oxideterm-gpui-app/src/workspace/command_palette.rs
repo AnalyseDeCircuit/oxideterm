@@ -617,7 +617,7 @@ impl WorkspaceApp {
             .map(|endpoint_session| endpoint_session.session.lock().lifecycle())
             .collect::<Vec<_>>();
         let (healthy, total) = command_palette_health_counts_from_lifecycles(lifecycles.iter());
-        self.refresh_connection_monitor_pool_stats(cx);
+        self.sync_host_tools_lifecycle(true, cx);
         self.push_command_palette_toast(
             self.i18n_replace(
                 "command_palette.health_result",

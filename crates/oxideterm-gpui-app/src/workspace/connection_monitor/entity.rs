@@ -47,6 +47,9 @@ pub(in crate::workspace) struct HostToolsEntity {
     active_tool: ContextSidebarTool,
     previous_tool: ContextSidebarTool,
     tab_scrollbar_drag: Option<HostToolsTabScrollbarDragState>,
+    // Visibility is an Entity lifecycle input. It controls only page-scoped
+    // sampling and never owns or releases shared SSH transports.
+    pub(super) visibility: HostToolsVisibility,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
@@ -111,6 +114,7 @@ impl HostToolsEntity {
             active_tool: ContextSidebarTool::Monitor,
             previous_tool: ContextSidebarTool::Monitor,
             tab_scrollbar_drag: None,
+            visibility: HostToolsVisibility::Hidden,
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -1152,6 +1156,7 @@ mod tests {
 
     #[gpui::test]
     fn pool_snapshot_refresh_is_entity_owned(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
         let registry = SshConnectionRegistry::default();
         let node_consumer = ConnectionConsumer::NodeRouter("node-1".to_string());
         let handle = registry.acquire(
@@ -1173,9 +1178,18 @@ mod tests {
             assert_eq!(entity.monitor_connections().len(), 1);
             assert!(entity.pool_stats_snapshot().is_some());
             assert!(entity.topology_snapshot().is_some());
+            entity.update_lifecycle(
+                HostToolsVisibility::Hidden,
+                true,
+                oxideterm_connection_monitor::ResourceSamplingConfig::default(),
+                runtime.handle().clone(),
+                false,
+                cx,
+            );
+            assert_eq!(entity.visibility, HostToolsVisibility::Hidden);
         });
 
-        // Sampling/page refresh must not consume or release the node owner.
+        // Sampling and hidden-page transitions must not consume or release the node owner.
         assert_eq!(handle.info().ref_count, 1);
         assert_eq!(handle.info().consumers, vec![node_consumer]);
     }
