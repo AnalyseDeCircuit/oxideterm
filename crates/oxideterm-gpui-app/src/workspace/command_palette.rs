@@ -611,15 +611,13 @@ impl WorkspaceApp {
     }
 
     pub(super) fn run_connection_health_check_from_palette(&mut self, cx: &mut Context<Self>) {
-        let summaries = self.ssh_registry.list_connection_summaries();
         let lifecycles = self
             .terminal_endpoint_sessions
             .values()
             .map(|endpoint_session| endpoint_session.session.lock().lifecycle())
             .collect::<Vec<_>>();
         let (healthy, total) = command_palette_health_counts_from_lifecycles(lifecycles.iter());
-        self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
-        self.connection_monitor.pool_summaries = summaries;
+        self.refresh_connection_monitor_pool_stats(cx);
         self.push_command_palette_toast(
             self.i18n_replace(
                 "command_palette.health_result",

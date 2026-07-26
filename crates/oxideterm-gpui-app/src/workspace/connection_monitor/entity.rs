@@ -1,9 +1,13 @@
 use super::*;
 
 use oxideterm_connection_monitor::ResourceSampler;
+use oxideterm_topology::ConnectionTopologySnapshot;
 
 /// Owns Host Tools sampling state independently from WorkspaceApp and SSH nodes.
 pub(in crate::workspace) struct HostToolsEntity {
+    // This handle is private to the Entity. Host Tools exposes snapshots and
+    // sampler acquisition only; page code cannot disconnect shared nodes.
+    ssh_registry: SshConnectionRegistry,
     pub(super) profiler_registry: ProfilerRegistry,
     pub(super) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
     pub(super) sampler_delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
@@ -17,6 +21,11 @@ pub(in crate::workspace) struct HostToolsEntity {
     selector_highlighted_index: Option<usize>,
     selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     tab_scroll_handle: ScrollHandle,
+    pool_stats: Option<ConnectionPoolMonitorStats>,
+    pool_summaries: Vec<ConnectionPoolEntrySummary>,
+    topology_snapshot: Option<ConnectionTopologySnapshot>,
+    pool_error: Option<String>,
+    last_pool_refresh: Option<Instant>,
     pub(in crate::workspace) section_list_state: ListState,
     pub(in crate::workspace) section_list_cache: RefCell<VirtualListSignatureCache>,
 }
@@ -25,6 +34,7 @@ impl HostToolsEntity {
     pub(in crate::workspace) fn new(
         profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
         profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
+        ssh_registry: SshConnectionRegistry,
         cx: &mut Context<Self>,
     ) -> Self {
         let sampler_delivery_wake = crate::workspace::delivery::ActiveDeliveryWake::default();
@@ -34,6 +44,7 @@ impl HostToolsEntity {
             );
         let (gpu_update_tx, gpu_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let entity = Self {
+            ssh_registry,
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
             sampler_delivery_wake,
@@ -46,6 +57,11 @@ impl HostToolsEntity {
             selector_highlighted_index: None,
             selector_focus_origin: None,
             tab_scroll_handle: ScrollHandle::new(),
+            pool_stats: None,
+            pool_summaries: Vec::new(),
+            topology_snapshot: None,
+            pool_error: None,
+            last_pool_refresh: None,
             // Monitor pages have variable-height browser sections and retain one
             // ListState owner across the main tab and detached-window surfaces.
             section_list_state: ListState::new(
@@ -73,6 +89,58 @@ impl HostToolsEntity {
 
     pub(in crate::workspace) fn profiler_registry(&self) -> &ProfilerRegistry {
         &self.profiler_registry
+    }
+
+    pub(in crate::workspace) fn refresh_pool_snapshot(&mut self, cx: &mut Context<Self>) {
+        self.pool_stats = Some(self.ssh_registry.monitor_stats());
+        self.pool_summaries = self.ssh_registry.list_connection_summaries();
+        self.topology_snapshot = Some(self.ssh_registry.connection_topology_snapshot());
+        self.pool_error = None;
+        self.last_pool_refresh = Some(Instant::now());
+        cx.notify();
+    }
+
+    pub(super) fn pool_refresh_is_stale(&self, interval: Duration) -> bool {
+        self.last_pool_refresh
+            .is_none_or(|last_refresh| last_refresh.elapsed() >= interval)
+    }
+
+    pub(super) fn pool_stats_snapshot(&self) -> Option<ConnectionPoolMonitorStats> {
+        self.pool_stats.clone()
+    }
+
+    pub(super) fn pool_error(&self) -> Option<&str> {
+        self.pool_error.as_deref()
+    }
+
+    pub(super) fn pool_summary_count(&self) -> usize {
+        self.pool_summaries.len()
+    }
+
+    pub(super) fn topology_snapshot(&self) -> Option<ConnectionTopologySnapshot> {
+        self.topology_snapshot.clone()
+    }
+
+    pub(super) fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
+        if !self.pool_summaries.is_empty() {
+            return self
+                .pool_summaries
+                .iter()
+                .filter(|summary| summary.is_displayed_in_pool())
+                .map(MonitorConnectionOption::from_pool_summary)
+                .collect();
+        }
+
+        let mut connections = self
+            .ssh_registry
+            .list()
+            .into_iter()
+            .map(MonitorConnectionOption::from_connection_info)
+            .collect::<Vec<_>>();
+        connections.sort_by(|left, right| {
+            monitor_connection_label(left).cmp(&monitor_connection_label(right))
+        });
+        connections
     }
 
     pub(super) fn set_runtime_section(&mut self, section: ConnectionRuntimeSection) -> bool {
@@ -253,12 +321,11 @@ impl HostToolsEntity {
     pub(super) fn start_profiler(
         &self,
         connection_id: String,
-        ssh_registry: &SshConnectionRegistry,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = ssh_registry.get(&connection_id) else {
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
             return;
         };
         let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
@@ -281,7 +348,6 @@ impl HostToolsEntity {
         &mut self,
         enabled_and_visible: bool,
         selected_connection_id: Option<String>,
-        ssh_registry: &SshConnectionRegistry,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) {
@@ -306,7 +372,7 @@ impl HostToolsEntity {
         if let Some(task) = self.host_gpu.sampling_task.take() {
             task.stop();
         }
-        let Some(handle) = ssh_registry.get(&connection_id) else {
+        let Some(handle) = self.ssh_registry.get(&connection_id) else {
             return;
         };
         let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
@@ -398,7 +464,6 @@ impl HostToolsEntity {
         connection_id: String,
         enabled_and_visible: bool,
         selected_connection_id: Option<String>,
-        ssh_registry: &SshConnectionRegistry,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) {
@@ -412,13 +477,7 @@ impl HostToolsEntity {
             task.stop();
         }
         self.host_gpu.snapshot = None;
-        self.sync_gpu_sampling(
-            enabled_and_visible,
-            selected_connection_id,
-            ssh_registry,
-            runtime,
-            cx,
-        );
+        self.sync_gpu_sampling(enabled_and_visible, selected_connection_id, runtime, cx);
     }
 }
 
@@ -430,7 +489,14 @@ mod tests {
     #[gpui::test]
     fn runtime_navigation_transition_is_entity_owned(cx: &mut TestAppContext) {
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
-        let entity = cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, cx));
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
 
         entity.update(cx, |entity, _cx| {
             assert_eq!(
@@ -453,7 +519,14 @@ mod tests {
     #[gpui::test]
     fn connection_selector_state_is_entity_owned(cx: &mut TestAppContext) {
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
-        let entity = cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, cx));
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
 
         entity.update(cx, |entity, cx| {
             let live_connections = vec!["connection-1".to_string(), "connection-2".to_string()];
@@ -479,9 +552,46 @@ mod tests {
     }
 
     #[gpui::test]
+    fn pool_snapshot_refresh_is_entity_owned(cx: &mut TestAppContext) {
+        let registry = SshConnectionRegistry::default();
+        let node_consumer = ConnectionConsumer::NodeRouter("node-1".to_string());
+        let handle = registry.acquire(
+            SshConfig {
+                host: "host.example".to_string(),
+                username: "alice".to_string(),
+                auth: AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+            node_consumer.clone(),
+        );
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity =
+            cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, registry, cx));
+
+        entity.update(cx, |entity, cx| {
+            entity.refresh_pool_snapshot(cx);
+            assert_eq!(entity.pool_summary_count(), 1);
+            assert_eq!(entity.monitor_connections().len(), 1);
+            assert!(entity.pool_stats_snapshot().is_some());
+            assert!(entity.topology_snapshot().is_some());
+        });
+
+        // Sampling/page refresh must not consume or release the node owner.
+        assert_eq!(handle.info().ref_count, 1);
+        assert_eq!(handle.info().consumers, vec![node_consumer]);
+    }
+
+    #[gpui::test]
     fn gpu_actions_and_expansion_are_entity_owned(cx: &mut TestAppContext) {
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
-        let entity = cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, cx));
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
         let mut events = cx.events(&entity);
 
         entity.update(cx, |entity, cx| {

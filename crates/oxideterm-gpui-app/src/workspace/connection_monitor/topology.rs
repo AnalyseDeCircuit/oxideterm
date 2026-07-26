@@ -88,16 +88,16 @@ impl WorkspaceApp {
 
     pub(super) fn render_connection_pool_monitor(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        if let Some(error) = &self.connection_monitor.pool_error {
+        if let Some(error) = self.host_tools.read(cx).pool_error() {
             return monitor_center_state(
                 self,
                 LucideIcon::AlertTriangle,
                 MONITOR_RED,
-                error.clone(),
+                error.to_string(),
                 cx,
             );
         }
-        let Some(stats) = self.connection_monitor.pool_stats.as_ref() else {
+        let Some(stats) = self.host_tools.read(cx).pool_stats_snapshot() else {
             return monitor_center_state(
                 self,
                 LucideIcon::RefreshCw,
@@ -363,7 +363,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(snapshot) = self.connection_monitor.topology_snapshot.as_ref() else {
+        let Some(snapshot) = self.host_tools.read(cx).topology_snapshot() else {
             return monitor_center_state(
                 self,
                 LucideIcon::RefreshCw,
@@ -372,7 +372,7 @@ impl WorkspaceApp {
                 cx,
             );
         };
-        let layout = ConnectionTopologyLayout::from_snapshot(snapshot);
+        let layout = ConnectionTopologyLayout::from_snapshot(&snapshot);
         if layout.nodes.is_empty() {
             return div()
                 .size_full()

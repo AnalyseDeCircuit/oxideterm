@@ -6,7 +6,7 @@ use oxideterm_connection_monitor::{filesystem_capture_snapshot, filesystem_perce
 
 impl WorkspaceApp {
     pub(super) fn render_host_filesystems_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         if connections.is_empty() {
             return monitor_center_state(
                 self,
@@ -904,7 +904,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         let Some(connection_id) = self
             .host_tools
             .read(cx)

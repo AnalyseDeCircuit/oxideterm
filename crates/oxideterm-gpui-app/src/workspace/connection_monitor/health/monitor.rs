@@ -11,7 +11,7 @@ impl WorkspaceApp {
         compact: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         if connections.is_empty() {
             return div()
                 .flex()

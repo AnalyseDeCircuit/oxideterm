@@ -4,7 +4,7 @@ use super::*;
 
 impl WorkspaceApp {
     pub(super) fn render_host_gpu_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         if connections.is_empty() {
             return monitor_center_state(
                 self,
@@ -589,16 +589,9 @@ impl WorkspaceApp {
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
             && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
-        let ssh_registry = self.ssh_registry.clone();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.sync_gpu_sampling(
-                visible,
-                selected_connection_id,
-                &ssh_registry,
-                runtime,
-                cx,
-            );
+            host_tools.sync_gpu_sampling(visible, selected_connection_id, runtime, cx);
         });
     }
 
@@ -613,14 +606,12 @@ impl WorkspaceApp {
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
             && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
-        let ssh_registry = self.ssh_registry.clone();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.restart_gpu_sampling(
                 connection_id,
                 visible,
                 selected_connection_id,
-                &ssh_registry,
                 runtime,
                 cx,
             );

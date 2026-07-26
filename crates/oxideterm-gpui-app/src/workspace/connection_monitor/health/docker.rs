@@ -6,7 +6,7 @@ use oxideterm_connection_monitor::docker_action_availability;
 
 impl WorkspaceApp {
     pub(super) fn render_host_docker_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         if connections.is_empty() {
             return monitor_center_state(
                 self,

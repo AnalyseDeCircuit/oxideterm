@@ -986,7 +986,7 @@ impl WorkspaceApp {
                         // the selected connection profiler. Waiting for the
                         // heartbeat made data appear only after another
                         // layout event, such as entering fullscreen.
-                        this.refresh_connection_monitor_pool_stats();
+                        this.refresh_connection_monitor_pool_stats(cx);
                         this.sync_connection_monitor_selection(cx);
                         this.sync_host_gpu_sampling(cx);
                         if tool == ContextSidebarTool::Services {
@@ -1247,7 +1247,7 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             return false;
         }
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         if !monitor_connection_can_switch(&connections) {
             self.host_tools.update(cx, |host_tools, cx| {
                 host_tools.close_selector(true, cx);

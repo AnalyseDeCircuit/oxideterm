@@ -67,23 +67,12 @@ impl WorkspaceApp {
         // selection state changes; include those browser-section states so
         // GPUI remeasures the variable-height List rows.
         section.hash(&mut hasher);
-        self.connection_monitor
-            .pool_error
-            .is_some()
-            .hash(&mut hasher);
-        self.connection_monitor
-            .pool_stats
-            .is_some()
-            .hash(&mut hasher);
-        self.connection_monitor
-            .pool_summaries
-            .len()
-            .hash(&mut hasher);
+        let host_tools = self.host_tools.read(cx);
+        host_tools.pool_error().is_some().hash(&mut hasher);
+        host_tools.pool_stats_snapshot().is_some().hash(&mut hasher);
+        host_tools.pool_summary_count().hash(&mut hasher);
         if matches!(section, ConnectionMonitorSection::Health) {
-            self.host_tools
-                .read(cx)
-                .selected_connection_id()
-                .hash(&mut hasher);
+            host_tools.selected_connection_id().hash(&mut hasher);
             self.settings_store
                 .settings()
                 .host_tools

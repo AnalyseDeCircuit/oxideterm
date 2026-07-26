@@ -93,8 +93,14 @@ impl WorkspaceApp {
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let connection_monitor = ConnectionMonitorState::new();
-        let host_tools =
-            cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, cx));
+        let host_tools = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                ssh_registry.clone(),
+                cx,
+            )
+        });
         let host_tools_subscription = cx.subscribe(
             &host_tools,
             |workspace, _host_tools, event: &HostToolsEvent, cx| match event {

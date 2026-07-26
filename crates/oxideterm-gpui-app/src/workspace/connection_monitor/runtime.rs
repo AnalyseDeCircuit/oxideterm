@@ -204,7 +204,7 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
-                this.refresh_connection_monitor_pool_stats();
+                this.refresh_connection_monitor_pool_stats(cx);
                 this.sync_connection_monitor_selection(cx);
                 cx.stop_propagation();
                 cx.notify();
@@ -215,7 +215,7 @@ impl WorkspaceApp {
 
     fn render_connection_runtime_overview(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(stats) = self.connection_monitor.pool_stats.clone() else {
+        let Some(stats) = self.host_tools.read(cx).pool_stats_snapshot() else {
             return div()
                 .id("connection-runtime-overview")
                 .flex_1()

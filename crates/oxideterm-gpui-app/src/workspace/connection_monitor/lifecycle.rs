@@ -63,7 +63,7 @@ impl WorkspaceApp {
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);
-        self.refresh_connection_monitor_pool_stats();
+        self.refresh_connection_monitor_pool_stats(cx);
         self.sync_connection_monitor_selection(cx);
     }
 
@@ -104,19 +104,18 @@ impl WorkspaceApp {
         }
 
         let stale = self
-            .connection_monitor
-            .last_pool_refresh
-            .is_none_or(|last| last.elapsed() >= MONITOR_POOL_REFRESH_INTERVAL);
+            .host_tools
+            .read(cx)
+            .pool_refresh_is_stale(MONITOR_POOL_REFRESH_INTERVAL);
         if stale {
-            self.refresh_connection_monitor_pool_stats();
+            self.refresh_connection_monitor_pool_stats(cx);
         }
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
+        let connections = self.monitor_connections(cx);
         let selected_missing = selected_connection_id.as_ref().is_none_or(|selected| {
-            !self
-                .connection_monitor
-                .pool_summaries
+            !connections
                 .iter()
-                .any(|summary| summary.id == *selected)
+                .any(|connection| connection.connection_id == *selected)
         });
         if stale || selected_missing {
             // Selection sync scans the registry and may start profilers. Keep it
@@ -125,20 +124,19 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn refresh_connection_monitor_pool_stats(&mut self) {
-        self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
-        self.connection_monitor.pool_summaries = self.ssh_registry.list_connection_summaries();
-        self.connection_monitor.topology_snapshot =
-            Some(self.ssh_registry.connection_topology_snapshot());
-        self.connection_monitor.pool_error = None;
-        self.connection_monitor.last_pool_refresh = Some(Instant::now());
+    pub(in crate::workspace) fn refresh_connection_monitor_pool_stats(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_tools
+            .update(cx, |host_tools, cx| host_tools.refresh_pool_snapshot(cx));
     }
 
     pub(in crate::workspace) fn sync_connection_monitor_selection(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         let live_connection_ids = connections
             .iter()
             .map(|connection| connection.connection_id.as_str())
@@ -186,11 +184,10 @@ impl WorkspaceApp {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        let ssh_registry = self.ssh_registry.clone();
         let sampling_config = self.resource_sampling_config();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.start_profiler(connection_id, &ssh_registry, sampling_config, runtime, cx);
+            host_tools.start_profiler(connection_id, sampling_config, runtime, cx);
         });
     }
 
@@ -222,27 +219,11 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
-        if !self.connection_monitor.pool_summaries.is_empty() {
-            return self
-                .connection_monitor
-                .pool_summaries
-                .iter()
-                .filter(|summary| summary.is_displayed_in_pool())
-                .map(MonitorConnectionOption::from_pool_summary)
-                .collect();
-        }
-
-        let mut connections = self
-            .ssh_registry
-            .list()
-            .into_iter()
-            .map(MonitorConnectionOption::from_connection_info)
-            .collect::<Vec<_>>();
-        connections.sort_by(|left, right| {
-            monitor_connection_label(left).cmp(&monitor_connection_label(right))
-        });
-        connections
+    pub(super) fn monitor_connections(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Vec<MonitorConnectionOption> {
+        self.host_tools.read(cx).monitor_connections()
     }
 }
 

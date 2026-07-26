@@ -1,9 +1,9 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui::{Rgba, rgb, rgba};
 use oxideterm_gpui_ui::motion::ExitPresence;
 use oxideterm_ssh::SshCommandOutput;
-use oxideterm_topology::{ConnectionTopologySnapshot, TopologyViewStatus};
+use oxideterm_topology::TopologyViewStatus;
 
 use super::*;
 
@@ -569,11 +569,6 @@ impl<T> HostToolConfirmState<T> {
 }
 
 pub(in crate::workspace) struct ConnectionMonitorState {
-    pub(in crate::workspace) pool_stats: Option<ConnectionPoolMonitorStats>,
-    pub(in crate::workspace) pool_summaries: Vec<ConnectionPoolEntrySummary>,
-    pub(in crate::workspace) topology_snapshot: Option<ConnectionTopologySnapshot>,
-    pub(in crate::workspace) pool_error: Option<String>,
-    pub(in crate::workspace) last_pool_refresh: Option<Instant>,
     // Reliable Host Tools action results remain view-owned until their pages
     // move into HostToolsEntity in the following Phase 3A slices.
     pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
@@ -725,11 +720,6 @@ impl ConnectionMonitorState {
     pub(in crate::workspace) fn new() -> Self {
         let delivery_wake = crate::workspace::delivery::ActiveDeliveryWake::default();
         Self {
-            pool_stats: None,
-            pool_summaries: Vec::new(),
-            topology_snapshot: None,
-            pool_error: None,
-            last_pool_refresh: None,
             delivery_wake,
             delivery_cursor: 0,
             compact_monitor_list_state: tauri_virtual_list_state(
