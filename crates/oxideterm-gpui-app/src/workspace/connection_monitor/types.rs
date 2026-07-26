@@ -531,12 +531,42 @@ impl HostFilesystemsState {
 pub(super) struct HostPackageSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostPackageSnapshotDelivery {
     pub(super) request: HostPackageSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostPackagesState {
+    pub(super) filter: PackageFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourcePackageSnapshot>,
+    pub(super) running: Option<HostPackageSnapshotRequest>,
+    pub(super) polling: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostPackagesState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: PackageFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            polling: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -755,17 +785,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_filesystem_search_focused: bool,
     pub(in crate::workspace) host_package_search_query: String,
     pub(in crate::workspace) host_package_search_focused: bool,
-    pub(super) host_package_filter: PackageFilter,
-    pub(in crate::workspace) host_package_expanded_index: Option<usize>,
-    pub(super) host_package_snapshot_connection_id: Option<String>,
-    pub(super) host_package_snapshot: Option<ResourcePackageSnapshot>,
-    pub(super) host_package_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostPackageSnapshotDelivery>>,
-    pub(super) host_package_snapshot_running: Option<HostPackageSnapshotRequest>,
-    pub(super) host_package_snapshot_polling: bool,
-    pub(super) host_package_last_error: Option<String>,
-    pub(super) host_package_list_state: ListState,
-    pub(super) host_package_list_cache: RefCell<VirtualListSignatureCache>,
 }
 
 impl ConnectionMonitorState {
@@ -882,20 +901,6 @@ impl ConnectionMonitorState {
             host_filesystem_search_focused: false,
             host_package_search_query: String::new(),
             host_package_search_focused: false,
-            host_package_filter: PackageFilter::All,
-            host_package_expanded_index: None,
-            host_package_snapshot_connection_id: None,
-            host_package_snapshot: None,
-            host_package_snapshot_rx: None,
-            host_package_snapshot_running: None,
-            host_package_snapshot_polling: false,
-            host_package_last_error: None,
-            host_package_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_package_list_cache: RefCell::new(VirtualListSignatureCache::default()),
         }
     }
 }

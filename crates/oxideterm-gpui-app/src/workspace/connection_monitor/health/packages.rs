@@ -19,29 +19,23 @@ impl WorkspaceApp {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_package_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_package_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.host_tools.read(cx).package_snapshot_for(selected_id);
+        let filter = self.host_tools.read(cx).package_filter();
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_package_rows(
                     &snapshot.entries,
                     &self.connection_monitor.host_package_search_query,
-                    self.connection_monitor.host_package_filter,
+                    filter,
                 )
             })
             .unwrap_or_default();
         let status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_package_list_state(&rows, selected_id);
+        self.sync_host_package_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-packages-panel")
@@ -68,7 +62,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_package_snapshot_polling,
+                        !self.host_tools.read(cx).package_snapshot_polling(),
                         cx,
                     ))
                     .child(self.render_host_package_search(cx))
@@ -82,7 +76,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_package_list(
                 rows,
-                self.connection_monitor.host_package_snapshot_polling,
+                self.host_tools.read(cx).package_snapshot_polling(),
                 status,
                 selected_id,
                 cx,
@@ -171,17 +165,15 @@ impl WorkspaceApp {
         filter: PackageFilter,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_package_filter == filter;
+        let active = self.host_tools.read(cx).package_filter() == filter;
         self.host_tools_filter_chip(active)
             .child(self.i18n.t(package_filter_label_key(filter)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_package_filter != filter {
-                        this.connection_monitor.host_package_filter = filter;
-                        this.connection_monitor.host_package_expanded_index = None;
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_package_filter(filter, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -227,7 +219,7 @@ impl WorkspaceApp {
                 rgb(theme.text),
                 oxideterm_gpui_ui::button::IconButtonOptions {
                     size: 24.0,
-                    disabled: self.connection_monitor.host_package_snapshot_polling,
+                    disabled: self.host_tools.read(cx).package_snapshot_polling(),
                     has_background: true,
                     background: Some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_panel)),
@@ -300,7 +292,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_package_list_state.clone();
+        let state = self.host_tools.read(cx).package_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         let show_context_columns =
@@ -418,7 +410,7 @@ impl WorkspaceApp {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_package_expanded_index == Some(index);
+        let expanded = self.host_tools.read(cx).package_expanded_index() == Some(index);
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let status = host_package_status_display(&self.i18n, &entry.status);
@@ -543,12 +535,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_package_expanded_index == Some(index) {
-                        this.connection_monitor.host_package_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_package_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.toggle_package_expanded(index, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -707,50 +696,21 @@ impl WorkspaceApp {
         &self,
         rows: &[ResourcePackageEntry],
         selected_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let signatures = rows.iter().map(package_row_signature).collect::<Vec<_>>();
         let identity = format!(
             "host-packages:{selected_id}:{}:{}:{}",
             self.connection_monitor.host_package_search_query,
-            self.connection_monitor.host_package_filter as u8,
-            self.connection_monitor
-                .host_package_expanded_index
+            self.host_tools.read(cx).package_filter() as u8,
+            self.host_tools
+                .read(cx)
+                .package_expanded_index()
                 .unwrap_or(usize::MAX)
         );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_package_list_state,
-            &mut self.connection_monitor.host_package_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
-    }
-
-    pub(super) fn host_package_snapshot_command(
-        &self,
-        connection_id: &str,
-    ) -> (oxideterm_connection_monitor::PackageCaptureCommand, String) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_package_snapshot_command(&os_type), os_type)
-    }
-
-    pub(super) fn host_package_inspect_command(
-        &self,
-        connection_id: &str,
-        manager: &str,
-        package_name: &str,
-    ) -> Result<(oxideterm_connection_monitor::PackageInspectCommand, String), String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_package_inspect_command(&os_type, manager, package_name)
-            .map(|command| (command, os_type))
+        self.host_tools
+            .read(cx)
+            .sync_package_list_signatures(&identity, &signatures);
     }
 
     pub(in crate::workspace) fn handle_host_package_search_key(
@@ -797,58 +757,22 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Packages) {
-            return;
-        }
-        if self.connection_monitor.host_package_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_package_toast(
-                    self.i18n
-                        .t("sidebar.host_packages.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_package_toast(
-                    self.i18n
-                        .t("sidebar.host_packages.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
-        };
-        let (command, _os_type) = self.host_package_snapshot_command(&connection_id);
-
-        let request = HostPackageSnapshotRequest {
-            connection_id: connection_id.clone(),
-            feedback,
-        };
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor.host_package_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_package_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_package_snapshot_rx = Some(rx);
-        self.connection_monitor.host_package_snapshot_polling = true;
-        self.connection_monitor.host_package_last_error = None;
-        // Package inventory is snapshot-driven and read-only. Keep it outside
-        // the metric profiler so package managers are not queried on every tick.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_PACKAGE_SNAPSHOT_TIMEOUT,
-                    HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostPackageSnapshotDelivery { request, result });
+        let monitoring_enabled = self.host_tool_monitoring_enabled(ContextSidebarTool::Packages);
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_packages.toast.unknown_error");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_package_snapshot(
+                connection_id,
+                feedback,
+                monitoring_enabled,
+                runtime,
+                failure_fallback,
+                cx,
+            )
         });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn copy_host_package_name(&mut self, package_name: String, cx: &mut Context<Self>) {
@@ -870,21 +794,24 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (command, _os_type) =
-            match self.host_package_inspect_command(&connection_id, &entry.manager, &entry.name) {
-                Ok(command) => command,
-                Err(_error) => {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.inspect_unsupported",
-                            &[("manager", host_package_blank_dash(&entry.manager))],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                    cx.notify();
-                    return;
-                }
-            };
+        let command = match self.host_tools.read(cx).package_inspect_command(
+            &connection_id,
+            &entry.manager,
+            &entry.name,
+        ) {
+            Ok(command) => command,
+            Err(_error) => {
+                self.push_host_package_toast(
+                    self.i18n_replace(
+                        "sidebar.host_packages.toast.inspect_unsupported",
+                        &[("manager", host_package_blank_dash(&entry.manager))],
+                    ),
+                    TerminalNoticeVariant::Error,
+                );
+                cx.notify();
+                return;
+            }
+        };
         let title = format!(
             "{}: {}",
             self.i18n.t("sidebar.host_packages.inspect_title"),
@@ -910,7 +837,7 @@ impl WorkspaceApp {
         }
         match self.queue_ssh_terminal_tab_for_existing_node(
             node_id,
-            Some(command.command),
+            Some(command),
             title,
             window,
             cx,
@@ -929,170 +856,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_host_packages_snapshot_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_package_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_package_snapshot_rx.take() else {
-            self.connection_monitor.host_package_snapshot_polling = false;
-            self.connection_monitor.host_package_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_packages_snapshot(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_package_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_package_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_package_snapshot_polling = false;
-                self.connection_monitor.host_package_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_packages.toast.unknown_error");
-                self.connection_monitor.host_package_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_packages_snapshot(
-        &mut self,
-        delivery: HostPackageSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_package_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
-            return;
-        }
-        let feedback = delivery.request.feedback;
-        self.connection_monitor.host_package_snapshot_polling = false;
-        self.connection_monitor.host_package_snapshot_running = None;
-        self.connection_monitor.host_package_snapshot_rx = None;
-        match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_package_snapshot(&output.stdout);
-                let visible_count = visible_package_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_package_search_query,
-                    self.connection_monitor.host_package_filter,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourcePackageStatus::Available { .. } => {
-                        self.connection_monitor.host_package_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_package_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_packages.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourcePackageStatus::Unavailable => {
-                        self.connection_monitor.host_package_last_error =
-                            Some(self.i18n.t("sidebar.host_packages.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_package_toast(
-                                self.i18n.t("sidebar.host_packages.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourcePackageStatus::Error { message } => {
-                        self.connection_monitor.host_package_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_package_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_packages.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourcePackageStatus::Unknown => {}
-                }
-                self.connection_monitor.host_package_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_package_snapshot = Some(snapshot);
-            }
-            Ok(output) => {
-                let reason = host_package_capture_failure_message(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                    self.i18n.t("sidebar.host_packages.toast.unknown_error"),
-                );
-                self.connection_monitor.host_package_last_error = Some(reason.clone());
-                self.connection_monitor.host_package_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_package_snapshot = Some(ResourcePackageSnapshot {
-                    status: ResourcePackageStatus::Error {
-                        message: reason.clone(),
-                    },
-                    managers: Vec::new(),
-                    entries: Vec::new(),
-                });
-                if feedback.should_toast() {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-            Err(error) => {
-                self.connection_monitor.host_package_last_error = Some(error.clone());
-                self.connection_monitor.host_package_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_package_snapshot = Some(ResourcePackageSnapshot {
-                    status: ResourcePackageStatus::Error {
-                        message: error.clone(),
-                    },
-                    managers: Vec::new(),
-                    entries: Vec::new(),
-                });
-                if feedback.should_toast() {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-        }
-        cx.notify();
-    }
-
     pub(super) fn push_host_package_toast(
         &mut self,
         message: String,
@@ -1105,6 +868,203 @@ impl WorkspaceApp {
             progress: None,
             variant,
         });
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn package_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<ResourcePackageSnapshot> {
+        self.host_packages
+            .snapshot
+            .as_ref()
+            .filter(|_| self.host_packages.snapshot_connection_id.as_deref() == Some(connection_id))
+            .cloned()
+    }
+
+    pub(super) fn package_snapshot_polling(&self) -> bool {
+        self.host_packages.polling
+    }
+
+    pub(in crate::workspace::connection_monitor) fn package_filter(&self) -> PackageFilter {
+        self.host_packages.filter
+    }
+
+    pub(super) fn package_list_state(&self) -> ListState {
+        self.host_packages.list_state.clone()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn package_expanded_index(&self) -> Option<usize> {
+        self.host_packages.expanded_index
+    }
+
+    pub(in crate::workspace::connection_monitor) fn select_package_filter(
+        &mut self,
+        filter: PackageFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_packages.filter == filter {
+            return false;
+        }
+        self.host_packages.filter = filter;
+        self.host_packages.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::connection_monitor) fn toggle_package_expanded(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_packages.expanded_index =
+            (self.host_packages.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_package_expanded(&mut self, cx: &mut Context<Self>) {
+        if self.host_packages.expanded_index.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_package_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_packages.list_state,
+            &mut self.host_packages.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn package_inspect_command(
+        &self,
+        connection_id: &str,
+        manager: &str,
+        package_name: &str,
+    ) -> Result<String, String> {
+        let os_type = self
+            .connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_package_inspect_command(&os_type, manager, package_name)
+            .map(|command| command.command)
+    }
+
+    pub(super) fn request_package_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
+        }
+        if self.host_packages.polling {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PackageSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
+        }
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PackageConnectionMissing)
+                .into_iter()
+                .collect();
+        };
+        let command = build_package_snapshot_command(&os_type);
+        let request = HostPackageSnapshotRequest {
+            connection_id: connection_id.clone(),
+            feedback,
+            failure_fallback,
+        };
+        self.host_packages.snapshot_connection_id = Some(connection_id);
+        self.host_packages.running = Some(request.clone());
+        self.host_packages.polling = true;
+        // Package inventory is read-only manual work, not a periodic sampler.
+        let spawned = self.spawn_package_snapshot_capture(
+            command.command,
+            request,
+            HOST_PACKAGE_SNAPSHOT_TIMEOUT,
+            HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_packages.polling = false;
+            self.host_packages.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PackageConnectionMissing)
+                .into_iter()
+                .collect();
+        }
+        cx.notify();
+        Vec::new()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_packages_snapshot(
+        &mut self,
+        delivery: HostPackageSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_packages.running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        let feedback = delivery.request.feedback;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_packages.polling = false;
+        self.host_packages.running = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_package_snapshot(&output.stdout);
+                if feedback.should_toast() {
+                    match &snapshot.status {
+                        ResourcePackageStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PackageSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourcePackageStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PackageUnavailable,
+                            ));
+                        }
+                        ResourcePackageStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PackageSnapshotFailed,
+                            ));
+                        }
+                        ResourcePackageStatus::Unknown => {}
+                    }
+                }
+                self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_packages.snapshot = Some(snapshot);
+            }
+            Ok(_) | Err(()) => {
+                self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_packages.snapshot = Some(ResourcePackageSnapshot {
+                    status: ResourcePackageStatus::Error {
+                        message: failure_fallback,
+                    },
+                    managers: Vec::new(),
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::PackageSnapshotFailed,
+                    ));
+                }
+            }
+        }
+        cx.notify();
     }
 }
 
@@ -1175,22 +1135,4 @@ fn host_package_meta_label(
         host_package_blank_dash(repo_or_arch),
         host_package_service_label(entry)
     )
-}
-
-fn host_package_capture_failure_message(
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-    fallback: String,
-) -> String {
-    let reason = stderr
-        .lines()
-        .chain(stdout.lines())
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or(fallback.as_str());
-    match exit_code {
-        Some(code) => format!("{reason} (exit {code})"),
-        None => reason.to_string(),
-    }
 }

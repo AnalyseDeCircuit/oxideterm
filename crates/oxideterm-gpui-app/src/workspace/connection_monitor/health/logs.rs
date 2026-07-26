@@ -879,6 +879,37 @@ impl WorkspaceApp {
                 ),
                 TerminalNoticeVariant::Error,
             ),
+            HostToolsNotice::PackageSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_packages.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::PackageConnectionMissing => (
+                self.i18n
+                    .t("sidebar.host_packages.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::PackageSnapshotLoaded { count } => (
+                self.i18n_replace(
+                    "sidebar.host_packages.toast.snapshot_loaded",
+                    &[("count", count.to_string())],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::PackageUnavailable => (
+                self.i18n.t("sidebar.host_packages.toast.unavailable"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::PackageSnapshotFailed => (
+                self.i18n_replace(
+                    "sidebar.host_packages.toast.snapshot_failed",
+                    &[(
+                        "reason",
+                        self.i18n.t("sidebar.host_packages.toast.unknown_error"),
+                    )],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
         };
         self.push_host_log_toast(message, variant);
     }

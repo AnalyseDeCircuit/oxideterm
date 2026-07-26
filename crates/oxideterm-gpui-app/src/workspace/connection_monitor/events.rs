@@ -29,6 +29,11 @@ pub(in crate::workspace) enum HostToolsNotice {
     FilesystemSnapshotLoaded { count: usize },
     FilesystemUnavailable,
     FilesystemSnapshotFailed,
+    PackageSnapshotAlreadyRunning,
+    PackageConnectionMissing,
+    PackageSnapshotLoaded { count: usize },
+    PackageUnavailable,
+    PackageSnapshotFailed,
 }
 
 impl EventEmitter<HostToolsEvent> for HostToolsEntity {}

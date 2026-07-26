@@ -25,6 +25,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) host_logs: HostLogsState,
     pub(super) host_ports: HostPortsState,
     pub(super) host_filesystems: HostFilesystemsState,
+    pub(super) host_packages: HostPackagesState,
     pub(in crate::workspace) active_runtime_section: ConnectionRuntimeSection,
     pub(in crate::workspace) previous_runtime_section: ConnectionRuntimeSection,
     selected_connection_id: Option<String>,
@@ -84,6 +85,7 @@ impl HostToolsEntity {
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
             host_filesystems: HostFilesystemsState::new(),
+            host_packages: HostPackagesState::new(),
             active_runtime_section: ConnectionRuntimeSection::Overview,
             previous_runtime_section: ConnectionRuntimeSection::Overview,
             selected_connection_id: None,
@@ -278,6 +280,32 @@ impl HostToolsEntity {
                     HostFilesystemSnapshotDelivery { request, result },
                 ),
             );
+        });
+        true
+    }
+
+    pub(super) fn spawn_package_snapshot_capture(
+        &self,
+        command: String,
+        request: HostPackageSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Package inventory uses the registry-owned transport and cannot
+        // release the shared node or inspect its authentication material.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::PackageSnapshot(
+                HostPackageSnapshotDelivery { request, result },
+            ));
         });
         true
     }
@@ -1077,6 +1105,68 @@ mod tests {
         assert_eq!(
             notice,
             HostToolsEvent::ShowNotice(HostToolsNotice::FilesystemSnapshotFailed)
+        );
+        assert!(!format!("{notice:?}").contains(secret_marker));
+    }
+
+    #[gpui::test]
+    fn package_snapshot_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let request = HostPackageSnapshotRequest {
+            connection_id: "connection-1".to_string(),
+            feedback: HostSnapshotFeedback::Toast,
+            failure_fallback: "Package capture failed".to_string(),
+        };
+        let sender = entity.update(cx, |entity, cx| {
+            assert!(entity.select_package_filter(PackageFilter::Upgradable, cx));
+            entity.toggle_package_expanded(4, cx);
+            assert_eq!(entity.package_filter(), PackageFilter::Upgradable);
+            assert_eq!(entity.package_expanded_index(), Some(4));
+            entity.host_packages.running = Some(request.clone());
+            entity.host_packages.polling = true;
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "token-should-not-reach-package-ui";
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::PackageSnapshot(
+                HostPackageSnapshotDelivery {
+                    request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(!entity.host_packages.polling);
+            let snapshot = entity.host_packages.snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status,
+                ResourcePackageStatus::Error {
+                    message: "Package capture failed".to_string(),
+                }
+            );
+            assert!(!format!("{:?}", snapshot.status).contains(secret_marker));
+        });
+        let notice = events.try_recv().unwrap();
+        assert_eq!(
+            notice,
+            HostToolsEvent::ShowNotice(HostToolsNotice::PackageSnapshotFailed)
         );
         assert!(!format!("{notice:?}").contains(secret_marker));
     }
