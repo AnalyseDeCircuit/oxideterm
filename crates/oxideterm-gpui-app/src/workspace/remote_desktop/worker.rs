@@ -118,7 +118,7 @@ pub(super) fn default_remote_desktop_initial_size() -> RemoteDesktopSize {
 }
 
 pub(super) fn initial_remote_desktop_sizes_for_session(
-    session: &RemoteDesktopSession,
+    session: &RemoteDesktopSessionEntity,
 ) -> (RemoteDesktopSize, Option<RemoteDesktopSize>) {
     if let Some(viewport_size) = session.geometry.viewport_size() {
         let viewport_size = RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);

@@ -619,7 +619,7 @@ impl WorkspaceApp {
         form.focused_field = NewConnectionField::Name;
         form.field_focused = true;
 
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;

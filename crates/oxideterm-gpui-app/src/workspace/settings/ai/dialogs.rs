@@ -156,7 +156,7 @@ impl WorkspaceApp {
                 .clone(),
             AiTextEditorDialog::Memory => self.settings_store.settings().ai.memory.content.clone(),
         };
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         let tokens = self.tokens;
         let runtime_settings = self.ide_runtime_settings();
         let placeholder = self.i18n.t(match dialog {

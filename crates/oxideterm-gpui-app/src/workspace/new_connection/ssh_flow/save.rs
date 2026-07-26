@@ -56,7 +56,7 @@ impl WorkspaceApp {
             }
         };
 
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_runtime_config(
             &node.config,
             Some(&node.title),
@@ -959,7 +959,7 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.editing_saved_connection_connect_after_save_node_id = None;
@@ -982,7 +982,7 @@ impl WorkspaceApp {
         let Some(conn) = self.connection_store.get(id).cloned() else {
             return;
         };
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.new_connection_form = Some(form_from_saved_connection(&conn, error));
         self.editing_saved_connection_id = Some(id.to_string());
         self.editing_saved_connection_connect_after_save_node_id = None;
@@ -1019,7 +1019,7 @@ impl WorkspaceApp {
         let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
             return;
         };
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_runtime_config(
             &node.config,
             Some(&node.title),

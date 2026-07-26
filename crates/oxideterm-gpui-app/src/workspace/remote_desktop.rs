@@ -89,6 +89,16 @@ pub(super) enum RemoteDesktopWorkerDelivery {
     },
 }
 
+pub(super) enum RemoteDesktopDeliveryIntent {
+    ClipboardTransferFailed,
+}
+
+pub(super) struct RemoteDesktopDeliveryOutcome {
+    changed: bool,
+    backlog_remaining: bool,
+    intents: Vec<RemoteDesktopDeliveryIntent>,
+}
+
 #[derive(Clone)]
 struct RemoteDesktopWorkerWake {
     pending: Arc<AtomicBool>,
@@ -260,10 +270,12 @@ impl RemoteDesktopModifierState {
     }
 }
 
-pub(super) struct RemoteDesktopSession {
+pub(in crate::workspace) struct RemoteDesktopSessionEntity {
+    tab_id: TabId,
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
     password: Option<RemoteDesktopSecret>,
+    certificate_store_path: PathBuf,
     certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
     session_trusted_certificate_fingerprint: Option<String>,
     state: RemoteDesktopViewState,
@@ -287,11 +299,13 @@ pub(super) struct RemoteDesktopSession {
     render_diagnostics: RemoteDesktopRenderDiagnostics,
 }
 
-impl RemoteDesktopSession {
+impl RemoteDesktopSessionEntity {
     fn new(
+        tab_id: TabId,
         profile: RemoteDesktopConnectionProfile,
         provider: RemoteDesktopProviderManifest,
         password: Option<RemoteDesktopSecret>,
+        certificate_store_path: PathBuf,
         frame_slot: RemoteDesktopFrameDeliverySlot,
         window_handle: AnyWindowHandle,
     ) -> Self {
@@ -303,11 +317,13 @@ impl RemoteDesktopSession {
             message: None,
         });
         Self {
+            tab_id,
             profile,
             provider,
             // The tab owns the credential only until one accepted certificate
             // moves it into the helper authentication request.
             password,
+            certificate_store_path,
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
             state,
@@ -332,6 +348,101 @@ impl RemoteDesktopSession {
             wheel_pixel_remainder: remote_desktop_empty_wheel_delta(),
             render_diagnostics: RemoteDesktopRenderDiagnostics::default(),
         }
+    }
+
+    fn schedule_worker_wake(
+        &self,
+        generation: u64,
+        worker_wake: RemoteDesktopWorkerWake,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |session, cx| {
+            loop {
+                worker_wake.wait().await;
+                let should_deliver = worker_wake.take();
+                let stopped = worker_wake.is_stopped();
+                if should_deliver {
+                    let delivery_available = session
+                        .update(cx, |current, cx| {
+                            if current.worker_generation != generation {
+                                return false;
+                            }
+                            cx.emit(RemoteDesktopSessionEvent::DeliveryReady { generation });
+                            true
+                        })
+                        .unwrap_or(false);
+                    if !delivery_available {
+                        break;
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn schedule_frame_apply(&self, generation: u64, delay: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |session, cx| {
+            if !delay.is_zero() {
+                Timer::after(delay).await;
+            }
+            let _ = session.update(cx, |current, cx| {
+                if current.worker_generation == generation {
+                    cx.emit(RemoteDesktopSessionEvent::FrameApplyReady { generation });
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum RemoteDesktopSessionEvent {
+    DeliveryReady { generation: u64 },
+    FrameApplyReady { generation: u64 },
+}
+
+impl gpui::EventEmitter<RemoteDesktopSessionEvent> for RemoteDesktopSessionEntity {}
+
+/// Owns all remote desktop sessions independently from the workspace window shell.
+pub(in crate::workspace) struct RemoteDesktopWorkspaceEntity {
+    sessions: HashMap<TabId, Entity<RemoteDesktopSessionEntity>>,
+    session_subscriptions: HashMap<TabId, Vec<Subscription>>,
+}
+
+impl RemoteDesktopWorkspaceEntity {
+    pub(in crate::workspace) fn new() -> Self {
+        Self {
+            sessions: HashMap::new(),
+            session_subscriptions: HashMap::new(),
+        }
+    }
+
+    pub(in crate::workspace) fn session(
+        &self,
+        tab_id: TabId,
+    ) -> Option<Entity<RemoteDesktopSessionEntity>> {
+        self.sessions.get(&tab_id).cloned()
+    }
+
+    pub(in crate::workspace) fn insert(
+        &mut self,
+        tab_id: TabId,
+        session: Entity<RemoteDesktopSessionEntity>,
+        subscriptions: Vec<Subscription>,
+    ) {
+        self.sessions.insert(tab_id, session);
+        self.session_subscriptions.insert(tab_id, subscriptions);
+    }
+
+    pub(in crate::workspace) fn remove(
+        &mut self,
+        tab_id: TabId,
+    ) -> Option<Entity<RemoteDesktopSessionEntity>> {
+        self.session_subscriptions.remove(&tab_id);
+        self.sessions.remove(&tab_id)
     }
 }
 
@@ -577,7 +688,7 @@ mod tests {
         let data =
             RemoteDesktopClipboardData::new(RemoteDesktopClipboardFormat::ImageJpeg, vec![4, 5, 6]);
 
-        let item = remote_desktop_clipboard_item_from_data(&data).unwrap();
+        let item = remote_desktop_clipboard_item_from_data(data).unwrap();
 
         assert!(matches!(
             item.entries(),

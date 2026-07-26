@@ -31,15 +31,14 @@ pub(super) fn remote_desktop_clipboard_paths_from_item(
 }
 
 pub(super) fn remote_desktop_clipboard_item_from_data(
-    data: &RemoteDesktopClipboardData,
+    data: RemoteDesktopClipboardData,
 ) -> Option<ClipboardItem> {
     if data.bytes.is_empty() {
         return None;
     }
     let format = gpui_image_format_from_remote_desktop(data.format)?;
     Some(ClipboardItem::new_image(&Image::from_bytes(
-        format,
-        data.bytes.clone(),
+        format, data.bytes,
     )))
 }
 

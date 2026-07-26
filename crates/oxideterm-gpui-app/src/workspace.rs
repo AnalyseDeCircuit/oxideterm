@@ -1025,7 +1025,7 @@ pub(crate) struct WorkspaceApp {
     connection_store_last_modified: Option<SystemTime>,
     native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState,
     session_manager: SessionManagerState,
-    remote_desktop_sessions: HashMap<TabId, remote_desktop::RemoteDesktopSession>,
+    remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
     oxide_export_connection_list_state: ListState,
     oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
     oxide_import_connection_preview_list_state: ListState,

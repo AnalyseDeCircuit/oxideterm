@@ -143,7 +143,7 @@ enum ShortcutsModalVirtualRow {
 impl WorkspaceApp {
     pub(super) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
         self.bootstrap_native_plugin_runtime(cx);
-        self.release_active_remote_desktop_inputs();
+        self.release_active_remote_desktop_inputs(cx);
         self.command_palette.open = true;
         self.command_palette.raw_query.clear();
         self.command_palette.mode = PaletteMode::All;
@@ -205,7 +205,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_shortcuts_modal(&mut self, cx: &mut Context<Self>) {
-        self.release_active_remote_desktop_inputs();
+        self.release_active_remote_desktop_inputs(cx);
         self.shortcuts_modal.open = true;
         self.shortcuts_modal.query.clear();
         self.shortcuts_modal.scroll_handle = UniformListScrollHandle::new();
@@ -772,7 +772,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.new_connection_form = Some(NewConnectionForm {
             name: host.clone(),
             host,
@@ -803,7 +803,7 @@ impl WorkspaceApp {
         match resolve_ssh_config_alias(&alias) {
             Ok(Some(host)) => match saved_connection_from_ssh_host(host) {
                 Ok(conn) => {
-                    self.prepare_modal_interaction_boundary();
+                    self.prepare_modal_interaction_boundary(cx);
                     self.new_connection_form = Some(
                         super::session_manager::form_from_saved_connection(&conn, None),
                     );

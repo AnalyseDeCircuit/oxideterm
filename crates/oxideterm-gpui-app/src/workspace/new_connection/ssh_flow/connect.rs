@@ -213,7 +213,7 @@ impl WorkspaceApp {
                 self.continue_verified_ssh_flow(config, title, intent, window, cx)
             }
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
-                self.prepare_modal_interaction_boundary();
+                self.prepare_modal_interaction_boundary(cx);
                 let host = config.host.clone();
                 let port = config.port;
                 self.host_key_challenge = Some(HostKeyChallenge {
@@ -417,7 +417,7 @@ impl WorkspaceApp {
                 };
                 let title = active_run.title.clone();
                 let intent = active_run.intent.clone();
-                self.prepare_modal_interaction_boundary();
+                self.prepare_modal_interaction_boundary(cx);
                 self.host_key_challenge = Some(HostKeyChallenge {
                     presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
                     config: SshConfig::default(),

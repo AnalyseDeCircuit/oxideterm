@@ -1702,7 +1702,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let value = self.terminal_command_specs_editor_initial_value();
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.terminal_command_specs_editor_open = true;
         self.focus_settings_input(SettingsInput::TerminalCommandSpecsJson, value, cx);
         window.focus(&self.focus_handle, cx);

@@ -103,6 +103,7 @@ impl WorkspaceApp {
             host_tools.set_messages(host_tools_messages);
             host_tools
         });
+        let remote_desktop = cx.new(|_cx| remote_desktop::RemoteDesktopWorkspaceEntity::new());
         let host_tools_subscription = cx.subscribe(
             &host_tools,
             |workspace, _host_tools, event: &HostToolsEvent, _cx| match event {
@@ -612,7 +613,7 @@ impl WorkspaceApp {
             connection_store_last_modified,
             native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState::new(plugin_registry),
             session_manager: SessionManagerState::default(),
-            remote_desktop_sessions: HashMap::new(),
+            remote_desktop,
             // .oxide export can contain many saved connections. Keep the
             // selectable record rows on the shared variable-list path while the
             // dialog chrome remains ordinary GPUI layout.

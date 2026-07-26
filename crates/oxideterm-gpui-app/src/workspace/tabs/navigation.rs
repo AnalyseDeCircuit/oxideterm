@@ -191,7 +191,7 @@ impl WorkspaceApp {
                 // Remote desktops keep server-side input state. Release it when
                 // the tab loses focus so modifiers or mouse buttons cannot stick
                 // on the remote host while the user works elsewhere.
-                self.release_remote_desktop_inputs_for_tab(previous_tab_id);
+                self.release_remote_desktop_inputs_for_tab(previous_tab_id, cx);
             }
             self.main_window_tabs.active_tab_id = Some(tab_id);
             self.resume_remote_desktop_frame_delivery(tab_id, cx);

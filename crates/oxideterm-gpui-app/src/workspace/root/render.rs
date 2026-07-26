@@ -564,13 +564,13 @@ impl Render for WorkspaceApp {
                 this.handle_workspace_key(event, window, cx);
             }))
             .on_key_up(cx.listener(|this, event: &KeyUpEvent, _window, cx| {
-                if this.forward_remote_desktop_key_up(event) {
+                if this.forward_remote_desktop_key_up(event, cx) {
                     cx.stop_propagation();
                 }
             }))
             .on_modifiers_changed(cx.listener(
-                |this, event: &ModifiersChangedEvent, _window, _cx| {
-                    let _ = this.forward_remote_desktop_modifiers_changed(event);
+                |this, event: &ModifiersChangedEvent, _window, cx| {
+                    let _ = this.forward_remote_desktop_modifiers_changed(event, cx);
                 },
             ))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
@@ -598,7 +598,7 @@ impl Render for WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                    this.release_active_remote_desktop_inputs();
+                    this.release_active_remote_desktop_inputs(cx);
                     this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                     this.blur_text_inputs(cx);
                     this.clear_read_only_ime_selection(cx);
@@ -607,7 +607,7 @@ impl Render for WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                    this.release_active_remote_desktop_inputs();
+                    this.release_active_remote_desktop_inputs(cx);
                     // Browser context menus and Radix popovers both treat
                     // outside pointer activity as a transient-layer dismiss.
                     // Right-click keeps input focus alone but must not leave an

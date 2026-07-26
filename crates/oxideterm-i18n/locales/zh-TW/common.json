@@ -1176,7 +1176,7 @@
     "vnc_legacy_security_description": "此安全方式無法保護伺服器身分，並可能使工作階段遭到攔截。僅應在可信任且受保護的網路中繼續。",
     "vnc_security_method": "安全方式：{{method}}",
     "vnc_continue_anyway": "仍要繼續",
-    "certificate_save_failed": "無法儲存憑證信任記錄：{{error}}",
-    "clipboard_file_failed": "無法接收剪貼簿檔案：{{error}}"
+    "certificate_save_failed": "無法儲存憑證信任記錄",
+    "clipboard_file_failed": "無法接收剪貼簿檔案"
   }
 }

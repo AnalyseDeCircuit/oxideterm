@@ -155,7 +155,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.new_connection_form = Some(NewConnectionForm {
             group: self.i18n.t("ssh.form.ungrouped"),
             agent_available: detect_ssh_agent_available(),
@@ -226,7 +226,7 @@ impl WorkspaceApp {
             return;
         }
 
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         let mut form = NewConnectionForm {
             auth_tab: SshAuthTab::Agent,
             focused_field: super::form_state::NewConnectionField::Host,

@@ -86,7 +86,7 @@ impl WorkspaceApp {
             // waiting until the transport-side KBI timeout.
             let _ = existing_tx.send(Err(SshPromptError::Cancelled));
         }
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         self.keyboard_interactive_challenge =
             Some(KeyboardInteractiveChallenge::new(request, response_tx));
         self.keyboard_interactive_timer_generation =
