@@ -150,19 +150,11 @@ impl WorkspaceApp {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        let mut results = Vec::new();
-        loop {
-            match self.ssh_worker_rx.try_recv() {
-                Ok(result) => results.push(result),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    break;
-                }
-            }
-        }
+    ) -> bool {
+        let result_batch =
+            delivery::drain_channel(&self.ssh_worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
 
-        for result in results {
+        for result in result_batch.items {
             match result {
                 SshConnectionWorkerResult::Preflight {
                     config,
@@ -199,6 +191,7 @@ impl WorkspaceApp {
                 }
             }
         }
+        result_batch.outcome.backlog_remaining
     }
 
     pub(super) fn handle_ssh_preflight_result(

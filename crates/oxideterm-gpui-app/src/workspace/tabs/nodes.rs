@@ -205,6 +205,49 @@ impl WorkspaceApp {
         .detach();
     }
 
+    pub(in crate::workspace) fn schedule_runtime_worker_delivery(
+        &self,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        let runtime_wake = self.ssh_worker_tx.wake();
+        let release_wake = runtime_wake.clone();
+        cx.on_release(move |_, _| {
+            // Releasing the UI owner must not stop shared SSH nodes or reconnect jobs.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                runtime_wake.wait().await;
+                let should_drain = runtime_wake.take();
+                let stopped = runtime_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(Ok(backlog_remaining)) = cx.update_window(window_handle, |_, window, cx| {
+                    weak.update(cx, |workspace, cx| {
+                        let ssh_backlog = workspace.poll_ssh_worker_results(window, cx);
+                        let reconnect_backlog = workspace.poll_reconnect_worker_results(window, cx);
+                        ssh_backlog || reconnect_backlog
+                    })
+                }) else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Continue bounded runtime batches without a periodic workspace pump.
+                    runtime_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     fn refresh_ssh_terminal_input_locks(&mut self, cx: &mut Context<Self>) {
         let terminal_nodes = self.terminal_ssh_nodes.clone();
         for (session_id, node_id) in terminal_nodes {
@@ -317,14 +360,14 @@ impl WorkspaceApp {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        let mut results = Vec::new();
-        while let Ok(result) = self.reconnect_worker_rx.try_recv() {
-            results.push(result);
-        }
+    ) -> bool {
+        let result_batch = delivery::drain_channel(
+            &self.reconnect_worker_rx,
+            delivery::LIFECYCLE_DELIVERY_BUDGET,
+        );
 
         let mut changed = false;
-        for result in results {
+        for result in result_batch.items {
             match result {
                 ReconnectWorkerResult::NodeConnected {
                     node_id,
@@ -854,6 +897,7 @@ impl WorkspaceApp {
             self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
         }
+        result_batch.outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn maybe_probe_active_ssh_connections(

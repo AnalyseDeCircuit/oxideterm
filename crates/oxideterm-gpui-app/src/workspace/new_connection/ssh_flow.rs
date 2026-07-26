@@ -1,9 +1,5 @@
 use std::{
-    collections::HashMap,
-    future::Future,
-    pin::Pin,
-    result::Result as StdResult,
-    sync::{Arc, mpsc},
+    collections::HashMap, future::Future, pin::Pin, result::Result as StdResult, sync::Arc,
     time::Duration,
 };
 
@@ -40,6 +36,7 @@ use super::{
 };
 use crate::workspace::{
     NativeProxyConnectRun, WorkspaceApp, WorkspaceSshNode,
+    delivery::{self, ActiveDeliverySender},
     session_manager::{
         duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
         save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
@@ -87,7 +84,7 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
 
 #[derive(Clone)]
 pub(in crate::workspace) struct NativeSshPromptHandler {
-    tx: mpsc::Sender<SshConnectionWorkerResult>,
+    tx: ActiveDeliverySender<SshConnectionWorkerResult>,
 }
 
 fn sync_saved_connection_node_title_for_nodes(
@@ -112,7 +109,7 @@ fn sync_saved_connection_node_title_for_nodes(
 }
 
 impl NativeSshPromptHandler {
-    pub(in crate::workspace) fn new(tx: mpsc::Sender<SshConnectionWorkerResult>) -> Self {
+    pub(in crate::workspace) fn new(tx: ActiveDeliverySender<SshConnectionWorkerResult>) -> Self {
         Self { tx }
     }
 }

@@ -60,7 +60,9 @@ impl WorkspaceApp {
         let node_runtime_store = NodeRuntimeStore::default();
         let node_router =
             NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store.clone());
-        let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
+        let runtime_delivery_wake = delivery::ActiveDeliveryWake::default();
+        let (ssh_worker_tx, ssh_worker_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake.clone());
         let (forwarding_worker_tx, forwarding_worker_rx) =
             delivery::ActiveDeliverySender::channel();
         // Node state is a latest-value stream. Bound and coalesce its mailbox so
@@ -70,7 +72,8 @@ impl WorkspaceApp {
         let (node_event_subscription, node_event_rx) = node_router
             .emitter()
             .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
-        let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
+        let (reconnect_worker_tx, reconnect_worker_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake);
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
         let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
         let (terminal_cwd_tx, terminal_cwd_rx) = std::sync::mpsc::channel();
@@ -733,6 +736,7 @@ impl WorkspaceApp {
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
+        workspace.schedule_runtime_worker_delivery(window_handle, cx);
         workspace.schedule_ai_delivery(window_handle, cx);
         workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
@@ -745,8 +749,6 @@ impl WorkspaceApp {
                 if cx
                     .update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {
-                            workspace.poll_ssh_worker_results(window, cx);
-                            workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_launcher_worker_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.poll_terminal_cwd_results(cx);
