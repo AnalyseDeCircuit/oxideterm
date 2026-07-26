@@ -936,6 +936,7 @@ impl WorkspaceApp {
                 }
             }
             SettingsSlider::AppearanceBorderRadius
+            | SettingsSlider::OnboardingBorderRadius
             | SettingsSlider::VersionMigrationBorderRadius => {
                 let Some(value) = self.settings_slider_value_from_position(
                     settings_slider_anchor_id(slider),
@@ -1423,7 +1424,8 @@ impl WorkspaceApp {
         };
         let left = f32::from(anchor.bounds.left());
         let width = f32::from(anchor.bounds.size.width).max(1.0);
-        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let percent =
+            slider_pointer_percent(x - left, width, self.tokens.metrics.ui_slider_thumb_size);
         let value = (8.0 + percent * (32.0 - 8.0)).round() as i64;
         if self.settings_store.settings().terminal.font_size != value {
             self.edit_settings(|settings| settings.terminal.font_size = value, cx);
@@ -1442,7 +1444,8 @@ impl WorkspaceApp {
         };
         let left = f32::from(anchor.bounds.left());
         let width = f32::from(anchor.bounds.size.width).max(1.0);
-        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let percent =
+            slider_pointer_percent(x - left, width, self.tokens.metrics.ui_slider_thumb_size);
         // Slider mousemove can fire many times inside one rounded setting step.
         // Callers compare the resulting persisted value before notifying.
         Some(min + percent * (max - min))
@@ -1462,7 +1465,8 @@ impl WorkspaceApp {
         };
         let left = f32::from(anchor.bounds.left());
         let width = f32::from(anchor.bounds.size.width).max(1.0);
-        let percent = ((x - left) / width).clamp(0.0, 1.0);
+        let percent =
+            slider_pointer_percent(x - left, width, self.tokens.metrics.ui_slider_thumb_size);
         let value = (percent * 20.0).round() as i64;
         let persisted_background_blur = self.settings_store.settings().terminal.background_blur;
         let Some(generation) = self
@@ -1516,6 +1520,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
         anchor_id,
         SelectAnchorId::SettingsAppearanceUiFontSizeSlider
             | SelectAnchorId::SettingsAppearanceBorderRadiusSlider
+            | SelectAnchorId::OnboardingBorderRadiusSlider
             | SelectAnchorId::SettingsAppearanceWindowOpacitySlider
             | SelectAnchorId::VersionMigrationBorderRadiusSlider
             | SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider

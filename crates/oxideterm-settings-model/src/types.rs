@@ -218,6 +218,7 @@ pub enum SettingsSlider {
     TerminalFontSize,
     AppearanceUiFontSize,
     AppearanceBorderRadius,
+    OnboardingBorderRadius,
     VersionMigrationBorderRadius,
     AppearanceWindowOpacity,
     AppearanceBackgroundOpacity,

@@ -55,6 +55,7 @@ pub enum SelectAnchorId {
     SettingsAppearanceDensity,
     SettingsAppearanceUiFontSizeSlider,
     SettingsAppearanceBorderRadiusSlider,
+    OnboardingBorderRadiusSlider,
     SettingsAppearanceWindowOpacitySlider,
     VersionMigrationBorderRadiusSlider,
     SettingsAppearanceAnimation,

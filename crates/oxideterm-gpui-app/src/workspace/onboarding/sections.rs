@@ -1,4 +1,8 @@
 use super::*;
+use crate::workspace::settings::{APPEARANCE_BORDER_RADIUS_MAX, APPEARANCE_BORDER_RADIUS_MIN};
+use oxideterm_gpui_settings_view::{
+    animation_label, animation_options, settings_appearance_radius_control,
+};
 use oxideterm_gpui_ui::{button::ButtonVariant, checkbox};
 
 impl WorkspaceApp {
@@ -200,6 +204,16 @@ impl WorkspaceApp {
             .child(self.onboarding_theme_picker(cx))
             .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
             .child(self.onboarding_font_picker(cx))
+            .child(div().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+            .child(self.onboarding_animation_picker(cx))
+            .child(self.onboarding_radius_picker(cx))
+            .child(self.onboarding_info_card(
+                Some((LucideIcon::Image, self.tokens.ui.accent)),
+                "onboarding.background_image_title",
+                Some("onboarding.background_image_hint"),
+                true,
+                cx,
+            ))
             .child(self.onboarding_tip(
                 "onboarding.tip_settings",
                 &[("shortcut", platform_cmd(", "))],
@@ -471,6 +485,51 @@ impl WorkspaceApp {
                 }),
             )
             .into_any_element()
+    }
+
+    pub(in crate::workspace) fn onboarding_animation_picker(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_speed = self.settings_store.settings().appearance.animation_speed;
+        let mut options = div().grid().grid_cols(4).gap(px(8.0));
+        for &speed in animation_options() {
+            options = options.child(self.onboarding_appearance_option(
+                animation_label(speed, &self.i18n),
+                speed == selected_speed,
+                move |this, cx| {
+                    this.edit_settings(|settings| settings.appearance.animation_speed = speed, cx);
+                },
+                cx,
+            ));
+        }
+        self.onboarding_section(
+            LucideIcon::Activity,
+            "settings_view.appearance.animation",
+            Some("onboarding.animation_hint"),
+            options.into_any_element(),
+        )
+    }
+
+    pub(in crate::workspace) fn onboarding_radius_picker(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_radius = self.settings_store.settings().appearance.border_radius;
+        let slider = self.appearance_slider_control(
+            SettingsSlider::OnboardingBorderRadius,
+            SelectAnchorId::OnboardingBorderRadiusSlider,
+            APPEARANCE_BORDER_RADIUS_MIN,
+            APPEARANCE_BORDER_RADIUS_MAX,
+            selected_radius as f32,
+            cx,
+        );
+        self.onboarding_section(
+            LucideIcon::Square,
+            "settings_view.appearance.border_radius",
+            Some("onboarding.radius_hint"),
+            settings_appearance_radius_control(&self.tokens, selected_radius, slider),
+        )
     }
 
     pub(in crate::workspace) fn render_onboarding_workflow(

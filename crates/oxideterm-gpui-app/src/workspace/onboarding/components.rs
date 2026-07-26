@@ -2,6 +2,53 @@ use super::*;
 use oxideterm_gpui_ui::{ActionSlotRowOptions, action_slot_row, checkbox};
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn onboarding_appearance_option(
+        &self,
+        label: String,
+        selected: bool,
+        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Animation options persist through the shared settings path and use
+        // the same selected treatment as the existing theme and font controls.
+        div()
+            .min_w(px(0.0))
+            .px(px(12.0))
+            .py(px(9.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if selected {
+                rgb(self.tokens.ui.accent)
+            } else {
+                rgb(self.tokens.ui.border)
+            })
+            .bg(if selected {
+                rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
+            } else {
+                rgb(self.tokens.ui.bg_card)
+            })
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(if selected {
+                rgb(self.tokens.ui.accent)
+            } else {
+                rgb(self.tokens.ui.text)
+            })
+            .cursor(CursorStyle::PointingHand)
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    action(this, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn onboarding_step_heading(
         &self,
         icon: LucideIcon,
