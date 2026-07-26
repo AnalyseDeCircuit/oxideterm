@@ -197,8 +197,9 @@ impl Render for WorkspaceApp {
                 (TabKind::ConnectionPool, _) => {
                     // Old workspaces may restore the retired connection-pool tab.
                     // Keep it readable by showing the runtime overview instead.
-                    self.active_connection_runtime_section = ConnectionRuntimeSection::Overview;
-                    self.previous_connection_runtime_section = ConnectionRuntimeSection::Overview;
+                    self.host_tools.update(cx, |host_tools, _cx| {
+                        host_tools.reset_runtime_section();
+                    });
                     self.render_connection_runtime_surface(cx)
                 }
                 (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),

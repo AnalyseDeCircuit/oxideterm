@@ -13,8 +13,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("connection_monitor");
-        self.sync_connection_monitor_section_list_state();
-        let state = self.connection_monitor_section_list_state.clone();
+        self.sync_connection_monitor_section_list_state(cx);
+        let state = self.host_tools.read(cx).section_list_state.clone();
         let workspace = cx.entity();
         let spec = self.connection_monitor_section_list_spec();
         div()
@@ -34,15 +34,16 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn sync_connection_monitor_section_list_state(&mut self) {
+    fn sync_connection_monitor_section_list_state(&mut self, cx: &mut Context<Self>) {
         let spec = self.connection_monitor_section_list_spec();
         let signatures = [
             self.connection_monitor_section_signature(ConnectionMonitorSection::Pool),
             self.connection_monitor_section_signature(ConnectionMonitorSection::Health),
         ];
+        let host_tools = self.host_tools.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor_section_list_state,
-            &mut self.connection_monitor_section_list_cache.borrow_mut(),
+            &host_tools.section_list_state,
+            &mut host_tools.section_list_cache.borrow_mut(),
             "connection-monitor",
             &signatures,
             spec,

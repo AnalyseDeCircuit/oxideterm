@@ -92,8 +92,9 @@ impl WorkspaceApp {
         let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (connection_monitor, host_tools_delivery_bridges) =
-            ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx);
+        let connection_monitor = ConnectionMonitorState::new();
+        let host_tools =
+            cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, cx));
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
         let sftp_progress_store: Arc<dyn ProgressStore> = {
@@ -563,23 +564,7 @@ impl WorkspaceApp {
             launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics: GraphicsState::new(),
             connection_monitor,
-            active_connection_runtime_section: ConnectionRuntimeSection::Overview,
-            previous_connection_runtime_section: ConnectionRuntimeSection::Overview,
-            // Monitor pages are variable-height browser sections; keep the
-            // summary page on a shared ListState-backed render path.
-            connection_monitor_section_list_state: ListState::new(
-                CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT),
-                    CONNECTION_MONITOR_SECTION_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            connection_monitor_section_list_cache: RefCell::new(
-                VirtualListSignatureCache::default(),
-            ),
+            host_tools,
             cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
             sftp_worker_tx,
             forwarding_worker_tx,
@@ -744,7 +729,7 @@ impl WorkspaceApp {
         workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_native_update_delivery(cx);
         workspace.schedule_forwarding_delivery(cx);
-        workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
+        workspace.schedule_host_tools_result_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_runtime_worker_delivery(window_handle, cx);

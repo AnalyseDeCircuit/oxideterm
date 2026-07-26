@@ -53,15 +53,17 @@ impl WorkspaceApp {
             .unwrap_or(&connections[0]);
         let snapshot = (!compact)
             .then(|| {
-                self.connection_monitor
-                    .profiler_registry
+                self.host_tools
+                    .read(cx)
+                    .profiler_registry()
                     .snapshot(&active_connection.connection_id)
             })
             .flatten();
         let current = compact
             .then(|| {
-                self.connection_monitor
-                    .profiler_registry
+                self.host_tools
+                    .read(cx)
+                    .profiler_registry()
                     .current(&active_connection.connection_id)
             })
             .flatten();

@@ -212,7 +212,8 @@ impl WorkspaceApp {
             SidebarSection::Network => {
                 self.active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Runtime)
-                    && self.active_connection_runtime_section == ConnectionRuntimeSection::Topology
+                    && self.host_tools.read(cx).active_runtime_section
+                        == ConnectionRuntimeSection::Topology
             }
             SidebarSection::Files => self
                 .active_tab()

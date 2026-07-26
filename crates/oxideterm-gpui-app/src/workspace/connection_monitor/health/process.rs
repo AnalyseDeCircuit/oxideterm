@@ -25,8 +25,9 @@ impl WorkspaceApp {
             .find(|connection| connection.connection_id == selected_id)
             .unwrap_or(&connections[0]);
         let current = self
-            .connection_monitor
-            .profiler_registry
+            .host_tools
+            .read(cx)
+            .profiler_registry()
             .current(&active_connection.connection_id);
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
         let rows = metrics
@@ -1219,8 +1220,9 @@ impl WorkspaceApp {
                 self.push_host_process_toast(error, TerminalNoticeVariant::Error);
             }
         }
-        self.connection_monitor
-            .profiler_registry
+        self.host_tools
+            .read(cx)
+            .profiler_registry()
             .stop(&delivery.request.connection_id);
         self.start_connection_monitor_profiler(delivery.request.connection_id, cx);
     }

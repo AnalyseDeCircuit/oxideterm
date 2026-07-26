@@ -99,7 +99,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
     );
     let host_tools_snapshots =
         oxideterm_plugin_host_api::host_tools::native_plugin_host_tools_snapshot_array(
-            &workspace.connection_monitor.profiler_registry,
+            workspace.host_tools.read(cx).profiler_registry(),
             &native_plugin_profiler_node_connection_ids(workspace),
         );
 

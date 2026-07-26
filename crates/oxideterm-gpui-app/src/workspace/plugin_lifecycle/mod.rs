@@ -912,9 +912,9 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(super) fn native_plugin_profiler_snapshot(&self) -> Value {
+    pub(super) fn native_plugin_profiler_snapshot(&self, cx: &mut Context<Self>) -> Value {
         native_plugin_profiler_snapshot_array(
-            &self.connection_monitor.profiler_registry,
+            self.host_tools.read(cx).profiler_registry(),
             &native_plugin_profiler_node_connection_ids(self),
         )
     }
@@ -1050,7 +1050,7 @@ impl WorkspaceApp {
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
         ) {
-            self.native_plugin_runtime.profiler_snapshot = self.native_plugin_profiler_snapshot();
+            self.native_plugin_runtime.profiler_snapshot = self.native_plugin_profiler_snapshot(cx);
             self.start_native_plugin_profiler_polling(cx);
         }
         if self
@@ -1321,7 +1321,7 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_profiler_if_changed(&mut self, cx: &mut Context<Self>) {
-        let metrics = self.native_plugin_profiler_snapshot();
+        let metrics = self.native_plugin_profiler_snapshot(cx);
         if metrics == self.native_plugin_runtime.profiler_snapshot {
             return;
         }
@@ -1953,7 +1953,7 @@ impl WorkspaceApp {
         let forwarding_registry = self.forwarding_registry.clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
         let transfer_manager = self.sftp_transfer_manager.clone();
-        let profiler_registry = self.connection_monitor.profiler_registry.clone();
+        let profiler_registry = self.host_tools.read(cx).profiler_registry().clone();
         let profiler_node_connection_ids = native_plugin_profiler_node_connection_ids(self);
         let ide_snapshot = self.native_plugin_ide_snapshot(cx);
         let ai_snapshot = self.native_plugin_ai_snapshot();

@@ -15,8 +15,8 @@ pub(in crate::workspace) struct HostToolsDeliveryBridges {
         workspace_delivery::ActiveDeliverySender<HostToolsSamplerDelivery>,
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn schedule_host_tools_delivery(
+impl HostToolsEntity {
+    pub(super) fn schedule_sampler_delivery(
         &self,
         bridges: HostToolsDeliveryBridges,
         cx: &mut Context<Self>,
@@ -54,10 +54,14 @@ impl WorkspaceApp {
         })
         .detach();
 
-        let delivery_wake = self.connection_monitor.delivery_wake.clone();
+        let delivery_wake = self.sampler_delivery_wake.clone();
         let release_wake = delivery_wake.clone();
-        cx.on_release(move |_, _| {
-            // Sampling runtimes stop through their owners; release only ends this UI waiter.
+        cx.on_release(move |entity, _| {
+            // Releasing the page owner stops sampling shells, never shared SSH nodes.
+            entity.profiler_registry.stop_all();
+            if let Some(task) = entity.host_gpu.sampling_task.take() {
+                task.stop();
+            }
             release_wake.stop();
         })
         .detach();
@@ -73,10 +77,10 @@ impl WorkspaceApp {
                     continue;
                 }
                 let backlog_remaining = weak
-                    .update(cx, |workspace, cx| workspace.poll_host_tools_deliveries(cx))
+                    .update(cx, |entity, cx| entity.poll_sampler_deliveries(cx))
                     .unwrap_or(false);
                 if backlog_remaining {
-                    // One permit continues every shared Host Tools queue without a timer.
+                    // One permit continues the bounded sampler queue without a timer.
                     delivery_wake.mark();
                 } else if stopped {
                     break;
@@ -86,19 +90,12 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn poll_host_tools_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
-        let sampler_backlog = self.poll_host_tools_sampler_deliveries(cx);
-        let result_backlog = self.poll_host_tools_result_receivers(cx);
-        sampler_backlog || result_backlog
-    }
-
-    fn poll_host_tools_sampler_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+    fn poll_sampler_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
         let drain = workspace_delivery::drain_channel(
-            &self.connection_monitor.sampler_delivery_rx,
+            &self.sampler_delivery_rx,
             workspace_delivery::LIFECYCLE_DELIVERY_BUDGET,
         );
         let active_gpu_connection_id = self
-            .connection_monitor
             .host_gpu
             .sampling_task
             .as_ref()
@@ -122,13 +119,49 @@ impl WorkspaceApp {
 
         let gpu_updated = latest_gpu_update.is_some();
         if let Some(update) = latest_gpu_update {
-            self.connection_monitor.host_gpu.snapshot_connection_id = Some(update.connection_id);
-            self.connection_monitor.host_gpu.snapshot = Some(update.snapshot);
+            self.host_gpu.snapshot_connection_id = Some(update.connection_id);
+            self.host_gpu.snapshot = Some(update.snapshot);
         }
         if profiler_updated || gpu_updated {
             cx.notify();
         }
         drain.outcome.backlog_remaining
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn schedule_host_tools_result_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.connection_monitor.delivery_wake.clone();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // HostToolsEntity owns samplers; this waiter owns only reliable action results.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let backlog_remaining = weak
+                    .update(cx, |workspace, cx| {
+                        workspace.poll_host_tools_result_receivers(cx)
+                    })
+                    .unwrap_or(false);
+                if backlog_remaining {
+                    delivery_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn poll_host_tools_result_receivers(&mut self, cx: &mut Context<Self>) -> bool {

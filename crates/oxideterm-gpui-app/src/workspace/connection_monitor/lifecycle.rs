@@ -1,7 +1,5 @@
 use super::*;
 
-use oxideterm_connection_monitor::ResourceSampler;
-
 fn is_host_tools_tab_kind(tab_kind: &TabKind) -> bool {
     matches!(
         tab_kind,
@@ -36,11 +34,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn set_connection_runtime_section(
         &mut self,
         section: ConnectionRuntimeSection,
+        cx: &mut Context<Self>,
     ) {
-        if self.active_connection_runtime_section != section {
-            self.previous_connection_runtime_section = self.active_connection_runtime_section;
-            self.active_connection_runtime_section = section;
-        }
+        self.host_tools.update(cx, |host_tools, _cx| {
+            host_tools.set_runtime_section(section);
+        });
     }
 
     pub(in crate::workspace) fn open_connection_runtime_tab(
@@ -49,7 +47,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_connection_runtime_section(section);
+        self.set_connection_runtime_section(section, cx);
         let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Runtime) {
             tab.id
         } else {
@@ -101,7 +99,7 @@ impl WorkspaceApp {
         if !self.host_tools_surface_visible() {
             // Profilers own only sampling shells. Shared SSH nodes and user-triggered
             // Host Tools operations continue independently while every surface is hidden.
-            self.connection_monitor.profiler_registry.stop_all();
+            self.host_tools.read(cx).stop_profiler_sampling();
             return;
         }
 
@@ -148,18 +146,18 @@ impl WorkspaceApp {
             .iter()
             .map(|connection| connection.connection_id.as_str())
             .collect::<HashSet<_>>();
-        for connection_id in self.connection_monitor.profiler_registry.connection_ids() {
+        for connection_id in self.host_tools.read(cx).profiler_connection_ids() {
             if !live_connection_ids.contains(connection_id.as_str()) {
-                self.connection_monitor
-                    .profiler_registry
-                    .remove(&connection_id);
+                self.host_tools
+                    .read(cx)
+                    .remove_profiler_connection(&connection_id);
             }
         }
         if connections.is_empty() {
             if let Some(connection_id) = self.connection_monitor.selected_connection_id.take() {
-                self.connection_monitor
-                    .profiler_registry
-                    .remove(&connection_id);
+                self.host_tools
+                    .read(cx)
+                    .remove_profiler_connection(&connection_id);
             }
             self.connection_monitor.selector_open = false;
             self.connection_monitor.selector_highlighted_index = None;
@@ -185,14 +183,13 @@ impl WorkspaceApp {
             return;
         };
         if !self.host_tools_surface_visible() || self.resource_sampling_config().is_empty() {
-            self.connection_monitor.profiler_registry.stop_all();
+            self.host_tools.read(cx).stop_profiler_sampling();
             return;
         }
         if self
-            .connection_monitor
-            .profiler_registry
-            .state(&connection_id)
-            .is_none()
+            .host_tools
+            .read(cx)
+            .profiler_connection_missing(&connection_id)
         {
             self.start_connection_monitor_profiler(connection_id, cx);
         }
@@ -203,26 +200,12 @@ impl WorkspaceApp {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            return;
-        };
-        let Some(os_type) = handle.remote_env().map(|env| env.os_type) else {
-            // Lifecycle polling retries this start after environment detection;
-            // choosing Linux here would run incorrect probes on other hosts.
-            return;
-        };
-        let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
-        self.connection_monitor
-            .profiler_registry
-            .start_with_sampler_on_config(
-                connection_id,
-                sampler,
-                os_type,
-                self.resource_sampling_config(),
-                Some(self.connection_monitor.profiler_update_tx.clone()),
-                self.forwarding_runtime.handle().clone(),
-            );
-        cx.notify();
+        let ssh_registry = self.ssh_registry.clone();
+        let sampling_config = self.resource_sampling_config();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.start_profiler(connection_id, &ssh_registry, sampling_config, runtime, cx);
+        });
     }
 
     pub(in crate::workspace) fn apply_host_tool_monitoring_settings(
@@ -232,9 +215,9 @@ impl WorkspaceApp {
         let config = self.resource_sampling_config();
         if config.is_empty() || !self.host_tools_surface_visible() {
             // The registry owns persistent shells, so stop them at the settings boundary.
-            self.connection_monitor.profiler_registry.stop_all();
+            self.host_tools.read(cx).stop_profiler_sampling();
         } else {
-            for connection_id in self.connection_monitor.profiler_registry.connection_ids() {
+            for connection_id in self.host_tools.read(cx).profiler_connection_ids() {
                 self.start_connection_monitor_profiler(connection_id, cx);
             }
             self.sync_connection_monitor_selection(cx);

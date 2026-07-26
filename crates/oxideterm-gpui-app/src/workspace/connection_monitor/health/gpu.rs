@@ -2,8 +2,6 @@
 
 use super::*;
 
-use oxideterm_connection_monitor::ResourceSampler;
-
 impl WorkspaceApp {
     pub(super) fn render_host_gpu_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let connections = self.monitor_connections();
@@ -22,28 +20,23 @@ impl WorkspaceApp {
             .selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_gpu
-            .snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_gpu
-                    .snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
+        let (snapshot, is_running) = {
+            let host_tools = self.host_tools.read(cx);
+            let snapshot = host_tools.host_gpu.snapshot.as_ref().filter(|_| {
+                host_tools.host_gpu.snapshot_connection_id.as_deref() == Some(selected_id)
             });
+            let is_running = host_tools
+                .host_gpu
+                .sampling_task
+                .as_ref()
+                .is_some_and(|task| task.connection_id() == selected_id && !task.is_finished());
+            (snapshot.cloned(), is_running)
+        };
+        let snapshot = snapshot.as_ref();
         let devices = snapshot
             .map(|snapshot| snapshot.devices.clone())
             .unwrap_or_default();
-        self.sync_host_gpu_list_state(&devices, snapshot, selected_id);
-        let is_running = self
-            .connection_monitor
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .is_some_and(|task| task.connection_id() == selected_id && !task.is_finished());
+        self.sync_host_gpu_list_state(&devices, snapshot, selected_id, cx);
 
         div()
             .id("host-gpu-panel")
@@ -288,7 +281,7 @@ impl WorkspaceApp {
         let devices = Arc::new(devices);
         let snapshot = Arc::new(snapshot);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_gpu.list_state.clone();
+        let state = self.host_tools.read(cx).host_gpu.list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_GPU_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         div()
@@ -374,8 +367,8 @@ impl WorkspaceApp {
         let Some(device) = device else {
             return div().into_any_element();
         };
-        let expanded =
-            self.connection_monitor.host_gpu.expanded_uuid.as_deref() == Some(device.uuid.as_str());
+        let expanded = self.host_tools.read(cx).host_gpu.expanded_uuid.as_deref()
+            == Some(device.uuid.as_str());
         let theme = self.tokens.ui;
         let device_uuid = device.uuid.clone();
         let device_kind = match device.provider {
@@ -405,13 +398,15 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_gpu.expanded_uuid.as_deref()
-                        == Some(device_uuid.as_str())
-                    {
-                        this.connection_monitor.host_gpu.expanded_uuid = None;
-                    } else {
-                        this.connection_monitor.host_gpu.expanded_uuid = Some(device_uuid.clone());
-                    }
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        if host_tools.host_gpu.expanded_uuid.as_deref()
+                            == Some(device_uuid.as_str())
+                        {
+                            host_tools.host_gpu.expanded_uuid = None;
+                        } else {
+                            host_tools.host_gpu.expanded_uuid = Some(device_uuid.clone());
+                        }
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -599,6 +594,7 @@ impl WorkspaceApp {
         devices: &[GpuDevice],
         snapshot: Option<&GpuSnapshot>,
         selected_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let signatures = devices
             .iter()
@@ -606,14 +602,15 @@ impl WorkspaceApp {
                 let process_count = snapshot
                     .map(|snapshot| snapshot.processes_for(device).count())
                     .unwrap_or_default();
-                let expanded = self.connection_monitor.host_gpu.expanded_uuid.as_deref()
+                let expanded = self.host_tools.read(cx).host_gpu.expanded_uuid.as_deref()
                     == Some(device.uuid.as_str());
                 gpu_device_row_signature(device, process_count, expanded)
             })
             .collect::<Vec<_>>();
+        let host_tools = self.host_tools.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_gpu.list_state,
-            &mut self.connection_monitor.host_gpu.list_cache.borrow_mut(),
+            &host_tools.host_gpu.list_state,
+            &mut host_tools.host_gpu.list_cache.borrow_mut(),
             &format!("host-gpu:{selected_id}"),
             &signatures,
             TauriVirtualListSpec::new(px(HOST_GPU_LIST_ESTIMATED_ROW_HEIGHT), 8),
@@ -626,63 +623,39 @@ impl WorkspaceApp {
             && self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
             && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
-        if !visible {
-            if let Some(task) = self.connection_monitor.host_gpu.sampling_task.take() {
-                task.stop();
-            }
-            return;
-        }
-
-        let Some(connection_id) = self.connection_monitor.selected_connection_id.clone() else {
-            return;
-        };
-        if self
-            .connection_monitor
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .is_some_and(|task| task.connection_id() == connection_id)
-        {
-            return;
-        }
-        if let Some(task) = self.connection_monitor.host_gpu.sampling_task.take() {
-            task.stop();
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            return;
-        };
-        let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
-            return;
-        };
-        let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
-        self.connection_monitor.host_gpu.snapshot_connection_id = Some(connection_id.clone());
-        self.connection_monitor.host_gpu.snapshot = None;
-        self.connection_monitor.host_gpu.expanded_uuid = None;
-        // The task is owned by the visible GPU page. It borrows the registry
-        // connection through ResourceSampler and owns only its shell channel.
-        self.connection_monitor.host_gpu.sampling_task = Some(start_gpu_sampling_on(
-            connection_id,
-            sampler,
-            os_type,
-            self.connection_monitor.host_gpu.update_tx.clone(),
-            self.forwarding_runtime.handle().clone(),
-        ));
-        cx.notify();
+        let selected_connection_id = self.connection_monitor.selected_connection_id.clone();
+        let ssh_registry = self.ssh_registry.clone();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.sync_gpu_sampling(
+                visible,
+                selected_connection_id,
+                &ssh_registry,
+                runtime,
+                cx,
+            );
+        });
     }
 
     fn restart_host_gpu_sampling(&mut self, connection_id: String, cx: &mut Context<Self>) {
-        if self
-            .connection_monitor
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .is_some_and(|task| task.connection_id() == connection_id)
-            && let Some(task) = self.connection_monitor.host_gpu.sampling_task.take()
-        {
-            task.stop();
-        }
-        self.connection_monitor.host_gpu.snapshot = None;
-        self.sync_host_gpu_sampling(cx);
+        let enabled = self.settings_store.settings().host_tools.gpu_enabled;
+        let visible = enabled
+            && self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
+        let selected_connection_id = self.connection_monitor.selected_connection_id.clone();
+        let ssh_registry = self.ssh_registry.clone();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.restart_gpu_sampling(
+                connection_id,
+                visible,
+                selected_connection_id,
+                &ssh_registry,
+                runtime,
+                cx,
+            );
+        });
     }
 }
 

@@ -247,7 +247,7 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
-use self::connection_monitor::{ConnectionMonitorState, ConnectionRuntimeSection};
+use self::connection_monitor::{ConnectionMonitorState, ConnectionRuntimeSection, HostToolsEntity};
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
@@ -999,10 +999,7 @@ pub(crate) struct WorkspaceApp {
     launcher_app_grid_list_cache: RefCell<VirtualListSignatureCache>,
     graphics: GraphicsState,
     connection_monitor: ConnectionMonitorState,
-    active_connection_runtime_section: ConnectionRuntimeSection,
-    previous_connection_runtime_section: ConnectionRuntimeSection,
-    connection_monitor_section_list_state: ListState,
-    connection_monitor_section_list_cache: RefCell<VirtualListSignatureCache>,
+    host_tools: Entity<HostToolsEntity>,
     cloud_sync: cloud_sync::CloudSyncWorkspaceState,
     sftp_worker_tx: tokio::sync::mpsc::UnboundedSender<sftp::SftpWorkerResult>,
     forwarding_worker_tx: delivery::ActiveDeliverySender<forwards::ForwardingWorkerResult>,
