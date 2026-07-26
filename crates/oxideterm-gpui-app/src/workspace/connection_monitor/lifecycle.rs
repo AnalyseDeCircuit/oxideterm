@@ -93,32 +93,10 @@ impl WorkspaceApp {
         self.open_connection_runtime_tab(ConnectionRuntimeSection::Topology, window, cx);
     }
 
-    pub(in crate::workspace) fn poll_connection_monitor_updates(
-        &mut self,
-        request_repaint: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let mut received_update = false;
-        while self
-            .connection_monitor
-            .profiler_update_rx
-            .try_recv()
-            .is_ok()
-        {
-            received_update = true;
-        }
-        if received_update && request_repaint {
-            // Background polling should wake the UI, but render-time draining
-            // must not schedule a second frame after the current one.
-            cx.notify();
-        }
-    }
-
     pub(in crate::workspace) fn maybe_refresh_connection_monitor(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.poll_host_service_snapshot_results(cx);
         self.sync_host_gpu_sampling(cx);
         if !self.host_tools_surface_visible() {
             // Profilers own only sampling shells. Shared SSH nodes and user-triggered

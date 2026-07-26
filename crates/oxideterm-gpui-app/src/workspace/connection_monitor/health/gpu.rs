@@ -684,31 +684,6 @@ impl WorkspaceApp {
         self.connection_monitor.host_gpu.snapshot = None;
         self.sync_host_gpu_sampling(cx);
     }
-
-    pub(in crate::workspace) fn poll_host_gpu_updates(
-        &mut self,
-        request_repaint: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let active_connection_id = self
-            .connection_monitor
-            .host_gpu
-            .sampling_task
-            .as_ref()
-            .map(|task| task.connection_id().to_string());
-        let mut received_update = false;
-        while let Ok(update) = self.connection_monitor.host_gpu.update_rx.try_recv() {
-            if active_connection_id.as_deref() != Some(update.connection_id.as_str()) {
-                continue;
-            }
-            self.connection_monitor.host_gpu.snapshot_connection_id = Some(update.connection_id);
-            self.connection_monitor.host_gpu.snapshot = Some(update.snapshot);
-            received_update = true;
-        }
-        if received_update && request_repaint {
-            cx.notify();
-        }
-    }
 }
 
 fn percent_text(value: Option<f64>) -> String {

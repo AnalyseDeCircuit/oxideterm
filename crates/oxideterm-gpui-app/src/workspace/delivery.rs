@@ -135,14 +135,12 @@ impl<T> Clone for ActiveDeliverySender<T> {
 
 impl<T> ActiveDeliverySender<T> {
     pub(in crate::workspace) fn channel() -> (Self, Receiver<T>) {
+        Self::channel_with_wake(ActiveDeliveryWake::default())
+    }
+
+    pub(in crate::workspace) fn channel_with_wake(wake: ActiveDeliveryWake) -> (Self, Receiver<T>) {
         let (sender, receiver) = std::sync::mpsc::channel();
-        (
-            Self {
-                sender,
-                wake: ActiveDeliveryWake::default(),
-            },
-            receiver,
-        )
+        (Self { sender, wake }, receiver)
     }
 
     pub(in crate::workspace) fn send(&self, value: T) -> Result<(), SendError<T>> {
@@ -252,5 +250,22 @@ mod tests {
         assert!(!sender.wake().take());
         assert_eq!(receiver.try_recv(), Ok(1));
         assert_eq!(receiver.try_recv(), Ok(2));
+    }
+
+    #[test]
+    fn active_senders_can_share_one_foreground_wake() {
+        let shared_wake = ActiveDeliveryWake::default();
+        let (first_sender, first_receiver) =
+            ActiveDeliverySender::channel_with_wake(shared_wake.clone());
+        let (second_sender, second_receiver) =
+            ActiveDeliverySender::channel_with_wake(shared_wake.clone());
+
+        first_sender.send(1).unwrap();
+        second_sender.send(2).unwrap();
+
+        assert!(shared_wake.take());
+        assert!(!shared_wake.take());
+        assert_eq!(first_receiver.try_recv(), Ok(1));
+        assert_eq!(second_receiver.try_recv(), Ok(2));
     }
 }

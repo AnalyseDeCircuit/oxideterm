@@ -1246,7 +1246,9 @@ impl WorkspaceApp {
             connection_id: connection_id.clone(),
             feedback,
         };
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.connection_monitor.delivery_wake.clone(),
+        );
         self.connection_monitor.host_tmux_snapshot_connection_id = Some(connection_id);
         self.connection_monitor.host_tmux_snapshot_running = Some(request.clone());
         self.connection_monitor.host_tmux_snapshot_rx = Some(rx);
@@ -1734,7 +1736,9 @@ impl WorkspaceApp {
                     return;
                 }
             };
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.connection_monitor.delivery_wake.clone(),
+        );
         let delivery_request = request.clone();
         self.connection_monitor.host_tmux_action_running = Some(request);
         self.connection_monitor.host_tmux_action_rx = Some(rx);

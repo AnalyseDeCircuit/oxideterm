@@ -1141,7 +1141,9 @@ impl WorkspaceApp {
             );
         }
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.connection_monitor.delivery_wake.clone(),
+        );
         let delivery_request = request.clone();
         self.connection_monitor.host_process_action_running = Some(request);
         self.connection_monitor.host_process_action_rx = Some(rx);

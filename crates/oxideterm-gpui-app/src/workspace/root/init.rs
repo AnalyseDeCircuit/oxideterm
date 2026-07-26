@@ -75,6 +75,8 @@ impl WorkspaceApp {
         let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (connection_monitor, host_tools_delivery_bridges) =
+            ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx);
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
         let sftp_progress_store: Arc<dyn ProgressStore> = {
@@ -544,7 +546,7 @@ impl WorkspaceApp {
             .measure_all(),
             launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics: GraphicsState::new(),
-            connection_monitor: ConnectionMonitorState::new(profiler_update_tx, profiler_update_rx),
+            connection_monitor,
             active_connection_runtime_section: ConnectionRuntimeSection::Overview,
             previous_connection_runtime_section: ConnectionRuntimeSection::Overview,
             // Monitor pages are variable-height browser sections; keep the
@@ -723,6 +725,7 @@ impl WorkspaceApp {
         workspace.schedule_terminal_notice_delivery(cx);
         workspace.schedule_connection_trace_delivery(cx);
         workspace.schedule_forwarding_worker_delivery(cx);
+        workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
         workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
@@ -739,22 +742,6 @@ impl WorkspaceApp {
                             workspace.poll_node_events(window, cx);
                             workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_launcher_worker_results(cx);
-                            workspace.poll_connection_monitor_updates(true, cx);
-                            workspace.poll_host_gpu_updates(true, cx);
-                            workspace.poll_host_process_action_results(cx);
-                            workspace.poll_host_docker_action_results(cx);
-                            workspace.poll_host_docker_logs_results(cx);
-                            workspace.poll_host_service_action_results(cx);
-                            workspace.poll_host_service_logs_results(cx);
-                            workspace.poll_host_logs_snapshot_results(cx);
-                            workspace.poll_host_tmux_snapshot_results(cx);
-                            workspace.poll_host_tmux_action_results(cx);
-                            workspace.poll_host_ports_snapshot_results(cx);
-                            workspace.poll_host_schedules_snapshot_results(cx);
-                            workspace.poll_host_filesystems_snapshot_results(cx);
-                            workspace.poll_host_packages_snapshot_results(cx);
-                            workspace.poll_host_schedule_logs_results(cx);
-                            workspace.poll_host_schedule_action_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.poll_terminal_cwd_results(cx);
                             workspace.poll_terminal_git_results(cx);

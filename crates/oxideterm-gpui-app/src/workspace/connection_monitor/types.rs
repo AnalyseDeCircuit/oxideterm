@@ -523,7 +523,6 @@ pub(super) struct HostToolConfirmState<T> {
 
 pub(super) struct HostGpuViewState {
     pub(super) update_tx: tokio::sync::mpsc::UnboundedSender<GpuUpdate>,
-    pub(super) update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
     pub(super) sampling_task: Option<GpuSamplingTask>,
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<GpuSnapshot>,
@@ -533,11 +532,9 @@ pub(super) struct HostGpuViewState {
 }
 
 impl HostGpuViewState {
-    fn new() -> Self {
-        let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel();
+    fn new(update_tx: tokio::sync::mpsc::UnboundedSender<GpuUpdate>) -> Self {
         Self {
             update_tx,
-            update_rx,
             sampling_task: None,
             snapshot_connection_id: None,
             snapshot: None,
@@ -583,8 +580,10 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     pub(in crate::workspace) profiler_registry: ProfilerRegistry,
     pub(in crate::workspace) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
-    pub(in crate::workspace) profiler_update_rx:
-        tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
+    pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
+    pub(super) sampler_delivery_rx:
+        std::sync::mpsc::Receiver<super::delivery::HostToolsSamplerDelivery>,
+    pub(super) delivery_cursor: usize,
     pub(super) host_gpu: HostGpuViewState,
     pub(super) compact_monitor_list_state: ListState,
     pub(super) compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
@@ -733,8 +732,14 @@ impl ConnectionMonitorState {
     pub(in crate::workspace) fn new(
         profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
         profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
-    ) -> Self {
-        Self {
+    ) -> (Self, super::delivery::HostToolsDeliveryBridges) {
+        let delivery_wake = crate::workspace::delivery::ActiveDeliveryWake::default();
+        let (sampler_delivery_tx, sampler_delivery_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                delivery_wake.clone(),
+            );
+        let (gpu_update_tx, gpu_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = Self {
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -746,8 +751,10 @@ impl ConnectionMonitorState {
             selector_focus_origin: None,
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
-            profiler_update_rx,
-            host_gpu: HostGpuViewState::new(),
+            delivery_wake,
+            sampler_delivery_rx,
+            delivery_cursor: 0,
+            host_gpu: HostGpuViewState::new(gpu_update_tx),
             compact_monitor_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -926,7 +933,13 @@ impl ConnectionMonitorState {
             tab_scrollbar_drag: None,
             topology_drag: None,
             topology_menu: None,
-        }
+        };
+        let bridges = super::delivery::HostToolsDeliveryBridges {
+            profiler_update_rx,
+            gpu_update_rx,
+            sampler_delivery_tx,
+        };
+        (state, bridges)
     }
 
     pub(in crate::workspace) fn dismiss_topology_menu(&mut self) -> bool {

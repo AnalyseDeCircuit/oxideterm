@@ -125,23 +125,6 @@ impl Render for WorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
-        self.poll_connection_monitor_updates(false, cx);
-        self.poll_host_gpu_updates(false, cx);
-        self.poll_host_process_action_results(cx);
-        self.poll_host_docker_action_results(cx);
-        self.poll_host_docker_logs_results(cx);
-        self.poll_host_service_action_results(cx);
-        self.poll_host_service_logs_results(cx);
-        self.poll_host_logs_snapshot_results(cx);
-        self.poll_host_tmux_snapshot_results(cx);
-        self.poll_host_tmux_action_results(cx);
-        self.poll_host_ports_snapshot_results(cx);
-        self.poll_host_schedules_snapshot_results(cx);
-        self.poll_host_filesystems_snapshot_results(cx);
-        self.poll_host_packages_snapshot_results(cx);
-        self.poll_host_schedule_logs_results(cx);
-        self.poll_host_schedule_action_results(cx);
-        self.maybe_refresh_connection_monitor(cx);
         self.refresh_workspace_toast_expirations(cx);
         self.poll_ai_chat_stream_events(Some(window), cx);
         self.poll_ai_compaction_results(cx);

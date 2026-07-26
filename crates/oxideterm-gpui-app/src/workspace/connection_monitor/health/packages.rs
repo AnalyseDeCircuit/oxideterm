@@ -828,7 +828,9 @@ impl WorkspaceApp {
             connection_id: connection_id.clone(),
             feedback,
         };
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.connection_monitor.delivery_wake.clone(),
+        );
         self.connection_monitor.host_package_snapshot_connection_id = Some(connection_id);
         self.connection_monitor.host_package_snapshot_running = Some(request.clone());
         self.connection_monitor.host_package_snapshot_rx = Some(rx);

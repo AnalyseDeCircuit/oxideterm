@@ -883,7 +883,9 @@ impl WorkspaceApp {
             error: None,
             loading: true,
         });
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.connection_monitor.delivery_wake.clone(),
+        );
         self.connection_monitor.host_docker_logs_rx = Some(rx);
         self.connection_monitor.host_docker_logs_polling = true;
         self.forwarding_runtime.handle().spawn(async move {
@@ -1122,7 +1124,9 @@ impl WorkspaceApp {
             }
         };
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+            self.connection_monitor.delivery_wake.clone(),
+        );
         let delivery_request = request.clone();
         self.connection_monitor.host_docker_action_running = Some(request);
         self.connection_monitor.host_docker_action_rx = Some(rx);
