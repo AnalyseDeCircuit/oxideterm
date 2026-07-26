@@ -720,6 +720,7 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         let window_handle = window.window_handle();
+        workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {
             loop {
                 Timer::after(Duration::from_millis(530)).await;
@@ -733,7 +734,6 @@ impl WorkspaceApp {
                             workspace.poll_node_events(window, cx);
                             workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_launcher_worker_results(cx);
-                            workspace.poll_graphics_worker_results(window, cx);
                             workspace.poll_connection_monitor_updates(true, cx);
                             workspace.poll_host_gpu_updates(true, cx);
                             workspace.poll_host_process_action_results(cx);

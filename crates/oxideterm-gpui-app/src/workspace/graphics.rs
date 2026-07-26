@@ -1,6 +1,11 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::Duration,
 };
 
 use gpui::RenderImage;
@@ -16,6 +21,7 @@ use oxideterm_wsl_graphics::{
     GraphicsSessionMode, WSL_GRAPHICS_UNAVAILABLE, WslDistro, WslGraphicsError, WslGraphicsSession,
     WslgStatus, wsl,
 };
+use tokio::sync::Notify;
 
 use super::graphics_vnc::{
     GraphicsVncFrame, GraphicsVncInput, GraphicsVncWorkerEvent, SharedGraphicsVncGeometry,
@@ -52,6 +58,8 @@ const GRAPHICS_ALPHA_10: u32 = 0x1a; // Tailwind /10.
 const GRAPHICS_ALPHA_20: u32 = 0x33; // Tailwind /20.
 const GRAPHICS_ALPHA_50: u32 = 0x80; // Tailwind /50.
 const GRAPHICS_ALPHA_90: u32 = 0xe6; // Tailwind /90.
+const GRAPHICS_WORKER_DELIVERY_BUDGET: delivery::DeliveryBudget =
+    delivery::DeliveryBudget::new(32, Duration::from_millis(6));
 
 const COMMON_APPS: &[(&str, &str)] = &[
     ("gedit", "gedit"),
@@ -124,6 +132,111 @@ pub(super) enum GraphicsWorkerResult {
     VncEvent(GraphicsVncWorkerEvent),
 }
 
+fn coalesce_adjacent_graphics_frames(
+    results: Vec<GraphicsWorkerResult>,
+) -> Vec<GraphicsWorkerResult> {
+    let mut coalesced = Vec::with_capacity(results.len());
+    for result in results {
+        match result {
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame { session_id, frame }) => {
+                let latest_frame = GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                    session_id,
+                    frame,
+                });
+                let replaces_previous = matches!(
+                    (coalesced.last(), &latest_frame),
+                    (
+                        Some(GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                            session_id: previous_session_id,
+                            ..
+                        })),
+                        GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                            session_id: latest_session_id,
+                            ..
+                        })
+                    ) if previous_session_id == latest_session_id
+                );
+                if replaces_previous {
+                    // A full frame supersedes only an adjacent frame from the same session.
+                    let previous_frame_index = coalesced.len() - 1;
+                    coalesced[previous_frame_index] = latest_frame;
+                } else {
+                    coalesced.push(latest_frame);
+                }
+            }
+            other => {
+                // Lifecycle boundaries stay ordered and prevent frame coalescing across them.
+                coalesced.push(other);
+            }
+        }
+    }
+    coalesced
+}
+
+#[derive(Clone)]
+struct GraphicsWorkerWake {
+    pending: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
+    notification: Arc<Notify>,
+}
+
+impl Default for GraphicsWorkerWake {
+    fn default() -> Self {
+        Self {
+            pending: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
+            notification: Arc::new(Notify::new()),
+        }
+    }
+}
+
+impl GraphicsWorkerWake {
+    fn mark(&self) {
+        // Notify stores one permit, while pending coalesces any burst before the UI task runs.
+        self.pending.store(true, Ordering::Release);
+        self.notification.notify_one();
+    }
+
+    fn take(&self) -> bool {
+        self.pending.swap(false, Ordering::AcqRel)
+    }
+
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+        self.notification.notify_one();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    async fn wait(&self) {
+        self.notification.notified().await;
+    }
+}
+
+#[derive(Clone)]
+struct GraphicsWorkerDelivery {
+    sender: mpsc::Sender<GraphicsWorkerResult>,
+    wake: GraphicsWorkerWake,
+}
+
+impl GraphicsWorkerDelivery {
+    fn new(sender: mpsc::Sender<GraphicsWorkerResult>) -> Self {
+        Self {
+            sender,
+            wake: GraphicsWorkerWake::default(),
+        }
+    }
+
+    fn send(&self, result: GraphicsWorkerResult) {
+        // Publish before waking so the foreground task always observes the queued result.
+        if self.sender.send(result).is_ok() {
+            self.wake.mark();
+        }
+    }
+}
+
 pub(super) struct GraphicsState {
     distros: Vec<WslDistro>,
     sessions: Vec<WslGraphicsSession>,
@@ -145,13 +258,14 @@ pub(super) struct GraphicsState {
     vnc_retired_images: Vec<Arc<RenderImage>>,
     vnc_geometry: SharedGraphicsVncGeometry,
     vnc_button_mask: u8,
-    worker_tx: mpsc::Sender<GraphicsWorkerResult>,
+    worker_delivery: GraphicsWorkerDelivery,
     worker_rx: mpsc::Receiver<GraphicsWorkerResult>,
 }
 
 impl GraphicsState {
     pub(super) fn new() -> Self {
         let (worker_tx, worker_rx) = mpsc::channel();
+        let worker_delivery = GraphicsWorkerDelivery::new(worker_tx);
         Self {
             distros: Vec::new(),
             sessions: Vec::new(),
@@ -173,9 +287,16 @@ impl GraphicsState {
             vnc_retired_images: Vec::new(),
             vnc_geometry: SharedGraphicsVncGeometry::default(),
             vnc_button_mask: 0,
-            worker_tx,
+            worker_delivery,
             worker_rx,
         }
+    }
+}
+
+impl Drop for GraphicsState {
+    fn drop(&mut self) {
+        // Stop the foreground waiter even if background producers still hold sender clones.
+        self.worker_delivery.wake.stop();
     }
 }
 
@@ -224,8 +345,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let drain =
+            delivery::drain_channel(&self.graphics.worker_rx, GRAPHICS_WORKER_DELIVERY_BUDGET);
         let mut changed = false;
-        while let Ok(result) = self.graphics.worker_rx.try_recv() {
+        for result in coalesce_adjacent_graphics_frames(drain.items) {
             match result {
                 GraphicsWorkerResult::ListSessions { result } => {
                     if let Ok(mut sessions) = result {
@@ -356,6 +479,39 @@ impl WorkspaceApp {
             self.ensure_graphics_vnc_worker();
             cx.notify();
         }
+        if drain.outcome.backlog_remaining {
+            self.graphics.worker_delivery.wake.mark();
+        }
+    }
+
+    pub(super) fn schedule_graphics_worker_delivery(
+        &self,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        let worker_wake = self.graphics.worker_delivery.wake.clone();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                worker_wake.wait().await;
+                if worker_wake.is_stopped() {
+                    break;
+                }
+                if !worker_wake.take() {
+                    continue;
+                }
+                if cx
+                    .update_window(window_handle, |_, window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.poll_graphics_worker_results(window, cx);
+                        })
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(super) fn handle_graphics_key(
@@ -434,14 +590,14 @@ impl WorkspaceApp {
         self.graphics.generation = self.graphics.generation.saturating_add(1);
         let generation = self.graphics.generation;
         self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = backend
                 .stop(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Stop {
+            delivery.send(GraphicsWorkerResult::Stop {
                 generation,
                 session_id,
                 result,
@@ -1548,19 +1704,19 @@ impl WorkspaceApp {
         let generation = self.graphics.generation;
         self.graphics.loading = true;
         self.graphics.error = None;
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         self.forwarding_runtime.spawn(async move {
             let result = wsl::list_distros().map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::LoadDistros { generation, result });
+            delivery.send(GraphicsWorkerResult::LoadDistros { generation, result });
         });
     }
 
     fn load_graphics_sessions(&self) {
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = Ok::<_, String>(backend.list_sessions().await);
-            let _ = tx.send(GraphicsWorkerResult::ListSessions { result });
+            delivery.send(GraphicsWorkerResult::ListSessions { result });
         });
     }
 
@@ -1571,7 +1727,7 @@ impl WorkspaceApp {
             .iter()
             .filter(|distro| distro.is_running)
         {
-            let tx = self.graphics.worker_tx.clone();
+            let delivery = self.graphics.worker_delivery.clone();
             let backend = self.wsl_graphics.clone();
             let distro_name = distro.name.clone();
             self.forwarding_runtime.spawn(async move {
@@ -1579,7 +1735,7 @@ impl WorkspaceApp {
                     .detect_wslg(&distro_name)
                     .await
                     .map_err(|error| error.to_string());
-                let _ = tx.send(GraphicsWorkerResult::DetectWslg {
+                delivery.send(GraphicsWorkerResult::DetectWslg {
                     generation,
                     distro: distro_name,
                     result,
@@ -1598,14 +1754,14 @@ impl WorkspaceApp {
         self.graphics.error = None;
         self.graphics.session = None;
         self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = backend
                 .start_desktop(distro)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Start { generation, result });
+            delivery.send(GraphicsWorkerResult::Start { generation, result });
         });
     }
 
@@ -1626,14 +1782,14 @@ impl WorkspaceApp {
         self.graphics.error = None;
         self.graphics.session = None;
         self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = backend
                 .start_app(distro, argv, None, None)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::StartApp { generation, result });
+            delivery.send(GraphicsWorkerResult::StartApp { generation, result });
         });
     }
 
@@ -1657,18 +1813,18 @@ impl WorkspaceApp {
             self.shutdown_graphics_session();
             return;
         }
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = backend
                 .stop(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::ListSessions {
+            delivery.send(GraphicsWorkerResult::ListSessions {
                 result: result.map(|_| Vec::new()),
             });
             let sessions = backend.list_sessions().await;
-            let _ = tx.send(GraphicsWorkerResult::ListSessions {
+            delivery.send(GraphicsWorkerResult::ListSessions {
                 result: Ok(sessions),
             });
         });
@@ -1688,14 +1844,14 @@ impl WorkspaceApp {
         self.graphics.status = GraphicsStatus::Starting;
         self.graphics.error = None;
         self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = backend
                 .reconnect(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Reconnect { generation, result });
+            delivery.send(GraphicsWorkerResult::Reconnect { generation, result });
         });
     }
 
@@ -1705,14 +1861,14 @@ impl WorkspaceApp {
         self.graphics.status = GraphicsStatus::Starting;
         self.graphics.error = None;
         self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
+        let delivery = self.graphics.worker_delivery.clone();
         let backend = self.wsl_graphics.clone();
         self.forwarding_runtime.spawn(async move {
             let result = backend
                 .reconnect(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Reconnect { generation, result });
+            delivery.send(GraphicsWorkerResult::Reconnect { generation, result });
         });
     }
 
@@ -1814,7 +1970,7 @@ impl WorkspaceApp {
         self.reset_graphics_vnc_viewer(true);
         let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-        let event_tx = self.graphics.worker_tx.clone();
+        let event_delivery = self.graphics.worker_delivery.clone();
         let session_id = session.id.clone();
         let vnc_port = session.vnc_port;
         self.graphics.vnc_session_id = Some(session_id.clone());
@@ -1822,7 +1978,7 @@ impl WorkspaceApp {
         self.graphics.vnc_stop = Some(stop_tx);
         self.forwarding_runtime.spawn(async move {
             run_graphics_vnc_worker(session_id, vnc_port, input_rx, stop_rx, move |event| {
-                let _ = event_tx.send(GraphicsWorkerResult::VncEvent(event));
+                event_delivery.send(GraphicsWorkerResult::VncEvent(event));
             })
             .await;
         });
@@ -1918,5 +2074,78 @@ fn normalize_graphics_error(error: String) -> String {
         WSL_GRAPHICS_UNAVAILABLE.to_string()
     } else {
         error
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+
+    #[test]
+    fn worker_delivery_marks_wake_after_enqueue() {
+        let (sender, receiver) = mpsc::channel();
+        let delivery = GraphicsWorkerDelivery::new(sender);
+
+        delivery.send(GraphicsWorkerResult::ListSessions {
+            result: Ok(Vec::new()),
+        });
+
+        assert!(delivery.wake.take());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(GraphicsWorkerResult::ListSessions { result: Ok(sessions) }) if sessions.is_empty()
+        ));
+    }
+
+    #[test]
+    fn worker_wake_coalesces_bursts_and_stops_explicitly() {
+        let wake = GraphicsWorkerWake::default();
+
+        wake.mark();
+        wake.mark();
+
+        assert!(wake.take());
+        assert!(!wake.take());
+        wake.stop();
+        assert!(wake.is_stopped());
+    }
+
+    #[test]
+    fn adjacent_frames_coalesce_without_crossing_lifecycle_boundaries() {
+        let session_id = "graphics-session".to_string();
+        let results = vec![
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Connected {
+                session_id: session_id.clone(),
+            }),
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                session_id: session_id.clone(),
+                frame: GraphicsVncFrame {
+                    width: 1,
+                    height: 1,
+                    bgra: vec![1, 0, 0, 0],
+                },
+            }),
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                session_id: session_id.clone(),
+                frame: GraphicsVncFrame {
+                    width: 1,
+                    height: 1,
+                    bgra: vec![2, 0, 0, 0],
+                },
+            }),
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Disconnected {
+                session_id,
+                reason: None,
+            }),
+        ];
+
+        let coalesced = coalesce_adjacent_graphics_frames(results);
+
+        assert_eq!(coalesced.len(), 3);
+        assert!(matches!(
+            &coalesced[1],
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame { frame, .. })
+                if frame.bgra == vec![2, 0, 0, 0]
+        ));
     }
 }

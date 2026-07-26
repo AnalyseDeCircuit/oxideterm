@@ -103,7 +103,6 @@ impl Render for WorkspaceApp {
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.poll_forwarding_worker_results(cx);
-        self.poll_graphics_worker_results(window, cx);
         self.poll_remote_desktop_worker_results(window, cx);
         self.poll_connection_monitor_updates(false, cx);
         self.poll_host_gpu_updates(false, cx);
