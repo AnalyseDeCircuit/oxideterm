@@ -1039,7 +1039,10 @@ impl WorkspaceApp {
         self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
     }
 
-    pub(in crate::workspace) fn dismiss_transient_workspace_overlays(&mut self) -> bool {
+    pub(in crate::workspace) fn dismiss_transient_workspace_overlays(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let mut changed = false;
 
         // Match browser/Radix outside-click behavior for non-modal UI only.
@@ -1063,10 +1066,10 @@ impl WorkspaceApp {
             // mirror that owner release so the native focus ring cannot linger.
             changed = true;
         }
-        if self.connection_monitor.selector_open {
-            self.connection_monitor.selector_open = false;
-            self.connection_monitor.selector_highlighted_index = None;
-            self.connection_monitor.selector_focus_origin = None;
+        if self
+            .host_tools
+            .update(cx, |host_tools, cx| host_tools.close_selector(true, cx))
+        {
             changed = true;
         }
         if self.session_manager.show_batch_move {
@@ -1150,7 +1153,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let changed = self.dismiss_transient_workspace_overlays();
+        let changed = self.dismiss_transient_workspace_overlays(cx);
         if changed {
             // Radix restores focus to the trigger/outside target after closing
             // transient popovers. Native tracks most triggers as workspace
@@ -1171,7 +1174,7 @@ impl WorkspaceApp {
         if event.keystroke.key.as_str() != "escape" || event.keystroke.modifiers.platform {
             return false;
         }
-        if self.dismiss_transient_workspace_overlays() {
+        if self.dismiss_transient_workspace_overlays(cx) {
             window.focus(&self.focus_handle, cx);
             cx.notify();
             return true;

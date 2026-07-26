@@ -15,9 +15,8 @@ impl WorkspaceApp {
             );
         }
 
-        let selected_id = self
-            .connection_monitor
-            .selected_connection_id
+        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
+        let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
         let snapshot = self
@@ -778,9 +777,9 @@ impl WorkspaceApp {
     ) {
         let connections = self.monitor_connections();
         let Some(connection_id) = self
-            .connection_monitor
-            .selected_connection_id
-            .clone()
+            .host_tools
+            .read(cx)
+            .selected_connection_id_owned()
             .or_else(|| {
                 connections
                     .first()

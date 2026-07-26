@@ -2,6 +2,7 @@ use super::*;
 
 mod delivery;
 mod entity;
+mod events;
 mod health;
 mod helpers;
 mod lifecycle;
@@ -16,4 +17,5 @@ use helpers::*;
 use types::*;
 
 pub(super) use entity::HostToolsEntity;
+pub(super) use events::HostToolsEvent;
 pub(super) use types::{ConnectionMonitorState, ConnectionRuntimeSection};

@@ -95,6 +95,14 @@ impl WorkspaceApp {
         let connection_monitor = ConnectionMonitorState::new();
         let host_tools =
             cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, cx));
+        let host_tools_subscription = cx.subscribe(
+            &host_tools,
+            |workspace, _host_tools, event: &HostToolsEvent, cx| match event {
+                HostToolsEvent::RefreshGpu { connection_id } => {
+                    workspace.restart_host_gpu_sampling(connection_id.clone(), cx);
+                }
+            },
+        );
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
         let sftp_progress_store: Arc<dyn ProgressStore> = {
@@ -178,7 +186,6 @@ impl WorkspaceApp {
             terminal_pane_subscriptions: HashMap::new(),
             pending_auto_close_terminal_sessions: HashSet::new(),
             auto_close_terminal_sessions_scheduled: false,
-            host_tools_tab_scroll_handle: ScrollHandle::new(),
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,
@@ -565,6 +572,7 @@ impl WorkspaceApp {
             graphics: GraphicsState::new(),
             connection_monitor,
             host_tools,
+            _host_tools_subscription: host_tools_subscription,
             cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
             sftp_worker_tx,
             forwarding_worker_tx,

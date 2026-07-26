@@ -110,17 +110,14 @@ impl WorkspaceApp {
         if stale {
             self.refresh_connection_monitor_pool_stats();
         }
-        let selected_missing = self
-            .connection_monitor
-            .selected_connection_id
-            .as_ref()
-            .is_none_or(|selected| {
-                !self
-                    .connection_monitor
-                    .pool_summaries
-                    .iter()
-                    .any(|summary| summary.id == *selected)
-            });
+        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
+        let selected_missing = selected_connection_id.as_ref().is_none_or(|selected| {
+            !self
+                .connection_monitor
+                .pool_summaries
+                .iter()
+                .any(|summary| summary.id == *selected)
+        });
         if stale || selected_missing {
             // Selection sync scans the registry and may start profilers. Keep it
             // tied to pool refreshes instead of every terminal-driven repaint.
@@ -154,32 +151,21 @@ impl WorkspaceApp {
             }
         }
         if connections.is_empty() {
-            if let Some(connection_id) = self.connection_monitor.selected_connection_id.take() {
-                self.host_tools
-                    .read(cx)
-                    .remove_profiler_connection(&connection_id);
-            }
-            self.connection_monitor.selector_open = false;
-            self.connection_monitor.selector_highlighted_index = None;
-            self.connection_monitor.selector_focus_origin = None;
+            self.host_tools.update(cx, |host_tools, cx| {
+                if let Some(connection_id) = host_tools.take_selected_connection(cx) {
+                    host_tools.remove_profiler_connection(&connection_id);
+                }
+            });
             return;
         }
 
-        let selected_missing = self
-            .connection_monitor
-            .selected_connection_id
-            .as_ref()
-            .is_none_or(|selected| {
-                !connections
-                    .iter()
-                    .any(|connection| connection.connection_id == *selected)
-            });
-        if selected_missing {
-            self.connection_monitor.selected_connection_id =
-                Some(connections[0].connection_id.clone());
-        }
-
-        let Some(connection_id) = self.connection_monitor.selected_connection_id.clone() else {
+        let live_connection_ids = connections
+            .iter()
+            .map(|connection| connection.connection_id.clone())
+            .collect::<Vec<_>>();
+        let Some(connection_id) = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.ensure_selected_connection(&live_connection_ids, cx)
+        }) else {
             return;
         };
         if !self.host_tools_surface_visible() || self.resource_sampling_config().is_empty() {

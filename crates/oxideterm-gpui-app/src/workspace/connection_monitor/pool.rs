@@ -37,8 +37,8 @@ impl WorkspaceApp {
     fn sync_connection_monitor_section_list_state(&mut self, cx: &mut Context<Self>) {
         let spec = self.connection_monitor_section_list_spec();
         let signatures = [
-            self.connection_monitor_section_signature(ConnectionMonitorSection::Pool),
-            self.connection_monitor_section_signature(ConnectionMonitorSection::Health),
+            self.connection_monitor_section_signature(ConnectionMonitorSection::Pool, cx),
+            self.connection_monitor_section_signature(ConnectionMonitorSection::Health, cx),
         ];
         let host_tools = self.host_tools.read(cx);
         sync_tauri_variable_list_state_by_signatures(
@@ -57,7 +57,11 @@ impl WorkspaceApp {
         )
     }
 
-    fn connection_monitor_section_signature(&self, section: ConnectionMonitorSection) -> u64 {
+    fn connection_monitor_section_signature(
+        &self,
+        section: ConnectionMonitorSection,
+        cx: &mut Context<Self>,
+    ) -> u64 {
         let mut hasher = DefaultHasher::new();
         // Pool/health cards change height when loading, errors, or profiler
         // selection state changes; include those browser-section states so
@@ -76,8 +80,9 @@ impl WorkspaceApp {
             .len()
             .hash(&mut hasher);
         if matches!(section, ConnectionMonitorSection::Health) {
-            self.connection_monitor
-                .selected_connection_id
+            self.host_tools
+                .read(cx)
+                .selected_connection_id()
                 .hash(&mut hasher);
             self.settings_store
                 .settings()

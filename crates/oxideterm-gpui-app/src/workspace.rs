@@ -247,7 +247,9 @@ use oxideterm_workspace::{
 };
 
 use self::actions::SearchBarState;
-use self::connection_monitor::{ConnectionMonitorState, ConnectionRuntimeSection, HostToolsEntity};
+use self::connection_monitor::{
+    ConnectionMonitorState, ConnectionRuntimeSection, HostToolsEntity, HostToolsEvent,
+};
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
@@ -742,7 +744,6 @@ pub(crate) struct WorkspaceApp {
     terminal_pane_subscriptions: HashMap<PaneId, Subscription>,
     pending_auto_close_terminal_sessions: HashSet<TerminalSessionId>,
     auto_close_terminal_sessions_scheduled: bool,
-    host_tools_tab_scroll_handle: ScrollHandle,
     next_tab_id: u64,
     next_pane_id: u64,
     next_session_id: u64,
@@ -1000,6 +1001,7 @@ pub(crate) struct WorkspaceApp {
     graphics: GraphicsState,
     connection_monitor: ConnectionMonitorState,
     host_tools: Entity<HostToolsEntity>,
+    _host_tools_subscription: Subscription,
     cloud_sync: cloud_sync::CloudSyncWorkspaceState,
     sftp_worker_tx: tokio::sync::mpsc::UnboundedSender<sftp::SftpWorkerResult>,
     forwarding_worker_tx: delivery::ActiveDeliverySender<forwards::ForwardingWorkerResult>,

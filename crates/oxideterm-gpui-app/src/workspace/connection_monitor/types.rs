@@ -574,10 +574,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) topology_snapshot: Option<ConnectionTopologySnapshot>,
     pub(in crate::workspace) pool_error: Option<String>,
     pub(in crate::workspace) last_pool_refresh: Option<Instant>,
-    pub(in crate::workspace) selected_connection_id: Option<String>,
-    pub(in crate::workspace) selector_open: bool,
-    pub(in crate::workspace) selector_highlighted_index: Option<usize>,
-    pub(in crate::workspace) selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     // Reliable Host Tools action results remain view-owned until their pages
     // move into HostToolsEntity in the following Phase 3A slices.
     pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
@@ -734,10 +730,6 @@ impl ConnectionMonitorState {
             topology_snapshot: None,
             pool_error: None,
             last_pool_refresh: None,
-            selected_connection_id: None,
-            selector_open: false,
-            selector_highlighted_index: None,
-            selector_focus_origin: None,
             delivery_wake,
             delivery_cursor: 0,
             compact_monitor_list_state: tauri_virtual_list_state(

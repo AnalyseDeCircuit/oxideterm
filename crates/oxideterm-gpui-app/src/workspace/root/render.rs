@@ -612,7 +612,7 @@ impl Render for WorkspaceApp {
                 // inline select/popover states that have no full-window layer,
                 // closing them before the same wheel event scrolls the page or
                 // terminal underneath.
-                if this.dismiss_transient_workspace_overlays() {
+                if this.dismiss_transient_workspace_overlays(cx) {
                     cx.stop_propagation();
                     cx.notify();
                 }
