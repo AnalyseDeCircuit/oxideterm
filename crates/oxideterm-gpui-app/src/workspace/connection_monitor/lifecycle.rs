@@ -26,6 +26,9 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         self.visibility = visibility;
+        self.gpu_enabled = gpu_enabled;
+        self.sampling_config = sampling_config;
+        self.lifecycle_runtime = Some(runtime.clone());
         let gpu_visible = gpu_enabled
             && visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
@@ -103,6 +106,9 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         self.visibility = visibility;
+        self.gpu_enabled = gpu_enabled;
+        self.sampling_config = sampling_config;
+        self.lifecycle_runtime = Some(runtime.clone());
         if sampling_config.is_empty() || !visibility.is_visible() {
             self.stop_profiler_sampling();
         } else {
@@ -232,18 +238,6 @@ impl WorkspaceApp {
                 force_pool_refresh,
                 cx,
             );
-        });
-    }
-
-    pub(in crate::workspace) fn start_connection_monitor_profiler(
-        &mut self,
-        connection_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let sampling_config = self.resource_sampling_config();
-        let runtime = self.forwarding_runtime.handle().clone();
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.start_profiler(connection_id, sampling_config, runtime, cx);
         });
     }
 

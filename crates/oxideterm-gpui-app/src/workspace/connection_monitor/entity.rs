@@ -50,6 +50,11 @@ pub(in crate::workspace) struct HostToolsEntity {
     // Visibility is an Entity lifecycle input. It controls only page-scoped
     // sampling and never owns or releases shared SSH transports.
     pub(super) visibility: HostToolsVisibility,
+    // These inputs let the Entity refresh its own samplers after an action.
+    // The runtime handle has no registry release or disconnect capability.
+    pub(super) lifecycle_runtime: Option<tokio::runtime::Handle>,
+    pub(super) sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+    pub(super) gpu_enabled: bool,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
@@ -115,6 +120,9 @@ impl HostToolsEntity {
             previous_tool: ContextSidebarTool::Monitor,
             tab_scrollbar_drag: None,
             visibility: HostToolsVisibility::Hidden,
+            lifecycle_runtime: None,
+            sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig::default(),
+            gpu_enabled: true,
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -692,7 +700,13 @@ impl HostToolsEntity {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        cx.emit(HostToolsEvent::RefreshProfiler { connection_id });
+        if !self.visibility.is_visible() || self.sampling_config.is_empty() {
+            return;
+        }
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            return;
+        };
+        self.start_profiler(connection_id, self.sampling_config, runtime, cx);
     }
 
     pub(super) fn set_runtime_section(&mut self, section: ConnectionRuntimeSection) -> bool {
@@ -1056,9 +1070,20 @@ impl HostToolsEntity {
     }
 
     pub(super) fn request_gpu_refresh(&mut self, connection_id: String, cx: &mut Context<Self>) {
-        // Events carry only the stable connection id; registry state and SSH
-        // credentials remain behind the workspace runtime boundary.
-        cx.emit(HostToolsEvent::RefreshGpu { connection_id });
+        let enabled_and_visible = self.gpu_enabled
+            && self.visibility.sidebar_is_visible()
+            && self.active_tool() == ContextSidebarTool::Gpu;
+        let selected_connection_id = self.selected_connection_id_owned();
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            return;
+        };
+        self.restart_gpu_sampling(
+            connection_id,
+            enabled_and_visible,
+            selected_connection_id,
+            runtime,
+            cx,
+        );
     }
 
     pub(super) fn restart_gpu_sampling(
@@ -1326,23 +1351,14 @@ mod tests {
             entity.request_gpu_refresh("connection-1".to_string(), cx);
         });
 
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshGpu {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        // Refresh stays inside the Entity and never needs a root event bounce.
+        assert!(events.try_recv().is_err());
         entity.update(cx, |entity, cx| {
             entity.toggle_gpu_device("gpu-1".to_string(), cx);
             assert!(!entity.gpu_device_is_expanded("gpu-1"));
             entity.request_profiler_refresh("connection-1".to_string(), cx);
         });
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshProfiler {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        assert!(events.try_recv().is_err());
     }
 
     #[gpui::test]
@@ -1426,12 +1442,7 @@ mod tests {
             })
         );
         assert!(!format!("{notice:?}").contains(display_secret.as_str()));
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshProfiler {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        assert!(events.try_recv().is_err());
     }
 
     #[gpui::test]
@@ -1531,12 +1542,7 @@ mod tests {
                 succeeded: false,
             })
         );
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshProfiler {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        assert!(events.try_recv().is_err());
     }
 
     #[gpui::test]

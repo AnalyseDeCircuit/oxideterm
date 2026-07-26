@@ -581,30 +581,6 @@ impl WorkspaceApp {
             .child(div().min_w_0().flex_1().truncate().child(value))
             .into_any_element()
     }
-
-    pub(in crate::workspace) fn restart_host_gpu_sampling(
-        &mut self,
-        connection_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let enabled = self.settings_store.settings().host_tools.gpu_enabled;
-        let visibility = self.host_tools_visibility();
-        let visible = enabled
-            && visibility.sidebar_is_visible()
-            && self.host_tools.read(cx).active_tool() == ContextSidebarTool::Gpu;
-        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
-        let runtime = self.forwarding_runtime.handle().clone();
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.visibility = visibility;
-            host_tools.restart_gpu_sampling(
-                connection_id,
-                visible,
-                selected_connection_id,
-                runtime,
-                cx,
-            );
-        });
-    }
 }
 
 fn percent_text(value: Option<f64>) -> String {

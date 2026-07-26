@@ -761,11 +761,10 @@ impl WorkspaceApp {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        self.host_tools
-            .read(cx)
-            .profiler_registry()
-            .stop(&connection_id);
-        self.start_connection_monitor_profiler(connection_id, cx);
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.profiler_registry().stop(&connection_id);
+            host_tools.request_profiler_refresh(connection_id, cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_host_docker_search_key(
@@ -1505,9 +1504,7 @@ impl HostToolsEntity {
         ));
         // Force a new Docker sample after the remote state transition.
         self.profiler_registry.stop(&delivery.request.connection_id);
-        cx.emit(HostToolsEvent::RefreshProfiler {
-            connection_id: delivery.request.connection_id,
-        });
+        self.request_profiler_refresh(delivery.request.connection_id, cx);
         cx.notify();
     }
 

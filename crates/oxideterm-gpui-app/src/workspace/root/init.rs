@@ -103,12 +103,6 @@ impl WorkspaceApp {
         let host_tools_subscription = cx.subscribe(
             &host_tools,
             |workspace, _host_tools, event: &HostToolsEvent, cx| match event {
-                HostToolsEvent::RefreshGpu { connection_id } => {
-                    workspace.restart_host_gpu_sampling(connection_id.clone(), cx);
-                }
-                HostToolsEvent::RefreshProfiler { connection_id } => {
-                    workspace.start_connection_monitor_profiler(connection_id.clone(), cx);
-                }
                 HostToolsEvent::RefreshServices { connection_id } => {
                     workspace.request_host_service_snapshot(connection_id.clone(), cx);
                 }

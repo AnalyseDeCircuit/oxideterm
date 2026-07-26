@@ -1288,9 +1288,7 @@ impl HostToolsEntity {
         // Force the next workspace integration call to rebuild the sampler
         // instead of treating the existing configuration as already running.
         self.profiler_registry.stop(&delivery.request.connection_id);
-        cx.emit(HostToolsEvent::RefreshProfiler {
-            connection_id: delivery.request.connection_id,
-        });
+        self.request_profiler_refresh(delivery.request.connection_id, cx);
         cx.notify();
     }
 }
