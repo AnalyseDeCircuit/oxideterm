@@ -71,7 +71,7 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(self.render_host_gpu_list(devices, snapshot.cloned(), selected_id, cx))
+            .child(self.render_host_gpu_list(devices, snapshot.cloned(), cx))
             .into_any_element()
     }
 
@@ -215,7 +215,6 @@ impl WorkspaceApp {
         &self,
         devices: Vec<GpuDevice>,
         snapshot: Option<GpuSnapshot>,
-        selected_id: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(snapshot) = snapshot else {
@@ -276,12 +275,30 @@ impl WorkspaceApp {
             GpuSnapshotStatus::Available | GpuSnapshotStatus::Unknown => {}
         }
 
+        let tokens = self.tokens;
+        let i18n = self.i18n.clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_gpu_device_list(devices, snapshot, &tokens, &i18n, cx)
+        })
+    }
+}
+
+impl HostToolsEntity {
+    fn render_gpu_device_list(
+        &self,
+        devices: Vec<GpuDevice>,
+        snapshot: GpuSnapshot,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let devices = Arc::new(devices);
         let snapshot = Arc::new(snapshot);
-        let selected_id = Arc::new(selected_id.to_string());
-        let state = self.host_tools.read(cx).gpu_list_state();
+        let state = self.gpu_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_GPU_LIST_ESTIMATED_ROW_HEIGHT), 8);
-        let workspace = cx.entity();
+        let host_tools = cx.entity();
+        let row_tokens = *tokens;
+        let row_i18n = i18n.clone();
         div()
             .w_full()
             .min_w_0()
@@ -290,7 +307,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(self.render_host_gpu_table_header())
+            .child(Self::render_host_gpu_table_header(tokens, i18n))
             .child(
                 div()
                     .flex_1()
@@ -302,12 +319,13 @@ impl WorkspaceApp {
                         move |index, _window, cx| {
                             let devices = devices.clone();
                             let snapshot = snapshot.clone();
-                            let selected_id = selected_id.clone();
-                            workspace.update(cx, |this, cx| {
-                                this.render_host_gpu_row(
-                                    selected_id.as_str(),
+                            let row_i18n = row_i18n.clone();
+                            host_tools.update(cx, |host_tools, cx| {
+                                host_tools.render_host_gpu_row(
                                     devices.get(index).cloned(),
                                     snapshot.as_ref(),
+                                    &row_tokens,
+                                    &row_i18n,
                                     cx,
                                 )
                             })
@@ -317,8 +335,8 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_host_gpu_table_header(&self) -> AnyElement {
-        let theme = self.tokens.ui;
+    fn render_host_gpu_table_header(tokens: &ThemeTokens, i18n: &I18n) -> AnyElement {
+        let theme = tokens.ui;
         div()
             .flex_none()
             .w_full()
@@ -338,38 +356,36 @@ impl WorkspaceApp {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_gpu.columns.device")),
+                    .child(i18n.t("sidebar.host_gpu.columns.device")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_GPU_UTILIZATION_COLUMN_WIDTH))
-                    .child(self.i18n.t("sidebar.host_gpu.columns.utilization")),
+                    .child(i18n.t("sidebar.host_gpu.columns.utilization")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_GPU_MEMORY_COLUMN_WIDTH))
-                    .child(self.i18n.t("sidebar.host_gpu.columns.memory")),
+                    .child(i18n.t("sidebar.host_gpu.columns.memory")),
             )
             .into_any_element()
     }
 
     fn render_host_gpu_row(
         &self,
-        _connection_id: &str,
         device: Option<GpuDevice>,
         snapshot: &GpuSnapshot,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(device) = device else {
             return div().into_any_element();
         };
-        let expanded = self
-            .host_tools
-            .read(cx)
-            .gpu_device_is_expanded(&device.uuid);
-        let theme = self.tokens.ui;
+        let expanded = self.gpu_device_is_expanded(&device.uuid);
+        let theme = tokens.ui;
         let device_uuid = device.uuid.clone();
         let device_kind = match device.provider {
             GpuProvider::Ascend | GpuProvider::Cambricon => "NPU",
@@ -398,9 +414,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.host_tools.update(cx, |host_tools, cx| {
-                        host_tools.toggle_gpu_device(device_uuid.clone(), cx);
-                    });
+                    // Expansion is a Host Tools view transition and does not
+                    // need to re-enter the workspace root.
+                    this.toggle_gpu_device(device_uuid.clone(), cx);
                     cx.stop_propagation();
                 }),
             )
@@ -411,7 +427,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_none().child(Self::render_lucide_icon(
+                    .child(div().flex_none().child(WorkspaceApp::render_lucide_icon(
                         if expanded {
                             LucideIcon::ChevronDown
                         } else {
@@ -465,79 +481,87 @@ impl WorkspaceApp {
                     ),
             )
             .when(expanded, |row| {
-                row.child(self.render_host_gpu_details(&device, &process_rows))
+                row.child(Self::render_host_gpu_details(
+                    &device,
+                    &process_rows,
+                    tokens,
+                    i18n,
+                ))
             })
             .into_any_element()
     }
 
     fn render_host_gpu_details(
-        &self,
         device: &GpuDevice,
         processes: &[oxideterm_connection_monitor::GpuProcess],
+        tokens: &ThemeTokens,
+        i18n: &I18n,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mut details =
-            div()
-                .px_3()
-                .pb_3()
-                .pl(px(34.0))
-                .flex()
-                .flex_col()
-                .gap_2()
-                .text_size(px(10.0))
-                .text_color(rgb(theme.text_muted))
-                .child(self.render_host_gpu_detail_line(
-                    "sidebar.host_gpu.details.uuid",
-                    device.uuid.clone(),
-                ))
-                .child(self.render_host_gpu_detail_line(
-                    "sidebar.host_gpu.details.driver",
-                    device.driver_version.clone().unwrap_or_else(|| "—".into()),
-                ))
-                .child(
-                    self.render_host_gpu_detail_line(
-                        "sidebar.host_gpu.details.performance_state",
-                        device
-                            .performance_state
-                            .clone()
-                            .unwrap_or_else(|| "—".into()),
-                    ),
-                )
-                .child(self.render_host_gpu_detail_line(
-                    "sidebar.host_gpu.details.health",
-                    device.health_status.clone().unwrap_or_else(|| "—".into()),
-                ))
-                .child(
-                    self.render_host_gpu_detail_line(
-                        "sidebar.host_gpu.details.temperature",
-                        device
-                            .temperature_celsius
-                            .map(|value| format!("{value:.0} °C"))
-                            .unwrap_or_else(|| "—".into()),
-                    ),
-                )
-                .child(self.render_host_gpu_detail_line(
-                    "sidebar.host_gpu.details.power",
-                    match (device.power_draw_watts, device.power_limit_watts) {
-                        (Some(draw), Some(limit)) => format!("{draw:.0} / {limit:.0} W"),
-                        (Some(draw), None) => format!("{draw:.0} W"),
-                        _ => "—".into(),
-                    },
-                ))
-                .child(self.render_host_gpu_detail_line(
-                    "sidebar.host_gpu.details.fan",
-                    percent_text(device.fan_speed_percent),
-                ))
-                .child(
-                    div()
-                        .mt_1()
-                        .text_size(px(11.0))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text))
-                        .child(self.i18n.t("sidebar.host_gpu.processes.title")),
-                );
+        let theme = tokens.ui;
+        let mut details = div()
+            .px_3()
+            .pb_3()
+            .pl(px(34.0))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_size(px(10.0))
+            .text_color(rgb(theme.text_muted))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.uuid",
+                device.uuid.clone(),
+                i18n,
+            ))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.driver",
+                device.driver_version.clone().unwrap_or_else(|| "—".into()),
+                i18n,
+            ))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.performance_state",
+                device
+                    .performance_state
+                    .clone()
+                    .unwrap_or_else(|| "—".into()),
+                i18n,
+            ))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.health",
+                device.health_status.clone().unwrap_or_else(|| "—".into()),
+                i18n,
+            ))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.temperature",
+                device
+                    .temperature_celsius
+                    .map(|value| format!("{value:.0} °C"))
+                    .unwrap_or_else(|| "—".into()),
+                i18n,
+            ))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.power",
+                match (device.power_draw_watts, device.power_limit_watts) {
+                    (Some(draw), Some(limit)) => format!("{draw:.0} / {limit:.0} W"),
+                    (Some(draw), None) => format!("{draw:.0} W"),
+                    _ => "—".into(),
+                },
+                i18n,
+            ))
+            .child(Self::render_host_gpu_detail_line(
+                "sidebar.host_gpu.details.fan",
+                percent_text(device.fan_speed_percent),
+                i18n,
+            ))
+            .child(
+                div()
+                    .mt_1()
+                    .text_size(px(11.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(i18n.t("sidebar.host_gpu.processes.title")),
+            );
         if processes.is_empty() {
-            details = details.child(self.i18n.t("sidebar.host_gpu.processes.empty"));
+            details = details.child(i18n.t("sidebar.host_gpu.processes.empty"));
         } else {
             for process in processes {
                 let memory = process
@@ -571,13 +595,17 @@ impl WorkspaceApp {
         details.into_any_element()
     }
 
-    fn render_host_gpu_detail_line(&self, label_key: &'static str, value: String) -> AnyElement {
+    fn render_host_gpu_detail_line(
+        label_key: &'static str,
+        value: String,
+        i18n: &I18n,
+    ) -> AnyElement {
         div()
             .min_w_0()
             .flex()
             .items_center()
             .gap_2()
-            .child(div().flex_none().w(px(82.0)).child(self.i18n.t(label_key)))
+            .child(div().flex_none().w(px(82.0)).child(i18n.t(label_key)))
             .child(div().min_w_0().flex_1().truncate().child(value))
             .into_any_element()
     }
