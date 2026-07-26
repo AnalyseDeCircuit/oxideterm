@@ -55,6 +55,10 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) lifecycle_runtime: Option<tokio::runtime::Handle>,
     pub(super) sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
     pub(super) gpu_enabled: bool,
+    pub(super) services_enabled: bool,
+    pub(super) schedules_enabled: bool,
+    pub(super) tmux_enabled: bool,
+    pub(super) messages: Option<HostToolsMessages>,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
@@ -123,6 +127,10 @@ impl HostToolsEntity {
             lifecycle_runtime: None,
             sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig::default(),
             gpu_enabled: true,
+            services_enabled: true,
+            schedules_enabled: true,
+            tmux_enabled: true,
+            messages: None,
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -1206,6 +1214,9 @@ mod tests {
             entity.update_lifecycle(
                 HostToolsVisibility::Hidden,
                 true,
+                true,
+                true,
+                true,
                 oxideterm_connection_monitor::ResourceSamplingConfig::default(),
                 runtime.handle().clone(),
                 false,
@@ -1547,6 +1558,7 @@ mod tests {
 
     #[gpui::test]
     fn service_snapshot_actions_and_logs_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
@@ -1635,6 +1647,16 @@ mod tests {
             action: ServiceActionKind::Restart,
         };
         let sender = entity.update(cx, |entity, cx| {
+            entity.visibility = HostToolsVisibility::VisibleSidebar;
+            entity.lifecycle_runtime = Some(runtime.handle().clone());
+            entity.messages = Some(HostToolsMessages {
+                service_connection_missing: "Service connection missing".to_string(),
+                service_action_failed: "Service capture failed".to_string(),
+                schedule_unknown_error: "Schedule capture failed".to_string(),
+                tmux_unknown_error: "tmux capture failed".to_string(),
+                tmux_unavailable: "tmux unavailable".to_string(),
+            });
+            entity.select_tool(ContextSidebarTool::Services, cx);
             assert!(
                 entity
                     .open_service_action_confirm(action_request.clone(), cx)
@@ -1660,6 +1682,12 @@ mod tests {
 
         entity.read_with(cx, |entity, _cx| {
             assert!(entity.host_services.action_running.is_none());
+            assert_eq!(
+                entity.host_services.snapshot.as_ref().unwrap().status,
+                ResourceServiceStatus::Error {
+                    message: "Service connection missing".to_string(),
+                }
+            );
         });
         assert_eq!(
             events.try_recv().unwrap(),
@@ -1668,12 +1696,7 @@ mod tests {
                 succeeded: false,
             })
         );
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshServices {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        assert!(events.try_recv().is_err());
     }
 
     #[gpui::test]
@@ -1798,12 +1821,7 @@ mod tests {
                 succeeded: false,
             })
         );
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshTmux {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        assert!(events.try_recv().is_err());
     }
 
     #[gpui::test]
@@ -2220,11 +2238,6 @@ mod tests {
                 succeeded: false,
             })
         );
-        assert_eq!(
-            events.try_recv().unwrap(),
-            HostToolsEvent::RefreshSchedules {
-                connection_id: "connection-1".to_string(),
-            }
-        );
+        assert!(events.try_recv().is_err());
     }
 }

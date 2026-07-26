@@ -245,7 +245,7 @@ use oxideterm_workspace::{
 
 use self::actions::SearchBarState;
 use self::connection_monitor::{
-    ConnectionRuntimeSection, HostSnapshotFeedback, HostToolsEntity, HostToolsEvent,
+    ConnectionRuntimeSection, HostToolsEntity, HostToolsEvent, HostToolsMessages,
 };
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;

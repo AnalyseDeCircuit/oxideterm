@@ -850,6 +850,26 @@ impl HostToolsVisibility {
     }
 }
 
+pub(in crate::workspace) struct HostToolsMessages {
+    pub(super) service_connection_missing: String,
+    pub(super) service_action_failed: String,
+    pub(super) schedule_unknown_error: String,
+    pub(super) tmux_unknown_error: String,
+    pub(super) tmux_unavailable: String,
+}
+
+impl HostToolsMessages {
+    pub(in crate::workspace) fn from_i18n(i18n: &I18n) -> Self {
+        Self {
+            service_connection_missing: i18n.t("sidebar.host_services.toast.connection_missing"),
+            service_action_failed: i18n.t("sidebar.host_services.toast.action_failed"),
+            schedule_unknown_error: i18n.t("sidebar.host_schedules.toast.unknown_error"),
+            tmux_unknown_error: i18n.t("sidebar.host_tmux.toast.unknown_error"),
+            tmux_unavailable: i18n.t("sidebar.host_tmux.unavailable"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CompactMonitorLayout {
     Inline,

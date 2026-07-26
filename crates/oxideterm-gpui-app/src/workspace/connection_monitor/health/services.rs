@@ -1630,16 +1630,46 @@ impl HostToolsEntity {
             return;
         }
         self.host_services.action_running = None;
+        let HostServiceActionRequest {
+            connection_id,
+            description,
+            ..
+        } = delivery.request;
         cx.emit(HostToolsEvent::ShowNotice(
             HostToolsNotice::ServiceActionFinished {
-                description: delivery.request.description,
+                description,
                 succeeded: delivery.result.unwrap_or(false),
             },
         ));
-        cx.emit(HostToolsEvent::RefreshServices {
-            connection_id: delivery.request.connection_id,
-        });
+        self.refresh_service_snapshot_after_action(connection_id, cx);
         cx.notify();
+    }
+
+    fn refresh_service_snapshot_after_action(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.services_enabled
+            || !self.visibility.is_visible()
+            || self.active_tool() != ContextSidebarTool::Services
+        {
+            return;
+        }
+        let (Some(runtime), Some(messages)) =
+            (self.lifecycle_runtime.clone(), self.messages.as_ref())
+        else {
+            return;
+        };
+        let connection_fallback = messages.service_connection_missing.clone();
+        let failure_fallback = messages.service_action_failed.clone();
+        self.request_service_snapshot(
+            connection_id,
+            runtime,
+            connection_fallback,
+            failure_fallback,
+            cx,
+        );
     }
 
     pub(super) fn request_service_logs(

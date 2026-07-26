@@ -19,6 +19,7 @@ impl WorkspaceApp {
         let version_migration = VersionMigrationState::from_settings_path(settings_store.path())?;
         let connection_store = ConnectionStore::load(default_connections_path())?;
         let settings = settings_store.settings().clone();
+        let i18n = I18n::new(locale_from_settings(settings.general.language));
         oxideterm_network_proxy::install_application_proxy_policy_from_settings(
             &settings,
             &connection_store,
@@ -92,34 +93,20 @@ impl WorkspaceApp {
         let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
         let host_tools = cx.new(|cx| {
-            HostToolsEntity::new(
+            let mut host_tools = HostToolsEntity::new(
                 profiler_update_tx,
                 profiler_update_rx,
                 ssh_registry.clone(),
                 cx,
-            )
+            );
+            host_tools.set_messages(host_tools_messages);
+            host_tools
         });
         let host_tools_subscription = cx.subscribe(
             &host_tools,
-            |workspace, _host_tools, event: &HostToolsEvent, cx| match event {
-                HostToolsEvent::RefreshServices { connection_id } => {
-                    workspace.request_host_service_snapshot(connection_id.clone(), cx);
-                }
-                HostToolsEvent::RefreshSchedules { connection_id } => {
-                    workspace.request_host_schedules_snapshot(
-                        connection_id.clone(),
-                        HostSnapshotFeedback::Silent,
-                        cx,
-                    );
-                }
-                HostToolsEvent::RefreshTmux { connection_id } => {
-                    workspace.request_host_tmux_snapshot(
-                        connection_id.clone(),
-                        HostSnapshotFeedback::Silent,
-                        cx,
-                    );
-                }
+            |workspace, _host_tools, event: &HostToolsEvent, _cx| match event {
                 HostToolsEvent::ShowNotice(notice) => {
                     workspace.push_host_tools_notice(notice.clone());
                 }
@@ -598,7 +585,7 @@ impl WorkspaceApp {
             forwarding_worker_tx,
             forwarding_worker_rx,
             forwarding_event_rx,
-            i18n: I18n::new(locale_from_settings(settings.general.language)),
+            i18n,
             tokens,
             detected_graphics,
             render_profile_override,

@@ -2093,16 +2093,50 @@ impl HostToolsEntity {
             return;
         }
         self.host_tmux.action_running = None;
+        let HostTmuxActionRun {
+            connection_id,
+            target_label,
+            ..
+        } = delivery.request;
         cx.emit(HostToolsEvent::ShowNotice(
             HostToolsNotice::TmuxActionFinished {
-                target_label: delivery.request.target_label,
+                target_label,
                 succeeded: delivery.result.unwrap_or(false),
             },
         ));
-        cx.emit(HostToolsEvent::RefreshTmux {
-            connection_id: delivery.request.connection_id,
-        });
+        self.refresh_tmux_snapshot_after_action(connection_id, cx);
         cx.notify();
+    }
+
+    fn refresh_tmux_snapshot_after_action(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.tmux_enabled
+            || !self.visibility.is_visible()
+            || self.active_tool() != ContextSidebarTool::Tmux
+        {
+            return;
+        }
+        let (Some(runtime), Some(messages)) =
+            (self.lifecycle_runtime.clone(), self.messages.as_ref())
+        else {
+            return;
+        };
+        let search_query = self.ui.host_tmux_search_query.clone();
+        let failure_fallback = messages.tmux_unknown_error.clone();
+        let unavailable_fallback = messages.tmux_unavailable.clone();
+        let notices = self.request_tmux_snapshot(
+            connection_id,
+            HostSnapshotFeedback::Silent,
+            search_query,
+            failure_fallback,
+            unavailable_fallback,
+            runtime,
+            cx,
+        );
+        debug_assert!(notices.is_empty());
     }
 
     pub(in crate::workspace::connection_monitor) fn open_tmux_input_dialog(

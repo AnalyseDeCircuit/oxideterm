@@ -1933,17 +1933,49 @@ impl HostToolsEntity {
         }
         self.host_schedules.action_running = None;
         let succeeded = delivery.result.unwrap_or(false);
+        let HostScheduleActionRequest {
+            connection_id,
+            task_name,
+            action,
+            ..
+        } = delivery.request;
         cx.emit(HostToolsEvent::ShowNotice(
             HostToolsNotice::ScheduleActionFinished {
-                kind: schedule_action_notice_kind(&delivery.request.action),
-                task_name: delivery.request.task_name,
+                kind: schedule_action_notice_kind(&action),
+                task_name,
                 succeeded,
             },
         ));
-        cx.emit(HostToolsEvent::RefreshSchedules {
-            connection_id: delivery.request.connection_id,
-        });
+        self.refresh_schedule_snapshot_after_action(connection_id, cx);
         cx.notify();
+    }
+
+    fn refresh_schedule_snapshot_after_action(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.schedules_enabled
+            || !self.visibility.is_visible()
+            || self.active_tool() != ContextSidebarTool::Schedules
+        {
+            return;
+        }
+        let (Some(runtime), Some(messages)) =
+            (self.lifecycle_runtime.clone(), self.messages.as_ref())
+        else {
+            return;
+        };
+        let failure_fallback = messages.schedule_unknown_error.clone();
+        let notices = self.request_schedule_snapshot(
+            connection_id,
+            HostSnapshotFeedback::Silent,
+            true,
+            runtime,
+            failure_fallback,
+            cx,
+        );
+        debug_assert!(notices.is_empty());
     }
 }
 

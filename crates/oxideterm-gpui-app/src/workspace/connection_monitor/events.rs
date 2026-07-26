@@ -4,9 +4,6 @@ use gpui::EventEmitter;
 /// Typed requests that cross from HostToolsEntity into workspace runtime services.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum HostToolsEvent {
-    RefreshServices { connection_id: String },
-    RefreshSchedules { connection_id: String },
-    RefreshTmux { connection_id: String },
     ShowNotice(HostToolsNotice),
 }
 
