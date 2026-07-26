@@ -175,6 +175,10 @@ impl WorkspaceApp {
             move |settings| tool.set_monitoring_enabled(&mut settings.host_tools, enabled),
             cx,
         );
+        if !enabled && tool == ContextSidebarTool::Services {
+            self.host_tools
+                .update(cx, |host_tools, _cx| host_tools.pause_service_refreshes());
+        }
         if enabled && self.host_tools.read(cx).active_tool() == tool {
             self.request_host_tool_snapshot_if_needed(tool, cx);
         }
@@ -953,6 +957,10 @@ impl WorkspaceApp {
                         }
                         if tool != ContextSidebarTool::Services {
                             this.connection_monitor.host_service_search_focused = false;
+                            this.host_tools.update(cx, |host_tools, cx| {
+                                host_tools.dismiss_service_confirm(cx);
+                                host_tools.pause_service_refreshes();
+                            });
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
@@ -1201,6 +1209,7 @@ impl WorkspaceApp {
             host_tools.select_connection(connection_id.clone(), focus_origin, cx);
             host_tools.dismiss_process_confirm(cx);
             host_tools.dismiss_docker_confirm(cx);
+            host_tools.dismiss_service_confirm(cx);
         });
         self.connection_monitor.host_tmux_pending_confirm = None;
         self.connection_monitor.host_tmux_input_dialog = None;

@@ -1,7 +1,7 @@
 use super::*;
 use crate::workspace::delivery as workspace_delivery;
 
-const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 5;
+const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 2;
 
 pub(super) enum HostToolsSamplerDelivery {
     ProfilerUpdated,
@@ -14,6 +14,9 @@ pub(super) enum HostToolsReliableDelivery {
     ProcessAction(HostProcessActionDelivery),
     DockerAction(HostDockerActionDelivery),
     DockerLogs(HostDockerLogsDelivery),
+    ServiceSnapshot(HostServiceSnapshotDelivery),
+    ServiceAction(HostServiceActionDelivery),
+    ServiceLogs(HostServiceLogsDelivery),
     LogSnapshot(HostLogSnapshotDelivery),
     PortSnapshot(HostPortSnapshotDelivery),
     FilesystemSnapshot(HostFilesystemSnapshotDelivery),
@@ -191,6 +194,15 @@ impl HostToolsEntity {
                 HostToolsReliableDelivery::DockerLogs(delivery) => {
                     self.finish_host_docker_logs(delivery, cx);
                 }
+                HostToolsReliableDelivery::ServiceSnapshot(delivery) => {
+                    self.finish_host_service_snapshot(delivery, cx);
+                }
+                HostToolsReliableDelivery::ServiceAction(delivery) => {
+                    self.finish_host_service_action(delivery, cx);
+                }
+                HostToolsReliableDelivery::ServiceLogs(delivery) => {
+                    self.finish_host_service_logs(delivery, cx);
+                }
                 HostToolsReliableDelivery::LogSnapshot(delivery) => {
                     self.finish_host_logs_snapshot(delivery, cx);
                 }
@@ -262,11 +274,8 @@ impl WorkspaceApp {
                 .allows_next(checked, started_at.elapsed())
         {
             match self.connection_monitor.delivery_cursor {
-                0 => self.poll_host_service_action_results(cx),
-                1 => self.poll_host_service_snapshot_results(cx),
-                2 => self.poll_host_service_logs_results(cx),
-                3 => self.poll_host_tmux_snapshot_results(cx),
-                4 => self.poll_host_tmux_action_results(cx),
+                0 => self.poll_host_tmux_snapshot_results(cx),
+                1 => self.poll_host_tmux_action_results(cx),
                 _ => unreachable!("Host Tools delivery cursor must stay within receiver count"),
             }
             self.connection_monitor.delivery_cursor =

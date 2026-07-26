@@ -269,6 +269,7 @@
         "follow_opened": "Seguindo logs de {{name}}.",
         "connection_missing": "A conexão selecionada não está mais disponível.",
         "action_failed": "Ação de serviço falhou.",
+        "action_succeeded": "A ação do serviço para {{name}} foi concluída.",
         "partial_support": "O gerenciamento de serviços é parcial em {{os}}."
       }
     },

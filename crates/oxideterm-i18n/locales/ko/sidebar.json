@@ -269,6 +269,7 @@
         "follow_opened": "{{name}} 로그를 추적하는 중입니다.",
         "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
         "action_failed": "서비스 작업 실패.",
+        "action_succeeded": "{{name}} 서비스 작업을 완료했습니다.",
         "partial_support": "{{os}}에서는 서비스 관리가 부분 지원됩니다."
       }
     },

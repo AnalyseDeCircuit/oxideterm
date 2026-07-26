@@ -100,6 +100,8 @@ impl WorkspaceApp {
             // Profilers own only sampling shells. Shared SSH nodes and user-triggered
             // Host Tools operations continue independently while every surface is hidden.
             self.host_tools.read(cx).stop_profiler_sampling();
+            self.host_tools
+                .update(cx, |host_tools, _cx| host_tools.pause_service_refreshes());
             return;
         }
 

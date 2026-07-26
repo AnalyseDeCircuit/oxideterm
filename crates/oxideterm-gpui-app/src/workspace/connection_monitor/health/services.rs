@@ -24,17 +24,9 @@ impl WorkspaceApp {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_service_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_service_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.host_tools.read(cx).service_snapshot_for(selected_id);
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_service_rows(
                     &snapshot.services,
@@ -43,6 +35,7 @@ impl WorkspaceApp {
             })
             .unwrap_or_default();
         let service_status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
         self.sync_host_service_list_state(&rows, selected_id);
@@ -72,7 +65,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_service_snapshot_polling,
+                        !self.host_tools.read(cx).service_snapshot_polling(),
                         cx,
                     ))
                     .child(self.render_host_service_search(cx))
@@ -85,7 +78,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_service_list(
                 rows,
-                self.connection_monitor.host_service_snapshot_polling,
+                self.host_tools.read(cx).service_snapshot_polling(),
                 service_status,
                 selected_id,
                 cx,
@@ -189,7 +182,7 @@ impl WorkspaceApp {
                     background: Some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_panel)),
                     idle_opacity: 1.0,
-                    disabled: self.connection_monitor.host_service_snapshot_polling,
+                    disabled: self.host_tools.read(cx).service_snapshot_polling(),
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                 },
                 self.i18n.t("sidebar.host_services.actions.refresh"),
@@ -470,10 +463,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let is_running = self
-            .connection_monitor
-            .host_service_action_running
-            .as_ref()
-            .is_some_and(|request| request.service_id == service.id);
+            .host_tools
+            .read(cx)
+            .service_action_running_for(&service.id);
         let availability = service_action_availability(service);
         div()
             .flex_none()
@@ -564,9 +556,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label = self.i18n.t(label_key);
-        let unsupported = self
-            .host_service_action_command(connection_id, &service.id, action.clone())
-            .is_err();
+        let unsupported = !self.host_tools.read(cx).service_action_supported(
+            connection_id,
+            &service.id,
+            action.clone(),
+        );
         let disabled = disabled || unsupported;
         let icon_color = if danger { MONITOR_RED } else { theme.text };
         self.workspace_tooltip_icon_button(
@@ -620,9 +614,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let unsupported = self
-            .host_service_logs_command(connection_id, &service.id)
-            .is_err();
+        let unsupported = !self
+            .host_tools
+            .read(cx)
+            .service_logs_supported(connection_id, &service.id);
         self.workspace_tooltip_icon_button(
             LucideIcon::FileText,
             13.0,
@@ -666,7 +661,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let unsupported = self
-            .host_service_follow_logs_command(connection_id, &service.id)
+            .host_tools
+            .read(cx)
+            .service_follow_logs_command(connection_id, &service.id)
             .is_err()
             || self
                 .node_router
@@ -763,46 +760,6 @@ impl WorkspaceApp {
         );
     }
 
-    pub(super) fn host_service_action_command(
-        &self,
-        connection_id: &str,
-        service_id: &str,
-        action: ServiceActionKind,
-    ) -> Result<oxideterm_connection_monitor::ServiceActionCommand, String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_service_action_command(&os_type, service_id, action)
-    }
-
-    pub(super) fn host_service_logs_command(
-        &self,
-        connection_id: &str,
-        service_id: &str,
-    ) -> Result<oxideterm_connection_monitor::ServiceCaptureCommand, String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_service_logs_command(&os_type, service_id)
-    }
-
-    pub(super) fn host_service_follow_logs_command(
-        &self,
-        connection_id: &str,
-        service_id: &str,
-    ) -> Result<oxideterm_connection_monitor::ServiceCaptureCommand, String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_service_follow_logs_command(&os_type, service_id)
-    }
-
     pub(super) fn refresh_host_service_snapshot(
         &mut self,
         connection_id: String,
@@ -831,71 +788,31 @@ impl WorkspaceApp {
         self.request_host_service_snapshot(connection_id, cx);
     }
 
-    pub(super) fn request_host_service_snapshot(
+    pub(in crate::workspace) fn request_host_service_snapshot(
         &mut self,
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Services) {
-            return;
-        }
-        if self.connection_monitor.host_service_snapshot_polling {
-            // Coalesce selection changes and post-action refreshes behind the
-            // in-flight snapshot instead of starting concurrent SSH commands.
-            self.connection_monitor
-                .host_service_snapshot_pending_connection_id = Some(connection_id);
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.connection_monitor.host_service_snapshot_connection_id = Some(connection_id);
-            self.connection_monitor.host_service_snapshot = Some(ResourceServiceSnapshot {
-                status: ResourceServiceStatus::Error {
-                    message: self
-                        .i18n
-                        .t("sidebar.host_services.toast.connection_missing"),
-                },
-                services: Vec::new(),
-            });
-            cx.notify();
-            return;
-        };
-        let os_type = handle
-            .remote_env()
-            .map(|env| env.os_type)
-            .unwrap_or_else(|| "Unknown".to_string());
-        let command = build_service_snapshot_command(&os_type);
-        let request = HostServiceSnapshotRequest {
-            connection_id: connection_id.clone(),
-        };
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        if self
-            .connection_monitor
-            .host_service_snapshot_connection_id
-            .as_deref()
-            != Some(connection_id.as_str())
+        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Services)
+            || !self.host_tools_surface_visible()
+            || self.host_tools.read(cx).active_tool() != ContextSidebarTool::Services
         {
-            self.connection_monitor.host_service_snapshot = None;
+            return;
         }
-        self.connection_monitor.host_service_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_service_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_service_snapshot_rx = Some(rx);
-        self.connection_monitor.host_service_snapshot_polling = true;
-        // The forwarding runtime owns this bounded page snapshot; the
-        // persistent resource profiler keeps its independent lifetime.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_SERVICE_SNAPSHOT_TIMEOUT,
-                    HOST_SERVICE_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostServiceSnapshotDelivery { request, result });
+        let runtime = self.forwarding_runtime.handle().clone();
+        let connection_fallback = self
+            .i18n
+            .t("sidebar.host_services.toast.connection_missing");
+        let failure_fallback = self.i18n.t("sidebar.host_services.toast.action_failed");
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_service_snapshot(
+                connection_id,
+                runtime,
+                connection_fallback,
+                failure_fallback,
+                cx,
+            );
         });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn handle_host_service_search_key(
@@ -924,27 +841,21 @@ impl WorkspaceApp {
         action: ServiceActionKind,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .connection_monitor
-            .host_service_action_running
-            .is_some()
-        {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.action_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+        let notice = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.open_service_action_confirm(
+                HostServiceActionRequest {
+                    connection_id,
+                    service_id,
+                    description,
+                    action,
+                },
+                cx,
+            )
+        });
+        if let Some(notice) = notice {
+            self.push_host_tools_notice(notice);
             return;
         }
-        HostToolConfirmState::open(
-            &mut self.connection_monitor.host_service_pending_confirm,
-            HostServiceActionRequest {
-                connection_id,
-                service_id,
-                description,
-                action,
-            },
-        );
         self.reset_standard_confirm_focus();
         cx.notify();
     }
@@ -956,72 +867,23 @@ impl WorkspaceApp {
         description: String,
         cx: &mut Context<Self>,
     ) {
-        if self.connection_monitor.host_service_logs_polling {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.logs_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let os_type = handle
-            .remote_env()
-            .map(|env| env.os_type)
-            .unwrap_or_else(|| "Unknown".to_string());
-        let command = match build_service_logs_command(&os_type, &service_id) {
-            Ok(command) => command,
-            Err(error) => {
-                self.push_host_service_toast(error, TerminalNoticeVariant::Error);
-                cx.notify();
-                return;
-            }
-        };
-        if command.capability == ServiceCommandCapability::Partial {
-            self.push_host_service_toast(
-                self.i18n_replace(
-                    "sidebar.host_services.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-        let request = HostServiceLogsRequest {
-            connection_id,
-            service_id,
-            description,
-        };
-        self.connection_monitor.host_service_logs_dialog = Some(HostServiceLogsDialog {
-            request: request.clone(),
-            output: None,
-            error: None,
-            loading: true,
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_services.toast.logs_failed");
+        let empty_fallback = self.i18n.t("sidebar.host_services.logs.empty");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_service_logs(
+                connection_id,
+                service_id,
+                description,
+                runtime,
+                failure_fallback,
+                empty_fallback,
+                cx,
+            )
         });
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor.host_service_logs_rx = Some(rx);
-        self.connection_monitor.host_service_logs_polling = true;
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_SERVICE_LOGS_TIMEOUT,
-                    HOST_SERVICE_LOGS_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostServiceLogsDelivery { request, result });
-        });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn open_host_service_follow_logs_terminal(
@@ -1032,7 +894,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+        let Some(os_type) = self.host_tools.read(cx).connection_os_type(&connection_id) else {
             self.push_host_service_toast(
                 self.i18n
                     .t("sidebar.host_services.toast.connection_missing"),
@@ -1041,11 +903,11 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let os_type = handle
-            .remote_env()
-            .map(|env| env.os_type)
-            .unwrap_or_else(|| "Unknown".to_string());
-        let command = match build_service_follow_logs_command(&os_type, &service_id) {
+        let command = match self
+            .host_tools
+            .read(cx)
+            .service_follow_logs_command(&connection_id, &service_id)
+        {
             Ok(command) => command,
             Err(error) => {
                 self.push_host_service_toast(error, TerminalNoticeVariant::Error);
@@ -1129,11 +991,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self
-            .connection_monitor
-            .host_service_pending_confirm
-            .is_none()
-        {
+        if self.host_tools.read(cx).service_confirm_view().is_none() {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {
@@ -1151,341 +1009,30 @@ impl WorkspaceApp {
     }
 
     pub(super) fn confirm_host_service_action(&mut self, cx: &mut Context<Self>) {
-        let Some(request) = self
-            .connection_monitor
-            .host_service_pending_confirm
-            .as_ref()
-            .map(|state| state.request.clone())
-        else {
-            return;
-        };
-        if self.begin_host_service_confirm_exit(cx) {
-            self.start_host_service_action(request, cx);
-        }
-    }
-
-    /// Keeps the request mounted until the current exit generation completes.
-    fn begin_host_service_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self
-            .connection_monitor
-            .host_service_pending_confirm
-            .as_mut()
-            .and_then(|state| state.presence.begin_exit())
-        else {
-            return false;
-        };
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        if delay.is_zero() {
-            self.connection_monitor.host_service_pending_confirm = None;
-            cx.notify();
-            return true;
-        }
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .connection_monitor
-                    .host_service_pending_confirm
-                    .as_ref()
-                    .is_some_and(|state| state.presence.finish_exit(generation))
-                {
-                    this.connection_monitor.host_service_pending_confirm = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-        true
-    }
-
-    pub(super) fn start_host_service_action(
-        &mut self,
-        request: HostServiceActionRequest,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
-            self.push_host_service_toast(
-                self.i18n
-                    .t("sidebar.host_services.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let os_type = handle
-            .remote_env()
-            .map(|env| env.os_type)
-            .unwrap_or_else(|| "Unknown".to_string());
-        let command = match build_service_action_command(
-            &os_type,
-            &request.service_id,
-            request.action.clone(),
-        ) {
-            Ok(command) => command,
-            Err(error) => {
-                self.push_host_service_toast(error, TerminalNoticeVariant::Error);
-                cx.notify();
-                return;
-            }
-        };
-        if command.capability == ServiceCommandCapability::Partial {
-            self.push_host_service_toast(
-                self.i18n_replace(
-                    "sidebar.host_services.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        let delivery_request = request.clone();
-        self.connection_monitor.host_service_action_running = Some(request);
-        self.connection_monitor.host_service_action_rx = Some(rx);
-        self.connection_monitor.host_service_action_polling = true;
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_SERVICE_ACTION_TIMEOUT,
-                    HOST_SERVICE_ACTION_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostServiceActionDelivery {
-                request: delivery_request,
-                result,
-            });
+        let runtime = self.forwarding_runtime.handle().clone();
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.confirm_service_action(delay, runtime, cx)
         });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn poll_host_service_action_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_service_action_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_service_action_rx.take() else {
-            self.connection_monitor.host_service_action_polling = false;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.connection_monitor.host_service_action_polling = false;
-                self.connection_monitor.host_service_action_running = None;
-                self.finish_host_service_action(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_service_action_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.connection_monitor.host_service_action_polling = false;
-                self.connection_monitor.host_service_action_running = None;
-                self.push_host_service_toast(
-                    self.i18n.t("sidebar.host_services.toast.action_failed"),
-                    TerminalNoticeVariant::Error,
-                );
-                cx.notify();
-            }
+        for notice in notices {
+            self.push_host_tools_notice(notice);
         }
     }
 
-    pub(in crate::workspace) fn poll_host_service_snapshot_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_service_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_service_snapshot_rx.take() else {
-            self.finish_disconnected_host_service_snapshot(cx);
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => self.finish_host_service_snapshot(delivery, cx),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_service_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.finish_disconnected_host_service_snapshot(cx);
-            }
-        }
-    }
-
-    fn finish_disconnected_host_service_snapshot(&mut self, cx: &mut Context<Self>) {
-        let connection_id = self
-            .connection_monitor
-            .host_service_snapshot_running
-            .take()
-            .map(|request| request.connection_id);
-        self.connection_monitor.host_service_snapshot_polling = false;
-        self.connection_monitor.host_service_snapshot_rx = None;
-        if let Some(connection_id) = connection_id {
-            self.connection_monitor.host_service_snapshot_connection_id = Some(connection_id);
-            self.connection_monitor.host_service_snapshot = Some(ResourceServiceSnapshot {
-                status: ResourceServiceStatus::Error {
-                    message: self.i18n.t("sidebar.host_services.toast.action_failed"),
-                },
-                services: Vec::new(),
-            });
-        }
-        self.start_pending_host_service_snapshot(cx);
-        cx.notify();
-    }
-
-    fn finish_host_service_snapshot(
-        &mut self,
-        delivery: HostServiceSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_service_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            return;
-        }
-        self.connection_monitor.host_service_snapshot_polling = false;
-        self.connection_monitor.host_service_snapshot_running = None;
-        self.connection_monitor.host_service_snapshot_rx = None;
-        let snapshot = match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                parse_service_snapshot(&output.stdout)
-            }
-            Ok(output) => ResourceServiceSnapshot {
-                status: ResourceServiceStatus::Error {
-                    message: host_tool_capture_failure_message(
-                        &output.stdout,
-                        &output.stderr,
-                        output.exit_code,
-                        &self.i18n.t("sidebar.host_services.toast.action_failed"),
-                    ),
-                },
-                services: Vec::new(),
-            },
-            Err(error) => ResourceServiceSnapshot {
-                status: ResourceServiceStatus::Error { message: error },
-                services: Vec::new(),
-            },
-        };
-        self.connection_monitor.host_service_snapshot_connection_id =
-            Some(delivery.request.connection_id);
-        self.connection_monitor.host_service_snapshot = Some(snapshot);
-        self.start_pending_host_service_snapshot(cx);
-        cx.notify();
-    }
-
-    fn start_pending_host_service_snapshot(&mut self, cx: &mut Context<Self>) {
-        let pending_connection_id = self
-            .connection_monitor
-            .host_service_snapshot_pending_connection_id
-            .take();
-        if let Some(connection_id) = pending_connection_id {
-            self.request_host_service_snapshot(connection_id, cx);
-        }
-    }
-
-    pub(in crate::workspace) fn poll_host_service_logs_results(&mut self, cx: &mut Context<Self>) {
-        if !self.connection_monitor.host_service_logs_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_service_logs_rx.take() else {
-            self.connection_monitor.host_service_logs_polling = false;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.connection_monitor.host_service_logs_polling = false;
-                self.finish_host_service_logs(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_service_logs_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.connection_monitor.host_service_logs_polling = false;
-                if let Some(dialog) = self.connection_monitor.host_service_logs_dialog.as_mut() {
-                    dialog.loading = false;
-                    dialog.error = Some(self.i18n.t("sidebar.host_services.toast.logs_failed"));
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_service_action(
-        &mut self,
-        delivery: HostServiceActionDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        match delivery.result {
-            Ok(output) => match interpret_service_action_output(
-                &output.stdout,
-                &output.stderr,
-                output.exit_code,
-            ) {
-                HostToolActionOutcome::Succeeded { message } => {
-                    self.push_host_service_toast(message, TerminalNoticeVariant::Success);
-                }
-                HostToolActionOutcome::Failed { message } => {
-                    self.push_host_service_toast(message, TerminalNoticeVariant::Error);
-                }
-            },
-            Err(error) => {
-                self.push_host_service_toast(error, TerminalNoticeVariant::Error);
-            }
-        }
-        self.refresh_host_service_snapshot(delivery.request.connection_id, cx);
-    }
-
-    pub(super) fn finish_host_service_logs(
-        &mut self,
-        delivery: HostServiceLogsDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(dialog) = self
-            .connection_monitor
-            .host_service_logs_dialog
-            .as_mut()
-            .filter(|dialog| dialog.request == delivery.request)
-        else {
-            cx.notify();
-            return;
-        };
-        dialog.loading = false;
-        match delivery.result {
-            Ok(output) if service_action_succeeded(output.exit_code) => {
-                let logs = if output.stdout.trim().is_empty() {
-                    self.i18n.t("sidebar.host_services.logs.empty")
-                } else {
-                    output.stdout
-                };
-                dialog.output = Some(logs);
-                dialog.error = None;
-            }
-            Ok(output) => {
-                dialog.output = None;
-                dialog.error = Some(service_action_failure_message(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                ));
-            }
-            Err(error) => {
-                dialog.output = None;
-                dialog.error = Some(error);
-            }
-        }
-        cx.notify();
+    /// Keeps the request mounted until the current exit generation completes.
+    fn begin_host_service_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.clear_standard_confirm_focus();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_service_confirm_exit(delay, cx)
+        })
     }
 
     pub(super) fn push_host_service_toast(
@@ -1506,11 +1053,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let request = self
-            .connection_monitor
-            .host_service_pending_confirm
-            .as_ref()?;
-        let request = &request.request;
+        let (request, phase) = self.host_tools.read(cx).service_confirm_view()?;
         let title = self.i18n.t("sidebar.host_services.confirm.title");
         let description = self.i18n_replace(
             host_service_confirm_description_key(&request.action),
@@ -1523,11 +1066,7 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
                 &self.tokens,
                 "host-service-confirm-motion",
-                self.connection_monitor
-                    .host_service_pending_confirm
-                    .as_ref()?
-                    .presence
-                    .phase(),
+                phase,
                 ConfirmDialogView {
                     variant: if matches!(
                         request.action,
@@ -1564,14 +1103,16 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.connection_monitor.host_service_logs_dialog.as_ref()?;
+        let dialog = self.host_tools.read(cx).service_logs_dialog()?;
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let follow_connection_id = dialog.request.connection_id.clone();
         let follow_service_id = dialog.request.service_id.clone();
         let follow_description = dialog.request.description.clone();
         let follow_logs_disabled = self
-            .host_service_follow_logs_command(&follow_connection_id, &follow_service_id)
+            .host_tools
+            .read(cx)
+            .service_follow_logs_command(&follow_connection_id, &follow_service_id)
             .is_err()
             || self
                 .node_router
@@ -1623,7 +1164,9 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.connection_monitor.host_service_logs_dialog = None;
+                        this.host_tools.update(cx, |host_tools, cx| {
+                            host_tools.dismiss_service_logs_dialog(cx);
+                        });
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -1697,8 +1240,13 @@ impl WorkspaceApp {
                                                 let service_id = follow_service_id;
                                                 let description = follow_description;
                                                 move |this, _event, window, cx| {
-                                                    this.connection_monitor.host_service_logs_dialog =
-                                                        None;
+                                                    this.host_tools.update(
+                                                        cx,
+                                                        |host_tools, cx| {
+                                                            host_tools
+                                                                .dismiss_service_logs_dialog(cx);
+                                                        },
+                                                    );
                                                     this.open_host_service_follow_logs_terminal(
                                                         connection_id.clone(),
                                                         service_id.clone(),
@@ -1729,8 +1277,10 @@ impl WorkspaceApp {
                                             "host-service-logs-close",
                                             true,
                                             cx.listener(|this, _event, _window, cx| {
-                                                this.connection_monitor.host_service_logs_dialog =
-                                                    None;
+                                                this.host_tools.update(cx, |host_tools, cx| {
+                                                    host_tools
+                                                        .dismiss_service_logs_dialog(cx);
+                                                });
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
@@ -1751,6 +1301,436 @@ impl WorkspaceApp {
                 ))
                 .into_any_element(),
         )
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn service_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<ResourceServiceSnapshot> {
+        (self.host_services.snapshot_connection_id.as_deref() == Some(connection_id))
+            .then(|| self.host_services.snapshot.clone())
+            .flatten()
+    }
+
+    pub(super) fn service_snapshot_polling(&self) -> bool {
+        self.host_services.snapshot_polling
+    }
+
+    pub(in crate::workspace::connection_monitor) fn pause_service_refreshes(&mut self) {
+        // A bounded capture already in flight may finish, while coalesced
+        // page-only refresh work is discarded when Services is hidden.
+        self.host_services.snapshot_pending = None;
+    }
+
+    pub(super) fn service_action_running_for(&self, service_id: &str) -> bool {
+        self.host_services
+            .action_running
+            .as_ref()
+            .is_some_and(|request| request.service_id == service_id)
+    }
+
+    pub(super) fn service_action_supported(
+        &self,
+        connection_id: &str,
+        service_id: &str,
+        action: ServiceActionKind,
+    ) -> bool {
+        self.connection_os_type(connection_id)
+            .and_then(|os_type| build_service_action_command(&os_type, service_id, action).ok())
+            .is_some()
+    }
+
+    pub(super) fn service_logs_supported(&self, connection_id: &str, service_id: &str) -> bool {
+        self.connection_os_type(connection_id)
+            .and_then(|os_type| build_service_logs_command(&os_type, service_id).ok())
+            .is_some()
+    }
+
+    pub(super) fn service_follow_logs_command(
+        &self,
+        connection_id: &str,
+        service_id: &str,
+    ) -> Result<oxideterm_connection_monitor::ServiceCaptureCommand, String> {
+        let os_type = self
+            .connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_service_follow_logs_command(&os_type, service_id)
+    }
+
+    pub(super) fn request_service_snapshot(
+        &mut self,
+        connection_id: String,
+        runtime: tokio::runtime::Handle,
+        connection_fallback: String,
+        failure_fallback: String,
+        cx: &mut Context<Self>,
+    ) {
+        let request = HostServiceSnapshotRequest {
+            connection_id,
+            connection_fallback,
+            failure_fallback,
+        };
+        if self.host_services.snapshot_polling {
+            // Keep only the newest selection or post-action refresh while the
+            // current bounded snapshot command completes.
+            self.host_services.snapshot_pending =
+                Some(HostServiceSnapshotPending { request, runtime });
+            return;
+        }
+        self.start_service_snapshot(request, runtime, cx);
+    }
+
+    fn start_service_snapshot(
+        &mut self,
+        request: HostServiceSnapshotRequest,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(os_type) = self.connection_os_type(&request.connection_id) else {
+            self.host_services.snapshot_connection_id = Some(request.connection_id);
+            self.host_services.snapshot = Some(ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error {
+                    message: request.connection_fallback,
+                },
+                services: Vec::new(),
+            });
+            cx.notify();
+            return;
+        };
+        let command = build_service_snapshot_command(&os_type);
+        if self.host_services.snapshot_connection_id.as_deref()
+            != Some(request.connection_id.as_str())
+        {
+            self.host_services.snapshot = None;
+        }
+        self.host_services.snapshot_connection_id = Some(request.connection_id.clone());
+        self.host_services.snapshot_running = Some(request.clone());
+        self.host_services.snapshot_polling = true;
+        let spawned = self.spawn_service_snapshot_capture(
+            command.command,
+            request.clone(),
+            HOST_SERVICE_SNAPSHOT_TIMEOUT,
+            HOST_SERVICE_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_services.snapshot_running = None;
+            self.host_services.snapshot_polling = false;
+            self.host_services.snapshot = Some(ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error {
+                    message: request.connection_fallback,
+                },
+                services: Vec::new(),
+            });
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_service_snapshot(
+        &mut self,
+        delivery: HostServiceSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_services.snapshot_running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        self.host_services.snapshot_polling = false;
+        self.host_services.snapshot_running = None;
+        let snapshot = match delivery.result {
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_service_snapshot(&output.stdout);
+                zeroize::Zeroize::zeroize(&mut output.stdout);
+                zeroize::Zeroize::zeroize(&mut output.stderr);
+                snapshot
+            }
+            Ok(mut output) => {
+                // Snapshot failures use a localized safe fallback, never the
+                // captured remote output.
+                zeroize::Zeroize::zeroize(&mut output.stdout);
+                zeroize::Zeroize::zeroize(&mut output.stderr);
+                ResourceServiceSnapshot {
+                    status: ResourceServiceStatus::Error {
+                        message: delivery.request.failure_fallback.clone(),
+                    },
+                    services: Vec::new(),
+                }
+            }
+            Err(()) => ResourceServiceSnapshot {
+                status: ResourceServiceStatus::Error {
+                    message: delivery.request.failure_fallback.clone(),
+                },
+                services: Vec::new(),
+            },
+        };
+        self.host_services.snapshot_connection_id = Some(delivery.request.connection_id);
+        self.host_services.snapshot = Some(snapshot);
+        let pending = self.host_services.snapshot_pending.take();
+        if let Some(pending) = pending {
+            self.start_service_snapshot(pending.request, pending.runtime, cx);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace::connection_monitor) fn open_service_action_confirm(
+        &mut self,
+        request: HostServiceActionRequest,
+        cx: &mut Context<Self>,
+    ) -> Option<HostToolsNotice> {
+        if self.host_services.action_running.is_some() {
+            return Some(HostToolsNotice::ServiceActionAlreadyRunning);
+        }
+        HostToolConfirmState::open(&mut self.host_services.pending_confirm, request);
+        cx.notify();
+        None
+    }
+
+    pub(in crate::workspace::connection_monitor) fn service_confirm_view(
+        &self,
+    ) -> Option<(
+        HostServiceActionRequest,
+        oxideterm_gpui_ui::motion::ExitPhase,
+    )> {
+        self.host_services
+            .pending_confirm
+            .as_ref()
+            .map(|state| (state.request.clone(), state.presence.phase()))
+    }
+
+    /// Dismisses unsubmitted UI state without cancelling a running service action.
+    pub(in crate::workspace::connection_monitor) fn dismiss_service_confirm(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_services.pending_confirm.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn begin_service_confirm_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self
+            .host_services
+            .pending_confirm
+            .as_mut()
+            .and_then(|state| state.presence.begin_exit())
+        else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.host_services.pending_confirm = None;
+            cx.notify();
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |entity, cx| {
+                if entity
+                    .host_services
+                    .pending_confirm
+                    .as_ref()
+                    .is_some_and(|state| state.presence.finish_exit(generation))
+                {
+                    entity.host_services.pending_confirm = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    pub(super) fn confirm_service_action(
+        &mut self,
+        delay: Duration,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        let Some(request) = self
+            .host_services
+            .pending_confirm
+            .as_ref()
+            .map(|state| state.request.clone())
+        else {
+            return Vec::new();
+        };
+        if !self.begin_service_confirm_exit(delay, cx) {
+            return Vec::new();
+        }
+        self.start_service_action(request, runtime, cx)
+    }
+
+    fn start_service_action(
+        &mut self,
+        request: HostServiceActionRequest,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        let Some(os_type) = self.connection_os_type(&request.connection_id) else {
+            return vec![HostToolsNotice::ServiceConnectionMissing];
+        };
+        let command = match build_service_action_command(
+            &os_type,
+            &request.service_id,
+            request.action.clone(),
+        ) {
+            Ok(command) => command,
+            Err(_) => return vec![HostToolsNotice::ServiceActionFailed],
+        };
+        let partial_support = command.capability == ServiceCommandCapability::Partial;
+        self.host_services.action_running = Some(request.clone());
+        let spawned = self.spawn_service_action(
+            command.command,
+            request,
+            HOST_SERVICE_ACTION_TIMEOUT,
+            HOST_SERVICE_ACTION_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_services.action_running = None;
+            return vec![HostToolsNotice::ServiceConnectionMissing];
+        }
+        cx.notify();
+        if partial_support {
+            vec![HostToolsNotice::ServicePartialSupport { os_type }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_service_action(
+        &mut self,
+        delivery: HostServiceActionDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_services.action_running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        self.host_services.action_running = None;
+        cx.emit(HostToolsEvent::ShowNotice(
+            HostToolsNotice::ServiceActionFinished {
+                description: delivery.request.description,
+                succeeded: delivery.result.unwrap_or(false),
+            },
+        ));
+        cx.emit(HostToolsEvent::RefreshServices {
+            connection_id: delivery.request.connection_id,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn request_service_logs(
+        &mut self,
+        connection_id: String,
+        service_id: String,
+        description: String,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        empty_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if self
+            .host_services
+            .logs_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.loading)
+        {
+            return vec![HostToolsNotice::ServiceLogsAlreadyRunning];
+        }
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return vec![HostToolsNotice::ServiceConnectionMissing];
+        };
+        let command = match build_service_logs_command(&os_type, &service_id) {
+            Ok(command) => command,
+            Err(_) => return vec![HostToolsNotice::ServiceLogsFailed],
+        };
+        let partial_support = command.capability == ServiceCommandCapability::Partial;
+        let request = HostServiceLogsRequest {
+            connection_id,
+            service_id,
+            description,
+            failure_fallback,
+            empty_fallback,
+        };
+        self.host_services.logs_dialog = Some(HostServiceLogsDialog {
+            request: request.clone(),
+            output: None,
+            error: None,
+            loading: true,
+        });
+        let spawned = self.spawn_service_logs_capture(
+            command.command,
+            request,
+            HOST_SERVICE_LOGS_TIMEOUT,
+            HOST_SERVICE_LOGS_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_services.logs_dialog = None;
+            return vec![HostToolsNotice::ServiceConnectionMissing];
+        }
+        cx.notify();
+        if partial_support {
+            vec![HostToolsNotice::ServicePartialSupport { os_type }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(super) fn service_logs_dialog(&self) -> Option<HostServiceLogsDialog> {
+        self.host_services.logs_dialog.clone()
+    }
+
+    pub(super) fn dismiss_service_logs_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.host_services.logs_dialog.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_service_logs(
+        &mut self,
+        delivery: HostServiceLogsDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self
+            .host_services
+            .logs_dialog
+            .as_mut()
+            .filter(|dialog| dialog.request == delivery.request)
+        else {
+            return;
+        };
+        dialog.loading = false;
+        match delivery.result {
+            Ok(mut output) if service_action_succeeded(output.exit_code) => {
+                zeroize::Zeroize::zeroize(&mut output.stderr);
+                let retained_output = if output.stdout.trim().is_empty() {
+                    delivery.request.empty_fallback
+                } else {
+                    std::mem::take(&mut output.stdout)
+                };
+                // The last Entity/render owner clears the retained log buffer.
+                dialog.output = Some(Arc::new(zeroize::Zeroizing::new(retained_output)));
+                dialog.error = None;
+            }
+            Ok(mut output) => {
+                // Failed output is never rendered or copied into an error.
+                zeroize::Zeroize::zeroize(&mut output.stdout);
+                zeroize::Zeroize::zeroize(&mut output.stderr);
+                dialog.output = None;
+                dialog.error = Some(delivery.request.failure_fallback);
+            }
+            Err(()) => {
+                dialog.output = None;
+                dialog.error = Some(delivery.request.failure_fallback);
+            }
+        }
+        cx.notify();
     }
 }
 

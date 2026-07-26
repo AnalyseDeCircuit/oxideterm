@@ -849,6 +849,55 @@ impl WorkspaceApp {
                     )
                 }
             }
+            HostToolsNotice::ServiceActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_services.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ServiceLogsAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_services.toast.logs_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ServiceConnectionMissing => (
+                self.i18n
+                    .t("sidebar.host_services.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ServicePartialSupport { os_type } => (
+                self.i18n_replace(
+                    "sidebar.host_services.toast.partial_support",
+                    &[("os", os_type)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ServiceActionFailed => (
+                self.i18n.t("sidebar.host_services.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ServiceLogsFailed => (
+                self.i18n.t("sidebar.host_services.toast.logs_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ServiceActionFinished {
+                description,
+                succeeded,
+            } => {
+                if succeeded {
+                    (
+                        self.i18n_replace(
+                            "sidebar.host_services.toast.action_succeeded",
+                            &[("name", description)],
+                        ),
+                        TerminalNoticeVariant::Success,
+                    )
+                } else {
+                    (
+                        self.i18n.t("sidebar.host_services.toast.action_failed"),
+                        TerminalNoticeVariant::Error,
+                    )
+                }
+            }
             HostToolsNotice::LogSnapshotAlreadyRunning => (
                 self.i18n
                     .t("sidebar.host_logs.toast.snapshot_already_running"),

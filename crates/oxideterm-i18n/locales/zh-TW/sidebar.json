@@ -269,6 +269,7 @@
         "follow_opened": "正在追蹤 {{name}} 的日誌。",
         "connection_missing": "所選連線已不可用。",
         "action_failed": "服務操作失敗。",
+        "action_succeeded": "服務 {{name}} 的操作已完成。",
         "partial_support": "{{os}} 上的服務管理為部分支援。"
       }
     },

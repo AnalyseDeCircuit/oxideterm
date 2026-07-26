@@ -23,6 +23,7 @@ pub(in crate::workspace) struct HostToolsEntity {
         std::sync::mpsc::Receiver<super::delivery::HostToolsReliableDelivery>,
     pub(super) host_process_actions: HostProcessActionsState,
     pub(super) host_docker_operations: HostDockerOperationsState,
+    pub(super) host_services: HostServicesState,
     pub(super) host_gpu: HostGpuViewState,
     pub(super) host_logs: HostLogsState,
     pub(super) host_ports: HostPortsState,
@@ -86,6 +87,7 @@ impl HostToolsEntity {
             reliable_delivery_rx,
             host_process_actions: HostProcessActionsState::new(),
             host_docker_operations: HostDockerOperationsState::new(),
+            host_services: HostServicesState::new(),
             host_gpu: HostGpuViewState::new(gpu_update_tx),
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
@@ -484,6 +486,87 @@ impl HostToolsEntity {
                 .map_err(|_| ());
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::DockerLogs(
                 HostDockerLogsDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_service_snapshot_capture(
+        &self,
+        command: String,
+        request: HostServiceSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Inventory output stays inside the Entity and is parsed before render.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ServiceSnapshot(
+                HostServiceSnapshotDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_service_action(
+        &self,
+        command: String,
+        request: HostServiceActionRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Service action output has no UI consumer and is cleared in the worker.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    let succeeded = output.exit_code.unwrap_or(0) == 0;
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    succeeded
+                })
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ServiceAction(
+                HostServiceActionDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_service_logs_capture(
+        &self,
+        command: String,
+        request: HostServiceLogsRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Raw service logs never cross the typed workspace event boundary.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ServiceLogs(
+                HostServiceLogsDelivery { request, result },
             ));
         });
         true
@@ -1291,6 +1374,137 @@ mod tests {
         assert_eq!(
             events.try_recv().unwrap(),
             HostToolsEvent::RefreshProfiler {
+                connection_id: "connection-1".to_string(),
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn service_snapshot_actions_and_logs_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let snapshot_request = HostServiceSnapshotRequest {
+            connection_id: "connection-1".to_string(),
+            connection_fallback: "Service connection missing".to_string(),
+            failure_fallback: "Service capture failed".to_string(),
+        };
+        let logs_request = HostServiceLogsRequest {
+            connection_id: "connection-1".to_string(),
+            service_id: "ssh.service".to_string(),
+            description: "SSH".to_string(),
+            failure_fallback: "Service logs failed".to_string(),
+            empty_fallback: "No service logs".to_string(),
+        };
+        let sender = entity.update(cx, |entity, _cx| {
+            entity.host_services.snapshot_running = Some(snapshot_request.clone());
+            entity.host_services.snapshot_polling = true;
+            entity.host_services.logs_dialog = Some(HostServiceLogsDialog {
+                request: logs_request.clone(),
+                output: None,
+                error: None,
+                loading: true,
+            });
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "Bearer should-not-reach-service-state";
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::ServiceSnapshot(
+                HostServiceSnapshotDelivery {
+                    request: snapshot_request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::ServiceLogs(
+                HostServiceLogsDelivery {
+                    request: logs_request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(!entity.host_services.snapshot_polling);
+            let snapshot = entity.host_services.snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status,
+                ResourceServiceStatus::Error {
+                    message: "Service capture failed".to_string(),
+                }
+            );
+            assert!(!format!("{:?}", snapshot.status).contains(secret_marker));
+            let dialog = entity.host_services.logs_dialog.as_ref().unwrap();
+            assert!(!dialog.loading);
+            assert!(dialog.output.is_none());
+            assert_eq!(dialog.error.as_deref(), Some("Service logs failed"));
+            assert!(!dialog.error.as_deref().unwrap().contains(secret_marker));
+        });
+        assert!(events.try_recv().is_err());
+
+        let action_request = HostServiceActionRequest {
+            connection_id: "connection-1".to_string(),
+            service_id: "ssh.service".to_string(),
+            description: "SSH".to_string(),
+            action: ServiceActionKind::Restart,
+        };
+        let sender = entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .open_service_action_confirm(action_request.clone(), cx)
+                    .is_none()
+            );
+            assert!(entity.service_confirm_view().is_some());
+            entity.dismiss_service_confirm(cx);
+            assert!(entity.service_confirm_view().is_none());
+            entity.host_services.action_running = Some(action_request.clone());
+            entity.reliable_delivery_tx.clone()
+        });
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::ServiceAction(
+                HostServiceActionDelivery {
+                    request: action_request,
+                    // Worker output is intentionally reduced to this boolean.
+                    result: Ok(false),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_services.action_running.is_none());
+        });
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::ShowNotice(HostToolsNotice::ServiceActionFinished {
+                description: "SSH".to_string(),
+                succeeded: false,
+            })
+        );
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::RefreshServices {
                 connection_id: "connection-1".to_string(),
             }
         );

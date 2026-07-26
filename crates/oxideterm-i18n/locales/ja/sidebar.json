@@ -269,6 +269,7 @@
         "follow_opened": "{{name}} のログを追跡しています。",
         "connection_missing": "選択した接続は利用できなくなりました。",
         "action_failed": "サービス操作に失敗しました。",
+        "action_succeeded": "{{name}} のサービス操作が完了しました。",
         "partial_support": "{{os}} でのサービス管理は一部対応です。"
       }
     },

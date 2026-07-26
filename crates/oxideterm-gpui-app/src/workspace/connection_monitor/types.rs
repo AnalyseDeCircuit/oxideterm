@@ -341,18 +341,24 @@ impl HostDockerOperationsState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceSnapshotRequest {
     pub(super) connection_id: String,
+    pub(super) connection_fallback: String,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostServiceSnapshotDelivery {
     pub(super) request: HostServiceSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostServiceSnapshotPending {
+    pub(super) request: HostServiceSnapshotRequest,
+    pub(super) runtime: tokio::runtime::Handle,
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceActionRequest {
     pub(super) connection_id: String,
     pub(super) service_id: String,
@@ -360,31 +366,58 @@ pub(super) struct HostServiceActionRequest {
     pub(super) action: ServiceActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostServiceActionDelivery {
     pub(super) request: HostServiceActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<bool, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceLogsRequest {
     pub(super) connection_id: String,
     pub(super) service_id: String,
     pub(super) description: String,
+    pub(super) failure_fallback: String,
+    pub(super) empty_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostServiceLogsDelivery {
     pub(super) request: HostServiceLogsRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceLogsDialog {
     pub(super) request: HostServiceLogsRequest,
-    pub(super) output: Option<String>,
+    // Service output stays in one shared zeroizing buffer while rendered.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
+}
+
+pub(super) struct HostServicesState {
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<oxideterm_connection_monitor::ResourceServiceSnapshot>,
+    pub(super) snapshot_running: Option<HostServiceSnapshotRequest>,
+    pub(super) snapshot_pending: Option<HostServiceSnapshotPending>,
+    pub(super) snapshot_polling: bool,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostServiceActionRequest>>,
+    pub(super) action_running: Option<HostServiceActionRequest>,
+    pub(super) logs_dialog: Option<HostServiceLogsDialog>,
+}
+
+impl HostServicesState {
+    pub(super) fn new() -> Self {
+        Self {
+            snapshot_connection_id: None,
+            snapshot: None,
+            snapshot_running: None,
+            snapshot_pending: None,
+            snapshot_polling: false,
+            pending_confirm: None,
+            action_running: None,
+            logs_dialog: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -794,20 +827,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_service_expanded_id: Option<String>,
     pub(super) host_service_list_state: ListState,
     pub(super) host_service_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) host_service_snapshot_connection_id: Option<String>,
-    pub(super) host_service_snapshot: Option<oxideterm_connection_monitor::ResourceServiceSnapshot>,
-    pub(super) host_service_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostServiceSnapshotDelivery>>,
-    pub(super) host_service_snapshot_running: Option<HostServiceSnapshotRequest>,
-    pub(super) host_service_snapshot_pending_connection_id: Option<String>,
-    pub(super) host_service_snapshot_polling: bool,
-    pub(super) host_service_pending_confirm: Option<HostToolConfirmState<HostServiceActionRequest>>,
-    pub(super) host_service_action_running: Option<HostServiceActionRequest>,
-    pub(super) host_service_action_rx: Option<std::sync::mpsc::Receiver<HostServiceActionDelivery>>,
-    pub(super) host_service_action_polling: bool,
-    pub(super) host_service_logs_dialog: Option<HostServiceLogsDialog>,
-    pub(super) host_service_logs_rx: Option<std::sync::mpsc::Receiver<HostServiceLogsDelivery>>,
-    pub(super) host_service_logs_polling: bool,
     pub(in crate::workspace) host_log_search_query: String,
     pub(in crate::workspace) host_log_search_focused: bool,
     pub(in crate::workspace) host_tmux_search_query: String,
@@ -875,19 +894,6 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_service_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            host_service_snapshot_connection_id: None,
-            host_service_snapshot: None,
-            host_service_snapshot_rx: None,
-            host_service_snapshot_running: None,
-            host_service_snapshot_pending_connection_id: None,
-            host_service_snapshot_polling: false,
-            host_service_pending_confirm: None,
-            host_service_action_running: None,
-            host_service_action_rx: None,
-            host_service_action_polling: false,
-            host_service_logs_dialog: None,
-            host_service_logs_rx: None,
-            host_service_logs_polling: false,
             host_log_search_query: String::new(),
             host_log_search_focused: false,
             host_tmux_search_query: String::new(),

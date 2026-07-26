@@ -269,6 +269,7 @@
         "follow_opened": "Đang theo dõi nhật ký của {{name}}.",
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
         "action_failed": "Thao tác dịch vụ thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác dịch vụ cho {{name}}.",
         "partial_support": "Quản lý dịch vụ chỉ được hỗ trợ một phần trên {{os}}."
       }
     },

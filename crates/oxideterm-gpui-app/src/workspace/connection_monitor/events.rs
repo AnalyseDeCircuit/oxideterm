@@ -6,6 +6,7 @@ use gpui::EventEmitter;
 pub(in crate::workspace) enum HostToolsEvent {
     RefreshGpu { connection_id: String },
     RefreshProfiler { connection_id: String },
+    RefreshServices { connection_id: String },
     RefreshSchedules { connection_id: String },
     ShowNotice(HostToolsNotice),
 }
@@ -37,6 +38,18 @@ pub(in crate::workspace) enum HostToolsNotice {
     DockerLogsFailed,
     DockerActionFinished {
         container_name: String,
+        succeeded: bool,
+    },
+    ServiceActionAlreadyRunning,
+    ServiceLogsAlreadyRunning,
+    ServiceConnectionMissing,
+    ServicePartialSupport {
+        os_type: String,
+    },
+    ServiceActionFailed,
+    ServiceLogsFailed,
+    ServiceActionFinished {
+        description: String,
         succeeded: bool,
     },
     LogSnapshotAlreadyRunning,

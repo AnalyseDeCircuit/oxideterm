@@ -269,6 +269,7 @@
         "follow_opened": "Logs für {{name}} werden verfolgt.",
         "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
         "action_failed": "Dienstaktion fehlgeschlagen.",
+        "action_succeeded": "Dienstaktion für {{name}} abgeschlossen.",
         "partial_support": "Dienstverwaltung wird auf {{os}} teilweise unterstützt."
       }
     },
