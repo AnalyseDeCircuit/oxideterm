@@ -758,7 +758,7 @@ impl WorkspaceApp {
                 // Startup may still be between window construction and active workspace
                 // restoration, so use the captured weak entity instead of the window root.
                 if cx
-                    .update_window(window_handle, |_, window, cx| {
+                    .update_window(window_handle, |_, _window, cx| {
                         weak.update(cx, |workspace, cx| {
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
@@ -769,14 +769,6 @@ impl WorkspaceApp {
                             workspace.maybe_start_forwards_port_scan(cx);
                             workspace.maybe_refresh_forwards_stats(cx);
                             if workspace.any_terminal_recording_active(cx) {
-                                cx.notify();
-                            }
-                            if workspace.handle_active_privilege_prompt_submit_request(window, cx) {
-                                cx.notify();
-                            }
-                            let handled_context_action =
-                                workspace.handle_active_terminal_context_action_request(window, cx);
-                            if handled_context_action {
                                 cx.notify();
                             }
                             if workspace.sync_active_privilege_prompt_inline_hint(cx) {

@@ -19,25 +19,90 @@ pub(super) struct SplitDrag {
     start_sizes: Vec<f32>,
 }
 
+#[derive(Clone, Copy)]
+enum TerminalPaneInteraction {
+    PrivilegePromptSubmit,
+    ContextAction,
+}
+
 impl WorkspaceApp {
     pub(super) fn register_terminal_pane(
         &mut self,
         pane_id: PaneId,
         session_id: TerminalSessionId,
         pane: gpui::Entity<TerminalPane>,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
+        let window_handle = window.window_handle();
         let subscription = cx.subscribe(
             &pane,
             move |this, _pane, event: &TerminalPaneEvent, cx| match event {
                 TerminalPaneEvent::Exited { .. } => {
                     this.queue_auto_close_terminal_session(session_id, cx);
                 }
+                TerminalPaneEvent::PrivilegePromptSubmitRequested => this
+                    .deliver_terminal_pane_interaction(
+                        pane_id,
+                        window_handle,
+                        TerminalPaneInteraction::PrivilegePromptSubmit,
+                        cx,
+                    ),
+                TerminalPaneEvent::ContextActionRequested => this
+                    .deliver_terminal_pane_interaction(
+                        pane_id,
+                        window_handle,
+                        TerminalPaneInteraction::ContextAction,
+                        cx,
+                    ),
             },
         );
         self.terminal_pane_subscriptions
             .insert(pane_id, subscription);
         self.panes.insert(pane_id, pane);
+    }
+
+    fn deliver_terminal_pane_interaction(
+        &mut self,
+        pane_id: PaneId,
+        window_handle: AnyWindowHandle,
+        interaction: TerminalPaneInteraction,
+        cx: &mut Context<Self>,
+    ) {
+        // Defer the window-scoped action without putting secrets or selected text in the event.
+        cx.spawn(async move |weak, cx| {
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                weak.update(cx, |workspace, cx| {
+                    if workspace.active_pane_id() != Some(pane_id) {
+                        // A request cannot follow focus into another pane.
+                        if let Some(pane) = workspace.panes.get(&pane_id).cloned() {
+                            pane.update(cx, |pane, _cx| match interaction {
+                                TerminalPaneInteraction::PrivilegePromptSubmit => {
+                                    pane.take_privilege_prompt_submit_request();
+                                }
+                                TerminalPaneInteraction::ContextAction => {
+                                    pane.take_context_action_request();
+                                }
+                            });
+                        }
+                        return;
+                    }
+
+                    let handled = match interaction {
+                        TerminalPaneInteraction::PrivilegePromptSubmit => {
+                            workspace.handle_active_privilege_prompt_submit_request(window, cx)
+                        }
+                        TerminalPaneInteraction::ContextAction => {
+                            workspace.handle_active_terminal_context_action_request(window, cx)
+                        }
+                    };
+                    if handled {
+                        cx.notify();
+                    }
+                })
+            });
+        })
+        .detach();
     }
 
     pub(super) fn bind_terminal_location(
@@ -209,7 +274,7 @@ impl WorkspaceApp {
             root_pane.split_active(active_pane_id, group_id, direction, pane_id, session_id)
         }) {
             tab.active_pane_id = Some(pane_id);
-            self.register_terminal_pane(pane_id, session_id, pane.clone(), cx);
+            self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
             self.bind_terminal_location(tab_id, pane_id, session_id);
             self.needs_active_pane_focus = true;
             pane.update(cx, |pane, cx| pane.focus(window, cx));

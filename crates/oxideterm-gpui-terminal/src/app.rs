@@ -83,6 +83,10 @@ const EDITOR_CLIPBOARD_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
     Exited { exit_code: Option<i32> },
+    // The event carries intent only; Workspace resolves any credential in the active scope.
+    PrivilegePromptSubmitRequested,
+    // The requested action remains pane-owned until the active Workspace consumes it.
+    ContextActionRequested,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
