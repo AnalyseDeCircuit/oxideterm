@@ -240,7 +240,7 @@ pub enum FontFamily {
     Custom,
 }
 
-pub const JETBRAINS_MONO_SUBSET_FAMILY: &str = "JetBrainsMono Nerd Font Mono";
+pub const JETBRAINS_MONO_SUBSET_FAMILY: &str = "JetBrainsMono NFM";
 pub const MESLO_SUBSET_FAMILY: &str = "MesloLGLDZ Nerd Font Mono";
 pub const MAPLE_MONO_SUBSET_FAMILY: &str = "Maple Mono NF CN";
 

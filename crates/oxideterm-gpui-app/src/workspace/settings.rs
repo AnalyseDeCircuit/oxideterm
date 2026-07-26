@@ -175,6 +175,7 @@ mod cli_companion;
 mod connections_page;
 mod controls;
 mod general_terminal_pages;
+pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;
 mod highlight;
 mod ide_page;
 mod local_terminal;

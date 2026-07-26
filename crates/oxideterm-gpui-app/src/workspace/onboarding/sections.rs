@@ -1,5 +1,8 @@
 use super::*;
-use crate::workspace::settings::{APPEARANCE_BORDER_RADIUS_MAX, APPEARANCE_BORDER_RADIUS_MIN};
+use crate::workspace::settings::{
+    APPEARANCE_BORDER_RADIUS_MAX, APPEARANCE_BORDER_RADIUS_MIN,
+    SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
+};
 use oxideterm_gpui_settings_view::{
     animation_label, animation_options, settings_appearance_radius_control,
 };
@@ -420,6 +423,18 @@ impl WorkspaceApp {
                 .flex_col()
                 .gap(px(12.0))
                 .child(grid)
+                .when(
+                    settings.terminal.font_family == FontFamily::Custom,
+                    |content| {
+                        content.child(self.settings_text_input_control(
+                            SettingsInput::TerminalCustomFontFamily,
+                            settings.terminal.custom_font_family.clone(),
+                            "'Sarasa Fixed SC', 'Fira Code', monospace".to_string(),
+                            SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
+                            cx,
+                        ))
+                    },
+                )
                 .child(
                     div()
                         .flex()

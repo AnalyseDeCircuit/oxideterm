@@ -25,13 +25,11 @@ pub(in crate::workspace) const ONBOARDING_THEME_IDS: [&str; 8] = [
     "rose-pine",
 ];
 
-pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool); 6] = [
+pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool); 4] = [
     (FontFamily::Jetbrains, "JetBrains Mono NF (Subset)", true),
     (FontFamily::Meslo, "MesloLGM NF (Subset)", true),
     (FontFamily::Maple, "Maple Mono NF CN (Subset)", true),
-    (FontFamily::Cascadia, "Cascadia Code", false),
-    (FontFamily::Consolas, "Consolas", false),
-    (FontFamily::Menlo, "Menlo", false),
+    (FontFamily::Custom, "Custom...", false),
 ];
 
 pub(in crate::workspace) const ONBOARDING_LANGUAGES: [(Language, &str); 11] = [
@@ -146,8 +144,8 @@ pub(in crate::workspace) enum OnboardingImportState {
 
 #[cfg(test)]
 mod tests {
-    use super::disclaimer_accepted_from_settings;
-    use oxideterm_settings::PersistedSettings;
+    use super::{ONBOARDING_FONT_OPTIONS, disclaimer_accepted_from_settings};
+    use oxideterm_settings::{FontFamily, PersistedSettings};
 
     #[test]
     fn persisted_disclaimer_acceptance_restores_without_completed_onboarding() {
@@ -163,5 +161,18 @@ mod tests {
         settings.onboarding_completed = true;
 
         assert!(disclaimer_accepted_from_settings(&settings));
+    }
+
+    #[test]
+    fn onboarding_fonts_are_bundled_or_custom() {
+        assert_eq!(
+            ONBOARDING_FONT_OPTIONS.map(|(family, _, bundled)| (family, bundled)),
+            [
+                (FontFamily::Jetbrains, true),
+                (FontFamily::Meslo, true),
+                (FontFamily::Maple, true),
+                (FontFamily::Custom, false),
+            ]
+        );
     }
 }

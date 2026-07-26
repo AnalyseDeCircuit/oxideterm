@@ -7702,6 +7702,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "ttf-parser",
  "uuid",
  "walkdir",
  "windows 0.61.3",

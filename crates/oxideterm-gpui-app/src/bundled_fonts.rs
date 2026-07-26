@@ -210,6 +210,35 @@ mod tests {
     }
 
     #[test]
+    fn bundled_terminal_faces_use_runtime_family_names() {
+        for face in ALL_TERMINAL_FACES {
+            let expected_family = match face {
+                BundledTerminalFace::JetBrainsRegular
+                | BundledTerminalFace::JetBrainsBold
+                | BundledTerminalFace::JetBrainsItalic
+                | BundledTerminalFace::JetBrainsBoldItalic => {
+                    oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY
+                }
+                BundledTerminalFace::MesloRegular
+                | BundledTerminalFace::MesloBold
+                | BundledTerminalFace::MesloItalic
+                | BundledTerminalFace::MesloBoldItalic => oxideterm_settings::MESLO_SUBSET_FAMILY,
+                BundledTerminalFace::MapleRegular
+                | BundledTerminalFace::MapleBold
+                | BundledTerminalFace::MapleItalic
+                | BundledTerminalFace::MapleBoldItalic => {
+                    oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
+                }
+            };
+
+            assert_eq!(
+                sfnt_family_name(face.bytes()).as_deref(),
+                Some(expected_family)
+            );
+        }
+    }
+
+    #[test]
     fn critical_faces_match_tauri_lazy_strategy() {
         assert_eq!(
             critical_faces_for_family(FontFamily::Jetbrains),
@@ -267,5 +296,13 @@ mod tests {
 
     fn is_sfnt(bytes: &[u8]) -> bool {
         bytes.starts_with(b"\0\x01\0\0") || bytes.starts_with(b"OTTO") || bytes.starts_with(b"ttcf")
+    }
+
+    fn sfnt_family_name(bytes: &[u8]) -> Option<String> {
+        let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+        face.names()
+            .into_iter()
+            .find(|name| name.name_id == ttf_parser::name_id::FAMILY)
+            .and_then(|name| name.to_string())
     }
 }
