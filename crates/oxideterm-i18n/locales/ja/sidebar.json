@@ -192,7 +192,8 @@
         "exec_opened": "{{name}} のシェルを開きました。",
         "follow_opened": "{{name}} のログを追跡しています。",
         "connection_missing": "選択した接続は利用できません。",
-        "action_failed": "Docker 操作に失敗しました。"
+        "action_failed": "Docker 操作に失敗しました。",
+        "action_succeeded": "{{name}} の Docker 操作が完了しました。"
       }
     },
     "host_services": {

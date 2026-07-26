@@ -192,7 +192,8 @@
         "exec_opened": "Shell aperta per {{name}}.",
         "follow_opened": "Log di {{name}} in monitoraggio.",
         "connection_missing": "La connessione selezionata non è più disponibile.",
-        "action_failed": "Azione Docker non riuscita."
+        "action_failed": "Azione Docker non riuscita.",
+        "action_succeeded": "Azione Docker per {{name}} completata."
       }
     },
     "host_services": {

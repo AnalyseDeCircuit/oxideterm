@@ -808,6 +808,47 @@ impl WorkspaceApp {
                     )
                 }
             }
+            HostToolsNotice::DockerActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_docker.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::DockerLogsAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_docker.toast.logs_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::DockerConnectionMissing => (
+                self.i18n.t("sidebar.host_docker.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::DockerActionFailed => (
+                self.i18n.t("sidebar.host_docker.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::DockerLogsFailed => (
+                self.i18n.t("sidebar.host_docker.toast.logs_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::DockerActionFinished {
+                container_name,
+                succeeded,
+            } => {
+                if succeeded {
+                    (
+                        self.i18n_replace(
+                            "sidebar.host_docker.toast.action_succeeded",
+                            &[("name", container_name)],
+                        ),
+                        TerminalNoticeVariant::Success,
+                    )
+                } else {
+                    (
+                        self.i18n.t("sidebar.host_docker.toast.action_failed"),
+                        TerminalNoticeVariant::Error,
+                    )
+                }
+            }
             HostToolsNotice::LogSnapshotAlreadyRunning => (
                 self.i18n
                     .t("sidebar.host_logs.toast.snapshot_already_running"),

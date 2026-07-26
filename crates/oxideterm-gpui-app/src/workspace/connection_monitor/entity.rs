@@ -22,6 +22,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) reliable_delivery_rx:
         std::sync::mpsc::Receiver<super::delivery::HostToolsReliableDelivery>,
     pub(super) host_process_actions: HostProcessActionsState,
+    pub(super) host_docker_operations: HostDockerOperationsState,
     pub(super) host_gpu: HostGpuViewState,
     pub(super) host_logs: HostLogsState,
     pub(super) host_ports: HostPortsState,
@@ -84,6 +85,7 @@ impl HostToolsEntity {
             reliable_delivery_tx,
             reliable_delivery_rx,
             host_process_actions: HostProcessActionsState::new(),
+            host_docker_operations: HostDockerOperationsState::new(),
             host_gpu: HostGpuViewState::new(gpu_update_tx),
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
@@ -426,6 +428,62 @@ impl HostToolsEntity {
                 .map_err(|_| ());
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ProcessAction(
                 HostProcessActionDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_docker_action(
+        &self,
+        command: String,
+        request: HostDockerActionRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Docker action output is not product data. Clear it before delivery.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    let succeeded = output.exit_code.unwrap_or(0) == 0;
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    succeeded
+                })
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::DockerAction(
+                HostDockerActionDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_docker_logs_capture(
+        &self,
+        command: String,
+        request: HostDockerLogsRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Raw logs remain inside the Entity delivery and dialog state.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::DockerLogs(
+                HostDockerLogsDelivery { request, result },
             ));
         });
         true
@@ -1125,6 +1183,111 @@ mod tests {
             })
         );
         assert!(!format!("{notice:?}").contains(display_secret.as_str()));
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::RefreshProfiler {
+                connection_id: "connection-1".to_string(),
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn docker_actions_and_logs_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let logs_request = HostDockerLogsRequest {
+            connection_id: "connection-1".to_string(),
+            container_id: "abc123".to_string(),
+            container_name: "web".to_string(),
+            failure_fallback: "Docker logs failed".to_string(),
+            empty_fallback: "No Docker logs".to_string(),
+        };
+        let logs_delivery_tx = entity.update(cx, |entity, _cx| {
+            entity.host_docker_operations.logs_dialog = Some(HostDockerLogsDialog {
+                request: logs_request.clone(),
+                output: None,
+                error: None,
+                loading: true,
+            });
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "Bearer should-not-reach-docker-dialog";
+
+        logs_delivery_tx
+            .send(super::delivery::HostToolsReliableDelivery::DockerLogs(
+                HostDockerLogsDelivery {
+                    request: logs_request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            let dialog = entity.host_docker_operations.logs_dialog.as_ref().unwrap();
+            assert!(!dialog.loading);
+            assert!(dialog.output.is_none());
+            assert_eq!(dialog.error.as_deref(), Some("Docker logs failed"));
+            assert!(!dialog.error.as_deref().unwrap().contains(secret_marker));
+        });
+        assert!(events.try_recv().is_err());
+
+        let action_request = HostDockerActionRequest {
+            connection_id: "connection-1".to_string(),
+            container_id: "abc123".to_string(),
+            container_name: "web".to_string(),
+            action: DockerActionKind::Restart,
+        };
+        let (action_delivery_tx, action_delivery) = entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .open_docker_action_confirm(action_request.clone(), cx)
+                    .is_none()
+            );
+            assert!(entity.docker_confirm_view().is_some());
+            entity.dismiss_docker_confirm(cx);
+            assert!(entity.docker_confirm_view().is_none());
+            entity.host_docker_operations.action_running = Some(action_request.clone());
+            (
+                entity.reliable_delivery_tx.clone(),
+                HostDockerActionDelivery {
+                    request: action_request,
+                    // Captured Docker output cannot enter this delivery type.
+                    result: Ok(false),
+                },
+            )
+        });
+
+        action_delivery_tx
+            .send(super::delivery::HostToolsReliableDelivery::DockerAction(
+                action_delivery,
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_docker_operations.action_running.is_none());
+        });
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::ShowNotice(HostToolsNotice::DockerActionFinished {
+                container_name: "web".to_string(),
+                succeeded: false,
+            })
+        );
         assert_eq!(
             events.try_recv().unwrap(),
             HostToolsEvent::RefreshProfiler {

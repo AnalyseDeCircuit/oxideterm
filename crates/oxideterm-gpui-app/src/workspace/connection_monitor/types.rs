@@ -289,7 +289,7 @@ impl HostProcessActionsState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostDockerActionRequest {
     pub(super) connection_id: String,
     pub(super) container_id: String,
@@ -297,31 +297,48 @@ pub(super) struct HostDockerActionRequest {
     pub(super) action: DockerActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostDockerActionDelivery {
     pub(super) request: HostDockerActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<bool, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostDockerLogsRequest {
     pub(super) connection_id: String,
     pub(super) container_id: String,
     pub(super) container_name: String,
+    pub(super) failure_fallback: String,
+    pub(super) empty_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostDockerLogsDelivery {
     pub(super) request: HostDockerLogsRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostDockerLogsDialog {
     pub(super) request: HostDockerLogsRequest,
-    pub(super) output: Option<String>,
+    // Docker output stays in one shared zeroizing buffer while rendered.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
+}
+
+pub(super) struct HostDockerOperationsState {
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostDockerActionRequest>>,
+    pub(super) action_running: Option<HostDockerActionRequest>,
+    pub(super) logs_dialog: Option<HostDockerLogsDialog>,
+}
+
+impl HostDockerOperationsState {
+    pub(super) fn new() -> Self {
+        Self {
+            pending_confirm: None,
+            action_running: None,
+            logs_dialog: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -772,13 +789,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_docker_expanded_id: Option<String>,
     pub(super) host_docker_list_state: ListState,
     pub(super) host_docker_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) host_docker_pending_confirm: Option<HostToolConfirmState<HostDockerActionRequest>>,
-    pub(super) host_docker_action_running: Option<HostDockerActionRequest>,
-    pub(super) host_docker_action_rx: Option<std::sync::mpsc::Receiver<HostDockerActionDelivery>>,
-    pub(super) host_docker_action_polling: bool,
-    pub(super) host_docker_logs_dialog: Option<HostDockerLogsDialog>,
-    pub(super) host_docker_logs_rx: Option<std::sync::mpsc::Receiver<HostDockerLogsDelivery>>,
-    pub(super) host_docker_logs_polling: bool,
     pub(in crate::workspace) host_service_search_query: String,
     pub(in crate::workspace) host_service_search_focused: bool,
     pub(in crate::workspace) host_service_expanded_id: Option<String>,
@@ -856,13 +866,6 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_docker_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            host_docker_pending_confirm: None,
-            host_docker_action_running: None,
-            host_docker_action_rx: None,
-            host_docker_action_polling: false,
-            host_docker_logs_dialog: None,
-            host_docker_logs_rx: None,
-            host_docker_logs_polling: false,
             host_service_search_query: String::new(),
             host_service_search_focused: false,
             host_service_expanded_id: None,

@@ -945,6 +945,9 @@ impl WorkspaceApp {
                         }
                         if tool != ContextSidebarTool::Docker {
                             this.connection_monitor.host_docker_search_focused = false;
+                            this.host_tools.update(cx, |host_tools, cx| {
+                                host_tools.dismiss_docker_confirm(cx);
+                            });
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
@@ -1197,6 +1200,7 @@ impl WorkspaceApp {
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.select_connection(connection_id.clone(), focus_origin, cx);
             host_tools.dismiss_process_confirm(cx);
+            host_tools.dismiss_docker_confirm(cx);
         });
         self.connection_monitor.host_tmux_pending_confirm = None;
         self.connection_monitor.host_tmux_input_dialog = None;

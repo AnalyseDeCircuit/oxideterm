@@ -30,6 +30,15 @@ pub(in crate::workspace) enum HostToolsNotice {
         pid: String,
         succeeded: bool,
     },
+    DockerActionAlreadyRunning,
+    DockerLogsAlreadyRunning,
+    DockerConnectionMissing,
+    DockerActionFailed,
+    DockerLogsFailed,
+    DockerActionFinished {
+        container_name: String,
+        succeeded: bool,
+    },
     LogSnapshotAlreadyRunning,
     LogConnectionMissing,
     LogPartialSupport {

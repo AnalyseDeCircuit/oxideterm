@@ -192,7 +192,8 @@
         "exec_opened": "已為 {{name}} 開啟 Shell。",
         "follow_opened": "正在追蹤 {{name}} 的日誌。",
         "connection_missing": "所選連線已無法使用。",
-        "action_failed": "Docker 操作失敗。"
+        "action_failed": "Docker 操作失敗。",
+        "action_succeeded": "容器 {{name}} 的 Docker 操作已完成。"
       }
     },
     "host_services": {

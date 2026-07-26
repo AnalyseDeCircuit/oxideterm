@@ -192,7 +192,8 @@
         "exec_opened": "{{name}}의 셸을 열었습니다.",
         "follow_opened": "{{name}}의 로그를 따라가는 중입니다.",
         "connection_missing": "선택한 연결을 사용할 수 없습니다.",
-        "action_failed": "Docker 작업에 실패했습니다."
+        "action_failed": "Docker 작업에 실패했습니다.",
+        "action_succeeded": "{{name}}의 Docker 작업을 완료했습니다."
       }
     },
     "host_services": {

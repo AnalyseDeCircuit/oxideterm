@@ -192,7 +192,8 @@
         "exec_opened": "Đã mở shell cho {{name}}.",
         "follow_opened": "Đang theo dõi log của {{name}}.",
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
-        "action_failed": "Thao tác Docker thất bại."
+        "action_failed": "Thao tác Docker thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác Docker cho {{name}}."
       }
     },
     "host_services": {
