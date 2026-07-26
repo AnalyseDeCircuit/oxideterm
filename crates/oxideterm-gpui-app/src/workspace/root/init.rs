@@ -90,7 +90,6 @@ impl WorkspaceApp {
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
         let (terminal_project_tx, terminal_project_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake);
-        let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
@@ -614,8 +613,6 @@ impl WorkspaceApp {
             native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState::new(plugin_registry),
             session_manager: SessionManagerState::default(),
             remote_desktop_sessions: HashMap::new(),
-            remote_desktop_worker_tx,
-            remote_desktop_worker_rx,
             // .oxide export can contain many saved connections. Keep the
             // selectable record rows on the shared variable-list path while the
             // dialog chrome remains ordinary GPUI layout.

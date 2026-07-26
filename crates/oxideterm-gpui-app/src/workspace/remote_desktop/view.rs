@@ -99,8 +99,12 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_remote_desktop_surface(
         &mut self,
         tab_id: TabId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Rendering is the authoritative mount boundary for both the main
+        // workspace and detached windows.
+        self.bind_remote_desktop_window(tab_id, window.window_handle());
         let Some(session) = self.remote_desktop_sessions.get(&tab_id) else {
             return div()
                 .size_full()

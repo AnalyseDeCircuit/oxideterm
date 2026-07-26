@@ -4,28 +4,49 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn bind_remote_desktop_window(
+        &mut self,
+        tab_id: TabId,
+        window_handle: AnyWindowHandle,
+    ) {
+        if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
+            // Window affinity is a lifecycle property: delivery and resource
+            // cleanup must follow the tab across detach and dock transitions.
+            session.window_handle = window_handle;
+        }
+    }
+
     pub(in crate::workspace) fn poll_remote_desktop_worker_results(
         &mut self,
+        tab_id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
-        let mut changed = self.schedule_remote_desktop_viewport_resizes(scale_factor, cx);
-        self.sync_remote_desktop_monitor_layouts(cx);
-        let drain = delivery::drain_channel(
-            &self.remote_desktop_worker_rx,
-            REMOTE_DESKTOP_DELIVERY_BUDGET,
-        );
+        let mut changed = self.schedule_remote_desktop_viewport_resize(tab_id, scale_factor, cx);
+        self.sync_remote_desktop_monitor_layout(tab_id, cx);
+        let Some(session) = self.remote_desktop_sessions.get(&tab_id) else {
+            return false;
+        };
+        let drain = delivery::drain_channel(&session.delivery_rx, REMOTE_DESKTOP_DELIVERY_BUDGET);
         for delivery in drain.items {
             match delivery {
-                RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation } => {
+                RemoteDesktopWorkerDelivery::FrameReady {
+                    tab_id: delivery_tab_id,
+                    generation,
+                } => {
+                    debug_assert_eq!(delivery_tab_id, tab_id);
                     if self.remote_desktop_tab_visible(tab_id)
                         && self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx)
                     {
                         changed = true;
                     }
                 }
-                RemoteDesktopWorkerDelivery::FrameRecoveryRequired { tab_id, generation } => {
+                RemoteDesktopWorkerDelivery::FrameRecoveryRequired {
+                    tab_id: delivery_tab_id,
+                    generation,
+                } => {
+                    debug_assert_eq!(delivery_tab_id, tab_id);
                     if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
                         continue;
                     }
@@ -37,10 +58,11 @@ impl WorkspaceApp {
                     );
                 }
                 RemoteDesktopWorkerDelivery::Event {
-                    tab_id,
+                    tab_id: delivery_tab_id,
                     generation,
                     event,
                 } => {
+                    debug_assert_eq!(delivery_tab_id, tab_id);
                     if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
                         continue;
                     }
@@ -98,14 +120,17 @@ impl WorkspaceApp {
                     }
                 }
                 RemoteDesktopWorkerDelivery::TransportFailed {
-                    tab_id,
+                    tab_id: delivery_tab_id,
                     generation,
                     message,
                 } => {
+                    debug_assert_eq!(delivery_tab_id, tab_id);
                     if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
                         continue;
                     }
-                    if self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx) {
+                    if self.remote_desktop_tab_visible(tab_id)
+                        && self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx)
+                    {
                         changed = true;
                     }
                     if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
@@ -131,27 +156,23 @@ impl WorkspaceApp {
         drain.outcome.backlog_remaining
     }
 
-    fn sync_remote_desktop_monitor_layouts(&mut self, cx: &App) {
-        let updated_layouts = self
-            .remote_desktop_sessions
-            .iter()
-            .filter(|(_, session)| session.profile.session_options.display.use_all_monitors)
-            .map(|(tab_id, session)| (*tab_id, remote_desktop_monitor_layout(&session.profile, cx)))
-            .collect::<Vec<_>>();
-        for (tab_id, layout) in updated_layouts {
-            let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
-                continue;
-            };
-            if layout == session.last_monitor_layout {
-                continue;
-            }
-            if let Some(request_tx) = session.request_tx.as_ref() {
-                let _ = request_tx.send(RemoteDesktopHelperRequest::UpdateDisplayLayout {
-                    layout: layout.clone(),
-                });
-            }
-            session.last_monitor_layout = layout;
+    fn sync_remote_desktop_monitor_layout(&mut self, tab_id: TabId, cx: &App) {
+        let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
+            return;
+        };
+        if !session.profile.session_options.display.use_all_monitors {
+            return;
         }
+        let layout = remote_desktop_monitor_layout(&session.profile, cx);
+        if layout == session.last_monitor_layout {
+            return;
+        }
+        if let Some(request_tx) = session.request_tx.as_ref() {
+            let _ = request_tx.send(RemoteDesktopHelperRequest::UpdateDisplayLayout {
+                layout: layout.clone(),
+            });
+        }
+        session.last_monitor_layout = layout;
     }
 
     pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId) -> bool {
@@ -275,9 +296,9 @@ impl WorkspaceApp {
         initial_size: RemoteDesktopSize,
         scale_factor: Option<u32>,
         monitor_layout: RemoteDesktopMonitorLayout,
+        delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     ) -> mpsc::Sender<RemoteDesktopHelperRequest> {
         let (request_tx, request_rx) = mpsc::channel();
-        let delivery_tx = self.remote_desktop_worker_tx.clone();
         thread::Builder::new()
             .name(format!("remote-desktop-{}", tab_id.0))
             .spawn(move || {
@@ -307,13 +328,6 @@ impl WorkspaceApp {
         worker_wake: RemoteDesktopWorkerWake,
         cx: &mut Context<Self>,
     ) {
-        let Some(window_handle) = self
-            .remote_desktop_sessions
-            .get(&tab_id)
-            .map(|session| session.window_handle)
-        else {
-            return;
-        };
         cx.spawn(async move |workspace, cx| {
             loop {
                 worker_wake.wait().await;
@@ -325,6 +339,17 @@ impl WorkspaceApp {
                     }
                     continue;
                 }
+                let Ok(window_handle) = workspace.update(cx, |this, _cx| {
+                    this.remote_desktop_sessions
+                        .get(&tab_id)
+                        .filter(|session| session.worker_generation == generation)
+                        .map(|session| session.window_handle)
+                }) else {
+                    break;
+                };
+                let Some(window_handle) = window_handle else {
+                    break;
+                };
                 let Ok(Ok((generation_matches, backlog_remaining))) =
                     cx.update_window(window_handle, |_, window, cx| {
                         workspace.update(cx, |this, cx| {
@@ -332,7 +357,7 @@ impl WorkspaceApp {
                                 return (false, false);
                             }
                             let backlog_remaining =
-                                this.poll_remote_desktop_worker_results(window, cx);
+                                this.poll_remote_desktop_worker_results(tab_id, window, cx);
                             (true, backlog_remaining)
                         })
                     })
@@ -768,6 +793,7 @@ impl WorkspaceApp {
             profile,
             provider,
             password,
+            delivery_tx,
             generation,
             initial_request_size,
             initial_viewport_size,
@@ -780,6 +806,7 @@ impl WorkspaceApp {
                 session.profile.clone(),
                 session.provider.clone(),
                 session.password.as_ref().map(RemoteDesktopSecret::share),
+                session.delivery_tx.clone(),
                 next_remote_desktop_worker_generation(session.worker_generation),
                 initial_request_size,
                 initial_viewport_size,
@@ -809,6 +836,7 @@ impl WorkspaceApp {
             initial_request_size,
             scale_factor,
             worker_monitor_layout,
+            delivery_tx,
         );
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             if let Some(previous_worker_wake) = session.worker_wake.replace(worker_wake.clone()) {
@@ -849,7 +877,7 @@ impl WorkspaceApp {
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((profile, provider, password, frame_slot, generation)) = self
+        let Some((profile, provider, password, frame_slot, delivery_tx, generation)) = self
             .remote_desktop_sessions
             .get(&tab_id)
             .and_then(|session| {
@@ -861,6 +889,7 @@ impl WorkspaceApp {
                     session.provider.clone(),
                     session.password.as_ref().map(RemoteDesktopSecret::share),
                     session.frame_slot.clone(),
+                    session.delivery_tx.clone(),
                     next_remote_desktop_worker_generation(session.worker_generation),
                 ))
             })
@@ -882,6 +911,7 @@ impl WorkspaceApp {
             initial_request_size,
             scale_factor,
             worker_monitor_layout,
+            delivery_tx,
         );
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             session.request_tx = Some(request_tx);
@@ -918,14 +948,19 @@ impl WorkspaceApp {
             .is_some_and(|session| session.worker_generation == generation)
     }
 
-    pub(in crate::workspace) fn schedule_remote_desktop_viewport_resizes(
+    pub(in crate::workspace) fn schedule_remote_desktop_viewport_resize(
         &mut self,
+        tab_id: TabId,
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
     ) -> bool {
         let mut changed = false;
         let mut pending_starts = Vec::new();
-        for (tab_id, session) in self.remote_desktop_sessions.iter_mut() {
+        for (session_tab_id, session) in self
+            .remote_desktop_sessions
+            .iter_mut()
+            .filter(|(session_tab_id, _)| **session_tab_id == tab_id)
+        {
             if let Some(scale_factor) = scale_factor {
                 // The first viewport measurement happens during layout, after
                 // render-time polling. Cache the window scale early so the
@@ -957,7 +992,7 @@ impl WorkspaceApp {
                         | RemoteDesktopSessionStatus::Reconnecting
                 ) {
                     pending_starts.push((
-                        *tab_id,
+                        *session_tab_id,
                         request_size,
                         Some(viewport_size),
                         session.last_viewport_scale_factor,
@@ -1041,7 +1076,7 @@ impl WorkspaceApp {
                         // render-time worker poll. Nudge the workspace briefly
                         // so a measured first viewport can start the helper
                         // without waiting for an unrelated repaint.
-                        if this.schedule_remote_desktop_viewport_resizes(None, cx) {
+                        if this.schedule_remote_desktop_viewport_resize(tab_id, None, cx) {
                             cx.notify();
                         }
 
@@ -1187,17 +1222,21 @@ impl WorkspaceApp {
         delay: Duration,
         cx: &mut Context<Self>,
     ) {
-        let Some(window_handle) = self
-            .remote_desktop_sessions
-            .get(&tab_id)
-            .map(|session| session.window_handle)
-        else {
-            return;
-        };
         cx.spawn(async move |workspace, cx| {
             if !delay.is_zero() {
                 Timer::after(delay).await;
             }
+            let Ok(window_handle) = workspace.update(cx, |this, _cx| {
+                this.remote_desktop_sessions
+                    .get(&tab_id)
+                    .filter(|session| session.worker_generation == generation)
+                    .map(|session| session.window_handle)
+            }) else {
+                return;
+            };
+            let Some(window_handle) = window_handle else {
+                return;
+            };
             let _ = cx.update_window(window_handle, |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     if !this.remote_desktop_worker_generation_matches(tab_id, generation) {

@@ -185,7 +185,10 @@ impl WorkspaceApp {
 
         match open_result {
             Ok(handle) => {
-                self.detached_tab_windows.insert(tab_id, handle.into());
+                let detached_window_handle = handle.into();
+                self.detached_tab_windows
+                    .insert(tab_id, detached_window_handle);
+                self.bind_remote_desktop_window(tab_id, detached_window_handle);
                 self.resume_remote_desktop_frame_delivery(tab_id, cx);
                 if let Some(exiting_visual) = exiting_visual {
                     self.begin_tab_visual_exit(exiting_visual, cx);
@@ -977,7 +980,7 @@ impl WorkspaceApp {
                 self.render_native_plugin_tab_surface(plugin_id, tab_id, cx)
             }
             (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
-            (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, cx),
+            (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, window, cx),
             (_, Some(root_pane)) => self.render_detached_terminal_surface(tab_id, root_pane, cx),
             _ => self.render_empty_workspace(cx),
         }
