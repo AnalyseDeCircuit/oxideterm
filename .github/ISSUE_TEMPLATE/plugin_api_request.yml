@@ -1,0 +1,55 @@
+name: Plugin API Request
+description: Request a new plugin host API / 插件接口请求
+labels: ["plugin-api", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Use this template to request a new plugin host API.** Code contributions (Pull Requests) are not accepted — see [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md).
+
+        **使用此模板请求新的插件宿主接口。** 本项目目前不接受 PR——详见 [CONTRIBUTING.md](https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md)。
+
+        ---
+
+        **One request per issue.** Multiple unrelated API requests will be closed — please open separate issues.
+        **每个 Issue 只提一个接口请求。** 多个不相关请求将被关闭，请分别提交。
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What are you trying to build? / 你想构建什么功能？
+      description: Describe the plugin you would build with this API.
+      placeholder: "I want to write a plugin that..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: api-proposal
+    attributes:
+      label: What API do you need? / 你需要什么接口？
+      description: Describe the host API surface you need — function signatures, data types, permissions, events.
+      placeholder: |
+        Namespace: window / terminal / sftp / fs / clipboard / ...
+        Functions you'd like to call:
+        Events you need to listen to:
+        Permission gate required (if any):
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds / 替代方案
+      description: Is there any existing API you could (partially) use today? Can other plugins work around this?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting / 提交前确认
+      options:
+        - label: I searched existing issues for this API request / 我已搜索过已有 Issue，确认此接口尚未被请求
+          required: true
+        - label: This is a plugin host API request, not a general feature request / 这是一个插件接口请求，不是通用功能建议
+          required: true

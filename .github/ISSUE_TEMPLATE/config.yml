@@ -10,6 +10,6 @@ contact_links:
     about: >
       Report privately via GitHub — do not open a public issue for undisclosed vulnerabilities.
   - name: Contributing & PR policy
-    url: https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/CONTRIBUTING.md
+    url: https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md
     about: >
-      PRs are welcome, but please open an Issue first to discuss the approach. Read CONTRIBUTING.md for details.
+      PRs are currently not accepted — read CONTRIBUTING.md for the policy and plugin alternatives.
