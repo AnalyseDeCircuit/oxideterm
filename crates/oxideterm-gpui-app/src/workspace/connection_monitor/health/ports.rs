@@ -19,29 +19,23 @@ impl WorkspaceApp {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_port_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_port_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.host_tools.read(cx).port_snapshot_for(selected_id);
+        let filter = self.host_tools.read(cx).port_filter();
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_port_rows(
                     &snapshot.entries,
                     &self.connection_monitor.host_port_search_query,
-                    self.connection_monitor.host_port_filter,
+                    filter,
                 )
             })
             .unwrap_or_default();
         let status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_port_list_state(&rows, selected_id);
+        self.sync_host_port_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-ports-panel")
@@ -68,7 +62,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_port_snapshot_polling,
+                        !self.host_tools.read(cx).port_snapshot_polling(),
                         cx,
                     ))
                     .child(self.render_host_port_search(cx))
@@ -82,7 +76,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_port_list(
                 rows,
-                self.connection_monitor.host_port_snapshot_polling,
+                self.host_tools.read(cx).port_snapshot_polling(),
                 status,
                 selected_id,
                 cx,
@@ -168,17 +162,15 @@ impl WorkspaceApp {
         filter: PortFilter,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_port_filter == filter;
+        let active = self.host_tools.read(cx).port_filter() == filter;
         self.host_tools_filter_chip(active)
             .child(self.i18n.t(port_filter_label_key(filter)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_port_filter != filter {
-                        this.connection_monitor.host_port_filter = filter;
-                        this.connection_monitor.host_port_expanded_index = None;
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_port_filter(filter, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -258,7 +250,7 @@ impl WorkspaceApp {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.connection_monitor.host_port_snapshot_polling,
+                            disabled: self.host_tools.read(cx).port_snapshot_polling(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -332,7 +324,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_port_list_state.clone();
+        let state = self.host_tools.read(cx).port_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         let show_context_columns =
@@ -446,7 +438,7 @@ impl WorkspaceApp {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_port_expanded_index == Some(index);
+        let expanded = self.host_tools.read(cx).port_expanded_index() == Some(index);
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let local = host_port_endpoint_label(&entry.local_address, &entry.local_port);
@@ -578,12 +570,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_port_expanded_index == Some(index) {
-                        this.connection_monitor.host_port_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_port_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.toggle_port_expanded(index, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -737,44 +726,25 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn sync_host_port_list_state(&self, rows: &[ResourcePortEntry], selected_id: &str) {
+    pub(super) fn sync_host_port_list_state(
+        &self,
+        rows: &[ResourcePortEntry],
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let signatures = rows.iter().map(port_row_signature).collect::<Vec<_>>();
         let identity = format!(
             "host-ports:{selected_id}:{}:{}:{}",
             self.connection_monitor.host_port_search_query,
-            self.connection_monitor.host_port_filter as u8,
-            self.connection_monitor
-                .host_port_expanded_index
+            self.host_tools.read(cx).port_filter() as u8,
+            self.host_tools
+                .read(cx)
+                .port_expanded_index()
                 .unwrap_or(usize::MAX)
         );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_port_list_state,
-            &mut self.connection_monitor.host_port_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
-    }
-
-    pub(super) fn host_port_snapshot_command(
-        &self,
-        connection_id: &str,
-    ) -> (oxideterm_connection_monitor::PortCaptureCommand, String) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_port_snapshot_command(&os_type), os_type)
-    }
-
-    pub(super) fn host_port_diagnostic_command(&self, connection_id: &str) -> (String, String) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_port_diagnostic_command(&os_type), os_type)
+        self.host_tools
+            .read(cx)
+            .sync_port_list_signatures(&identity, &signatures);
     }
 
     pub(in crate::workspace) fn handle_host_port_search_key(
@@ -821,66 +791,22 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Ports) {
-            return;
-        }
-        if self.connection_monitor.host_port_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_port_toast(
-                    self.i18n
-                        .t("sidebar.host_ports.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_port_toast(
-                    self.i18n.t("sidebar.host_ports.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
-        };
-        let (command, os_type) = self.host_port_snapshot_command(&connection_id);
-        if feedback.should_toast() && command.capability == PortCommandCapability::Partial {
-            self.push_host_port_toast(
-                self.i18n_replace(
-                    "sidebar.host_ports.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let request = HostPortSnapshotRequest {
-            connection_id: connection_id.clone(),
-            feedback,
-        };
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor.host_port_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_port_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_port_snapshot_rx = Some(rx);
-        self.connection_monitor.host_port_snapshot_polling = true;
-        self.connection_monitor.host_port_last_error = None;
-        // Port sampling is a troubleshooting snapshot, not a monitor metric.
-        // Keep it out of the high-frequency profiler loop.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_PORT_SNAPSHOT_TIMEOUT,
-                    HOST_PORT_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostPortSnapshotDelivery { request, result });
+        let monitoring_enabled = self.host_tool_monitoring_enabled(ContextSidebarTool::Ports);
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_ports.toast.unknown_error");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_port_snapshot(
+                connection_id,
+                feedback,
+                monitoring_enabled,
+                runtime,
+                failure_fallback,
+                cx,
+            )
         });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn copy_host_port_endpoint(&mut self, endpoint: String, cx: &mut Context<Self>) {
@@ -913,7 +839,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (command, _os_type) = self.host_port_diagnostic_command(&connection_id);
+        let command = self
+            .host_tools
+            .read(cx)
+            .port_diagnostic_command(&connection_id);
         let title = self.i18n.t("sidebar.host_ports.diagnostic_title");
         let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
             self.push_host_port_toast(
@@ -951,168 +880,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_host_ports_snapshot_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_port_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_port_snapshot_rx.take() else {
-            self.connection_monitor.host_port_snapshot_polling = false;
-            self.connection_monitor.host_port_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_ports_snapshot(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_port_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_port_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_port_snapshot_polling = false;
-                self.connection_monitor.host_port_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_ports.toast.unknown_error");
-                self.connection_monitor.host_port_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_port_toast(
-                        self.i18n_replace(
-                            "sidebar.host_ports.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_ports_snapshot(
-        &mut self,
-        delivery: HostPortSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_port_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
-            return;
-        }
-        let feedback = delivery.request.feedback;
-        self.connection_monitor.host_port_snapshot_polling = false;
-        self.connection_monitor.host_port_snapshot_running = None;
-        self.connection_monitor.host_port_snapshot_rx = None;
-        match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_port_snapshot(&output.stdout);
-                let visible_count = visible_port_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_port_search_query,
-                    self.connection_monitor.host_port_filter,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourcePortStatus::Available { .. } => {
-                        self.connection_monitor.host_port_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_port_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_ports.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourcePortStatus::Unavailable => {
-                        self.connection_monitor.host_port_last_error =
-                            Some(self.i18n.t("sidebar.host_ports.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_port_toast(
-                                self.i18n.t("sidebar.host_ports.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourcePortStatus::Error { message } => {
-                        self.connection_monitor.host_port_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_port_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_ports.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourcePortStatus::Unknown => {}
-                }
-                self.connection_monitor.host_port_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_port_snapshot = Some(snapshot);
-            }
-            Ok(output) => {
-                let reason = host_port_capture_failure_message(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                    self.i18n.t("sidebar.host_ports.toast.unknown_error"),
-                );
-                self.connection_monitor.host_port_last_error = Some(reason.clone());
-                self.connection_monitor.host_port_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_port_snapshot = Some(ResourcePortSnapshot {
-                    status: ResourcePortStatus::Error {
-                        message: reason.clone(),
-                    },
-                    entries: Vec::new(),
-                });
-                if feedback.should_toast() {
-                    self.push_host_port_toast(
-                        self.i18n_replace(
-                            "sidebar.host_ports.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-            Err(error) => {
-                self.connection_monitor.host_port_last_error = Some(error.clone());
-                self.connection_monitor.host_port_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_port_snapshot = Some(ResourcePortSnapshot {
-                    status: ResourcePortStatus::Error {
-                        message: error.clone(),
-                    },
-                    entries: Vec::new(),
-                });
-                if feedback.should_toast() {
-                    self.push_host_port_toast(
-                        self.i18n_replace(
-                            "sidebar.host_ports.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-        }
-        cx.notify();
-    }
-
     pub(super) fn push_host_port_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
         let _ = self.terminal_notice_tx.send(TerminalNotice {
             title: message,
@@ -1121,6 +888,196 @@ impl WorkspaceApp {
             progress: None,
             variant,
         });
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn port_snapshot_for(&self, connection_id: &str) -> Option<ResourcePortSnapshot> {
+        self.host_ports
+            .snapshot
+            .as_ref()
+            .filter(|_| self.host_ports.snapshot_connection_id.as_deref() == Some(connection_id))
+            .cloned()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn port_filter(&self) -> PortFilter {
+        self.host_ports.filter
+    }
+
+    pub(super) fn port_snapshot_polling(&self) -> bool {
+        self.host_ports.polling
+    }
+
+    pub(super) fn port_list_state(&self) -> ListState {
+        self.host_ports.list_state.clone()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn port_expanded_index(&self) -> Option<usize> {
+        self.host_ports.expanded_index
+    }
+
+    pub(in crate::workspace::connection_monitor) fn select_port_filter(
+        &mut self,
+        filter: PortFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_ports.filter == filter {
+            return false;
+        }
+        self.host_ports.filter = filter;
+        self.host_ports.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::connection_monitor) fn toggle_port_expanded(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_ports.expanded_index =
+            (self.host_ports.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_port_expanded(&mut self, cx: &mut Context<Self>) {
+        if self.host_ports.expanded_index.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_port_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_ports.list_state,
+            &mut self.host_ports.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn port_diagnostic_command(&self, connection_id: &str) -> String {
+        let os_type = self
+            .connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_port_diagnostic_command(&os_type)
+    }
+
+    pub(super) fn request_port_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
+        }
+        if self.host_ports.polling {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PortSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
+        }
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PortConnectionMissing)
+                .into_iter()
+                .collect();
+        };
+        let command = build_port_snapshot_command(&os_type);
+        let mut notices = Vec::new();
+        if feedback.should_toast() && command.capability == PortCommandCapability::Partial {
+            notices.push(HostToolsNotice::PortPartialSupport { os_type });
+        }
+
+        let request = HostPortSnapshotRequest {
+            connection_id: connection_id.clone(),
+            feedback,
+            failure_fallback,
+        };
+        self.host_ports.snapshot_connection_id = Some(connection_id);
+        self.host_ports.running = Some(request.clone());
+        self.host_ports.polling = true;
+        // Port capture is a user-requested troubleshooting snapshot, not a sampler.
+        let spawned = self.spawn_port_snapshot_capture(
+            command.command,
+            request,
+            HOST_PORT_SNAPSHOT_TIMEOUT,
+            HOST_PORT_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_ports.polling = false;
+            self.host_ports.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PortConnectionMissing)
+                .into_iter()
+                .collect();
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_ports_snapshot(
+        &mut self,
+        delivery: HostPortSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_ports.running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        let feedback = delivery.request.feedback;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_ports.polling = false;
+        self.host_ports.running = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_port_snapshot(&output.stdout);
+                if feedback.should_toast() {
+                    match &snapshot.status {
+                        ResourcePortStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PortSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourcePortStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(HostToolsNotice::PortUnavailable));
+                        }
+                        ResourcePortStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PortSnapshotFailed,
+                            ));
+                        }
+                        ResourcePortStatus::Unknown => {}
+                    }
+                }
+                self.host_ports.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_ports.snapshot = Some(snapshot);
+            }
+            Ok(_) | Err(()) => {
+                self.host_ports.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_ports.snapshot = Some(ResourcePortSnapshot {
+                    status: ResourcePortStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::PortSnapshotFailed,
+                    ));
+                }
+            }
+        }
+        cx.notify();
     }
 }
 
@@ -1163,23 +1120,5 @@ fn host_port_state_color(state: &str, muted_color: u32) -> u32 {
         "syn-sent" | "syn-recv" | "close-wait" => MONITOR_AMBER,
         "time-wait" | "time_wait" => muted_color,
         _ => muted_color,
-    }
-}
-
-fn host_port_capture_failure_message(
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-    fallback: String,
-) -> String {
-    let reason = stderr
-        .lines()
-        .chain(stdout.lines())
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or(fallback.as_str());
-    match exit_code {
-        Some(code) => format!("{reason} (exit {code})"),
-        None => reason.to_string(),
     }
 }

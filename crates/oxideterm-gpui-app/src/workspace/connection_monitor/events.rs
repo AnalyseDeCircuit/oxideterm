@@ -17,6 +17,12 @@ pub(in crate::workspace) enum HostToolsNotice {
     LogSnapshotLoaded { count: usize },
     LogUnavailable,
     LogSnapshotFailed,
+    PortSnapshotAlreadyRunning,
+    PortConnectionMissing,
+    PortPartialSupport { os_type: String },
+    PortSnapshotLoaded { count: usize },
+    PortUnavailable,
+    PortSnapshotFailed,
 }
 
 impl EventEmitter<HostToolsEvent> for HostToolsEntity {}

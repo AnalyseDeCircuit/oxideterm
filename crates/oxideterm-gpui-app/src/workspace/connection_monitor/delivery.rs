@@ -1,7 +1,7 @@
 use super::*;
 use crate::workspace::delivery as workspace_delivery;
 
-const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 14;
+const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 13;
 
 pub(super) enum HostToolsSamplerDelivery {
     ProfilerUpdated,
@@ -12,6 +12,7 @@ pub(super) enum HostToolsReliableDelivery {
     // Command output stays inside the Entity-owned delivery queue and never
     // crosses the typed GPUI event boundary or a Debug formatter.
     LogSnapshot(HostLogSnapshotDelivery),
+    PortSnapshot(HostPortSnapshotDelivery),
 }
 
 pub(in crate::workspace) struct HostToolsDeliveryBridges {
@@ -176,6 +177,9 @@ impl HostToolsEntity {
                 HostToolsReliableDelivery::LogSnapshot(delivery) => {
                     self.finish_host_logs_snapshot(delivery, cx);
                 }
+                HostToolsReliableDelivery::PortSnapshot(delivery) => {
+                    self.finish_host_ports_snapshot(delivery, cx);
+                }
             }
         }
         drain.outcome.backlog_remaining
@@ -234,12 +238,11 @@ impl WorkspaceApp {
                 5 => self.poll_host_service_logs_results(cx),
                 6 => self.poll_host_tmux_snapshot_results(cx),
                 7 => self.poll_host_tmux_action_results(cx),
-                8 => self.poll_host_ports_snapshot_results(cx),
-                9 => self.poll_host_schedules_snapshot_results(cx),
-                10 => self.poll_host_filesystems_snapshot_results(cx),
-                11 => self.poll_host_packages_snapshot_results(cx),
-                12 => self.poll_host_schedule_logs_results(cx),
-                13 => self.poll_host_schedule_action_results(cx),
+                8 => self.poll_host_schedules_snapshot_results(cx),
+                9 => self.poll_host_filesystems_snapshot_results(cx),
+                10 => self.poll_host_packages_snapshot_results(cx),
+                11 => self.poll_host_schedule_logs_results(cx),
+                12 => self.poll_host_schedule_action_results(cx),
                 _ => unreachable!("Host Tools delivery cursor must stay within receiver count"),
             }
             self.connection_monitor.delivery_cursor =

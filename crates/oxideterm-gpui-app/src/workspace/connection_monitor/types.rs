@@ -435,12 +435,42 @@ pub(super) struct HostTmuxActionDelivery {
 pub(super) struct HostPortSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostPortSnapshotDelivery {
     pub(super) request: HostPortSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostPortsState {
+    pub(super) filter: PortFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourcePortSnapshot>,
+    pub(super) running: Option<HostPortSnapshotRequest>,
+    pub(super) polling: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostPortsState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: PortFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            polling: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -669,16 +699,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_port_search_query: String,
     pub(in crate::workspace) host_port_search_focused: bool,
-    pub(super) host_port_filter: PortFilter,
-    pub(in crate::workspace) host_port_expanded_index: Option<usize>,
-    pub(super) host_port_snapshot_connection_id: Option<String>,
-    pub(super) host_port_snapshot: Option<ResourcePortSnapshot>,
-    pub(super) host_port_snapshot_rx: Option<std::sync::mpsc::Receiver<HostPortSnapshotDelivery>>,
-    pub(super) host_port_snapshot_running: Option<HostPortSnapshotRequest>,
-    pub(super) host_port_snapshot_polling: bool,
-    pub(super) host_port_last_error: Option<String>,
-    pub(super) host_port_list_state: ListState,
-    pub(super) host_port_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_schedule_search_query: String,
     pub(in crate::workspace) host_schedule_search_focused: bool,
     pub(super) host_schedule_filter: ScheduledTaskFilter,
@@ -816,20 +836,6 @@ impl ConnectionMonitorState {
             host_tmux_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_port_search_query: String::new(),
             host_port_search_focused: false,
-            host_port_filter: PortFilter::All,
-            host_port_expanded_index: None,
-            host_port_snapshot_connection_id: None,
-            host_port_snapshot: None,
-            host_port_snapshot_rx: None,
-            host_port_snapshot_running: None,
-            host_port_snapshot_polling: false,
-            host_port_last_error: None,
-            host_port_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_port_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_schedule_search_query: String::new(),
             host_schedule_search_focused: false,
             host_schedule_filter: ScheduledTaskFilter::All,

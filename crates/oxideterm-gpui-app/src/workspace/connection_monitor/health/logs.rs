@@ -804,6 +804,43 @@ impl WorkspaceApp {
                 ),
                 TerminalNoticeVariant::Error,
             ),
+            HostToolsNotice::PortSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_ports.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::PortConnectionMissing => (
+                self.i18n.t("sidebar.host_ports.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::PortPartialSupport { os_type } => (
+                self.i18n_replace(
+                    "sidebar.host_ports.toast.partial_support",
+                    &[("os", os_type)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::PortSnapshotLoaded { count } => (
+                self.i18n_replace(
+                    "sidebar.host_ports.toast.snapshot_loaded",
+                    &[("count", count.to_string())],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::PortUnavailable => (
+                self.i18n.t("sidebar.host_ports.toast.unavailable"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::PortSnapshotFailed => (
+                self.i18n_replace(
+                    "sidebar.host_ports.toast.snapshot_failed",
+                    &[(
+                        "reason",
+                        self.i18n.t("sidebar.host_ports.toast.unknown_error"),
+                    )],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
         };
         self.push_host_log_toast(message, variant);
     }
@@ -871,7 +908,7 @@ impl HostToolsEntity {
         connection_id: &str,
     ) -> Result<(oxideterm_connection_monitor::LogCaptureCommand, String), String> {
         let os_type = self
-            .log_connection_os_type(connection_id)
+            .connection_os_type(connection_id)
             .unwrap_or_else(|| "Unknown".to_string());
         build_log_follow_command(&os_type, self.host_logs.preset).map(|command| (command, os_type))
     }
@@ -895,7 +932,7 @@ impl HostToolsEntity {
                 .into_iter()
                 .collect();
         }
-        let Some(os_type) = self.log_connection_os_type(&connection_id) else {
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
             return feedback
                 .should_toast()
                 .then_some(HostToolsNotice::LogConnectionMissing)
