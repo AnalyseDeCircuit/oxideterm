@@ -941,6 +941,7 @@ pub(crate) struct WorkspaceApp {
     // The subscription token owns the bounded router listener for this workspace.
     _node_event_subscription: NodeEventSubscription,
     node_event_rx: NodeEventReceiver,
+    node_event_wake: delivery::ActiveDeliveryWake,
     node_event_generations: HashMap<NodeId, u64>,
     reconnect_orchestrator: ReconnectOrchestratorStore,
     reconnect_worker_tx: std::sync::mpsc::Sender<ReconnectWorkerResult>,

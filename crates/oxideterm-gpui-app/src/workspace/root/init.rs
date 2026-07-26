@@ -65,7 +65,11 @@ impl WorkspaceApp {
             delivery::ActiveDeliverySender::channel();
         // Node state is a latest-value stream. Bound and coalesce its mailbox so
         // a suspended UI cannot retain an unbounded event backlog.
-        let (node_event_subscription, node_event_rx) = node_router.emitter().subscribe_bounded(256);
+        let node_event_wake = delivery::ActiveDeliveryWake::default();
+        let emitter_wake = node_event_wake.clone();
+        let (node_event_subscription, node_event_rx) = node_router
+            .emitter()
+            .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
         let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
         let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
@@ -431,6 +435,7 @@ impl WorkspaceApp {
             node_router,
             _node_event_subscription: node_event_subscription,
             node_event_rx,
+            node_event_wake,
             node_event_generations: HashMap::new(),
             reconnect_orchestrator: ReconnectOrchestratorStore::new(
                 reconnect_timing_from_settings(&settings),
@@ -727,6 +732,7 @@ impl WorkspaceApp {
         workspace.schedule_forwarding_worker_delivery(cx);
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
+        workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_ai_delivery(window_handle, cx);
         workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
@@ -740,7 +746,6 @@ impl WorkspaceApp {
                     .update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {
                             workspace.poll_ssh_worker_results(window, cx);
-                            workspace.poll_node_events(window, cx);
                             workspace.poll_reconnect_worker_results(window, cx);
                             workspace.poll_launcher_worker_results(cx);
                             workspace.poll_external_settings_store_changes(cx);

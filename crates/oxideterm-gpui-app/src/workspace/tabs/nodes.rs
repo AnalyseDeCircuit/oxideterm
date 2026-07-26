@@ -138,14 +138,21 @@ impl WorkspaceApp {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        const NODE_EVENT_BUDGET_PER_TICK: usize = 64;
-
+    ) -> bool {
+        let started_at = Instant::now();
         let mut events = Vec::new();
-        while events.len() < NODE_EVENT_BUDGET_PER_TICK
-            && let Ok(event) = self.node_event_rx.try_recv()
-        {
-            events.push(event);
+        let mut source_exhausted = false;
+        while delivery::LIFECYCLE_DELIVERY_BUDGET.allows_next(events.len(), started_at.elapsed()) {
+            match self.node_event_rx.try_recv() {
+                Ok(event) => events.push(event),
+                Err(
+                    std::sync::mpsc::TryRecvError::Empty
+                    | std::sync::mpsc::TryRecvError::Disconnected,
+                ) => {
+                    source_exhausted = true;
+                    break;
+                }
+            }
         }
 
         let mut changed = false;
@@ -156,6 +163,46 @@ impl WorkspaceApp {
             self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
         }
+        !source_exhausted
+    }
+
+    pub(in crate::workspace) fn schedule_node_event_delivery(
+        &self,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        let event_wake = self.node_event_wake.clone();
+        let release_wake = event_wake.clone();
+        cx.on_release(move |_, _| {
+            // The router owns node lifecycles; workspace release only stops its UI waiter.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                event_wake.wait().await;
+                let should_drain = event_wake.take();
+                let stopped = event_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(Ok(backlog_remaining)) = cx.update_window(window_handle, |_, window, cx| {
+                    weak.update(cx, |workspace, cx| workspace.poll_node_events(window, cx))
+                }) else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Continue a bounded lifecycle batch without waiting for the heartbeat.
+                    event_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn refresh_ssh_terminal_input_locks(&mut self, cx: &mut Context<Self>) {

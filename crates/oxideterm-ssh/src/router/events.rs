@@ -34,6 +34,7 @@ pub struct NodeEventEmitter {
 struct NodeEventMailbox {
     queue: parking_lot::Mutex<VecDeque<NodeStateEvent>>,
     capacity: usize,
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 pub struct NodeEventReceiver {
@@ -80,11 +81,21 @@ impl NodeEventEmitter {
         &self,
         capacity: usize,
     ) -> (NodeEventSubscription, NodeEventReceiver) {
+        self.subscribe_bounded_with_wake(capacity, None)
+    }
+
+    /// Creates a bounded mailbox and invokes the optional wake after a new event is queued.
+    pub fn subscribe_bounded_with_wake(
+        &self,
+        capacity: usize,
+        wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> (NodeEventSubscription, NodeEventReceiver) {
         assert!(capacity > 0, "node event mailbox capacity must be positive");
         let listener_id = self.next_listener_id.fetch_add(1, Ordering::Relaxed);
         let mailbox = Arc::new(NodeEventMailbox {
             queue: parking_lot::Mutex::new(VecDeque::with_capacity(capacity)),
             capacity,
+            wake,
         });
         self.mailbox_listeners
             .write()
@@ -247,6 +258,11 @@ impl NodeEventEmitter {
             // They may temporarily exceed the level-event capacity rather than
             // being silently discarded while the UI is suspended.
             queue.push_back(event.clone());
+            let wake = mailbox.wake.clone();
+            drop(queue);
+            if let Some(wake) = wake {
+                wake();
+            }
             true
         });
     }
@@ -276,6 +292,31 @@ fn node_event_requires_reliable_delivery(event: &NodeStateEvent) -> bool {
 #[cfg(test)]
 mod mailbox_tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn bounded_subscription_wakes_after_event_is_queued() {
+        let emitter = NodeEventEmitter::new();
+        let woke = Arc::new(AtomicBool::new(false));
+        let callback_flag = woke.clone();
+        let (_subscription, receiver) = emitter.subscribe_bounded_with_wake(
+            1,
+            Some(Arc::new(move || {
+                callback_flag.store(true, Ordering::Release);
+            })),
+        );
+
+        emitter.emit_connection_state_changed_for_test("node-a", NodeReadiness::Ready);
+
+        assert!(woke.load(Ordering::Acquire));
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            NodeStateEvent::ConnectionStateChanged {
+                state: NodeReadiness::Ready,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn bounded_subscription_coalesces_latest_event_and_unsubscribes_on_drop() {
