@@ -896,7 +896,7 @@ pub(crate) struct WorkspaceApp {
     portable_settings_refresh_pending: bool,
     native_update_state: settings::NativeUpdateUiState,
     native_update_rx: Option<std::sync::mpsc::Receiver<settings::NativeUpdateDelivery>>,
-    native_update_polling: bool,
+    native_update_wake: delivery::ActiveDeliveryWake,
     native_update_cancel: Option<Arc<AtomicBool>>,
     native_update_package: Option<oxideterm_update::NativeUpdatePackage>,
     native_update_notification_open: bool,

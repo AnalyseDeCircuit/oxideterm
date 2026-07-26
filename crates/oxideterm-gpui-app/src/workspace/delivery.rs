@@ -6,7 +6,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{Receiver, SendError, Sender, TryRecvError},
     },
     time::{Duration, Instant},
@@ -67,6 +67,7 @@ pub(in crate::workspace) struct DrainOutcome {
 pub(in crate::workspace) struct ChannelDrain<T> {
     pub items: Vec<T>,
     pub outcome: DrainOutcome,
+    pub disconnected: bool,
 }
 
 pub(in crate::workspace) const LIFECYCLE_DELIVERY_BUDGET: DeliveryBudget =
@@ -120,15 +121,29 @@ impl ActiveDeliveryWake {
 
 /// Sends one value before marking the shared foreground wake.
 pub(in crate::workspace) struct ActiveDeliverySender<T> {
-    sender: Sender<T>,
+    sender: Option<Sender<T>>,
+    sender_count: Arc<AtomicUsize>,
     wake: ActiveDeliveryWake,
 }
 
 impl<T> Clone for ActiveDeliverySender<T> {
     fn clone(&self) -> Self {
+        self.sender_count.fetch_add(1, Ordering::Relaxed);
         Self {
             sender: self.sender.clone(),
+            sender_count: self.sender_count.clone(),
             wake: self.wake.clone(),
+        }
+    }
+}
+
+impl<T> Drop for ActiveDeliverySender<T> {
+    fn drop(&mut self) {
+        // Drop the channel endpoint before waking so the receiver can observe
+        // disconnection when the final producer exits.
+        self.sender.take();
+        if self.sender_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.wake.mark();
         }
     }
 }
@@ -140,11 +155,21 @@ impl<T> ActiveDeliverySender<T> {
 
     pub(in crate::workspace) fn channel_with_wake(wake: ActiveDeliveryWake) -> (Self, Receiver<T>) {
         let (sender, receiver) = std::sync::mpsc::channel();
-        (Self { sender, wake }, receiver)
+        (
+            Self {
+                sender: Some(sender),
+                sender_count: Arc::new(AtomicUsize::new(1)),
+                wake,
+            },
+            receiver,
+        )
     }
 
     pub(in crate::workspace) fn send(&self, value: T) -> Result<(), SendError<T>> {
-        self.sender.send(value)?;
+        self.sender
+            .as_ref()
+            .expect("active delivery sender must exist before drop")
+            .send(value)?;
         self.wake.mark();
         Ok(())
     }
@@ -162,6 +187,7 @@ pub(in crate::workspace) fn drain_channel<T>(
     let started_at = Instant::now();
     let mut items = Vec::new();
     let mut source_exhausted = false;
+    let mut disconnected = false;
 
     loop {
         if !budget.allows_next(items.len(), started_at.elapsed()) {
@@ -175,6 +201,7 @@ pub(in crate::workspace) fn drain_channel<T>(
             }
             Err(TryRecvError::Disconnected) => {
                 source_exhausted = true;
+                disconnected = true;
                 break;
             }
         }
@@ -184,6 +211,7 @@ pub(in crate::workspace) fn drain_channel<T>(
     ChannelDrain {
         outcome: budget.outcome(items.len(), elapsed, source_exhausted),
         items,
+        disconnected,
     }
 }
 
@@ -267,5 +295,21 @@ mod tests {
         assert!(!shared_wake.take());
         assert_eq!(first_receiver.try_recv(), Ok(1));
         assert_eq!(second_receiver.try_recv(), Ok(2));
+    }
+
+    #[test]
+    fn final_sender_drop_wakes_and_reports_disconnection() {
+        let (sender, receiver) = ActiveDeliverySender::<u8>::channel();
+        let wake = sender.wake();
+        let sender_clone = sender.clone();
+        drop(sender);
+        assert!(!wake.take());
+
+        drop(sender_clone);
+
+        assert!(wake.take());
+        let drain = drain_channel(&receiver, DeliveryBudget::new(1, Duration::from_secs(1)));
+        assert!(drain.disconnected);
+        assert!(!drain.outcome.backlog_remaining);
     }
 }

@@ -165,13 +165,13 @@ impl WorkspaceApp {
             _ => return,
         };
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(self.native_update_wake.clone());
         let cancel = Arc::new(AtomicBool::new(false));
         self.native_update_rx = Some(rx);
         self.native_update_cancel = Some(cancel.clone());
         self.native_update_state = NativeUpdateUiState::Downloading(None);
         self.show_native_update_notification();
-        self.schedule_native_update_delivery_poll(cx);
 
         let directory = self.native_update_download_directory();
         let runtime = self.forwarding_runtime.clone();
@@ -219,12 +219,12 @@ impl WorkspaceApp {
             };
         let plan = oxideterm_update::plan_native_install(&download.path, &context);
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(self.native_update_wake.clone());
         self.native_update_rx = Some(rx);
         self.native_update_cancel = None;
         self.native_update_state = NativeUpdateUiState::Installing(Some(plan.clone()));
         self.show_native_update_notification();
-        self.schedule_native_update_delivery_poll(cx);
 
         let runtime = self.forwarding_runtime.clone();
         let cleanup_directory = self.native_update_download_directory();
@@ -262,24 +262,34 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn schedule_native_update_delivery_poll(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.native_update_polling {
-            return;
-        }
-        self.native_update_polling = true;
+    pub(in crate::workspace) fn schedule_native_update_delivery(&self, cx: &mut Context<Self>) {
+        let update_wake = self.native_update_wake.clone();
+        let release_wake = update_wake.clone();
+        cx.on_release(move |_, _| {
+            // Cancel state remains operation-owned; release only stops the UI waiter.
+            release_wake.stop();
+        })
+        .detach();
         cx.spawn(async move |weak, cx| {
             loop {
-                Timer::after(std::time::Duration::from_millis(100)).await;
-                let keep_polling = weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_update_delivery(cx);
-                        this.native_update_polling
-                    })
-                    .unwrap_or(false);
-                if !keep_polling {
+                update_wake.wait().await;
+                let should_drain = update_wake.take();
+                let stopped = update_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(backlog_remaining) =
+                    weak.update(cx, |this, cx| this.poll_native_update_delivery(cx))
+                else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Continue a bounded progress batch without a polling timer.
+                    update_wake.mark();
+                } else if stopped {
                     break;
                 }
             }
@@ -287,34 +297,25 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(in crate::workspace) fn poll_native_update_delivery(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_native_update_delivery(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(rx) = self.native_update_rx.as_ref() else {
-            self.native_update_polling = false;
-            return;
+            return false;
         };
 
-        let mut deliveries = Vec::new();
-        let mut disconnected = false;
-        loop {
-            match rx.try_recv() {
-                Ok(delivery) => deliveries.push(delivery),
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    disconnected = true;
-                    break;
-                }
-            }
-        }
+        let delivery_batch = delivery::drain_channel(rx, delivery::NOTIFICATION_DELIVERY_BUDGET);
 
-        for delivery in deliveries {
-            self.handle_native_update_delivery(delivery, cx);
+        for update in delivery_batch.items {
+            self.handle_native_update_delivery(update, cx);
         }
-        if disconnected {
+        if delivery_batch.disconnected {
             self.native_update_rx = None;
-            self.native_update_polling = false;
             self.native_update_cancel = None;
         }
         cx.notify();
+        delivery_batch.outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn handle_native_update_delivery(

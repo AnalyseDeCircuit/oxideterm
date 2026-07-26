@@ -402,7 +402,7 @@ impl WorkspaceApp {
             portable_settings_refresh_pending: false,
             native_update_state: settings::NativeUpdateUiState::Idle,
             native_update_rx: None,
-            native_update_polling: false,
+            native_update_wake: delivery::ActiveDeliveryWake::default(),
             native_update_cancel: None,
             native_update_package: None,
             native_update_notification_open: false,
@@ -744,6 +744,7 @@ impl WorkspaceApp {
         workspace.schedule_connection_trace_delivery(cx);
         workspace.schedule_launcher_worker_delivery(cx);
         workspace.schedule_terminal_metadata_delivery(cx);
+        workspace.schedule_native_update_delivery(cx);
         workspace.schedule_forwarding_delivery(cx);
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
