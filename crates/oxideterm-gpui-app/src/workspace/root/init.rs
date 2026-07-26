@@ -61,7 +61,8 @@ impl WorkspaceApp {
         let node_router =
             NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store.clone());
         let (ssh_worker_tx, ssh_worker_rx) = std::sync::mpsc::channel();
-        let (forwarding_worker_tx, forwarding_worker_rx) = std::sync::mpsc::channel();
+        let (forwarding_worker_tx, forwarding_worker_rx) =
+            delivery::ActiveDeliverySender::channel();
         // Node state is a latest-value stream. Bound and coalesce its mailbox so
         // a suspended UI cannot retain an unbounded event backlog.
         let (node_event_subscription, node_event_rx) = node_router.emitter().subscribe_bounded(256);
@@ -721,6 +722,7 @@ impl WorkspaceApp {
         workspace.restore_session_tree_snapshot();
         workspace.schedule_terminal_notice_delivery(cx);
         workspace.schedule_connection_trace_delivery(cx);
+        workspace.schedule_forwarding_worker_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
@@ -760,7 +762,6 @@ impl WorkspaceApp {
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);
-                            workspace.poll_forwarding_worker_results(cx);
                             workspace.poll_forwarding_events(cx);
                             workspace.sync_ssh_node_lifecycle(cx);
                             workspace.maybe_probe_active_ssh_connections(cx);

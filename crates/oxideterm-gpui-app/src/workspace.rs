@@ -1005,7 +1005,7 @@ pub(crate) struct WorkspaceApp {
     connection_monitor_section_list_cache: RefCell<VirtualListSignatureCache>,
     cloud_sync: cloud_sync::CloudSyncWorkspaceState,
     sftp_worker_tx: tokio::sync::mpsc::UnboundedSender<sftp::SftpWorkerResult>,
-    forwarding_worker_tx: std::sync::mpsc::Sender<forwards::ForwardingWorkerResult>,
+    forwarding_worker_tx: delivery::ActiveDeliverySender<forwards::ForwardingWorkerResult>,
     forwarding_worker_rx: std::sync::mpsc::Receiver<forwards::ForwardingWorkerResult>,
     forwarding_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
     i18n: I18n,

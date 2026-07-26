@@ -5,8 +5,7 @@ use super::{
     FORWARDS_PORT_SCAN_INTERVAL, FORWARDS_STATS_REFRESH_INTERVAL, ForwardEvent, ForwardInput,
     ForwardRule, ForwardStatus, ForwardType, ForwardUpdate, ForwardingManager, ForwardingRegistry,
     ForwardingWorkerResult, Instant, KeyDownEvent, NodeId, NodeReadiness, NodeRouter,
-    PortDetectionSnapshot, TabId, TabKind, TerminalNotice, TerminalNoticeVariant, WorkspaceApp,
-    thread,
+    PortDetectionSnapshot, TabId, TerminalNotice, TerminalNoticeVariant, WorkspaceApp, thread,
 };
 use crate::workspace::delivery;
 
@@ -319,6 +318,19 @@ impl WorkspaceApp {
             .cloned()
             .collect::<Vec<_>>();
         for node_id in nodes {
+            if !self.forwards_node_has_visible_tab(&node_id) {
+                if let Some(connection_id) = self.forwarding_connection_id_for_node(&node_id) {
+                    // Hidden forwarding pages stop their profiler without touching tunnel owners.
+                    self.forwarding_registry.stop_port_profiler(&connection_id);
+                }
+                if let Some(state) = self.forwarding_port_detection_by_node.get_mut(&node_id)
+                    && !state.port_scan_pending
+                {
+                    // A newly visible mount should restart sampling immediately.
+                    state.last_port_scan_started = None;
+                }
+                continue;
+            }
             let state = self
                 .forwarding_port_detection_by_node
                 .entry(node_id.clone())
@@ -336,14 +348,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn maybe_refresh_forwards_stats(&mut self, cx: &mut Context<Self>) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
-            return;
-        };
-        if self
-            .tabs
-            .iter()
-            .find(|tab| tab.id == tab_id)
-            .is_none_or(|tab| tab.kind != TabKind::Forwards)
+        if !self
+            .forward_tab_nodes
+            .keys()
+            .any(|tab_id| self.forwards_tab_is_visible(*tab_id))
         {
             return;
         }
@@ -468,7 +476,10 @@ impl WorkspaceApp {
                 })
     }
 
-    pub(in crate::workspace) fn poll_forwarding_worker_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_forwarding_worker_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let drain = delivery::drain_channel(
             &self.forwarding_worker_rx,
             delivery::USER_ACTION_DELIVERY_BUDGET,
@@ -484,10 +495,15 @@ impl WorkspaceApp {
                     result,
                 } => {
                     self.remember_forwarding_binding(binding);
-                    if Some(tab_id) == self.main_window_tabs.active_tab_id {
-                        self.forwarding_view.pending = false;
-                        match result {
-                            Ok(()) => {
+                    self.forwarding_view.pending = false;
+                    match result {
+                        Ok(()) => {
+                            if sync_saved_forwards_on_success {
+                                // Persisted mutations are durable even when the initiating tab
+                                // becomes hidden before the worker completes.
+                                self.queue_cloud_sync_dirty_refresh(cx);
+                            }
+                            if self.forwards_tab_is_visible(tab_id) {
                                 let _ = message_key;
                                 self.forwarding_view.error = None;
                                 if self.forwarding_view.show_new_form {
@@ -498,17 +514,21 @@ impl WorkspaceApp {
                                     self.begin_forward_edit_form_exit(cx);
                                 }
                                 self.forwarding_view.focused_input = None;
-                                if sync_saved_forwards_on_success {
-                                    // Tauri emits saved-forwards:update only
-                                    // for persisted mutations. A temporary stop
-                                    // preserves the saved rule and must not mark
-                                    // cloud sync dirty by itself.
-                                    self.queue_cloud_sync_dirty_refresh(cx);
-                                }
+                                changed = true;
                             }
-                            Err(error) => self.forwarding_view.error = Some(error),
                         }
-                        changed = true;
+                        Err(error) => {
+                            if self.forwards_tab_is_visible(tab_id) {
+                                self.forwarding_view.error = Some(error);
+                                changed = true;
+                            } else {
+                                self.push_forward_status_notice(
+                                    self.i18n.t("forwards.toast.error_title"),
+                                    Some(error),
+                                    TerminalNoticeVariant::Error,
+                                );
+                            }
+                        }
                     }
                 }
                 ForwardingWorkerResult::Binding { binding } => {
@@ -533,9 +553,7 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
-        if drain.outcome.backlog_remaining {
-            self.schedule_forwarding_worker_delivery_continuation(cx);
-        }
+        drain.outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn poll_forwarding_events(&mut self, cx: &mut Context<Self>) {
@@ -552,9 +570,7 @@ impl WorkspaceApp {
                     error,
                     ..
                 } => {
-                    if !self.active_forwards_tab_matches_session(&session_id) {
-                        continue;
-                    }
+                    let visible = self.active_forwards_tab_matches_session(&session_id);
                     match status {
                         ForwardStatus::Suspended => {
                             let description = self.i18n.t("forwards.toast.suspended_desc");
@@ -573,7 +589,7 @@ impl WorkspaceApp {
                         }
                         _ => {}
                     }
-                    changed = true;
+                    changed |= visible;
                 }
                 ForwardEvent::StatsUpdated { session_id, .. } => {
                     if self.active_forwards_tab_matches_session(&session_id) {
@@ -584,9 +600,7 @@ impl WorkspaceApp {
                     session_id,
                     forward_ids,
                 } => {
-                    if !self.active_forwards_tab_matches_session(&session_id) {
-                        continue;
-                    }
+                    let visible = self.active_forwards_tab_matches_session(&session_id);
                     // Tauri handles sessionSuspended as a toast-only runtime
                     // event. Keep inline form errors reserved for create/edit
                     // validation and operation failures.
@@ -599,7 +613,7 @@ impl WorkspaceApp {
                         ),
                         TerminalNoticeVariant::Warning,
                     );
-                    changed = true;
+                    changed |= visible;
                 }
                 ForwardEvent::PortDetected {
                     connection_id,
@@ -636,12 +650,37 @@ impl WorkspaceApp {
         }
     }
 
-    fn schedule_forwarding_worker_delivery_continuation(&self, cx: &mut Context<Self>) {
-        // Continue immediately so completed user actions never wait for the workspace heartbeat.
+    pub(in crate::workspace) fn schedule_forwarding_worker_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.forwarding_worker_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Tunnel managers remain registry-owned; only the workspace UI waiter stops here.
+            release_wake.stop();
+        })
+        .detach();
         cx.spawn(async move |weak, cx| {
-            let _ = weak.update(cx, |workspace, cx| {
-                workspace.poll_forwarding_worker_results(cx);
-            });
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let backlog_remaining = weak
+                    .update(cx, |workspace, cx| {
+                        workspace.poll_forwarding_worker_results(cx)
+                    })
+                    .unwrap_or(false);
+                if backlog_remaining {
+                    // Store one continuation permit for the next reliable worker batch.
+                    delivery_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
         })
         .detach();
     }
@@ -676,22 +715,34 @@ impl WorkspaceApp {
     }
 
     fn active_forwards_tab_matches_session(&self, session_id: &str) -> bool {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
-            return false;
-        };
-        let Some(node_id) = self.forward_tab_nodes.get(&tab_id) else {
-            return false;
-        };
-        self.forwarding_session_id_for_node(node_id) == session_id
+        self.forward_tab_nodes.iter().any(|(tab_id, node_id)| {
+            self.forwards_tab_is_visible(*tab_id)
+                && self.forwarding_session_id_for_node(node_id) == session_id
+        })
     }
 
     fn active_forwards_tab_matches_node(&self, node_id: &NodeId) -> bool {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
-            return false;
-        };
         self.forward_tab_nodes
-            .get(&tab_id)
-            .is_some_and(|active_node_id| active_node_id == node_id)
+            .iter()
+            .any(|(tab_id, visible_node_id)| {
+                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id)
+            })
+    }
+
+    fn forwards_node_has_visible_tab(&self, node_id: &NodeId) -> bool {
+        self.forward_tab_nodes
+            .iter()
+            .any(|(tab_id, visible_node_id)| {
+                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id)
+            })
+    }
+
+    fn forwards_tab_is_visible(&self, tab_id: TabId) -> bool {
+        super::forwarding_tab_mount_is_visible(
+            tab_id,
+            self.main_window_tabs.active_tab_id,
+            self.detached_tab_windows.contains_key(&tab_id),
+        )
     }
 
     pub(in crate::workspace) fn forwarding_connection_id_for_node(
