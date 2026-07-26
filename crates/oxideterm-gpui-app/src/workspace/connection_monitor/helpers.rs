@@ -3,6 +3,8 @@ use super::*;
 use gpui::{PathBuilder, canvas, point};
 use oxideterm_topology::TopologyViewStatus;
 
+use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
+
 pub(super) fn host_tools_tooltip_icon_button(
     tokens: &ThemeTokens,
     icon: LucideIcon,
@@ -54,6 +56,17 @@ pub(super) fn monitor_center_state(
     label: String,
     cx: &mut Context<WorkspaceApp>,
 ) -> AnyElement {
+    let selectable_text = app.selectable_text_render_state(cx);
+    host_tools_center_state(icon, color, label, &selectable_text, cx)
+}
+
+pub(super) fn host_tools_center_state(
+    icon: LucideIcon,
+    color: u32,
+    label: String,
+    selectable_text: &SelectableTextRenderState,
+    cx: &mut App,
+) -> AnyElement {
     let label_key = label.clone();
     div()
         .p_4()
@@ -68,18 +81,18 @@ pub(super) fn monitor_center_state(
                 .mb_2()
                 .child(WorkspaceApp::render_lucide_icon(icon, 20.0, rgb(color))),
         )
-        .child(
-            div()
-                .text_size(px(14.0))
-                .child(app.render_display_text_with_role(
-                    SelectableTextRole::PlainDocument,
-                    "monitor-center-state",
-                    label_key,
-                    label,
-                    color,
-                    cx,
-                )),
-        )
+        .child(div().text_size(px(14.0)).child(
+            selectable_text.render_display_text_with_role_in_group(
+                SelectableTextRole::PlainDocument,
+                selectable_document_group_id(),
+                "monitor-center-state",
+                label_key,
+                0,
+                label,
+                color,
+                cx,
+            ),
+        ))
         .into_any_element()
 }
 

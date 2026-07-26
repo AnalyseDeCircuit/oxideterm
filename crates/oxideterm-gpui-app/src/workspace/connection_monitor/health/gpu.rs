@@ -2,53 +2,45 @@
 
 use super::*;
 
-impl WorkspaceApp {
-    pub(super) fn render_host_gpu_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let connections = self.monitor_connections(cx);
+impl HostToolsEntity {
+    pub(in crate::workspace::connection_monitor) fn render_host_gpu_panel(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.monitor_connections();
         if connections.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::WifiOff,
-                self.tokens.ui.text_muted,
-                self.i18n.t("profiler.panel.no_connection"),
+                tokens.ui.text_muted,
+                i18n.t("profiler.panel.no_connection"),
+                selectable_text,
                 cx,
             );
         }
 
-        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
+        let selected_connection_id = self.selected_connection_id_owned();
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let (snapshot, is_running) = {
-            let host_tools = self.host_tools.read(cx);
-            (
-                host_tools.gpu_snapshot_for(selected_id),
-                host_tools.gpu_sampling_is_running(selected_id),
-            )
-        };
+        let snapshot = self.gpu_snapshot_for(selected_id);
+        let is_running = self.gpu_sampling_is_running(selected_id);
         let snapshot = snapshot.as_ref();
         let devices = snapshot
             .map(|snapshot| snapshot.devices.clone())
             .unwrap_or_default();
-        self.host_tools
-            .read(cx)
-            .sync_gpu_list_state(&devices, snapshot, selected_id);
-        let tokens = self.tokens;
-        let i18n = self.i18n.clone();
-        let summary = snapshot.map(|snapshot| {
-            self.host_tools.update(cx, |host_tools, _cx| {
-                host_tools.render_host_gpu_summary(snapshot, &tokens, &i18n)
-            })
-        });
-        let status = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.render_host_gpu_status_row(
-                devices.len(),
-                selected_id.to_string(),
-                &tokens,
-                &i18n,
-                cx,
-            )
-        });
+        self.sync_gpu_list_state(&devices, snapshot, selected_id);
+        let summary = snapshot.map(|snapshot| self.render_host_gpu_summary(snapshot, tokens, i18n));
+        let status = self.render_host_gpu_status_row(
+            devices.len(),
+            selected_id.to_string(),
+            tokens,
+            i18n,
+            cx,
+        );
 
         div()
             .id("host-gpu-panel")
@@ -71,17 +63,27 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap_2()
                     .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_switcher_row(
+                    .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
                         is_running,
+                        tokens,
+                        mono_font_family,
+                        selectable_text,
                         cx,
                     ))
                     .when_some(summary, |header, summary| header.child(summary))
                     .child(status),
             )
-            .child(self.render_host_gpu_list(devices, snapshot.cloned(), cx))
+            .child(self.render_host_gpu_list(
+                devices,
+                snapshot.cloned(),
+                tokens,
+                i18n,
+                selectable_text,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -89,75 +91,75 @@ impl WorkspaceApp {
         &self,
         devices: Vec<GpuDevice>,
         snapshot: Option<GpuSnapshot>,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(snapshot) = snapshot else {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Cpu,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_gpu.sampling"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_gpu.sampling"),
+                selectable_text,
                 cx,
             );
         };
         match &snapshot.status {
             GpuSnapshotStatus::Unavailable => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::Cpu,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_gpu.unavailable"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_gpu.unavailable"),
+                    selectable_text,
                     cx,
                 );
             }
             GpuSnapshotStatus::Unsupported => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::Cpu,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_gpu.unsupported"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_gpu.unsupported"),
+                    selectable_text,
                     cx,
                 );
             }
             GpuSnapshotStatus::NoDevices => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::Cpu,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_gpu.no_devices"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_gpu.no_devices"),
+                    selectable_text,
                     cx,
                 );
             }
             GpuSnapshotStatus::Error(message) => {
-                return monitor_center_state(
-                    self,
+                let error = i18n
+                    .t("sidebar.host_gpu.error")
+                    .replace("{{error}}", message);
+                return host_tools_center_state(
                     LucideIcon::AlertTriangle,
                     MONITOR_RED,
-                    self.i18n_replace("sidebar.host_gpu.error", &[("error", message.clone())]),
+                    error,
+                    selectable_text,
                     cx,
                 );
             }
             GpuSnapshotStatus::Unknown if devices.is_empty() => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::Cpu,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_gpu.sampling"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_gpu.sampling"),
+                    selectable_text,
                     cx,
                 );
             }
             GpuSnapshotStatus::Available | GpuSnapshotStatus::Unknown => {}
         }
 
-        let tokens = self.tokens;
-        let i18n = self.i18n.clone();
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.render_gpu_device_list(devices, snapshot, &tokens, &i18n, cx)
-        })
+        self.render_gpu_device_list(devices, snapshot, tokens, i18n, cx)
     }
-}
 
-impl HostToolsEntity {
     fn render_host_gpu_summary(
         &self,
         snapshot: &GpuSnapshot,

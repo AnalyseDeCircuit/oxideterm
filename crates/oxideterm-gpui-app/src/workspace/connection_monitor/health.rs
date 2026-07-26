@@ -428,7 +428,22 @@ impl WorkspaceApp {
         let content = if enabled {
             match active_tool {
                 ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
-                ContextSidebarTool::Gpu => self.render_host_gpu_panel(cx),
+                ContextSidebarTool::Gpu => {
+                    let tokens = self.tokens;
+                    let i18n = self.i18n.clone();
+                    let mono_font_family =
+                        settings_mono_font_family(self.settings_store.settings());
+                    let selectable_text = self.selectable_text_render_state(cx);
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.render_host_gpu_panel(
+                            &tokens,
+                            &i18n,
+                            mono_font_family,
+                            &selectable_text,
+                            cx,
+                        )
+                    })
+                }
                 ContextSidebarTool::Processes => self.render_host_processes_panel(cx),
                 ContextSidebarTool::Services => self.render_host_services_panel(cx),
                 ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
