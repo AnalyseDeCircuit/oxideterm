@@ -110,6 +110,13 @@ impl WorkspaceApp {
                 HostToolsEvent::RefreshProfiler { connection_id } => {
                     workspace.start_connection_monitor_profiler(connection_id.clone(), cx);
                 }
+                HostToolsEvent::RefreshSchedules { connection_id } => {
+                    workspace.request_host_schedules_snapshot(
+                        connection_id.clone(),
+                        HostSnapshotFeedback::Silent,
+                        cx,
+                    );
+                }
                 HostToolsEvent::ShowNotice(notice) => {
                     workspace.push_host_tools_notice(notice.clone());
                 }

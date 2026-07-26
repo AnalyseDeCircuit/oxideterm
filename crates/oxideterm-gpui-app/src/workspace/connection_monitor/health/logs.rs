@@ -948,6 +948,52 @@ impl WorkspaceApp {
                 ),
                 TerminalNoticeVariant::Error,
             ),
+            HostToolsNotice::ScheduleLogsAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_schedules.toast.logs_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ScheduleLogsFailed => (
+                self.i18n.t("sidebar.host_schedules.toast.logs_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ScheduleActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_schedules.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ScheduleActionFailed => (
+                self.i18n.t("sidebar.host_schedules.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ScheduleActionFinished {
+                kind,
+                task_name,
+                succeeded,
+            } => {
+                if succeeded {
+                    let message_key = match kind {
+                        ScheduleActionNoticeKind::RunNow => {
+                            "sidebar.host_schedules.toast.run_now_started"
+                        }
+                        ScheduleActionNoticeKind::Enable => {
+                            "sidebar.host_schedules.toast.enable_succeeded"
+                        }
+                        ScheduleActionNoticeKind::Disable => {
+                            "sidebar.host_schedules.toast.disable_succeeded"
+                        }
+                    };
+                    (
+                        self.i18n_replace(message_key, &[("name", task_name)]),
+                        TerminalNoticeVariant::Success,
+                    )
+                } else {
+                    (
+                        self.i18n.t("sidebar.host_schedules.toast.action_failed"),
+                        TerminalNoticeVariant::Error,
+                    )
+                }
+            }
         };
         self.push_host_log_toast(message, variant);
     }

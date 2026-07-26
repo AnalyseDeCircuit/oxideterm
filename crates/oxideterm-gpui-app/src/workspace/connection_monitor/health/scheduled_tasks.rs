@@ -611,10 +611,9 @@ impl WorkspaceApp {
         let can_toggle_enabled = availability.can_toggle_enabled;
         let should_enable = matches!(availability.next_toggle, ScheduledTaskToggleAction::Enable);
         let action_running = self
-            .connection_monitor
-            .host_schedule_action_running
-            .as_ref()
-            .is_some_and(|request| request.task_id == entry.id);
+            .host_tools
+            .read(cx)
+            .schedule_action_running_for(&entry.id);
         div()
             .flex_none()
             .flex()
@@ -895,25 +894,6 @@ impl WorkspaceApp {
             .map(|command| (command, os_type))
     }
 
-    pub(super) fn host_schedule_action_command(
-        &self,
-        connection_id: &str,
-        action: ScheduledTaskActionKind,
-    ) -> Result<
-        (
-            oxideterm_connection_monitor::ScheduledTaskActionCommand,
-            String,
-        ),
-        String,
-    > {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_scheduled_task_action_command(&os_type, action).map(|command| (command, os_type))
-    }
-
     pub(super) fn host_schedule_diagnostic_command(&self, connection_id: &str) -> (String, String) {
         let os_type = self
             .ssh_registry
@@ -961,7 +941,7 @@ impl WorkspaceApp {
         self.request_host_schedules_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
     }
 
-    pub(super) fn request_host_schedules_snapshot(
+    pub(in crate::workspace) fn request_host_schedules_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,
@@ -991,68 +971,22 @@ impl WorkspaceApp {
         task: ResourceScheduledTask,
         cx: &mut Context<Self>,
     ) {
-        if self.connection_monitor.host_schedule_logs_polling {
-            self.push_host_schedule_toast(
-                self.i18n
-                    .t("sidebar.host_schedules.toast.logs_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            self.push_host_schedule_toast(
-                self.i18n
-                    .t("sidebar.host_schedules.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let (command, os_type) =
-            match self.host_schedule_logs_command(&connection_id, &task, false, 200) {
-                Ok(command) => command,
-                Err(error) => {
-                    self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
-                    cx.notify();
-                    return;
-                }
-            };
-        if command.capability == ScheduledTaskCapability::Partial {
-            self.push_host_schedule_toast(
-                self.i18n_replace(
-                    "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-        let request = HostScheduleLogsRequest {
-            connection_id,
-            task,
-        };
-        self.connection_monitor.host_schedule_logs_dialog = Some(HostScheduleLogsDialog {
-            request: request.clone(),
-            output: None,
-            error: None,
-            loading: true,
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_schedules.toast.logs_failed");
+        let empty_fallback = self.i18n.t("sidebar.host_schedules.logs.empty");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_schedule_logs(
+                connection_id,
+                task,
+                runtime,
+                failure_fallback,
+                empty_fallback,
+                cx,
+            )
         });
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor.host_schedule_logs_rx = Some(rx);
-        self.connection_monitor.host_schedule_logs_polling = true;
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_SCHEDULE_LOGS_TIMEOUT,
-                    HOST_SCHEDULE_LOGS_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostScheduleLogsDelivery { request, result });
-        });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn request_host_schedule_run_now(
@@ -1061,31 +995,25 @@ impl WorkspaceApp {
         task: ResourceScheduledTask,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .connection_monitor
-            .host_schedule_action_running
-            .is_some()
-        {
-            self.push_host_schedule_toast(
-                self.i18n
-                    .t("sidebar.host_schedules.toast.action_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+        let notice = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.open_schedule_action_confirm(
+                HostScheduleActionRequest {
+                    connection_id,
+                    task_id: task.id.clone(),
+                    task_name: task.name.clone(),
+                    unit: task.unit.clone(),
+                    action: ScheduledTaskActionKind::RunNow {
+                        id: task.id,
+                        unit: task.unit,
+                    },
+                },
+                cx,
+            )
+        });
+        if let Some(notice) = notice {
+            self.push_host_tools_notice(notice);
             return;
         }
-        HostToolConfirmState::open(
-            &mut self.connection_monitor.host_schedule_pending_confirm,
-            HostScheduleActionRequest {
-                connection_id,
-                task_id: task.id.clone(),
-                task_name: task.name.clone(),
-                unit: task.unit.clone(),
-                action: ScheduledTaskActionKind::RunNow {
-                    id: task.id,
-                    unit: task.unit,
-                },
-            },
-        );
         self.reset_standard_confirm_focus();
         cx.notify();
     }
@@ -1097,18 +1025,6 @@ impl WorkspaceApp {
         enable: bool,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .connection_monitor
-            .host_schedule_action_running
-            .is_some()
-        {
-            self.push_host_schedule_toast(
-                self.i18n
-                    .t("sidebar.host_schedules.toast.action_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
-            return;
-        }
         let action = if enable {
             ScheduledTaskActionKind::Enable {
                 id: task.id.clone(),
@@ -1120,16 +1036,22 @@ impl WorkspaceApp {
                 source: task.source.clone(),
             }
         };
-        HostToolConfirmState::open(
-            &mut self.connection_monitor.host_schedule_pending_confirm,
-            HostScheduleActionRequest {
-                connection_id,
-                task_id: task.id,
-                task_name: task.name,
-                unit: task.unit,
-                action,
-            },
-        );
+        let notice = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.open_schedule_action_confirm(
+                HostScheduleActionRequest {
+                    connection_id,
+                    task_id: task.id,
+                    task_name: task.name,
+                    unit: task.unit,
+                    action,
+                },
+                cx,
+            )
+        });
+        if let Some(notice) = notice {
+            self.push_host_tools_notice(notice);
+            return;
+        }
         self.reset_standard_confirm_focus();
         cx.notify();
     }
@@ -1244,11 +1166,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self
-            .connection_monitor
-            .host_schedule_pending_confirm
-            .is_none()
-        {
+        if self.host_tools.read(cx).schedule_confirm_view().is_none() {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {
@@ -1266,253 +1184,30 @@ impl WorkspaceApp {
     }
 
     pub(super) fn confirm_host_schedule_action(&mut self, cx: &mut Context<Self>) {
-        let Some(request) = self
-            .connection_monitor
-            .host_schedule_pending_confirm
-            .as_ref()
-            .map(|state| state.request.clone())
-        else {
-            return;
-        };
-        if self.begin_host_schedule_confirm_exit(cx) {
-            self.start_host_schedule_action(request, cx);
-        }
-    }
-
-    /// Keeps the request mounted until the current exit generation completes.
-    fn begin_host_schedule_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self
-            .connection_monitor
-            .host_schedule_pending_confirm
-            .as_mut()
-            .and_then(|state| state.presence.begin_exit())
-        else {
-            return false;
-        };
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        if delay.is_zero() {
-            self.connection_monitor.host_schedule_pending_confirm = None;
-            cx.notify();
-            return true;
-        }
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .connection_monitor
-                    .host_schedule_pending_confirm
-                    .as_ref()
-                    .is_some_and(|state| state.presence.finish_exit(generation))
-                {
-                    this.connection_monitor.host_schedule_pending_confirm = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-        true
-    }
-
-    pub(super) fn start_host_schedule_action(
-        &mut self,
-        request: HostScheduleActionRequest,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
-            self.push_host_schedule_toast(
-                self.i18n
-                    .t("sidebar.host_schedules.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let (command, os_type) = match self
-            .host_schedule_action_command(&request.connection_id, request.action.clone())
-        {
-            Ok(command) => command,
-            Err(error) => {
-                self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
-                cx.notify();
-                return;
-            }
-        };
-        if command.capability == ScheduledTaskCapability::Partial {
-            self.push_host_schedule_toast(
-                self.i18n_replace(
-                    "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        let delivery_request = request.clone();
-        self.connection_monitor.host_schedule_action_running = Some(request);
-        self.connection_monitor.host_schedule_action_rx = Some(rx);
-        self.connection_monitor.host_schedule_action_polling = true;
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_SCHEDULE_ACTION_TIMEOUT,
-                    HOST_SCHEDULE_ACTION_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostScheduleActionDelivery {
-                request: delivery_request,
-                result,
-            });
+        let runtime = self.forwarding_runtime.handle().clone();
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.confirm_schedule_action(delay, runtime, cx)
         });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn poll_host_schedule_logs_results(&mut self, cx: &mut Context<Self>) {
-        if !self.connection_monitor.host_schedule_logs_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_schedule_logs_rx.take() else {
-            self.connection_monitor.host_schedule_logs_polling = false;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.connection_monitor.host_schedule_logs_polling = false;
-                self.finish_host_schedule_logs(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_schedule_logs_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.connection_monitor.host_schedule_logs_polling = false;
-                if let Some(dialog) = self.connection_monitor.host_schedule_logs_dialog.as_mut() {
-                    dialog.loading = false;
-                    dialog.error = Some(self.i18n.t("sidebar.host_schedules.toast.logs_failed"));
-                }
-                cx.notify();
-            }
+        for notice in notices {
+            self.push_host_tools_notice(notice);
         }
     }
 
-    pub(in crate::workspace) fn poll_host_schedule_action_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_schedule_action_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_schedule_action_rx.take() else {
-            self.connection_monitor.host_schedule_action_polling = false;
-            self.connection_monitor.host_schedule_action_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.connection_monitor.host_schedule_action_polling = false;
-                self.connection_monitor.host_schedule_action_running = None;
-                self.finish_host_schedule_action(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_schedule_action_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.connection_monitor.host_schedule_action_polling = false;
-                self.connection_monitor.host_schedule_action_running = None;
-                self.push_host_schedule_toast(
-                    self.i18n.t("sidebar.host_schedules.toast.action_failed"),
-                    TerminalNoticeVariant::Error,
-                );
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_schedule_logs(
-        &mut self,
-        delivery: HostScheduleLogsDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(dialog) = self
-            .connection_monitor
-            .host_schedule_logs_dialog
-            .as_mut()
-            .filter(|dialog| dialog.request == delivery.request)
-        else {
-            cx.notify();
-            return;
-        };
-        dialog.loading = false;
-        match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let logs = if output.stdout.trim().is_empty() {
-                    self.i18n.t("sidebar.host_schedules.logs.empty")
-                } else {
-                    output.stdout
-                };
-                dialog.output = Some(logs);
-                dialog.error = None;
-            }
-            Ok(output) => {
-                dialog.output = None;
-                dialog.error = Some(host_tool_capture_failure_message(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                    &self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
-                ));
-            }
-            Err(error) => {
-                dialog.output = None;
-                dialog.error = Some(error);
-            }
-        }
-        cx.notify();
-    }
-
-    pub(super) fn finish_host_schedule_action(
-        &mut self,
-        delivery: HostScheduleActionDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        match delivery.result {
-            Ok(output) => {
-                let success_message = self.i18n_replace(
-                    host_schedule_action_success_key(&delivery.request.action),
-                    &[("name", delivery.request.task_name.clone())],
-                );
-                match interpret_scheduled_task_action_output(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                    success_message,
-                    &self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
-                ) {
-                    HostToolActionOutcome::Succeeded { message } => {
-                        self.push_host_schedule_toast(message, TerminalNoticeVariant::Success);
-                    }
-                    HostToolActionOutcome::Failed { message } => {
-                        self.push_host_schedule_toast(message, TerminalNoticeVariant::Error);
-                    }
-                }
-            }
-            Err(error) => {
-                self.push_host_schedule_toast(error, TerminalNoticeVariant::Error);
-            }
-        }
-        self.request_host_schedules_snapshot(
-            delivery.request.connection_id,
-            HostSnapshotFeedback::Silent,
-            cx,
+    /// Keeps the request mounted until the current exit generation completes.
+    fn begin_host_schedule_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.clear_standard_confirm_focus();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_schedule_confirm_exit(delay, cx)
+        })
     }
 
     pub(super) fn push_host_schedule_toast(
@@ -1533,11 +1228,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let request = self
-            .connection_monitor
-            .host_schedule_pending_confirm
-            .as_ref()?;
-        let request = &request.request;
+        let (request, phase) = self.host_tools.read(cx).schedule_confirm_view()?;
         let title = self.i18n.t("sidebar.host_schedules.confirm.title");
         let description = self.i18n_replace(
             host_schedule_confirm_description_key(&request.action),
@@ -1550,11 +1241,7 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
                 &self.tokens,
                 "host-schedule-confirm-motion",
-                self.connection_monitor
-                    .host_schedule_pending_confirm
-                    .as_ref()?
-                    .presence
-                    .phase(),
+                phase,
                 ConfirmDialogView {
                     variant: ConfirmDialogVariant::Default,
                     title: div().child(title).into_any_element(),
@@ -1585,11 +1272,27 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.connection_monitor.host_schedule_logs_dialog.as_ref()?;
+        let dialog = self.host_tools.read(cx).schedule_logs_dialog()?;
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let follow_connection_id = dialog.request.connection_id.clone();
-        let follow_task = dialog.request.task.clone();
+        // Rebuild only the task identity required by the command builder.
+        // The sampled task command is never copied into the async log request.
+        let follow_task = ResourceScheduledTask {
+            id: dialog.request.task_id.clone(),
+            name: dialog.request.task_name.clone(),
+            source: dialog.request.task_source.clone(),
+            schedule: String::new(),
+            command: String::new(),
+            user: String::new(),
+            enabled: String::new(),
+            active: String::new(),
+            last_run: String::new(),
+            next_run: String::new(),
+            last_result: String::new(),
+            description: String::new(),
+            unit: dialog.request.task_unit.clone(),
+        };
         let follow_logs_disabled = self
             .host_schedule_logs_command(&follow_connection_id, &follow_task, true, 200)
             .is_err()
@@ -1611,6 +1314,8 @@ impl WorkspaceApp {
                 .into_any_element()
         } else {
             let output = dialog.output.clone().unwrap_or_default();
+            // Per-line strings are the explicit GPUI output boundary and live
+            // only in the current render tree; the retained capture stays shared.
             let mut lines = div()
                 .p_3()
                 .flex()
@@ -1641,7 +1346,9 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.connection_monitor.host_schedule_logs_dialog = None;
+                        this.host_tools.update(cx, |host_tools, cx| {
+                            host_tools.dismiss_schedule_logs_dialog(cx);
+                        });
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -1674,7 +1381,7 @@ impl WorkspaceApp {
                                                 .text_color(rgb(theme.text))
                                                 .child(self.i18n_replace(
                                                     "sidebar.host_schedules.logs.title",
-                                                    &[("name", dialog.request.task.name.clone())],
+                                                    &[("name", dialog.request.task_name.clone())],
                                                 )),
                                         )
                                         .child(
@@ -1682,7 +1389,7 @@ impl WorkspaceApp {
                                                 .truncate()
                                                 .text_size(px(11.0))
                                                 .text_color(rgb(theme.text_muted))
-                                                .child(dialog.request.task.id.clone()),
+                                                .child(dialog.request.task_id.clone()),
                                         ),
                                 )
                                 .child(
@@ -1714,8 +1421,13 @@ impl WorkspaceApp {
                                                 let connection_id = follow_connection_id;
                                                 let task = follow_task;
                                                 move |this, _event, window, cx| {
-                                                    this.connection_monitor.host_schedule_logs_dialog =
-                                                        None;
+                                                    this.host_tools.update(
+                                                        cx,
+                                                        |host_tools, cx| {
+                                                            host_tools
+                                                                .dismiss_schedule_logs_dialog(cx);
+                                                        },
+                                                    );
                                                     this.open_host_schedule_follow_terminal(
                                                         connection_id.clone(),
                                                         task.clone(),
@@ -1745,8 +1457,13 @@ impl WorkspaceApp {
                                             "host-schedule-logs-close",
                                             true,
                                             cx.listener(|this, _event, _window, cx| {
-                                                this.connection_monitor.host_schedule_logs_dialog =
-                                                    None;
+                                                this.host_tools.update(
+                                                    cx,
+                                                    |host_tools, cx| {
+                                                        host_tools
+                                                            .dismiss_schedule_logs_dialog(cx);
+                                                    },
+                                                );
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
@@ -1959,6 +1676,271 @@ impl HostToolsEntity {
         }
         cx.notify();
     }
+
+    pub(super) fn schedule_action_running_for(&self, task_id: &str) -> bool {
+        self.host_schedules
+            .action_running
+            .as_ref()
+            .is_some_and(|request| request.task_id == task_id)
+    }
+
+    pub(in crate::workspace::connection_monitor) fn open_schedule_action_confirm(
+        &mut self,
+        request: HostScheduleActionRequest,
+        cx: &mut Context<Self>,
+    ) -> Option<HostToolsNotice> {
+        if self.host_schedules.action_running.is_some() {
+            return Some(HostToolsNotice::ScheduleActionAlreadyRunning);
+        }
+        HostToolConfirmState::open(&mut self.host_schedules.pending_confirm, request);
+        cx.notify();
+        None
+    }
+
+    pub(in crate::workspace::connection_monitor) fn schedule_confirm_view(
+        &self,
+    ) -> Option<(
+        HostScheduleActionRequest,
+        oxideterm_gpui_ui::motion::ExitPhase,
+    )> {
+        self.host_schedules
+            .pending_confirm
+            .as_ref()
+            .map(|state| (state.request.clone(), state.presence.phase()))
+    }
+
+    /// Dismisses a pending confirmation without affecting an in-flight remote action.
+    pub(in crate::workspace::connection_monitor) fn dismiss_schedule_confirm(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_schedules.pending_confirm.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn begin_schedule_confirm_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self
+            .host_schedules
+            .pending_confirm
+            .as_mut()
+            .and_then(|state| state.presence.begin_exit())
+        else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.host_schedules.pending_confirm = None;
+            cx.notify();
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |entity, cx| {
+                if entity
+                    .host_schedules
+                    .pending_confirm
+                    .as_ref()
+                    .is_some_and(|state| state.presence.finish_exit(generation))
+                {
+                    entity.host_schedules.pending_confirm = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    pub(super) fn confirm_schedule_action(
+        &mut self,
+        delay: Duration,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        let Some(request) = self
+            .host_schedules
+            .pending_confirm
+            .as_ref()
+            .map(|state| state.request.clone())
+        else {
+            return Vec::new();
+        };
+        if !self.begin_schedule_confirm_exit(delay, cx) {
+            return Vec::new();
+        }
+        self.start_schedule_action(request, runtime, cx)
+    }
+
+    fn start_schedule_action(
+        &mut self,
+        request: HostScheduleActionRequest,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        let Some(os_type) = self.connection_os_type(&request.connection_id) else {
+            return vec![HostToolsNotice::ScheduleConnectionMissing];
+        };
+        let command = match build_scheduled_task_action_command(&os_type, request.action.clone()) {
+            Ok(command) => command,
+            Err(_) => return vec![HostToolsNotice::ScheduleActionFailed],
+        };
+        let mut notices = Vec::new();
+        if command.capability == ScheduledTaskCapability::Partial {
+            notices.push(HostToolsNotice::SchedulePartialSupport { os_type });
+        }
+        self.host_schedules.action_running = Some(request.clone());
+        let spawned = self.spawn_schedule_action(
+            command.command,
+            request,
+            HOST_SCHEDULE_ACTION_TIMEOUT,
+            HOST_SCHEDULE_ACTION_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_schedules.action_running = None;
+            return vec![HostToolsNotice::ScheduleConnectionMissing];
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(super) fn request_schedule_logs(
+        &mut self,
+        connection_id: String,
+        task: ResourceScheduledTask,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        empty_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if self
+            .host_schedules
+            .logs_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.loading)
+        {
+            return vec![HostToolsNotice::ScheduleLogsAlreadyRunning];
+        }
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return vec![HostToolsNotice::ScheduleConnectionMissing];
+        };
+        let command = match build_scheduled_task_logs_command(&os_type, &task, false, 200) {
+            Ok(command) => command,
+            Err(_) => return vec![HostToolsNotice::ScheduleLogsFailed],
+        };
+        let mut notices = Vec::new();
+        if command.capability == ScheduledTaskCapability::Partial {
+            notices.push(HostToolsNotice::SchedulePartialSupport { os_type });
+        }
+        let request = HostScheduleLogsRequest {
+            connection_id,
+            task_id: task.id,
+            task_name: task.name,
+            task_source: task.source,
+            task_unit: task.unit,
+            failure_fallback,
+            empty_fallback,
+        };
+        self.host_schedules.logs_dialog = Some(HostScheduleLogsDialog {
+            request: request.clone(),
+            output: None,
+            error: None,
+            loading: true,
+        });
+        let spawned = self.spawn_schedule_logs_capture(
+            command.command,
+            request,
+            HOST_SCHEDULE_LOGS_TIMEOUT,
+            HOST_SCHEDULE_LOGS_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_schedules.logs_dialog = None;
+            return vec![HostToolsNotice::ScheduleConnectionMissing];
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(super) fn schedule_logs_dialog(&self) -> Option<HostScheduleLogsDialog> {
+        self.host_schedules.logs_dialog.clone()
+    }
+
+    pub(super) fn dismiss_schedule_logs_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.host_schedules.logs_dialog.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_schedule_logs(
+        &mut self,
+        delivery: HostScheduleLogsDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self
+            .host_schedules
+            .logs_dialog
+            .as_mut()
+            .filter(|dialog| dialog.request == delivery.request)
+        else {
+            return;
+        };
+        dialog.loading = false;
+        match delivery.result {
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                zeroize::Zeroize::zeroize(&mut output.stderr);
+                let retained_output = if output.stdout.trim().is_empty() {
+                    delivery.request.empty_fallback
+                } else {
+                    std::mem::take(&mut output.stdout)
+                };
+                // One shared owner retains the requested output and clears it
+                // when both the Entity and current render tree release it.
+                dialog.output = Some(Arc::new(zeroize::Zeroizing::new(retained_output)));
+                dialog.error = None;
+            }
+            Ok(mut output) => {
+                // Failed output is never user-facing and is cleared immediately.
+                zeroize::Zeroize::zeroize(&mut output.stdout);
+                zeroize::Zeroize::zeroize(&mut output.stderr);
+                dialog.output = None;
+                dialog.error = Some(delivery.request.failure_fallback);
+            }
+            Err(()) => {
+                dialog.output = None;
+                dialog.error = Some(delivery.request.failure_fallback);
+            }
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_schedule_action(
+        &mut self,
+        delivery: HostScheduleActionDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_schedules.action_running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        self.host_schedules.action_running = None;
+        let succeeded = delivery.result.unwrap_or(false);
+        cx.emit(HostToolsEvent::ShowNotice(
+            HostToolsNotice::ScheduleActionFinished {
+                kind: schedule_action_notice_kind(&delivery.request.action),
+                task_name: delivery.request.task_name,
+                succeeded,
+            },
+        ));
+        cx.emit(HostToolsEvent::RefreshSchedules {
+            connection_id: delivery.request.connection_id,
+        });
+        cx.notify();
+    }
 }
 
 fn host_schedule_blank_dash(value: &str) -> String {
@@ -2032,10 +2014,10 @@ fn host_schedule_confirm_label_key(action: &ScheduledTaskActionKind) -> &'static
     }
 }
 
-fn host_schedule_action_success_key(action: &ScheduledTaskActionKind) -> &'static str {
+fn schedule_action_notice_kind(action: &ScheduledTaskActionKind) -> ScheduleActionNoticeKind {
     match action {
-        ScheduledTaskActionKind::RunNow { .. } => "sidebar.host_schedules.toast.run_now_started",
-        ScheduledTaskActionKind::Enable { .. } => "sidebar.host_schedules.toast.enable_succeeded",
-        ScheduledTaskActionKind::Disable { .. } => "sidebar.host_schedules.toast.disable_succeeded",
+        ScheduledTaskActionKind::RunNow { .. } => ScheduleActionNoticeKind::RunNow,
+        ScheduledTaskActionKind::Enable { .. } => ScheduleActionNoticeKind::Enable,
+        ScheduledTaskActionKind::Disable { .. } => ScheduleActionNoticeKind::Disable,
     }
 }

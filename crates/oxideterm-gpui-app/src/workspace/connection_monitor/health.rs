@@ -969,7 +969,9 @@ impl WorkspaceApp {
                         }
                         if tool != ContextSidebarTool::Schedules {
                             this.connection_monitor.host_schedule_search_focused = false;
-                            this.connection_monitor.host_schedule_pending_confirm = None;
+                            this.host_tools.update(cx, |host_tools, cx| {
+                                host_tools.dismiss_schedule_confirm(cx);
+                            });
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
@@ -1194,7 +1196,9 @@ impl WorkspaceApp {
         });
         self.connection_monitor.host_tmux_pending_confirm = None;
         self.connection_monitor.host_tmux_input_dialog = None;
-        self.connection_monitor.host_schedule_pending_confirm = None;
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.dismiss_schedule_confirm(cx);
+        });
         self.sync_connection_monitor_selection(cx);
         self.sync_host_gpu_sampling(cx);
         let active_tool = self.host_tools.read(cx).active_tool();

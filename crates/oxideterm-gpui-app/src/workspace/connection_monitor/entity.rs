@@ -340,6 +340,63 @@ impl HostToolsEntity {
         true
     }
 
+    pub(super) fn spawn_schedule_logs_capture(
+        &self,
+        command: String,
+        request: HostScheduleLogsRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Raw log output stays inside the Entity delivery and dialog state.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ScheduleLogs(
+                HostScheduleLogsDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_schedule_action(
+        &self,
+        command: String,
+        request: HostScheduleActionRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Action output is reduced to a success bit before it enters delivery.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    let succeeded = output.exit_code.unwrap_or(0) == 0;
+                    // Captured action text may contain credentials and has no UI consumer.
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    succeeded
+                })
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ScheduleAction(
+                HostScheduleActionDelivery { request, result },
+            ));
+        });
+        true
+    }
+
     pub(super) fn compact_monitor_list_state(&self) -> ListState {
         self.compact_monitor_list_state.clone()
     }
@@ -1263,5 +1320,115 @@ mod tests {
             HostToolsEvent::ShowNotice(HostToolsNotice::ScheduleSnapshotFailed)
         );
         assert!(!format!("{notice:?}").contains(secret_marker));
+    }
+
+    #[gpui::test]
+    fn schedule_logs_and_actions_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let logs_request = HostScheduleLogsRequest {
+            connection_id: "connection-1".to_string(),
+            task_id: "backup.timer".to_string(),
+            task_name: "Backup".to_string(),
+            task_source: "systemd".to_string(),
+            task_unit: "backup.service".to_string(),
+            failure_fallback: "Schedule logs failed".to_string(),
+            empty_fallback: "No schedule logs".to_string(),
+        };
+        let sender = entity.update(cx, |entity, _cx| {
+            entity.host_schedules.logs_dialog = Some(HostScheduleLogsDialog {
+                request: logs_request.clone(),
+                output: None,
+                error: None,
+                loading: true,
+            });
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "Authorization: should-not-reach-schedule-dialog";
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::ScheduleLogs(
+                HostScheduleLogsDelivery {
+                    request: logs_request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            let dialog = entity.host_schedules.logs_dialog.as_ref().unwrap();
+            assert!(!dialog.loading);
+            assert!(dialog.output.is_none());
+            assert_eq!(dialog.error.as_deref(), Some("Schedule logs failed"));
+            // Failed command output must be reduced before it reaches renderable state.
+            assert!(!dialog.error.as_deref().unwrap().contains(secret_marker));
+        });
+        assert!(events.try_recv().is_err());
+
+        let action_request = HostScheduleActionRequest {
+            connection_id: "connection-1".to_string(),
+            task_id: "backup.timer".to_string(),
+            task_name: "Backup".to_string(),
+            unit: "backup.service".to_string(),
+            action: ScheduledTaskActionKind::RunNow {
+                id: "backup.timer".to_string(),
+                unit: "backup.service".to_string(),
+            },
+        };
+        let sender = entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .open_schedule_action_confirm(action_request.clone(), cx)
+                    .is_none()
+            );
+            assert!(entity.schedule_confirm_view().is_some());
+            entity.dismiss_schedule_confirm(cx);
+            assert!(entity.schedule_confirm_view().is_none());
+            entity.host_schedules.action_running = Some(action_request.clone());
+            entity.reliable_delivery_tx.clone()
+        });
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::ScheduleAction(
+                HostScheduleActionDelivery {
+                    request: action_request,
+                    // Worker output is intentionally reduced to this boolean.
+                    result: Ok(false),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_schedules.action_running.is_none());
+        });
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::ShowNotice(HostToolsNotice::ScheduleActionFinished {
+                kind: ScheduleActionNoticeKind::RunNow,
+                task_name: "Backup".to_string(),
+                succeeded: false,
+            })
+        );
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::RefreshSchedules {
+                connection_id: "connection-1".to_string(),
+            }
+        );
     }
 }

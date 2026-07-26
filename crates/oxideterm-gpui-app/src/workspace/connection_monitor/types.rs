@@ -349,7 +349,7 @@ pub(super) struct HostServiceLogsDialog {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum HostSnapshotFeedback {
+pub(in crate::workspace) enum HostSnapshotFeedback {
     Silent,
     Toast,
 }
@@ -494,6 +494,9 @@ pub(super) struct HostSchedulesState {
     pub(super) polling: bool,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostScheduleActionRequest>>,
+    pub(super) action_running: Option<HostScheduleActionRequest>,
+    pub(super) logs_dialog: Option<HostScheduleLogsDialog>,
 }
 
 impl HostSchedulesState {
@@ -511,6 +514,9 @@ impl HostSchedulesState {
                 TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            pending_confirm: None,
+            action_running: None,
+            logs_dialog: None,
         }
     }
 }
@@ -599,7 +605,7 @@ impl HostPackagesState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostScheduleActionRequest {
     pub(super) connection_id: String,
     pub(super) task_id: String,
@@ -608,28 +614,34 @@ pub(super) struct HostScheduleActionRequest {
     pub(super) action: ScheduledTaskActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleActionDelivery {
     pub(super) request: HostScheduleActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<bool, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostScheduleLogsRequest {
     pub(super) connection_id: String,
-    pub(super) task: ResourceScheduledTask,
+    // Keep sampled commands out of asynchronous deliveries; logs need only
+    // the public task identity used by the dialog and follow action.
+    pub(super) task_id: String,
+    pub(super) task_name: String,
+    pub(super) task_source: String,
+    pub(super) task_unit: String,
+    pub(super) failure_fallback: String,
+    pub(super) empty_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleLogsDelivery {
     pub(super) request: HostScheduleLogsRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostScheduleLogsDialog {
     pub(super) request: HostScheduleLogsRequest,
-    pub(super) output: Option<String>,
+    // The Entity and render tree share one zeroizing capture buffer.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
 }
@@ -791,15 +803,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_port_search_focused: bool,
     pub(in crate::workspace) host_schedule_search_query: String,
     pub(in crate::workspace) host_schedule_search_focused: bool,
-    pub(super) host_schedule_pending_confirm:
-        Option<HostToolConfirmState<HostScheduleActionRequest>>,
-    pub(super) host_schedule_action_running: Option<HostScheduleActionRequest>,
-    pub(super) host_schedule_action_rx:
-        Option<std::sync::mpsc::Receiver<HostScheduleActionDelivery>>,
-    pub(super) host_schedule_action_polling: bool,
-    pub(super) host_schedule_logs_dialog: Option<HostScheduleLogsDialog>,
-    pub(super) host_schedule_logs_rx: Option<std::sync::mpsc::Receiver<HostScheduleLogsDelivery>>,
-    pub(super) host_schedule_logs_polling: bool,
     pub(in crate::workspace) host_filesystem_search_query: String,
     pub(in crate::workspace) host_filesystem_search_focused: bool,
     pub(in crate::workspace) host_package_search_query: String,
@@ -895,13 +898,6 @@ impl ConnectionMonitorState {
             host_port_search_focused: false,
             host_schedule_search_query: String::new(),
             host_schedule_search_focused: false,
-            host_schedule_pending_confirm: None,
-            host_schedule_action_running: None,
-            host_schedule_action_rx: None,
-            host_schedule_action_polling: false,
-            host_schedule_logs_dialog: None,
-            host_schedule_logs_rx: None,
-            host_schedule_logs_polling: false,
             host_filesystem_search_query: String::new(),
             host_filesystem_search_focused: false,
             host_package_search_query: String::new(),
