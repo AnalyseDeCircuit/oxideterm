@@ -1615,6 +1615,27 @@ impl WorkspaceApp {
         let Some(target) = self.active_ime_target() else {
             return false;
         };
+        let path_completion_visible = match target {
+            WorkspaceImeTarget::FileManager(FileManagerInput::Path) => {
+                self.file_manager.path_completion.is_visible()
+            }
+            WorkspaceImeTarget::Sftp(SftpInput::LocalPath) => {
+                self.sftp_view.local_path_completion.is_visible()
+            }
+            WorkspaceImeTarget::Sftp(SftpInput::RemotePath) => {
+                self.sftp_view.remote_path_completion.is_visible()
+            }
+            _ => false,
+        };
+        if path_completion_owns_vertical_navigation(
+            target,
+            keystroke.key.as_str(),
+            path_completion_visible,
+            keystroke.modifiers.platform || keystroke.modifiers.control || keystroke.modifiers.alt,
+        ) {
+            // The owning surface accepts the key after the shared text-input handler declines it.
+            return false;
+        }
         if target == WorkspaceImeTarget::TerminalCommandBar
             && self.terminal_command_bar_should_accept_inline_suggestion(keystroke, cx)
         {
@@ -2821,23 +2842,40 @@ fn effective_platform_text_replacement_range(
     current_selection()
 }
 
+fn path_completion_owns_vertical_navigation(
+    target: WorkspaceImeTarget,
+    key: &str,
+    completion_visible: bool,
+    has_command_modifier: bool,
+) -> bool {
+    completion_visible
+        && !has_command_modifier
+        && matches!(key, "up" | "arrowup" | "down" | "arrowdown")
+        && matches!(
+            target,
+            WorkspaceImeTarget::FileManager(FileManagerInput::Path)
+                | WorkspaceImeTarget::Sftp(SftpInput::LocalPath)
+                | WorkspaceImeTarget::Sftp(SftpInput::RemotePath)
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Keystroke, Modifiers, px};
 
     use super::{
-        CopyShortcutOwner, PendingPlatformTextCommit, SettingsInput, TextInputContentAlign,
-        WorkspaceApp, WorkspaceImeMarkedText, WorkspaceImeTarget,
+        CopyShortcutOwner, FileManagerInput, PendingPlatformTextCommit, SettingsInput, SftpInput,
+        TextInputContentAlign, WorkspaceApp, WorkspaceImeMarkedText, WorkspaceImeTarget,
         active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
         control_k_delete_end, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, ime_target_accepts_newline,
         ime_target_should_blink_caret, keystroke_commits_platform_text,
         keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
-        normalize_clipboard_text_for_ime_target, platform_text_commit_is_duplicate,
-        previous_utf16_boundary, previous_word_boundary, soft_wrapped_line_ranges_utf16,
-        transpose_text_at_utf16_offset, vertical_line_navigation_destination,
-        word_range_for_utf16_offset,
+        normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
+        platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
+        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        vertical_line_navigation_destination, word_range_for_utf16_offset,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -3178,6 +3216,40 @@ mod tests {
         assert_eq!(vertical_line_navigation_destination(value, 2, true), 6);
         assert_eq!(vertical_line_navigation_destination(value, 6, true), 9);
         assert_eq!(vertical_line_navigation_destination(value, 9, false), 6);
+    }
+
+    #[test]
+    fn visible_path_completion_owns_unmodified_vertical_navigation() {
+        for target in [
+            WorkspaceImeTarget::FileManager(FileManagerInput::Path),
+            WorkspaceImeTarget::Sftp(SftpInput::LocalPath),
+            WorkspaceImeTarget::Sftp(SftpInput::RemotePath),
+        ] {
+            assert!(path_completion_owns_vertical_navigation(
+                target, "arrowup", true, false,
+            ));
+            assert!(path_completion_owns_vertical_navigation(
+                target, "down", true, false,
+            ));
+            assert!(!path_completion_owns_vertical_navigation(
+                target, "arrowup", false, false,
+            ));
+            assert!(!path_completion_owns_vertical_navigation(
+                target, "arrowup", true, true,
+            ));
+        }
+        assert!(!path_completion_owns_vertical_navigation(
+            WorkspaceImeTarget::Search,
+            "arrowdown",
+            true,
+            false,
+        ));
+        assert!(!path_completion_owns_vertical_navigation(
+            WorkspaceImeTarget::Sftp(SftpInput::RemotePath),
+            "left",
+            true,
+            false,
+        ));
     }
 
     #[test]
