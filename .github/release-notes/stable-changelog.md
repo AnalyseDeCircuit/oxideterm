@@ -3,6 +3,31 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.12
+
+OxideTerm 2.0.12 substantially expands native remote desktop and SSH Agent workflows, adds richer asset and first-run appearance controls, and fixes several terminal, connection, and cloud-sync interactions.
+
+### ✨ Highlights
+
+- Expanded native RDP and VNC support with persisted session options, negotiated capability reporting, stronger VNC security policies, improved display and input handling, audio redirection, and richer clipboard interoperability.
+- Added saved RDP and VNC assets to the session manager, including editing, selection, custom icons with independent foreground and background colors, and cloud synchronization alongside existing connection resources.
+- Completed SSH Agent authentication and forwarding across supported endpoint types, including OpenSSH certificate identities, `ForwardAgent` and `IdentityAgent` imports, macOS Agent discovery, Windows named-pipe discovery, connection-pool isolation, and visible forwarding rejection errors.
+- Expanded first-run appearance setup with bundled and custom terminal fonts, light and dark themes, background guidance, animation controls, and a continuous corner-radius slider.
+- Added built-in light palettes and made password and private-key passphrase fields revealable while users enter or edit their own credentials.
+
+### 🛠️ Fixes
+
+- Fixed abnormal character spacing when the bundled JetBrains Mono font is selected on macOS by aligning embedded font metadata with the runtime family name.
+- Preserved SSH Agent authentication and asset appearance settings when editing saved connections and other managed resources.
+- Kept file-manager path completion navigation intact and added a terminal setting for recognizing local file paths as clickable links.
+- Made keybindings explicitly removable without forcing a replacement shortcut.
+- Corrected the cloud-sync automatic-upload toggle so the form reflects and saves the selected behavior consistently.
+
+### 🧰 Release Maintenance
+
+- Hardened GPUI draw lifetimes and platform dispatch behavior, expanded platform-focused checks, and documented the maintained GPUI-CE patch set.
+- Added recoverable issue-maintenance automation and refined contribution and issue templates around the repository's current support policy.
+
 ## 2.0.11
 
 OxideTerm 2.0.11 adds resilient SCP fallback and editor-aware Free Type Mode, improves IDE and terminal reliability, and avoids eager Metal memory allocation on macOS.
