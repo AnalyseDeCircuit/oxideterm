@@ -27,7 +27,7 @@ use serde_json::{Map, Value, json};
 use zeroize::Zeroizing;
 
 use super::types::{NativePluginSyncAction, NativePluginSyncRequest};
-use crate::workspace::{plugin_runtime, quick_commands::QuickCommandImportStrategy};
+use crate::workspace::{delivery, plugin_runtime, quick_commands::QuickCommandImportStrategy};
 
 // Sync owns the plugin-facing .oxide and saved-connection protocol. Mutating
 // operations are routed back through Workspace so cloned snapshots cannot
@@ -42,7 +42,7 @@ pub(super) fn native_plugin_sync_response(
     saved_forwards_revision: Option<&str>,
     plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
     plugin_settings_revisions: &Map<String, Value>,
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let request_id = call.request_id.clone();
     match call.method.as_str() {
@@ -157,7 +157,7 @@ pub(super) fn native_plugin_sync_export_oxide_response(
     connection_store: &oxideterm_connections::ConnectionStore,
     plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
     args: &Value,
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let connection_ids = match native_plugin_sync_connection_ids(connection_store, args) {
         Ok(connection_ids) => connection_ids,
@@ -239,7 +239,7 @@ fn native_plugin_sync_preview_import_response(
     request_id: String,
     connection_store: &oxideterm_connections::ConnectionStore,
     args: &Value,
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let bytes = match native_plugin_file_data_arg(args) {
         Ok(bytes) => bytes,
@@ -302,7 +302,7 @@ fn native_plugin_sync_preview_import_response(
 fn native_plugin_sync_apply_saved_connections_response(
     request_id: String,
     args: &Value,
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let Some(sync_tx) = sync_tx else {
         return plugin_runtime::PluginResponse::error(
@@ -356,7 +356,7 @@ fn native_plugin_sync_apply_saved_connections_response(
 }
 
 pub(super) fn native_plugin_emit_sync_progress(
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
     plugin_id: &str,
     registration_id: &str,
     value: Value,
@@ -382,7 +382,7 @@ fn native_plugin_sync_import_oxide_response(
     plugin_id: &str,
     request_id: String,
     args: &Value,
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let Some(sync_tx) = sync_tx else {
         return plugin_runtime::PluginResponse::error(

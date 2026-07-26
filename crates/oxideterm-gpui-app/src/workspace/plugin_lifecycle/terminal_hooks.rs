@@ -10,15 +10,16 @@ use super::{
     types::{NativePluginTerminalAction, NativePluginTerminalRequest},
 };
 use crate::workspace::{
-    TerminalInputInterceptorResult, plugin_host::NativePluginRuntimeTerminalHookContribution,
-    plugin_runtime, plugin_runtime::PluginResponseResult,
+    TerminalInputInterceptorResult, delivery,
+    plugin_host::NativePluginRuntimeTerminalHookContribution, plugin_runtime,
+    plugin_runtime::PluginResponseResult,
 };
 
 // Terminal hook execution has a strict timeout and fail-open behavior; keeping
 // it isolated makes that contract easier to audit than burying it in lifecycle.
 pub(super) fn native_plugin_terminal_response(
     call: plugin_runtime::PluginHostCall,
-    terminal_tx: &mpsc::Sender<NativePluginTerminalRequest>,
+    terminal_tx: &delivery::ActiveDeliverySender<NativePluginTerminalRequest>,
 ) -> plugin_runtime::PluginResponse {
     let request_id = call.request_id.clone();
     let action = match native_plugin_terminal_action_from_call(&call) {

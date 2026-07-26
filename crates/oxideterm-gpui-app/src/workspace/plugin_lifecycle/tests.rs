@@ -340,7 +340,7 @@ fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation(
         }
     );
 
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = delivery::ActiveDeliverySender::channel();
     let export_response = native_plugin_sync_response(
         "com.example.demo",
         plugin_runtime::PluginHostCall {
@@ -1244,7 +1244,7 @@ fn progress_effect_updates_host_owned_toast_payload() {
 
 #[test]
 fn show_progress_returnable_host_api_creates_host_owned_reporter() {
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = delivery::ActiveDeliverySender::channel();
     let response = native_plugin_show_progress_response(
         "com.example.demo",
         plugin_runtime::PluginHostCall {
@@ -1281,7 +1281,8 @@ fn show_progress_returnable_host_api_creates_host_owned_reporter() {
 
 #[test]
 fn show_confirm_returnable_host_api_resolves_user_choice() {
-    let (confirm_tx, confirm_rx) = mpsc::channel::<NativePluginConfirmRequest>();
+    let (confirm_tx, confirm_rx) =
+        delivery::ActiveDeliverySender::<NativePluginConfirmRequest>::channel();
     let handle = std::thread::spawn(move || {
         let request = confirm_rx.recv().unwrap();
         assert_eq!(request.plugin_id, "com.example.demo");
@@ -1316,7 +1317,8 @@ fn show_confirm_returnable_host_api_resolves_user_choice() {
 
 #[test]
 fn show_confirm_returnable_host_api_rejects_missing_description() {
-    let (confirm_tx, _confirm_rx) = mpsc::channel();
+    let (confirm_tx, _confirm_rx) =
+        delivery::ActiveDeliverySender::<NativePluginConfirmRequest>::channel();
     let response = native_plugin_show_confirm_response(
         "com.example.demo",
         plugin_runtime::PluginHostCall {

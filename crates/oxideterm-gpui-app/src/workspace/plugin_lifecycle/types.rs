@@ -21,20 +21,18 @@ use crate::workspace::{delivery, plugin_host, plugin_runtime};
 pub(in crate::workspace) struct NativePluginRuntimeState {
     pub(in crate::workspace) registry: plugin_host::NativePluginRegistry,
     pub(in crate::workspace) host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
-    pub(in crate::workspace) confirm_tx: mpsc::Sender<NativePluginConfirmRequest>,
+    pub(in crate::workspace) confirm_tx: delivery::ActiveDeliverySender<NativePluginConfirmRequest>,
     pub(in crate::workspace) confirm_rx: mpsc::Receiver<NativePluginConfirmRequest>,
     pub(in crate::workspace) confirm: Option<NativePluginConfirmDialog>,
     pub(in crate::workspace) confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(in crate::workspace) confirm_polling: bool,
-    pub(in crate::workspace) terminal_tx: mpsc::Sender<NativePluginTerminalRequest>,
+    pub(in crate::workspace) terminal_tx:
+        delivery::ActiveDeliverySender<NativePluginTerminalRequest>,
     pub(in crate::workspace) terminal_rx: mpsc::Receiver<NativePluginTerminalRequest>,
     pub(in crate::workspace) terminal_ui_requests: VecDeque<NativePluginTerminalRequest>,
-    pub(in crate::workspace) terminal_polling: bool,
     pub(in crate::workspace) product_ui_effects: VecDeque<NativePluginProductUiEffect>,
     pub(in crate::workspace) ui_wake: delivery::ActiveDeliveryWake,
-    pub(in crate::workspace) sync_tx: mpsc::Sender<NativePluginSyncRequest>,
+    pub(in crate::workspace) sync_tx: delivery::ActiveDeliverySender<NativePluginSyncRequest>,
     pub(in crate::workspace) sync_rx: mpsc::Receiver<NativePluginSyncRequest>,
-    pub(in crate::workspace) sync_polling: bool,
     pub(in crate::workspace) services_started: bool,
     pub(in crate::workspace) layout_snapshot: Value,
     pub(in crate::workspace) layout_polling: bool,
@@ -60,9 +58,12 @@ impl NativePluginRuntimeState {
     pub(in crate::workspace) fn new(registry: plugin_host::NativePluginRegistry) -> Self {
         // Runtime request channels are created together so every endpoint has
         // the same lifetime as the registry and runtime host that use it.
-        let (confirm_tx, confirm_rx) = mpsc::channel();
-        let (terminal_tx, terminal_rx) = mpsc::channel();
-        let (sync_tx, sync_rx) = mpsc::channel();
+        let ui_wake = delivery::ActiveDeliveryWake::default();
+        let (confirm_tx, confirm_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(ui_wake.clone());
+        let (terminal_tx, terminal_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(ui_wake.clone());
+        let (sync_tx, sync_rx) = delivery::ActiveDeliverySender::channel_with_wake(ui_wake.clone());
         Self {
             registry,
             host: Arc::new(tokio::sync::Mutex::new(
@@ -72,16 +73,13 @@ impl NativePluginRuntimeState {
             confirm_rx,
             confirm: None,
             confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            confirm_polling: false,
             terminal_tx,
             terminal_rx,
             terminal_ui_requests: VecDeque::new(),
-            terminal_polling: false,
             product_ui_effects: VecDeque::new(),
-            ui_wake: delivery::ActiveDeliveryWake::default(),
+            ui_wake,
             sync_tx,
             sync_rx,
-            sync_polling: false,
             services_started: false,
             layout_snapshot: Value::Null,
             layout_polling: false,

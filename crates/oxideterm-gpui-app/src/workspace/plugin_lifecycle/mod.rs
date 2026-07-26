@@ -73,43 +73,19 @@ use oxideterm_plugin_host_api::{
 impl WorkspaceApp {
     pub(super) fn start_native_plugin_runtime_services_if_needed(
         &mut self,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) {
         if self.native_plugin_runtime.services_started {
             return;
         }
         self.native_plugin_runtime.services_started = true;
-        // Runtime request queues only need polling once a native process/WASM
-        // plugin can issue host calls; keeping them cold avoids idle startup work.
-        self.start_native_plugin_confirm_polling(cx);
-        self.start_native_plugin_terminal_polling(cx);
-        self.start_native_plugin_sync_polling(cx);
+        // Request queues share the workspace plugin wake installed at startup.
+        // Starting services enables producers without starting polling timers.
     }
 
-    pub(super) fn start_native_plugin_confirm_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.confirm_polling {
-            return;
-        }
-        self.native_plugin_runtime.confirm_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_confirm_requests(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_confirm_requests(&mut self, cx: &mut Context<Self>) {
+    fn poll_native_plugin_confirm_requests(&mut self, cx: &mut Context<Self>) -> bool {
         if self.native_plugin_runtime.confirm.is_some() {
-            return;
+            return false;
         }
 
         match self.native_plugin_runtime.confirm_rx.try_recv() {
@@ -123,10 +99,9 @@ impl WorkspaceApp {
                 cx.notify();
             }
             Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.native_plugin_runtime.confirm_polling = false;
-            }
+            Err(mpsc::TryRecvError::Disconnected) => {}
         }
+        false
     }
 
     fn respond_native_plugin_confirm(&mut self, confirmed: bool, cx: &mut Context<Self>) {
@@ -173,38 +148,15 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn start_native_plugin_terminal_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.terminal_polling {
-            return;
+    fn poll_native_plugin_terminal_requests(&mut self, cx: &mut Context<Self>) -> bool {
+        let request_batch = delivery::drain_channel(
+            &self.native_plugin_runtime.terminal_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        for request in request_batch.items {
+            self.handle_native_plugin_terminal_request(request, cx);
         }
-        self.native_plugin_runtime.terminal_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_terminal_requests(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_terminal_requests(&mut self, cx: &mut Context<Self>) {
-        loop {
-            match self.native_plugin_runtime.terminal_rx.try_recv() {
-                Ok(request) => self.handle_native_plugin_terminal_request(request, cx),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.native_plugin_runtime.terminal_polling = false;
-                    break;
-                }
-            }
-        }
+        request_batch.outcome.backlog_remaining
     }
 
     fn handle_native_plugin_terminal_request(
@@ -302,17 +254,25 @@ impl WorkspaceApp {
                 }
                 let Ok(Ok(backlog_remaining)) = cx.update_window(window_handle, |_, window, cx| {
                     weak.update(cx, |workspace, cx| {
-                        let terminal_backlog =
+                        let confirm_backlog = workspace.poll_native_plugin_confirm_requests(cx);
+                        let terminal_request_backlog =
+                            workspace.poll_native_plugin_terminal_requests(cx);
+                        let sync_backlog = workspace.poll_native_plugin_sync_requests(cx);
+                        let terminal_ui_backlog =
                             workspace.poll_native_plugin_terminal_ui_requests(window, cx);
                         let product_backlog =
                             workspace.poll_native_plugin_product_ui_effects(window, cx);
-                        terminal_backlog || product_backlog
+                        confirm_backlog
+                            || terminal_request_backlog
+                            || sync_backlog
+                            || terminal_ui_backlog
+                            || product_backlog
                     })
                 }) else {
                     break;
                 };
                 if backlog_remaining {
-                    // Both reliable queues share one continuation permit and keep FIFO locally.
+                    // Reliable plugin queues share one continuation permit and keep FIFO locally.
                     ui_wake.mark();
                 } else if stopped {
                     break;
@@ -370,38 +330,15 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn start_native_plugin_sync_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.sync_polling {
-            return;
+    fn poll_native_plugin_sync_requests(&mut self, cx: &mut Context<Self>) -> bool {
+        let request_batch = delivery::drain_channel(
+            &self.native_plugin_runtime.sync_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        for request in request_batch.items {
+            self.handle_native_plugin_sync_request(request, cx);
         }
-        self.native_plugin_runtime.sync_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_sync_requests(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_sync_requests(&mut self, cx: &mut Context<Self>) {
-        loop {
-            match self.native_plugin_runtime.sync_rx.try_recv() {
-                Ok(request) => self.handle_native_plugin_sync_request(request, cx),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.native_plugin_runtime.sync_polling = false;
-                    break;
-                }
-            }
-        }
+        request_batch.outcome.backlog_remaining
     }
 
     fn handle_native_plugin_sync_request(
@@ -1564,7 +1501,8 @@ impl WorkspaceApp {
                 .mark_runtime_loading(&plan.plugin_id);
         }
 
-        let (tx, rx) = mpsc::channel();
+        let runtime_wake = delivery::ActiveDeliveryWake::default();
+        let (tx, rx) = delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
         let host = self.native_plugin_runtime.host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
         let wasm_sidecar_path =
@@ -1625,29 +1563,7 @@ impl WorkspaceApp {
             let _ = tx.send(NativePluginRuntimeDelivery::Finished);
         });
 
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                let mut finished = false;
-                while let Ok(delivery) = rx.try_recv() {
-                    if matches!(delivery, NativePluginRuntimeDelivery::Finished) {
-                        finished = true;
-                    }
-                    if weak
-                        .update(cx, |workspace, cx| {
-                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                if finished {
-                    break;
-                }
-            }
-        })
-        .detach();
+        self.schedule_native_plugin_runtime_delivery(rx, runtime_wake, cx);
     }
 
     fn handle_native_plugin_runtime_delivery(
@@ -1669,6 +1585,46 @@ impl WorkspaceApp {
                 cx.notify();
             }
         }
+    }
+
+    fn schedule_native_plugin_runtime_delivery(
+        &self,
+        receiver: mpsc::Receiver<NativePluginRuntimeDelivery>,
+        runtime_wake: delivery::ActiveDeliveryWake,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |weak, cx| {
+            loop {
+                runtime_wake.wait().await;
+                if !runtime_wake.take() {
+                    continue;
+                }
+                let delivery_batch =
+                    delivery::drain_channel(&receiver, delivery::LIFECYCLE_DELIVERY_BUDGET);
+                let finished = delivery_batch
+                    .items
+                    .iter()
+                    .any(|delivery| matches!(delivery, NativePluginRuntimeDelivery::Finished));
+                if weak
+                    .update(cx, |workspace, cx| {
+                        for delivery in delivery_batch.items {
+                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                if finished || delivery_batch.disconnected {
+                    break;
+                }
+                if delivery_batch.outcome.backlog_remaining {
+                    // Continue a bounded runtime batch without a polling timer.
+                    runtime_wake.mark();
+                }
+            }
+        })
+        .detach();
     }
 
     fn handle_native_plugin_activation_result(
@@ -1760,7 +1716,8 @@ impl WorkspaceApp {
     ) {
         let host = self.native_plugin_runtime.host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
-        let (tx, rx) = mpsc::channel();
+        let runtime_wake = delivery::ActiveDeliveryWake::default();
+        let (tx, rx) = delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
         self.forwarding_runtime.spawn({
             let plugin_id = plugin_id;
             let command = command;
@@ -1779,29 +1736,7 @@ impl WorkspaceApp {
                 let _ = tx.send(NativePluginRuntimeDelivery::Finished);
             }
         });
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                let mut finished = false;
-                while let Ok(delivery) = rx.try_recv() {
-                    if matches!(delivery, NativePluginRuntimeDelivery::Finished) {
-                        finished = true;
-                    }
-                    if weak
-                        .update(cx, |workspace, cx| {
-                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                if finished {
-                    break;
-                }
-            }
-        })
-        .detach();
+        self.schedule_native_plugin_runtime_delivery(rx, runtime_wake, cx);
     }
 
     pub(super) fn dispatch_runtime_plugin_keybinding(
@@ -1984,7 +1919,8 @@ impl WorkspaceApp {
     ) {
         let host = self.native_plugin_runtime.host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
-        let (tx, rx) = mpsc::channel();
+        let runtime_wake = delivery::ActiveDeliveryWake::default();
+        let (tx, rx) = delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
         let event = plugin_runtime::PluginEvent {
             name: event_name.to_string(),
             payload,
@@ -2001,29 +1937,7 @@ impl WorkspaceApp {
                 let _ = tx.send(NativePluginRuntimeDelivery::Finished);
             }
         });
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                let mut finished = false;
-                while let Ok(delivery) = rx.try_recv() {
-                    if matches!(delivery, NativePluginRuntimeDelivery::Finished) {
-                        finished = true;
-                    }
-                    if weak
-                        .update(cx, |workspace, cx| {
-                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                if finished {
-                    break;
-                }
-            }
-        })
-        .detach();
+        self.schedule_native_plugin_runtime_delivery(rx, runtime_wake, cx);
     }
 
     fn native_plugin_host_api_resolver(
