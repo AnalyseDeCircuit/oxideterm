@@ -4,55 +4,78 @@
 use super::*;
 
 impl WorkspaceApp {
-    pub(crate) fn start_single_instance_polling(
+    pub(crate) fn start_single_instance_delivery(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.single_instance_rx.is_none() || self.single_instance_polling {
+        let Some(notification) = self
+            .single_instance_rx
+            .as_ref()
+            .map(|receiver| receiver.notification())
+        else {
             return;
+        };
+        if self.poll_single_instance_events(window, cx) {
+            notification.notify_one();
         }
-        self.single_instance_polling = true;
         let window_handle = window.window_handle();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop_notification = Arc::new(tokio::sync::Notify::new());
+        let release_stopped = stopped.clone();
+        let release_notification = stop_notification.clone();
+        cx.on_release(move |_, _| {
+            release_stopped.store(true, Ordering::Release);
+            release_notification.notify_one();
+        })
+        .detach();
         cx.spawn(async move |weak, cx| {
-            // The single-instance listener runs on a standard thread. Polling
-            // keeps the request handling on GPUI's window context.
             loop {
-                Timer::after(Duration::from_millis(100)).await;
-                let keep_polling = cx
+                tokio::select! {
+                    _ = notification.notified() => {}
+                    _ = stop_notification.notified() => break,
+                }
+                if stopped.load(Ordering::Acquire) {
+                    break;
+                }
+                let backlog_remaining = cx
                     .update_window(window_handle, |_, window, cx| {
-                        weak.update(cx, |this, cx| {
-                            this.poll_single_instance_events(window, cx);
-                            this.single_instance_polling
-                        })
-                        .unwrap_or(false)
+                        weak.update(cx, |this, cx| this.poll_single_instance_events(window, cx))
+                            .unwrap_or(false)
                     })
                     .unwrap_or(false);
-                if !keep_polling {
-                    break;
+                if backlog_remaining {
+                    notification.notify_one();
                 }
             }
         })
         .detach();
     }
 
-    fn poll_single_instance_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn poll_single_instance_events(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(rx) = self.single_instance_rx.as_ref() else {
-            self.single_instance_polling = false;
-            return;
+            return false;
         };
 
+        let started_at = Instant::now();
         let mut events = Vec::new();
+        let mut source_exhausted = false;
         let mut disconnected = false;
         {
             // The application owns the receiver across workspace lifetimes;
             // each active window only locks it while draining queued events.
             let rx = rx.lock().expect("single-instance receiver poisoned");
-            loop {
+            while delivery::USER_ACTION_DELIVERY_BUDGET
+                .allows_next(events.len(), started_at.elapsed())
+            {
                 match rx.try_recv() {
                     Ok(event) => events.push(event),
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        source_exhausted = true;
+                        break;
+                    }
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        source_exhausted = true;
                         disconnected = true;
                         break;
                     }
@@ -65,8 +88,8 @@ impl WorkspaceApp {
         }
         if disconnected {
             self.single_instance_rx = None;
-            self.single_instance_polling = false;
         }
+        !source_exhausted
     }
 
     fn handle_single_instance_event(

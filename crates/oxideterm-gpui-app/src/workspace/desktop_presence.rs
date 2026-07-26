@@ -1,45 +1,69 @@
 use super::*;
 
 impl WorkspaceApp {
-    pub(crate) fn start_desktop_presence_polling(&mut self, cx: &mut Context<Self>) {
-        if self.desktop_presence_rx.is_none() || self.desktop_presence_polling {
+    pub(crate) fn start_desktop_presence_delivery(&mut self, cx: &mut Context<Self>) {
+        let Some(notification) = self
+            .desktop_presence_rx
+            .as_ref()
+            .map(|receiver| receiver.notification())
+        else {
             return;
+        };
+        if self.poll_desktop_presence_events(cx) {
+            notification.notify_one();
         }
-        self.desktop_presence_polling = true;
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop_notification = Arc::new(tokio::sync::Notify::new());
+        let release_stopped = stopped.clone();
+        let release_notification = stop_notification.clone();
+        cx.on_release(move |_, _| {
+            release_stopped.store(true, Ordering::Release);
+            release_notification.notify_one();
+        })
+        .detach();
         cx.spawn(async move |weak, cx| {
-            // Windows tray callbacks arrive outside GPUI's action system, so
-            // a small UI-task poll bridges them back onto the workspace.
             loop {
-                Timer::after(Duration::from_millis(100)).await;
-                let keep_polling = weak
-                    .update(cx, |this, cx| {
-                        this.poll_desktop_presence_events(cx);
-                        this.desktop_presence_polling
-                    })
-                    .unwrap_or(false);
-                if !keep_polling {
+                tokio::select! {
+                    _ = notification.notified() => {}
+                    _ = stop_notification.notified() => break,
+                }
+                if stopped.load(Ordering::Acquire) {
                     break;
+                }
+                let Ok(backlog_remaining) =
+                    weak.update(cx, |this, cx| this.poll_desktop_presence_events(cx))
+                else {
+                    break;
+                };
+                if backlog_remaining {
+                    notification.notify_one();
                 }
             }
         })
         .detach();
     }
 
-    fn poll_desktop_presence_events(&mut self, cx: &mut Context<Self>) {
+    fn poll_desktop_presence_events(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(rx) = self.desktop_presence_rx.as_ref() else {
-            self.desktop_presence_polling = false;
-            return;
+            return false;
         };
 
+        let started_at = Instant::now();
         let mut events = Vec::new();
+        let mut source_exhausted = false;
         let mut disconnected = false;
         // Drain the channel before handling actions so callbacks cannot borrow
         // the receiver while workspace mutations are being dispatched.
-        loop {
+        while delivery::USER_ACTION_DELIVERY_BUDGET.allows_next(events.len(), started_at.elapsed())
+        {
             match rx.try_recv() {
                 Ok(event) => events.push(event),
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     disconnected = true;
                     break;
                 }
@@ -51,8 +75,8 @@ impl WorkspaceApp {
         }
         if disconnected {
             self.desktop_presence_rx = None;
-            self.desktop_presence_polling = false;
         }
+        !source_exhausted
     }
 
     fn handle_desktop_presence_event(

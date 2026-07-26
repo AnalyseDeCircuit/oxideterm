@@ -15,6 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use fs2::FileExt;
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 const INSTANCE_FILENAME_PREFIX: &str = "oxideterm-native-instance";
@@ -24,7 +25,23 @@ const MAX_INSTANCE_REQUEST_BYTES: u64 = 64 * 1024;
 
 // The application keeps this shared receiver alive while individual workspace
 // windows attach and detach from the single-instance event stream.
-pub(crate) type SingleInstanceReceiver = Arc<Mutex<mpsc::Receiver<SingleInstanceEvent>>>;
+#[derive(Clone)]
+pub(crate) struct SingleInstanceReceiver {
+    receiver: Arc<Mutex<mpsc::Receiver<SingleInstanceEvent>>>,
+    notification: Arc<Notify>,
+}
+
+impl SingleInstanceReceiver {
+    pub(crate) fn lock(
+        &self,
+    ) -> std::sync::LockResult<std::sync::MutexGuard<'_, mpsc::Receiver<SingleInstanceEvent>>> {
+        self.receiver.lock()
+    }
+
+    pub(crate) fn notification(&self) -> Arc<Notify> {
+        self.notification.clone()
+    }
+}
 
 pub(crate) enum SingleInstanceOutcome {
     Primary {
@@ -193,9 +210,13 @@ fn start_primary(lock_file: File, paths: InstancePaths) -> Result<SingleInstance
     })?;
 
     let (tx, rx) = mpsc::channel();
+    let notification = Arc::new(Notify::new());
+    let listener_notification = notification.clone();
     thread::Builder::new()
         .name("oxideterm-single-instance".to_string())
-        .spawn(move || accept_forwarded_requests(listener, token, tx))
+        .spawn(move || {
+            accept_forwarded_requests(listener, token, tx, listener_notification);
+        })
         .context("failed to spawn single-instance handoff listener")?;
 
     Ok(SingleInstanceOutcome::Primary {
@@ -203,7 +224,10 @@ fn start_primary(lock_file: File, paths: InstancePaths) -> Result<SingleInstance
             _lock_file: lock_file,
             state_path: paths.state_path,
         },
-        receiver: Arc::new(Mutex::new(rx)),
+        receiver: SingleInstanceReceiver {
+            receiver: Arc::new(Mutex::new(rx)),
+            notification,
+        },
     })
 }
 
@@ -250,6 +274,7 @@ fn accept_forwarded_requests(
     listener: TcpListener,
     token: String,
     tx: mpsc::Sender<SingleInstanceEvent>,
+    notification: Arc<Notify>,
 ) {
     for stream in listener.incoming() {
         let Ok(stream) = stream else {
@@ -257,10 +282,14 @@ fn accept_forwarded_requests(
         };
         if let Ok(events) = events_from_stream(stream, &token) {
             for event in events {
-                let _ = tx.send(event);
+                if tx.send(event).is_ok() {
+                    notification.notify_one();
+                }
             }
         }
     }
+    // Wake the UI once more so it can observe a disconnected listener.
+    notification.notify_one();
 }
 
 fn events_from_stream(mut stream: TcpStream, token: &str) -> Result<Vec<SingleInstanceEvent>> {
