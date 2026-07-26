@@ -2236,7 +2236,9 @@ impl WorkspaceApp {
                         replacement_range,
                         text,
                     );
-                    self.connection_monitor.host_schedule_expanded_index = None;
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.clear_schedule_expanded(cx);
+                    });
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

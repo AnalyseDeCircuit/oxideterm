@@ -26,6 +26,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) host_ports: HostPortsState,
     pub(super) host_filesystems: HostFilesystemsState,
     pub(super) host_packages: HostPackagesState,
+    pub(super) host_schedules: HostSchedulesState,
     pub(in crate::workspace) active_runtime_section: ConnectionRuntimeSection,
     pub(in crate::workspace) previous_runtime_section: ConnectionRuntimeSection,
     selected_connection_id: Option<String>,
@@ -86,6 +87,7 @@ impl HostToolsEntity {
             host_ports: HostPortsState::new(),
             host_filesystems: HostFilesystemsState::new(),
             host_packages: HostPackagesState::new(),
+            host_schedules: HostSchedulesState::new(),
             active_runtime_section: ConnectionRuntimeSection::Overview,
             previous_runtime_section: ConnectionRuntimeSection::Overview,
             selected_connection_id: None,
@@ -306,6 +308,34 @@ impl HostToolsEntity {
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::PackageSnapshot(
                 HostPackageSnapshotDelivery { request, result },
             ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_schedule_snapshot_capture(
+        &self,
+        command: String,
+        request: HostScheduleSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Scheduled-task inventory runs on the registry-owned transport and
+        // cannot acquire node release or authentication capabilities.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(
+                super::delivery::HostToolsReliableDelivery::ScheduleSnapshot(
+                    HostScheduleSnapshotDelivery { request, result },
+                ),
+            );
         });
         true
     }
@@ -1167,6 +1197,70 @@ mod tests {
         assert_eq!(
             notice,
             HostToolsEvent::ShowNotice(HostToolsNotice::PackageSnapshotFailed)
+        );
+        assert!(!format!("{notice:?}").contains(secret_marker));
+    }
+
+    #[gpui::test]
+    fn schedule_snapshot_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let request = HostScheduleSnapshotRequest {
+            connection_id: "connection-1".to_string(),
+            feedback: HostSnapshotFeedback::Toast,
+            failure_fallback: "Schedule capture failed".to_string(),
+        };
+        let sender = entity.update(cx, |entity, cx| {
+            assert!(entity.select_schedule_filter(ScheduledTaskFilter::Failed, cx));
+            entity.toggle_schedule_expanded(5, cx);
+            assert_eq!(entity.schedule_filter(), ScheduledTaskFilter::Failed);
+            assert_eq!(entity.schedule_expanded_index(), Some(5));
+            entity.host_schedules.running = Some(request.clone());
+            entity.host_schedules.polling = true;
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "schedule-token-should-not-reach-ui";
+
+        sender
+            .send(
+                super::delivery::HostToolsReliableDelivery::ScheduleSnapshot(
+                    HostScheduleSnapshotDelivery {
+                        request,
+                        result: Ok(SshCommandOutput {
+                            stdout: secret_marker.to_string(),
+                            stderr: secret_marker.to_string(),
+                            exit_code: Some(1),
+                            truncated: false,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(!entity.host_schedules.polling);
+            let snapshot = entity.host_schedules.snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status,
+                ResourceScheduledTaskStatus::Error {
+                    message: "Schedule capture failed".to_string(),
+                }
+            );
+            assert!(!format!("{:?}", snapshot.status).contains(secret_marker));
+        });
+        let notice = events.try_recv().unwrap();
+        assert_eq!(
+            notice,
+            HostToolsEvent::ShowNotice(HostToolsNotice::ScheduleSnapshotFailed)
         );
         assert!(!format!("{notice:?}").contains(secret_marker));
     }

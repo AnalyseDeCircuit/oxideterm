@@ -910,6 +910,44 @@ impl WorkspaceApp {
                 ),
                 TerminalNoticeVariant::Error,
             ),
+            HostToolsNotice::ScheduleSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_schedules.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ScheduleConnectionMissing => (
+                self.i18n
+                    .t("sidebar.host_schedules.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::SchedulePartialSupport { os_type } => (
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.partial_support",
+                    &[("os", os_type)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ScheduleSnapshotLoaded { count } => (
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.snapshot_loaded",
+                    &[("count", count.to_string())],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::ScheduleUnavailable => (
+                self.i18n.t("sidebar.host_schedules.toast.unavailable"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ScheduleSnapshotFailed => (
+                self.i18n_replace(
+                    "sidebar.host_schedules.toast.snapshot_failed",
+                    &[(
+                        "reason",
+                        self.i18n.t("sidebar.host_schedules.toast.unknown_error"),
+                    )],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
         };
         self.push_host_log_toast(message, variant);
     }

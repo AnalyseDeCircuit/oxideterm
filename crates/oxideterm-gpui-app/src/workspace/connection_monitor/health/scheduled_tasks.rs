@@ -3,7 +3,7 @@
 use super::*;
 
 use oxideterm_connection_monitor::{
-    ScheduledTaskToggleAction, scheduled_task_action_availability, scheduled_task_capture_snapshot,
+    ScheduledTaskToggleAction, parse_scheduled_task_snapshot, scheduled_task_action_availability,
 };
 
 impl WorkspaceApp {
@@ -23,29 +23,23 @@ impl WorkspaceApp {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_schedule_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_schedule_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.host_tools.read(cx).schedule_snapshot_for(selected_id);
+        let filter = self.host_tools.read(cx).schedule_filter();
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_scheduled_task_rows(
                     &snapshot.entries,
                     &self.connection_monitor.host_schedule_search_query,
-                    self.connection_monitor.host_schedule_filter,
+                    filter,
                 )
             })
             .unwrap_or_default();
         let status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_schedule_list_state(&rows, selected_id);
+        self.sync_host_schedule_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-schedules-panel")
@@ -72,7 +66,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_schedule_snapshot_polling,
+                        !self.host_tools.read(cx).schedule_snapshot_polling(),
                         cx,
                     ))
                     .child(self.render_host_schedule_search(cx))
@@ -86,7 +80,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_schedule_list(
                 rows,
-                self.connection_monitor.host_schedule_snapshot_polling,
+                self.host_tools.read(cx).schedule_snapshot_polling(),
                 status,
                 selected_id,
                 cx,
@@ -174,17 +168,15 @@ impl WorkspaceApp {
         filter: ScheduledTaskFilter,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_schedule_filter == filter;
+        let active = self.host_tools.read(cx).schedule_filter() == filter;
         self.host_tools_filter_chip(active)
             .child(self.i18n.t(scheduled_task_filter_label_key(filter)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_schedule_filter != filter {
-                        this.connection_monitor.host_schedule_filter = filter;
-                        this.connection_monitor.host_schedule_expanded_index = None;
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_schedule_filter(filter, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -264,7 +256,7 @@ impl WorkspaceApp {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.connection_monitor.host_schedule_snapshot_polling,
+                            disabled: self.host_tools.read(cx).schedule_snapshot_polling(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -339,7 +331,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_schedule_list_state.clone();
+        let state = self.host_tools.read(cx).schedule_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         let show_context_columns =
@@ -457,7 +449,7 @@ impl WorkspaceApp {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_schedule_expanded_index == Some(index);
+        let expanded = self.host_tools.read(cx).schedule_expanded_index() == Some(index);
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let source = host_schedule_source_display(&self.i18n, &entry.source);
@@ -594,12 +586,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_schedule_expanded_index == Some(index) {
-                        this.connection_monitor.host_schedule_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_schedule_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.toggle_schedule_expanded(index, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -864,6 +853,7 @@ impl WorkspaceApp {
         &self,
         rows: &[ResourceScheduledTask],
         selected_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let signatures = rows
             .iter()
@@ -872,36 +862,15 @@ impl WorkspaceApp {
         let identity = format!(
             "host-schedules:{selected_id}:{}:{}:{}",
             self.connection_monitor.host_schedule_search_query,
-            self.connection_monitor.host_schedule_filter as u8,
-            self.connection_monitor
-                .host_schedule_expanded_index
+            self.host_tools.read(cx).schedule_filter() as u8,
+            self.host_tools
+                .read(cx)
+                .schedule_expanded_index()
                 .unwrap_or(usize::MAX)
         );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_schedule_list_state,
-            &mut self
-                .connection_monitor
-                .host_schedule_list_cache
-                .borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
-    }
-
-    pub(super) fn host_schedule_snapshot_command(
-        &self,
-        connection_id: &str,
-    ) -> (
-        oxideterm_connection_monitor::ScheduledTaskCaptureCommand,
-        String,
-    ) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_scheduled_task_snapshot_command(&os_type), os_type)
+        self.host_tools
+            .read(cx)
+            .sync_schedule_list_signatures(&identity, &signatures);
     }
 
     pub(super) fn host_schedule_logs_command(
@@ -998,67 +967,22 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Schedules) {
-            return;
-        }
-        if self.connection_monitor.host_schedule_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_schedule_toast(
-                    self.i18n
-                        .t("sidebar.host_schedules.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_schedule_toast(
-                    self.i18n
-                        .t("sidebar.host_schedules.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
-        };
-        let (command, os_type) = self.host_schedule_snapshot_command(&connection_id);
-        if feedback.should_toast() && command.capability == ScheduledTaskCapability::Partial {
-            self.push_host_schedule_toast(
-                self.i18n_replace(
-                    "sidebar.host_schedules.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let request = HostScheduleSnapshotRequest {
-            connection_id: connection_id.clone(),
-            feedback,
-        };
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor.host_schedule_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_schedule_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_schedule_snapshot_rx = Some(rx);
-        self.connection_monitor.host_schedule_snapshot_polling = true;
-        self.connection_monitor.host_schedule_last_error = None;
-        // Scheduled tasks are inventory data, not high-frequency metrics.
-        // Keep the sampler out of the profiler loop to avoid expensive cron/systemd scans.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_SCHEDULE_SNAPSHOT_TIMEOUT,
-                    HOST_SCHEDULE_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostScheduleSnapshotDelivery { request, result });
+        let monitoring_enabled = self.host_tool_monitoring_enabled(ContextSidebarTool::Schedules);
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_schedules.toast.unknown_error");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_schedule_snapshot(
+                connection_id,
+                feedback,
+                monitoring_enabled,
+                runtime,
+                failure_fallback,
+                cx,
+            )
         });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn request_host_schedule_logs(
@@ -1452,50 +1376,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_host_schedules_snapshot_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_schedule_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_schedule_snapshot_rx.take() else {
-            self.connection_monitor.host_schedule_snapshot_polling = false;
-            self.connection_monitor.host_schedule_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_schedules_snapshot(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_schedule_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_schedule_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_schedule_snapshot_polling = false;
-                self.connection_monitor.host_schedule_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_schedules.toast.unknown_error");
-                self.connection_monitor.host_schedule_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_schedule_toast(
-                        self.i18n_replace(
-                            "sidebar.host_schedules.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
     pub(in crate::workspace) fn poll_host_schedule_logs_results(&mut self, cx: &mut Context<Self>) {
         if !self.connection_monitor.host_schedule_logs_polling {
             return;
@@ -1554,103 +1434,6 @@ impl WorkspaceApp {
                 cx.notify();
             }
         }
-    }
-
-    pub(super) fn finish_host_schedules_snapshot(
-        &mut self,
-        delivery: HostScheduleSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_schedule_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
-            return;
-        }
-        let feedback = delivery.request.feedback;
-        self.connection_monitor.host_schedule_snapshot_polling = false;
-        self.connection_monitor.host_schedule_snapshot_running = None;
-        self.connection_monitor.host_schedule_snapshot_rx = None;
-        match delivery.result {
-            Ok(output) => {
-                let snapshot = scheduled_task_capture_snapshot(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                );
-                let visible_count = visible_scheduled_task_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_schedule_search_query,
-                    self.connection_monitor.host_schedule_filter,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourceScheduledTaskStatus::Available { .. } => {
-                        self.connection_monitor.host_schedule_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_schedule_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_schedules.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourceScheduledTaskStatus::Unavailable => {
-                        self.connection_monitor.host_schedule_last_error =
-                            Some(self.i18n.t("sidebar.host_schedules.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_schedule_toast(
-                                self.i18n.t("sidebar.host_schedules.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourceScheduledTaskStatus::Error { message } => {
-                        self.connection_monitor.host_schedule_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_schedule_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_schedules.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourceScheduledTaskStatus::Unknown => {}
-                }
-                self.connection_monitor.host_schedule_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_schedule_snapshot = Some(snapshot);
-            }
-            Err(error) => {
-                self.connection_monitor.host_schedule_last_error = Some(error.clone());
-                self.connection_monitor.host_schedule_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_schedule_snapshot =
-                    Some(ResourceScheduledTaskSnapshot {
-                        status: ResourceScheduledTaskStatus::Error {
-                            message: error.clone(),
-                        },
-                        entries: Vec::new(),
-                    });
-                if feedback.should_toast() {
-                    self.push_host_schedule_toast(
-                        self.i18n_replace(
-                            "sidebar.host_schedules.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-        }
-        cx.notify();
     }
 
     pub(super) fn finish_host_schedule_logs(
@@ -1984,6 +1767,197 @@ impl WorkspaceApp {
                 ))
                 .into_any_element(),
         )
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn schedule_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<ResourceScheduledTaskSnapshot> {
+        self.host_schedules
+            .snapshot
+            .as_ref()
+            .filter(|_| {
+                self.host_schedules.snapshot_connection_id.as_deref() == Some(connection_id)
+            })
+            .cloned()
+    }
+
+    pub(super) fn schedule_snapshot_polling(&self) -> bool {
+        self.host_schedules.polling
+    }
+
+    pub(in crate::workspace::connection_monitor) fn schedule_filter(&self) -> ScheduledTaskFilter {
+        self.host_schedules.filter
+    }
+
+    pub(super) fn schedule_list_state(&self) -> ListState {
+        self.host_schedules.list_state.clone()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn schedule_expanded_index(
+        &self,
+    ) -> Option<usize> {
+        self.host_schedules.expanded_index
+    }
+
+    pub(in crate::workspace::connection_monitor) fn select_schedule_filter(
+        &mut self,
+        filter: ScheduledTaskFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_schedules.filter == filter {
+            return false;
+        }
+        self.host_schedules.filter = filter;
+        self.host_schedules.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::connection_monitor) fn toggle_schedule_expanded(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_schedules.expanded_index =
+            (self.host_schedules.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_schedule_expanded(&mut self, cx: &mut Context<Self>) {
+        if self.host_schedules.expanded_index.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_schedule_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_schedules.list_state,
+            &mut self.host_schedules.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn request_schedule_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
+        }
+        if self.host_schedules.polling {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::ScheduleSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
+        }
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::ScheduleConnectionMissing)
+                .into_iter()
+                .collect();
+        };
+        let command = build_scheduled_task_snapshot_command(&os_type);
+        let mut notices = Vec::new();
+        if feedback.should_toast() && command.capability == ScheduledTaskCapability::Partial {
+            notices.push(HostToolsNotice::SchedulePartialSupport { os_type });
+        }
+        let request = HostScheduleSnapshotRequest {
+            connection_id: connection_id.clone(),
+            feedback,
+            failure_fallback,
+        };
+        self.host_schedules.snapshot_connection_id = Some(connection_id);
+        self.host_schedules.running = Some(request.clone());
+        self.host_schedules.polling = true;
+        // Inventory scans remain manual and never join the metric sampler.
+        let spawned = self.spawn_schedule_snapshot_capture(
+            command.command,
+            request,
+            HOST_SCHEDULE_SNAPSHOT_TIMEOUT,
+            HOST_SCHEDULE_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_schedules.polling = false;
+            self.host_schedules.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::ScheduleConnectionMissing)
+                .into_iter()
+                .collect();
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_schedules_snapshot(
+        &mut self,
+        delivery: HostScheduleSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_schedules.running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        let feedback = delivery.request.feedback;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_schedules.polling = false;
+        self.host_schedules.running = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_scheduled_task_snapshot(&output.stdout);
+                if feedback.should_toast() {
+                    match &snapshot.status {
+                        ResourceScheduledTaskStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::ScheduleSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourceScheduledTaskStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::ScheduleUnavailable,
+                            ));
+                        }
+                        ResourceScheduledTaskStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::ScheduleSnapshotFailed,
+                            ));
+                        }
+                        ResourceScheduledTaskStatus::Unknown => {}
+                    }
+                }
+                self.host_schedules.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_schedules.snapshot = Some(snapshot);
+            }
+            Ok(_) | Err(()) => {
+                self.host_schedules.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_schedules.snapshot = Some(ResourceScheduledTaskSnapshot {
+                    status: ResourceScheduledTaskStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::ScheduleSnapshotFailed,
+                    ));
+                }
+            }
+        }
+        cx.notify();
     }
 }
 

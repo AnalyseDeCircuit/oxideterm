@@ -34,6 +34,12 @@ pub(in crate::workspace) enum HostToolsNotice {
     PackageSnapshotLoaded { count: usize },
     PackageUnavailable,
     PackageSnapshotFailed,
+    ScheduleSnapshotAlreadyRunning,
+    ScheduleConnectionMissing,
+    SchedulePartialSupport { os_type: String },
+    ScheduleSnapshotLoaded { count: usize },
+    ScheduleUnavailable,
+    ScheduleSnapshotFailed,
 }
 
 impl EventEmitter<HostToolsEvent> for HostToolsEntity {}

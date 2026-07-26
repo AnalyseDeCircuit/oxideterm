@@ -477,12 +477,42 @@ impl HostPortsState {
 pub(super) struct HostScheduleSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleSnapshotDelivery {
     pub(super) request: HostScheduleSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostSchedulesState {
+    pub(super) filter: ScheduledTaskFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceScheduledTaskSnapshot>,
+    pub(super) running: Option<HostScheduleSnapshotRequest>,
+    pub(super) polling: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostSchedulesState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: ScheduledTaskFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            polling: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -761,15 +791,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_port_search_focused: bool,
     pub(in crate::workspace) host_schedule_search_query: String,
     pub(in crate::workspace) host_schedule_search_focused: bool,
-    pub(super) host_schedule_filter: ScheduledTaskFilter,
-    pub(in crate::workspace) host_schedule_expanded_index: Option<usize>,
-    pub(super) host_schedule_snapshot_connection_id: Option<String>,
-    pub(super) host_schedule_snapshot: Option<ResourceScheduledTaskSnapshot>,
-    pub(super) host_schedule_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostScheduleSnapshotDelivery>>,
-    pub(super) host_schedule_snapshot_running: Option<HostScheduleSnapshotRequest>,
-    pub(super) host_schedule_snapshot_polling: bool,
-    pub(super) host_schedule_last_error: Option<String>,
     pub(super) host_schedule_pending_confirm:
         Option<HostToolConfirmState<HostScheduleActionRequest>>,
     pub(super) host_schedule_action_running: Option<HostScheduleActionRequest>,
@@ -779,8 +800,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_schedule_logs_dialog: Option<HostScheduleLogsDialog>,
     pub(super) host_schedule_logs_rx: Option<std::sync::mpsc::Receiver<HostScheduleLogsDelivery>>,
     pub(super) host_schedule_logs_polling: bool,
-    pub(super) host_schedule_list_state: ListState,
-    pub(super) host_schedule_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_filesystem_search_query: String,
     pub(in crate::workspace) host_filesystem_search_focused: bool,
     pub(in crate::workspace) host_package_search_query: String,
@@ -876,14 +895,6 @@ impl ConnectionMonitorState {
             host_port_search_focused: false,
             host_schedule_search_query: String::new(),
             host_schedule_search_focused: false,
-            host_schedule_filter: ScheduledTaskFilter::All,
-            host_schedule_expanded_index: None,
-            host_schedule_snapshot_connection_id: None,
-            host_schedule_snapshot: None,
-            host_schedule_snapshot_rx: None,
-            host_schedule_snapshot_running: None,
-            host_schedule_snapshot_polling: false,
-            host_schedule_last_error: None,
             host_schedule_pending_confirm: None,
             host_schedule_action_running: None,
             host_schedule_action_rx: None,
@@ -891,12 +902,6 @@ impl ConnectionMonitorState {
             host_schedule_logs_dialog: None,
             host_schedule_logs_rx: None,
             host_schedule_logs_polling: false,
-            host_schedule_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_schedule_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_filesystem_search_query: String::new(),
             host_filesystem_search_focused: false,
             host_package_search_query: String::new(),
