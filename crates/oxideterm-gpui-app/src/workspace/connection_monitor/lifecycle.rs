@@ -2,7 +2,37 @@ use super::*;
 
 use oxideterm_connection_monitor::ResourceSampler;
 
+fn is_host_tools_tab_kind(tab_kind: &TabKind) -> bool {
+    matches!(
+        tab_kind,
+        TabKind::ConnectionPool | TabKind::ConnectionMonitor | TabKind::Topology | TabKind::Runtime
+    )
+}
+
+fn host_tools_surface_visible(
+    main_tab_visible: bool,
+    detached_tab_visible: bool,
+    sidebar_visible: bool,
+) -> bool {
+    main_tab_visible || detached_tab_visible || sidebar_visible
+}
+
 impl WorkspaceApp {
+    pub(in crate::workspace) fn host_tools_surface_visible(&self) -> bool {
+        let main_tab_visible = self.tabs.iter().any(|tab| {
+            is_host_tools_tab_kind(&tab.kind)
+                && self.main_window_tabs.active_tab_id == Some(tab.id)
+                && !self.detached_tabs.contains(&tab.id)
+        });
+        let detached_tab_visible = self.tabs.iter().any(|tab| {
+            is_host_tools_tab_kind(&tab.kind) && self.detached_tab_windows.contains_key(&tab.id)
+        });
+        let sidebar_visible = self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
+
+        host_tools_surface_visible(main_tab_visible, detached_tab_visible, sidebar_visible)
+    }
+
     pub(in crate::workspace) fn set_connection_runtime_section(
         &mut self,
         section: ConnectionRuntimeSection,
@@ -90,31 +120,10 @@ impl WorkspaceApp {
     ) {
         self.poll_host_service_snapshot_results(cx);
         self.sync_host_gpu_sampling(cx);
-        let monitor_surface_visible = self.active_tab().is_some_and(|tab| {
-            matches!(
-                tab.kind,
-                TabKind::ConnectionPool
-                    | TabKind::ConnectionMonitor
-                    | TabKind::Topology
-                    | TabKind::Runtime
-            )
-        }) || (self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-            && matches!(
-                self.active_context_sidebar_tool,
-                ContextSidebarTool::Monitor
-                    | ContextSidebarTool::Gpu
-                    | ContextSidebarTool::Processes
-                    | ContextSidebarTool::Services
-                    | ContextSidebarTool::Logs
-                    | ContextSidebarTool::Tmux
-                    | ContextSidebarTool::Docker
-                    | ContextSidebarTool::Ports
-                    | ContextSidebarTool::Schedules
-                    | ContextSidebarTool::Filesystems
-                    | ContextSidebarTool::Packages
-            ));
-        if !monitor_surface_visible {
+        if !self.host_tools_surface_visible() {
+            // Profilers own only sampling shells. Shared SSH nodes and user-triggered
+            // Host Tools operations continue independently while every surface is hidden.
+            self.connection_monitor.profiler_registry.stop_all();
             return;
         }
 
@@ -197,7 +206,7 @@ impl WorkspaceApp {
         let Some(connection_id) = self.connection_monitor.selected_connection_id.clone() else {
             return;
         };
-        if self.resource_sampling_config().is_empty() {
+        if !self.host_tools_surface_visible() || self.resource_sampling_config().is_empty() {
             self.connection_monitor.profiler_registry.stop_all();
             return;
         }
@@ -243,7 +252,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let config = self.resource_sampling_config();
-        if config.is_empty() {
+        if config.is_empty() || !self.host_tools_surface_visible() {
             // The registry owns persistent shells, so stop them at the settings boundary.
             self.connection_monitor.profiler_registry.stop_all();
         } else {
@@ -287,5 +296,19 @@ impl WorkspaceApp {
             monitor_connection_label(left).cmp(&monitor_connection_label(right))
         });
         connections
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_tools_surface_visible;
+
+    #[test]
+    fn host_tools_visibility_covers_main_detached_and_sidebar_surfaces() {
+        assert!(host_tools_surface_visible(true, false, false));
+        assert!(host_tools_surface_visible(false, true, false));
+        assert!(host_tools_surface_visible(false, false, true));
+        assert!(host_tools_surface_visible(true, true, true));
+        assert!(!host_tools_surface_visible(false, false, false));
     }
 }
