@@ -252,8 +252,9 @@ use self::connection_monitor::{
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
 use self::ime::{
-    WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
-    active_ime_should_defer_input_key,
+    HostToolsPlainTextImeFrame, TextInputAnchorStore, WorkspaceImeDragSelection,
+    WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
+    active_ime_should_defer_input_key, workspace_ime_target_for_plain_host_tools_input,
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
@@ -303,7 +304,7 @@ use oxideterm_gpui_settings_view::{
     ActiveSurface, SettingsInput, SettingsSelect, SettingsSlider, SettingsTab,
 };
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId, select_anchor_probe};
-use oxideterm_gpui_ui::text_input::{TextInputAnchor, TextInputAnchorId};
+use oxideterm_gpui_ui::text_input::TextInputAnchor;
 use oxideterm_gpui_ui::typography::{
     css_font_family_head as settings_css_font_family_head, gpui_font_family_name,
     tauri_ui_font_family as settings_ui_font_family,
@@ -860,7 +861,7 @@ pub(crate) struct WorkspaceApp {
     ai_delete_message_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     tab_close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
-    text_input_anchors: HashMap<TextInputAnchorId, TextInputAnchor>,
+    text_input_anchors: TextInputAnchorStore,
     selectable_text_values: HashMap<u64, String>,
     selectable_text_layouts: HashMap<u64, TextLayout>,
     selectable_text_fragments: HashMap<u64, SelectableTextFragmentState>,

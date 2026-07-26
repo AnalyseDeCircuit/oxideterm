@@ -1,4 +1,4 @@
-use std::{ops::Range, time::Instant};
+use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Instant};
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
@@ -35,6 +35,34 @@ use oxideterm_workspace::parse_command_palette_query;
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
 const READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE: f32 = 28.0;
+
+/// Shares layout-only text input anchors without retaining the workspace entity.
+#[derive(Clone, Default)]
+pub(super) struct TextInputAnchorStore {
+    anchors: Rc<RefCell<HashMap<TextInputAnchorId, TextInputAnchor>>>,
+}
+
+impl TextInputAnchorStore {
+    pub(super) fn get(&self, id: TextInputAnchorId) -> Option<TextInputAnchor> {
+        self.anchors.borrow().get(&id).copied()
+    }
+
+    pub(super) fn changed(&self, anchor: TextInputAnchor) -> bool {
+        self.get(anchor.id) != Some(anchor)
+    }
+
+    pub(super) fn update(&self, anchor: TextInputAnchor) {
+        if self.changed(anchor) {
+            // Anchor probes run during layout, so geometry updates must not
+            // trigger a second render loop.
+            self.anchors.borrow_mut().insert(anchor.id, anchor);
+        }
+    }
+
+    fn bounds(&self, id: TextInputAnchorId) -> Option<Bounds<Pixels>> {
+        self.get(id).map(|anchor| anchor.bounds)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum WorkspaceImeTarget {
@@ -73,6 +101,81 @@ pub(super) enum WorkspaceImeTarget {
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
+}
+
+/// Captures non-secret Host Tools IME presentation state for one render frame.
+#[derive(Clone)]
+pub(super) struct HostToolsPlainTextImeFrame {
+    input: HostToolsTextInput,
+    target: WorkspaceImeTarget,
+    caret_visible: bool,
+    selected_range: Option<Range<usize>>,
+    marked_text: Option<String>,
+    anchor_store: TextInputAnchorStore,
+}
+
+impl HostToolsPlainTextImeFrame {
+    fn new(
+        input: HostToolsTextInput,
+        caret_visible: bool,
+        selected_range: Option<Range<usize>>,
+        marked_text: Option<String>,
+        anchor_store: TextInputAnchorStore,
+    ) -> Option<Self> {
+        // Tmux dialog commands may contain secrets and must stay on their
+        // zeroizing workspace-owned input path.
+        let target = workspace_ime_target_for_plain_host_tools_input(input)?;
+        Some(Self {
+            input,
+            target,
+            caret_visible,
+            selected_range,
+            marked_text,
+            anchor_store,
+        })
+    }
+
+    pub(super) fn input(&self) -> HostToolsTextInput {
+        self.input
+    }
+
+    pub(super) fn anchor_id(&self) -> TextInputAnchorId {
+        self.target.anchor_id()
+    }
+
+    pub(super) fn caret_visible(&self) -> bool {
+        self.caret_visible
+    }
+
+    pub(super) fn selected_range(&self) -> Option<Range<usize>> {
+        self.selected_range.clone()
+    }
+
+    pub(super) fn marked_text(&self) -> Option<&str> {
+        self.marked_text.as_deref()
+    }
+
+    pub(super) fn update_anchor(&self, anchor: TextInputAnchor) {
+        self.anchor_store.update(anchor);
+    }
+}
+
+pub(super) fn workspace_ime_target_for_plain_host_tools_input(
+    input: HostToolsTextInput,
+) -> Option<WorkspaceImeTarget> {
+    match input {
+        HostToolsTextInput::ProcessSearch => Some(WorkspaceImeTarget::HostProcessSearch),
+        HostToolsTextInput::ProcessRenice => Some(WorkspaceImeTarget::HostProcessRenice),
+        HostToolsTextInput::DockerSearch => Some(WorkspaceImeTarget::HostDockerSearch),
+        HostToolsTextInput::ServiceSearch => Some(WorkspaceImeTarget::HostServiceSearch),
+        HostToolsTextInput::LogSearch => Some(WorkspaceImeTarget::HostLogSearch),
+        HostToolsTextInput::TmuxSearch => Some(WorkspaceImeTarget::HostTmuxSearch),
+        HostToolsTextInput::TmuxDialog => None,
+        HostToolsTextInput::PortSearch => Some(WorkspaceImeTarget::HostPortSearch),
+        HostToolsTextInput::ScheduleSearch => Some(WorkspaceImeTarget::HostScheduleSearch),
+        HostToolsTextInput::FilesystemSearch => Some(WorkspaceImeTarget::HostFilesystemSearch),
+        HostToolsTextInput::PackageSearch => Some(WorkspaceImeTarget::HostPackageSearch),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -406,8 +509,7 @@ impl InputHandler for WorkspaceInputHandler {
             let target = view.active_ime_target(cx)?;
             let bounds = view
                 .text_input_anchors
-                .get(&target.anchor_id())
-                .map(|anchor| anchor.bounds)
+                .bounds(target.anchor_id())
                 .unwrap_or(self.fallback_bounds);
             Some(Bounds {
                 origin: bounds.origin + point(px(0.0), bounds.size.height),
@@ -483,13 +585,22 @@ impl WorkspaceApp {
         anchor: TextInputAnchor,
         _cx: &mut Context<Self>,
     ) {
-        if self.text_input_anchors.get(&anchor.id) != Some(&anchor) {
-            // Anchor probes run during layout, so scrolling a focused input can
-            // update its bounds every frame. Browsers do not schedule an app
-            // render for that geometry-only change; store it for hit-testing
-            // and IME math without feeding another cx.notify loop.
-            self.text_input_anchors.insert(anchor.id, anchor);
-        }
+        self.text_input_anchors.update(anchor);
+    }
+
+    pub(super) fn host_tools_plain_text_ime_frame(
+        &self,
+        input: HostToolsTextInput,
+        cx: &App,
+    ) -> Option<HostToolsPlainTextImeFrame> {
+        let target = workspace_ime_target_for_plain_host_tools_input(input)?;
+        HostToolsPlainTextImeFrame::new(
+            input,
+            self.new_connection_caret_visible,
+            self.ime_selected_range_for_target(target, cx),
+            self.marked_text_for_target(target, cx).map(str::to_owned),
+            self.text_input_anchors.clone(),
+        )
     }
 
     pub(super) fn active_ime_target(&self, cx: &App) -> Option<WorkspaceImeTarget> {
@@ -990,7 +1101,7 @@ impl WorkspaceApp {
             return Some(index.min(text_len));
         }
 
-        let bounds = self.text_input_anchors.get(&target.anchor_id())?.bounds;
+        let bounds = self.text_input_anchors.bounds(target.anchor_id())?;
         let padding =
             Self::ime_target_horizontal_padding(target, self.tokens.metrics.ui_control_padding_x);
         let left = bounds.left() + padding;
@@ -2847,21 +2958,23 @@ fn path_completion_owns_vertical_navigation(
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Keystroke, Modifiers, px};
+    use gpui::{Bounds, Keystroke, Modifiers, point, px, size};
 
     use super::{
-        CopyShortcutOwner, FileManagerInput, PendingPlatformTextCommit, SettingsInput, SftpInput,
-        TextInputContentAlign, WorkspaceApp, WorkspaceImeMarkedText, WorkspaceImeTarget,
-        active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
-        control_k_delete_end, copy_shortcut_owner_for_target,
-        effective_platform_text_replacement_range, ime_target_accepts_newline,
-        ime_target_should_blink_caret, keystroke_commits_platform_text,
+        CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
+        PendingPlatformTextCommit, SettingsInput, SftpInput, TextInputAnchor, TextInputAnchorId,
+        TextInputAnchorStore, TextInputContentAlign, WorkspaceApp, WorkspaceImeMarkedText,
+        WorkspaceImeTarget, active_ime_should_defer_input_key,
+        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
+        copy_shortcut_owner_for_target, effective_platform_text_replacement_range,
+        ime_target_accepts_newline, ime_target_should_blink_caret, keystroke_commits_platform_text,
         keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
         platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
         soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
         vertical_line_navigation_destination, word_range_for_utf16_offset,
+        workspace_ime_target_for_plain_host_tools_input,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -3008,6 +3121,50 @@ mod tests {
         assert!(!ime_target_should_blink_caret(
             WorkspaceImeTarget::ReadOnlyText(1)
         ));
+    }
+
+    #[test]
+    fn text_input_anchor_store_clones_share_geometry_updates() {
+        let store = TextInputAnchorStore::default();
+        let cloned = store.clone();
+        let anchor_id = TextInputAnchorId(42);
+        cloned.update(TextInputAnchor {
+            id: anchor_id,
+            bounds: Bounds {
+                origin: point(px(12.0), px(24.0)),
+                size: size(px(80.0), px(30.0)),
+            },
+        });
+
+        assert_eq!(
+            store.bounds(anchor_id),
+            Some(Bounds {
+                origin: point(px(12.0), px(24.0)),
+                size: size(px(80.0), px(30.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn plain_host_tools_ime_frame_rejects_secret_tmux_dialog_input() {
+        assert_eq!(
+            workspace_ime_target_for_plain_host_tools_input(HostToolsTextInput::ProcessRenice),
+            Some(WorkspaceImeTarget::HostProcessRenice)
+        );
+        assert_eq!(
+            workspace_ime_target_for_plain_host_tools_input(HostToolsTextInput::TmuxDialog),
+            None
+        );
+        assert!(
+            HostToolsPlainTextImeFrame::new(
+                HostToolsTextInput::TmuxDialog,
+                true,
+                None,
+                None,
+                TextInputAnchorStore::default(),
+            )
+            .is_none()
+        );
     }
 
     #[test]

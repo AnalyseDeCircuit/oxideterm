@@ -51,6 +51,10 @@ pub(in crate::workspace) enum HostToolsWindowIntent {
         opened_notice: String,
         missing_notice: String,
     },
+    BeginPlainTextImeSelection {
+        input: HostToolsTextInput,
+        event: MouseDownEvent,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -192,6 +196,7 @@ mod tests {
             Some(HostToolsWindowIntent::OpenExistingNodeTerminal { command, .. }) => {
                 assert_eq!(command, "journalctl --follow");
             }
+            Some(_) => panic!("cloned request retained the wrong intent kind"),
             None => panic!("cloned request should retain the shared intent"),
         }
         assert!(request.take().is_none());

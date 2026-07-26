@@ -393,7 +393,7 @@ impl WorkspaceApp {
             ai_delete_message_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             tab_close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             select_anchors: HashMap::new(),
-            text_input_anchors: HashMap::new(),
+            text_input_anchors: TextInputAnchorStore::default(),
             selectable_text_values: HashMap::new(),
             selectable_text_layouts: HashMap::new(),
             selectable_text_fragments: HashMap::new(),

@@ -1404,7 +1404,7 @@ impl WorkspaceApp {
         step: f32,
         cx: &mut Context<Self>,
     ) {
-        let Some(anchor) = self.text_input_anchors.get(&target.anchor_id()) else {
+        let Some(anchor) = self.text_input_anchors.get(target.anchor_id()) else {
             return;
         };
         let width = f32::from(anchor.bounds.size.width).max(1.0);

@@ -54,6 +54,17 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            HostToolsWindowIntent::BeginPlainTextImeSelection { input, event } => {
+                let Some(target) = workspace_ime_target_for_plain_host_tools_input(input) else {
+                    // Secret-bearing tmux dialog input never crosses this
+                    // plain-text frame boundary.
+                    return;
+                };
+                self.ime_marked_text = None;
+                self.new_connection_caret_visible = true;
+                window.focus(&self.focus_handle, cx);
+                self.begin_ime_selection_from_mouse_down(target, &event, window, cx);
+            }
         }
     }
 

@@ -2,20 +2,30 @@
 
 use super::*;
 
-impl WorkspaceApp {
-    pub(super) fn render_host_processes_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let connections = self.monitor_connections(cx);
+impl HostToolsEntity {
+    fn render_host_processes_panel(
+        &self,
+        search_ime: HostToolsPlainTextImeFrame,
+        renice_ime: HostToolsPlainTextImeFrame,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.monitor_connections();
         if connections.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::WifiOff,
-                self.tokens.ui.text_muted,
-                self.i18n.t("profiler.panel.no_connection"),
+                tokens.ui.text_muted,
+                i18n.t("profiler.panel.no_connection"),
+                selectable_text,
                 cx,
             );
         }
 
-        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
+        let selected_connection_id = self.selected_connection_id_owned();
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
@@ -24,15 +34,13 @@ impl WorkspaceApp {
             .find(|connection| connection.connection_id == selected_id)
             .unwrap_or(&connections[0]);
         let current = self
-            .host_tools
-            .read(cx)
             .profiler_registry()
             .current(&active_connection.connection_id);
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
         let rows = metrics
-            .map(|metrics| self.visible_host_process_rows(&metrics.top_processes, cx))
+            .map(|metrics| self.visible_host_process_rows(&metrics.top_processes))
             .unwrap_or_default();
-        self.sync_host_process_list_state(&rows, selected_id, cx);
+        self.sync_host_process_list_state(&rows, selected_id);
 
         div()
             .id("host-processes-panel")
@@ -55,74 +63,42 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap_2()
                     .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_switcher_row(
+                    .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
                         current.is_some(),
+                        tokens,
+                        mono_font_family.clone(),
+                        selectable_text,
                         cx,
                     ))
-                    .child(self.render_host_process_search(cx))
-                    .child(self.render_host_process_filter_row(cx))
-                    .child(self.render_host_process_sort_row(rows.len(), cx)),
+                    .child(self.render_host_process_search(&search_ime, tokens, i18n, cx))
+                    .child(self.render_host_process_filter_row(tokens, i18n, selectable_text, cx))
+                    .child(self.render_host_process_sort_row(rows.len(), tokens, i18n, cx)),
             )
-            .child(self.render_host_process_list(rows, current.is_some(), selected_id, cx))
+            .child(self.render_host_process_list(
+                rows,
+                current.is_some(),
+                selected_id,
+                renice_ime,
+                sidebar_width,
+                tokens,
+                i18n,
+                mono_font_family,
+                selectable_text,
+                cx,
+            ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_search(&self, cx: &mut Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::HostProcessSearch;
-        let (focused, value) = {
-            let ui = &self.host_tools.read(cx).ui;
-            (
-                ui.input_is_focused(HostToolsTextInput::ProcessSearch),
-                ui.host_process_search_query.clone(),
-            )
-        };
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value: &value,
-                    placeholder: self.i18n.t("sidebar.host_processes.search_placeholder"),
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .h(px(34.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.host_tools.update(cx, |host_tools, _cx| {
-                        host_tools.ui.focus_input(HostToolsTextInput::ProcessSearch);
-                    });
-                    this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
-        )
-        .into_any_element()
-    }
-
-    pub(super) fn render_host_process_filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_host_process_filter_row(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .items_center()
@@ -131,41 +107,56 @@ impl WorkspaceApp {
             .child(self.render_host_process_filter_chip(
                 ProcessFilter::All,
                 "sidebar.host_processes.filters.all",
+                tokens,
+                i18n,
+                selectable_text,
                 cx,
             ))
             .child(self.render_host_process_filter_chip(
                 ProcessFilter::Running,
                 "sidebar.host_processes.filters.running",
+                tokens,
+                i18n,
+                selectable_text,
                 cx,
             ))
             .child(self.render_host_process_filter_chip(
                 ProcessFilter::HighCpu,
                 "sidebar.host_processes.filters.high_cpu",
+                tokens,
+                i18n,
+                selectable_text,
                 cx,
             ))
             .child(self.render_host_process_filter_chip(
                 ProcessFilter::HighMemory,
                 "sidebar.host_processes.filters.high_memory",
+                tokens,
+                i18n,
+                selectable_text,
                 cx,
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_filter_chip(
+    fn render_host_process_filter_chip(
         &self,
         filter: ProcessFilter,
         label_key: &'static str,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.host_tools.read(cx).ui.host_process_filter == filter;
-        let theme = self.tokens.ui;
+        let active = self.ui.host_process_filter == filter;
+        let theme = tokens.ui;
         div()
             .flex_none()
             .px_2()
             .h(px(24.0))
             .flex()
             .items_center()
-            .rounded(px(self.tokens.radii.sm))
+            .rounded(px(tokens.radii.sm))
             .text_size(px(11.0))
             .cursor_pointer()
             .bg(if active {
@@ -179,21 +170,22 @@ impl WorkspaceApp {
                 rgb(theme.text_muted)
             })
             .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
-            .child(self.render_display_text_with_role(
+            .child(selectable_text.render_display_text_with_role_in_group(
                 SelectableTextRole::NonSelectable,
+                selectable_document_group_id(),
                 "host-process-filter",
                 label_key,
-                self.i18n.t(label_key),
+                0,
+                i18n.t(label_key),
                 if active { theme.text } else { theme.text_muted },
                 cx,
             ))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.host_tools.update(cx, |host_tools, _cx| {
-                        host_tools.ui.host_process_filter = filter;
-                        host_tools.ui.host_process_expanded_pid = None;
-                    });
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Filtering and expansion are process-page state transitions.
+                    host_tools.ui.host_process_filter = filter;
+                    host_tools.ui.host_process_expanded_pid = None;
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -201,9 +193,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_sort_row(
+    fn render_host_process_sort_row(
         &self,
         visible_count: usize,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -213,11 +207,11 @@ impl WorkspaceApp {
             .gap_2()
             .min_w_0()
             .text_size(px(11.0))
-            .text_color(rgb(self.tokens.ui.text_muted))
+            .text_color(rgb(tokens.ui.text_muted))
             .child(div().flex_none().child(format!(
                 "{} {}",
                 visible_count,
-                self.i18n.t("sidebar.host_processes.count_suffix")
+                i18n.t("sidebar.host_processes.count_suffix")
             )))
             .child(
                 div()
@@ -229,47 +223,54 @@ impl WorkspaceApp {
                     .child(self.render_host_process_sort_button(
                         ProcessSort::Cpu,
                         "sidebar.host_processes.sort.cpu",
+                        tokens,
+                        i18n,
                         cx,
                     ))
                     .child(self.render_host_process_sort_button(
                         ProcessSort::Memory,
                         "sidebar.host_processes.sort.memory",
+                        tokens,
+                        i18n,
                         cx,
                     ))
                     .child(self.render_host_process_sort_button(
                         ProcessSort::Pid,
                         "sidebar.host_processes.sort.pid",
+                        tokens,
+                        i18n,
                         cx,
                     ))
                     .child(self.render_host_process_sort_button(
                         ProcessSort::Command,
                         "sidebar.host_processes.sort.command",
+                        tokens,
+                        i18n,
                         cx,
                     ))
                     .child(self.render_host_process_sort_button(
                         ProcessSort::User,
                         "sidebar.host_processes.sort.user",
+                        tokens,
+                        i18n,
                         cx,
                     )),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_sort_button(
+    fn render_host_process_sort_button(
         &self,
         sort: ProcessSort,
         label_key: &'static str,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (active, descending) = {
-            let ui = &self.host_tools.read(cx).ui;
-            (
-                ui.host_process_sort == sort,
-                ui.host_process_sort_descending,
-            )
-        };
-        let theme = self.tokens.ui;
-        let mut label = self.i18n.t(label_key);
+        let active = self.ui.host_process_sort == sort;
+        let descending = self.ui.host_process_sort_descending;
+        let theme = tokens.ui;
+        let mut label = i18n.t(label_key);
         if active {
             label.push_str(if descending { " ↓" } else { " ↑" });
         }
@@ -279,7 +280,7 @@ impl WorkspaceApp {
             .h(px(22.0))
             .flex()
             .items_center()
-            .rounded(px(self.tokens.radii.sm))
+            .rounded(px(tokens.radii.sm))
             .cursor_pointer()
             .bg(if active {
                 rgb(theme.bg_hover)
@@ -295,17 +296,16 @@ impl WorkspaceApp {
             .child(label)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.host_tools.update(cx, |host_tools, _cx| {
-                        let ui = &mut host_tools.ui;
-                        if ui.host_process_sort == sort {
-                            ui.host_process_sort_descending = !ui.host_process_sort_descending;
-                        } else {
-                            ui.host_process_sort = sort;
-                            ui.host_process_sort_descending =
-                                !matches!(sort, ProcessSort::Command | ProcessSort::User);
-                        }
-                    });
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Sorting changes only the process view owned by this entity.
+                    let ui = &mut host_tools.ui;
+                    if ui.host_process_sort == sort {
+                        ui.host_process_sort_descending = !ui.host_process_sort_descending;
+                    } else {
+                        ui.host_process_sort = sort;
+                        ui.host_process_sort_descending =
+                            !matches!(sort, ProcessSort::Command | ProcessSort::User);
+                    }
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -313,39 +313,84 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_list(
+    fn visible_host_process_rows(
+        &self,
+        processes: &[ResourceTopProcess],
+    ) -> Vec<ResourceTopProcess> {
+        visible_process_rows(
+            processes,
+            &self.ui.host_process_search_query,
+            self.ui.host_process_filter,
+            self.ui.host_process_sort,
+            self.ui.host_process_sort_descending,
+        )
+    }
+
+    fn sync_host_process_list_state(&self, rows: &[ResourceTopProcess], selected_id: &str) {
+        let signatures = rows.iter().map(process_row_signature).collect::<Vec<_>>();
+        let identity = format!(
+            "host-processes:{selected_id}:{}:{}:{}:{}:{}",
+            self.ui.host_process_search_query,
+            self.ui.host_process_filter as u8,
+            self.ui.host_process_sort as u8,
+            self.ui.host_process_sort_descending,
+            self.ui
+                .host_process_expanded_pid
+                .as_deref()
+                .unwrap_or_default()
+        );
+        sync_tauri_variable_list_state_by_signatures(
+            &self.ui.host_process_list_state,
+            &mut self.ui.host_process_list_cache.borrow_mut(),
+            &identity,
+            &signatures,
+            TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_process_list(
         &self,
         rows: Vec<ResourceTopProcess>,
         has_metrics: bool,
         selected_id: &str,
+        renice_ime: HostToolsPlainTextImeFrame,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if !has_metrics {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Activity,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_processes.sampling"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_processes.sampling"),
+                selectable_text,
                 cx,
             );
         }
         if rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::ListChecks,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_processes.empty"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_processes.empty"),
+                selectable_text,
                 cx,
             );
         }
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.host_tools.read(cx).ui.host_process_list_state.clone();
+        let state = self.ui.host_process_list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8);
-        let workspace = cx.entity();
-        let separate_user_column =
-            host_process_table_uses_separate_user_column(self.ai.chat.sidebar_width);
+        let host_tools = cx.entity();
+        let separate_user_column = host_process_table_uses_separate_user_column(sidebar_width);
+        let row_tokens = *tokens;
+        let row_i18n = i18n.clone();
+        let row_mono_font_family = mono_font_family.clone();
+
         div()
             .w_full()
             .min_w_0()
@@ -356,7 +401,11 @@ impl WorkspaceApp {
             .overflow_hidden()
             // Processes are an operational table, not a card stack; keep the
             // header fixed while the GPUI List owns only the scrolling rows.
-            .child(self.render_host_process_table_header(separate_user_column))
+            .child(Self::render_host_process_table_header(
+                tokens,
+                i18n,
+                separate_user_column,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -366,13 +415,15 @@ impl WorkspaceApp {
                         state,
                         spec,
                         move |index, _window, cx| {
-                            let rows = rows.clone();
-                            let selected_id = selected_id.clone();
-                            workspace.update(cx, |this, cx| {
-                                this.render_host_process_row(
+                            host_tools.update(cx, |host_tools, cx| {
+                                host_tools.render_host_process_row(
                                     selected_id.as_str(),
                                     rows.get(index).cloned(),
                                     separate_user_column,
+                                    &renice_ime,
+                                    &row_tokens,
+                                    &row_i18n,
+                                    row_mono_font_family.clone(),
                                     cx,
                                 )
                             })
@@ -382,11 +433,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_table_header(
-        &self,
+    fn render_host_process_table_header(
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         separate_user_column: bool,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         div()
             .flex_none()
             .w_full()
@@ -407,7 +459,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .child(host_process_identity_header_label(
-                        &self.i18n,
+                        i18n,
                         separate_user_column,
                     )),
             )
@@ -417,14 +469,14 @@ impl WorkspaceApp {
                         .flex_none()
                         .w(px(HOST_PROCESS_USER_COLUMN_WIDTH))
                         .truncate()
-                        .child(self.i18n.t("sidebar.host_processes.sort.user")),
+                        .child(i18n.t("sidebar.host_processes.sort.user")),
                 )
             })
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_PROCESS_PID_COLUMN_WIDTH))
-                    .child(self.i18n.t("sidebar.host_processes.sort.pid")),
+                    .child(i18n.t("sidebar.host_processes.sort.pid")),
             )
             .child(
                 div()
@@ -432,7 +484,7 @@ impl WorkspaceApp {
                     .w(px(HOST_PROCESS_CPU_COLUMN_WIDTH))
                     .flex()
                     .justify_end()
-                    .child(self.i18n.t("sidebar.host_processes.sort.cpu")),
+                    .child(i18n.t("sidebar.host_processes.sort.cpu")),
             )
             .child(
                 div()
@@ -440,38 +492,39 @@ impl WorkspaceApp {
                     .w(px(HOST_PROCESS_MEMORY_COLUMN_WIDTH))
                     .flex()
                     .justify_end()
-                    .child(self.i18n.t("sidebar.host_processes.sort.memory")),
+                    .child(i18n.t("sidebar.host_processes.sort.memory")),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_row(
+    fn process_is_expanded(&self, pid: &str) -> bool {
+        self.ui.host_process_expanded_pid.as_deref() == Some(pid)
+    }
+
+    fn render_host_process_row(
         &self,
         connection_id: &str,
         process: Option<ResourceTopProcess>,
         separate_user_column: bool,
+        renice_ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(process) = process else {
             return div().into_any_element();
         };
-        let expanded = self
-            .host_tools
-            .read(cx)
-            .ui
-            .host_process_expanded_pid
-            .as_deref()
-            == Some(process.pid.as_str());
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         let status = process
             .state
             .as_deref()
-            .map(|state| self.i18n.t(process_state_label_key(state)))
-            .unwrap_or_else(|| self.i18n.t("sidebar.host_processes.unknown"));
+            .map(|state| i18n.t(process_state_label_key(state)))
+            .unwrap_or_else(|| i18n.t("sidebar.host_processes.unknown"));
         let user = process
             .user
             .clone()
-            .unwrap_or_else(|| self.i18n.t("sidebar.host_processes.unknown"));
+            .unwrap_or_else(|| i18n.t("sidebar.host_processes.unknown"));
         let cpu = process
             .cpu_percent
             .map(|value| format!("{value:.1}%"))
@@ -479,7 +532,19 @@ impl WorkspaceApp {
         let memory = format!("{:.1}%", process.memory_percent);
         let cpu_color = threshold_color(process.cpu_percent);
         let memory_color = threshold_color(Some(process.memory_percent));
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let inline_actions =
+            self.render_host_process_inline_actions(connection_id, &process, tokens, i18n, cx);
+        let detail = self.process_is_expanded(&process.pid).then(|| {
+            self.render_host_process_detail(
+                connection_id,
+                &process,
+                self.render_host_process_renice_input(renice_ime, tokens, i18n, cx),
+                tokens,
+                i18n,
+                mono_font_family.clone(),
+                cx,
+            )
+        });
 
         div()
             .w_full()
@@ -506,7 +571,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
                             .text_color(rgb(theme.text))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(process_display_name(&process)),
                     )
                     .when(!separate_user_column, |main| {
@@ -517,7 +582,7 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                                 .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(user.clone()),
                         )
                     })
@@ -529,7 +594,7 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                                 .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(user.clone()),
                         )
                     })
@@ -540,7 +605,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(process.pid.clone()),
                     )
                     .child(
@@ -551,7 +616,7 @@ impl WorkspaceApp {
                             .justify_end()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(cpu_color))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(cpu),
                     )
                     .child(
@@ -562,7 +627,7 @@ impl WorkspaceApp {
                             .justify_end()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(memory_color))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(memory),
                     ),
             )
@@ -584,27 +649,24 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font)
+                            .font_family(mono_font_family)
                             .child(format!("{status} · {}", process_display_command(&process))),
                     )
-                    .child(self.render_host_process_inline_actions(connection_id, &process, cx)),
+                    .child(inline_actions),
             )
-            .when(expanded, |row| {
-                row.child(self.render_host_process_detail(connection_id, &process, cx))
-            })
+            .when_some(detail, |row, detail| row.child(detail))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
                     let pid = process.pid.clone();
-                    move |this, _event, _window, cx| {
-                        this.host_tools.update(cx, |host_tools, _cx| {
-                            let expanded_pid = &mut host_tools.ui.host_process_expanded_pid;
-                            if expanded_pid.as_deref() == Some(pid.as_str()) {
-                                *expanded_pid = None;
-                            } else {
-                                *expanded_pid = Some(pid.clone());
-                            }
-                        });
+                    move |host_tools, _event, _window, cx| {
+                        // Expansion is local process-page state and never re-enters the root.
+                        let expanded_pid = &mut host_tools.ui.host_process_expanded_pid;
+                        if expanded_pid.as_deref() == Some(pid.as_str()) {
+                            *expanded_pid = None;
+                        } else {
+                            *expanded_pid = Some(pid.clone());
+                        }
                         cx.notify();
                         cx.stop_propagation();
                     }
@@ -613,16 +675,111 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_inline_actions(
+    fn render_host_process_search(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_host_process_text_input(
+            ime,
+            &self.ui.host_process_search_query,
+            i18n.t("sidebar.host_processes.search_placeholder"),
+            None,
+            px(34.0),
+            tokens,
+            cx,
+        )
+    }
+
+    fn render_host_process_renice_input(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_host_process_text_input(
+            ime,
+            &self.ui.host_process_renice_value,
+            i18n.t("sidebar.host_processes.actions.renice_placeholder"),
+            Some(px(54.0)),
+            px(26.0),
+            tokens,
+            cx,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_process_text_input(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        value: &str,
+        placeholder: String,
+        width: Option<Pixels>,
+        height: Pixels,
+        tokens: &ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = ime.input();
+        let anchor_frame = ime.clone();
+        let input_control = text_input(
+            tokens,
+            TextInputView {
+                value,
+                placeholder,
+                focused: self.ui.input_is_focused(input),
+                caret_visible: ime.caret_visible(),
+                secret: false,
+                selected_all: false,
+                selected_range: ime.selected_range(),
+                marked_text: ime.marked_text(),
+            },
+        )
+        .h(height)
+        .cursor(CursorStyle::IBeam)
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
+                host_tools.ui.focus_input(input);
+                // The event moves through a one-shot action so the root can
+                // coordinate the shared window IME without being retained.
+                window.dispatch_action(
+                    Box::new(HostToolsWindowRequest::new(
+                        HostToolsWindowIntent::BeginPlainTextImeSelection {
+                            input,
+                            event: event.clone(),
+                        },
+                    )),
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        );
+        text_input_anchor_probe(
+            ime.anchor_id(),
+            if let Some(width) = width {
+                input_control.w(width)
+            } else {
+                input_control
+            },
+            move |anchor, _window, _cx| {
+                anchor_frame.update_anchor(anchor);
+            },
+        )
+        .into_any_element()
+    }
+
+    fn render_host_process_inline_actions(
         &self,
         connection_id: &str,
         process: &ResourceTopProcess,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_running = self
-            .host_tools
-            .read(cx)
-            .process_action_running_for(&process.pid);
+        let is_running = self.process_action_running_for(&process.pid);
         div()
             .flex_none()
             .flex()
@@ -637,6 +794,8 @@ impl WorkspaceApp {
                 "sidebar.host_processes.actions.term",
                 false,
                 is_running,
+                tokens,
+                i18n,
                 cx,
             ))
             .child(self.render_host_process_action_button(
@@ -647,6 +806,8 @@ impl WorkspaceApp {
                 "sidebar.host_processes.actions.kill",
                 true,
                 is_running,
+                tokens,
+                i18n,
                 cx,
             ))
             .child(self.render_host_process_action_button(
@@ -657,6 +818,8 @@ impl WorkspaceApp {
                 "sidebar.host_processes.actions.stop",
                 false,
                 is_running,
+                tokens,
+                i18n,
                 cx,
             ))
             .child(self.render_host_process_action_button(
@@ -667,19 +830,24 @@ impl WorkspaceApp {
                 "sidebar.host_processes.actions.cont",
                 false,
                 is_running,
+                tokens,
+                i18n,
                 cx,
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_detail(
+    fn render_host_process_detail(
         &self,
         connection_id: &str,
         process: &ResourceTopProcess,
+        renice_input: AnyElement,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let theme = tokens.ui;
         div()
             .px_3()
             .pb_3()
@@ -691,50 +859,56 @@ impl WorkspaceApp {
             .gap_1()
             .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
             .text_color(rgb(theme.text_muted))
-            .child(self.render_host_process_detail_line(
+            .child(Self::render_host_process_detail_line(
                 "PPID",
                 process.ppid.clone().unwrap_or_else(|| "—".to_string()),
+                mono_font_family.clone(),
             ))
-            .child(
-                self.render_host_process_detail_line(
-                    "RSS",
-                    process
-                        .rss_bytes
-                        .map(format_bytes)
-                        .unwrap_or_else(|| "—".to_string()),
-                ),
-            )
-            .child(
-                self.render_host_process_detail_line(
-                    "VSZ",
-                    process
-                        .vsz_bytes
-                        .map(format_bytes)
-                        .unwrap_or_else(|| "—".to_string()),
-                ),
-            )
-            .child(self.render_host_process_detail_line(
-                self.i18n.t("sidebar.host_processes.elapsed"),
+            .child(Self::render_host_process_detail_line(
+                "RSS",
+                process
+                    .rss_bytes
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "—".to_string()),
+                mono_font_family.clone(),
+            ))
+            .child(Self::render_host_process_detail_line(
+                "VSZ",
+                process
+                    .vsz_bytes
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "—".to_string()),
+                mono_font_family.clone(),
+            ))
+            .child(Self::render_host_process_detail_line(
+                i18n.t("sidebar.host_processes.elapsed"),
                 process.elapsed.clone().unwrap_or_else(|| "—".to_string()),
+                mono_font_family.clone(),
             ))
-            .child(self.render_host_process_action_bar(connection_id, process, cx))
+            .child(self.render_host_process_action_bar(
+                connection_id,
+                process,
+                renice_input,
+                tokens,
+                i18n,
+                cx,
+            ))
             .child(
                 div()
                     .mt_1()
                     .min_w_0()
-                    .font_family(mono_font)
+                    .font_family(mono_font_family)
                     .text_color(rgb(theme.text))
                     .child(process_display_command(process)),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_detail_line(
-        &self,
+    fn render_host_process_detail_line(
         label: impl Into<String>,
         value: String,
+        mono_font_family: SharedString,
     ) -> AnyElement {
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
         div()
             .flex()
             .items_center()
@@ -746,23 +920,23 @@ impl WorkspaceApp {
                 div()
                     .min_w_0()
                     .truncate()
-                    .font_family(mono_font)
+                    .font_family(mono_font_family)
                     .child(value),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_action_bar(
+    fn render_host_process_action_bar(
         &self,
         connection_id: &str,
         process: &ResourceTopProcess,
+        renice_input: AnyElement,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let is_running = self
-            .host_tools
-            .read(cx)
-            .process_action_running_for(&process.pid);
+        let theme = tokens.ui;
+        let is_running = self.process_action_running_for(&process.pid);
         div()
             .mt_2()
             .w_full()
@@ -781,26 +955,29 @@ impl WorkspaceApp {
                             .flex_none()
                             .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("sidebar.host_processes.actions.renice")),
+                            .child(i18n.t("sidebar.host_processes.actions.renice")),
                     )
-                    .child(self.render_host_process_renice_input(cx))
+                    .child(renice_input)
                     .child(self.render_host_process_action_button(
                         connection_id,
                         process,
                         ProcessActionKind::Renice {
-                            nice: self.host_process_renice_value(cx),
+                            nice: self.host_process_renice_value(),
                         },
                         LucideIcon::Gauge,
                         "sidebar.host_processes.actions.apply",
                         false,
                         is_running,
+                        tokens,
+                        i18n,
                         cx,
                     )),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_process_action_button(
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_process_action_button(
         &self,
         connection_id: &str,
         process: &ResourceTopProcess,
@@ -809,19 +986,22 @@ impl WorkspaceApp {
         label_key: &'static str,
         danger: bool,
         disabled: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let label = self.i18n.t(label_key);
-        let unsupported = !self.host_tools.read(cx).process_action_supported(
-            connection_id,
-            &process.pid,
-            action.clone(),
-        );
+        let theme = tokens.ui;
+        let label = i18n.t(label_key);
+        let unsupported =
+            !self.process_action_supported(connection_id, &process.pid, action.clone());
         let disabled = disabled || unsupported;
         let icon_color = if danger { MONITOR_RED } else { theme.text };
+        let connection_id = connection_id.to_string();
+        let pid = process.pid.clone();
+        // Share one zeroizing display value with the listener and confirmation state.
+        let display_command = Arc::new(zeroize::Zeroizing::new(process_display_name(process)));
         host_tools_tooltip_icon_button(
-            &self.tokens,
+            tokens,
             icon,
             13.0,
             rgb(icon_color),
@@ -845,119 +1025,141 @@ impl WorkspaceApp {
             label,
             "host-process-action",
             true,
-            cx.listener({
-                let connection_id = connection_id.to_string();
-                let pid = process.pid.clone();
-                let command = process_display_name(process);
-                move |this, _event, _window, cx| {
-                    this.request_host_process_action(
-                        connection_id.clone(),
-                        pid.clone(),
-                        command.clone(),
-                        action.clone(),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }
+            cx.listener(move |host_tools, _event, _window, cx| {
+                host_tools.request_host_process_action(
+                    connection_id.clone(),
+                    pid.clone(),
+                    display_command.clone(),
+                    action.clone(),
+                    cx,
+                );
+                cx.stop_propagation();
             }),
         )
     }
 
-    pub(super) fn render_host_process_renice_input(&self, cx: &mut Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::HostProcessRenice;
-        let (focused, value) = {
-            let ui = &self.host_tools.read(cx).ui;
-            (
-                ui.input_is_focused(HostToolsTextInput::ProcessRenice),
-                ui.host_process_renice_value.clone(),
-            )
-        };
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value: &value,
-                    placeholder: self
-                        .i18n
-                        .t("sidebar.host_processes.actions.renice_placeholder"),
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .w(px(54.0))
-            .h(px(26.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.host_tools.update(cx, |host_tools, _cx| {
-                        host_tools.ui.focus_input(HostToolsTextInput::ProcessRenice);
-                    });
-                    this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
-        )
-        .into_any_element()
+    fn host_process_renice_value(&self) -> i32 {
+        self.ui
+            .host_process_renice_value
+            .trim()
+            .parse::<i32>()
+            .unwrap_or(0)
+            .clamp(-20, 19)
     }
 
-    pub(super) fn visible_host_process_rows(
-        &self,
-        processes: &[ResourceTopProcess],
-        cx: &App,
-    ) -> Vec<ResourceTopProcess> {
-        let ui = &self.host_tools.read(cx).ui;
-        visible_process_rows(
-            processes,
-            &ui.host_process_search_query,
-            ui.host_process_filter,
-            ui.host_process_sort,
-            ui.host_process_sort_descending,
-        )
-    }
-
-    pub(super) fn sync_host_process_list_state(
-        &self,
-        rows: &[ResourceTopProcess],
-        selected_id: &str,
+    fn request_host_process_action(
+        &mut self,
+        connection_id: String,
+        pid: String,
+        display_command: Arc<zeroize::Zeroizing<String>>,
+        action: ProcessActionKind,
         cx: &mut Context<Self>,
     ) {
-        let signatures = rows.iter().map(process_row_signature).collect::<Vec<_>>();
-        self.host_tools.update(cx, |host_tools, _cx| {
-            let ui = &host_tools.ui;
-            let identity = format!(
-                "host-processes:{selected_id}:{}:{}:{}:{}:{}",
-                ui.host_process_search_query,
-                ui.host_process_filter as u8,
-                ui.host_process_sort as u8,
-                ui.host_process_sort_descending,
-                ui.host_process_expanded_pid.as_deref().unwrap_or_default()
-            );
-            sync_tauri_variable_list_state_by_signatures(
-                &ui.host_process_list_state,
-                &mut ui.host_process_list_cache.borrow_mut(),
-                &identity,
-                &signatures,
-                TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            );
-        });
+        let notice = self.open_process_action_confirm(
+            HostProcessActionRequest {
+                connection_id,
+                pid,
+                display_command,
+                action,
+            },
+            cx,
+        );
+        if let Some(notice) = notice {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+
+    fn render_host_process_confirm_dialog(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        focused_action: Option<ConfirmDialogAction>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (request, phase) = self.process_confirm_view()?;
+        let description = i18n
+            .t(host_process_confirm_description_key(&request.action))
+            .replace("{{pid}}", &request.pid)
+            // This is the explicit UI boundary for the retained display name.
+            .replace("{{command}}", request.display_command.as_str());
+        let exit_delay = oxideterm_gpui_ui::motion::duration(
+            tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+
+        Some(
+            oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
+                tokens,
+                "host-process-confirm-motion",
+                phase,
+                ConfirmDialogView {
+                    variant: if matches!(request.action, ProcessActionKind::Kill) {
+                        ConfirmDialogVariant::Danger
+                    } else {
+                        ConfirmDialogVariant::Default
+                    },
+                    title: div()
+                        .child(i18n.t("sidebar.host_processes.confirm.title"))
+                        .into_any_element(),
+                    description: Some(div().child(description).into_any_element()),
+                    cancel_label: div()
+                        .child(i18n.t("sidebar.host_processes.confirm.cancel"))
+                        .into_any_element(),
+                    confirm_label: div()
+                        .child(i18n.t(host_process_confirm_label_key(&request.action)))
+                        .into_any_element(),
+                },
+                focused_action,
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Confirmation presence belongs to the Host Tools entity.
+                    host_tools.begin_process_confirm_exit(exit_delay, cx);
+                }),
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.confirm_process_action_from_view(exit_delay, cx);
+                }),
+            )
+            .into_any_element(),
+        )
+    }
+
+    fn confirm_process_action_from_view(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::ProcessConnectionMissing,
+            ));
+            return;
+        };
+        for notice in self.confirm_process_action(delay, runtime, cx) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+}
+
+impl WorkspaceApp {
+    pub(super) fn render_host_processes_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = self.tokens;
+        let i18n = &self.i18n;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        let selectable_text = self.selectable_text_render_state(cx);
+        let search_ime = self
+            .host_tools_plain_text_ime_frame(HostToolsTextInput::ProcessSearch, cx)
+            .expect("process search is a non-secret Host Tools input");
+        let renice_ime = self
+            .host_tools_plain_text_ime_frame(HostToolsTextInput::ProcessRenice, cx)
+            .expect("process renice is a non-secret Host Tools input");
+        let sidebar_width = self.ai.chat.sidebar_width;
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_processes_panel(
+                search_ime,
+                renice_ime,
+                sidebar_width,
+                &tokens,
+                i18n,
+                mono_font_family,
+                &selectable_text,
+                cx,
+            )
+        })
     }
 
     pub(in crate::workspace) fn handle_host_process_search_key(
@@ -982,45 +1184,6 @@ impl WorkspaceApp {
             return true;
         }
         false
-    }
-
-    pub(super) fn host_process_renice_value(&self, cx: &App) -> i32 {
-        self.host_tools
-            .read(cx)
-            .ui
-            .host_process_renice_value
-            .trim()
-            .parse::<i32>()
-            .unwrap_or(0)
-            .clamp(-20, 19)
-    }
-
-    pub(super) fn request_host_process_action(
-        &mut self,
-        connection_id: String,
-        pid: String,
-        command: String,
-        action: ProcessActionKind,
-        cx: &mut Context<Self>,
-    ) {
-        let notice = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.open_process_action_confirm(
-                HostProcessActionRequest {
-                    connection_id,
-                    pid,
-                    // The confirmation and render tree share this zeroizing owner.
-                    display_command: Arc::new(zeroize::Zeroizing::new(command)),
-                    action,
-                },
-                cx,
-            )
-        });
-        if let Some(notice) = notice {
-            self.push_host_tools_notice(notice);
-            return;
-        }
-        self.reset_standard_confirm_focus();
-        cx.notify();
     }
 
     pub(in crate::workspace) fn handle_host_process_confirm_key(
@@ -1076,46 +1239,12 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let (request, phase) = self.host_tools.read(cx).process_confirm_view()?;
-        let title = self.i18n.t("sidebar.host_processes.confirm.title");
-        let description = self.i18n_replace(
-            host_process_confirm_description_key(&request.action),
-            &[
-                ("pid", request.pid.clone()),
-                // This is the explicit UI boundary for the retained display name.
-                ("command", request.display_command.as_str().to_string()),
-            ],
-        );
-        Some(
-            oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
-                &self.tokens,
-                "host-process-confirm-motion",
-                phase,
-                ConfirmDialogView {
-                    variant: if matches!(request.action, ProcessActionKind::Kill) {
-                        ConfirmDialogVariant::Danger
-                    } else {
-                        ConfirmDialogVariant::Default
-                    },
-                    title: div().child(title).into_any_element(),
-                    description: Some(div().child(description).into_any_element()),
-                    cancel_label: div()
-                        .child(self.i18n.t("sidebar.host_processes.confirm.cancel"))
-                        .into_any_element(),
-                    confirm_label: div()
-                        .child(self.i18n.t(host_process_confirm_label_key(&request.action)))
-                        .into_any_element(),
-                },
-                self.standard_confirm_focus(),
-                cx.listener(|this, _event, _window, cx| {
-                    this.begin_host_process_confirm_exit(cx);
-                }),
-                cx.listener(|this, _event, _window, cx| {
-                    this.confirm_host_process_action(cx);
-                }),
-            )
-            .into_any_element(),
-        )
+        let tokens = self.tokens;
+        let i18n = &self.i18n;
+        let focused_action = self.standard_confirm_focus();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_process_confirm_dialog(&tokens, i18n, focused_action, cx)
+        })
     }
 }
 

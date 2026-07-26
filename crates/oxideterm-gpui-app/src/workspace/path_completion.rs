@@ -266,7 +266,7 @@ impl WorkspaceApp {
         anchor: oxideterm_gpui_ui::text_input::TextInputAnchor,
         cx: &mut Context<Self>,
     ) {
-        let changed = self.text_input_anchors.get(&anchor.id) != Some(&anchor);
+        let changed = self.text_input_anchors.changed(anchor);
         self.update_text_input_anchor(anchor, cx);
         if changed && self.path_completion_state(owner).is_visible() {
             // Geometry-only updates repaint only while a visible popup depends on them.
@@ -285,7 +285,7 @@ impl WorkspaceApp {
         }
         let anchor = self
             .text_input_anchors
-            .get(&owner.ime_target().anchor_id())?;
+            .get(owner.ime_target().anchor_id())?;
         let theme = self.tokens.ui;
         let selected_index = state.selected_index();
         let mut popup = div()
