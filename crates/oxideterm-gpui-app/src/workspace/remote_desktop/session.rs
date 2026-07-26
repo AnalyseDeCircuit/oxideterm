@@ -8,11 +8,15 @@ impl WorkspaceApp {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
         let mut changed = self.schedule_remote_desktop_viewport_resizes(scale_factor, cx);
         self.sync_remote_desktop_monitor_layouts(cx);
-        while let Ok(delivery) = self.remote_desktop_worker_rx.try_recv() {
+        let drain = delivery::drain_channel(
+            &self.remote_desktop_worker_rx,
+            REMOTE_DESKTOP_DELIVERY_BUDGET,
+        );
+        for delivery in drain.items {
             match delivery {
                 RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation } => {
                     if self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx) {
@@ -122,6 +126,7 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
+        drain.outcome.backlog_remaining
     }
 
     fn sync_remote_desktop_monitor_layouts(&mut self, cx: &App) {
@@ -154,6 +159,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(mut session) = self.remote_desktop_sessions.remove(&tab_id) {
+            if let Some(worker_wake) = session.worker_wake.take() {
+                // Closing the tab owns helper shutdown and its foreground delivery waiter.
+                worker_wake.stop();
+            }
             let images = session.state.take_all_images();
             let textures = session.state.take_all_textures();
             Self::drop_remote_desktop_images(images, window, cx);
@@ -269,21 +278,45 @@ impl WorkspaceApp {
         worker_wake: RemoteDesktopWorkerWake,
         cx: &mut Context<Self>,
     ) {
+        let Some(window_handle) = self
+            .remote_desktop_sessions
+            .get(&tab_id)
+            .map(|session| session.window_handle)
+        else {
+            return;
+        };
         cx.spawn(async move |workspace, cx| {
             loop {
                 worker_wake.wait().await;
-                let keep_running = workspace
-                    .update(cx, |this, cx| {
-                        if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
-                            return false;
-                        }
-                        if worker_wake.take() {
-                            cx.notify();
-                        }
-                        !worker_wake.is_stopped()
+                let should_drain = worker_wake.take();
+                let stopped = worker_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(Ok((generation_matches, backlog_remaining))) =
+                    cx.update_window(window_handle, |_, window, cx| {
+                        workspace.update(cx, |this, cx| {
+                            if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
+                                return (false, false);
+                            }
+                            let backlog_remaining =
+                                this.poll_remote_desktop_worker_results(window, cx);
+                            (true, backlog_remaining)
+                        })
                     })
-                    .unwrap_or(false);
-                if !keep_running {
+                else {
+                    break;
+                };
+                if !generation_matches {
+                    break;
+                }
+                if backlog_remaining {
+                    // One stored permit continues the bounded drain without a render-time pump.
+                    worker_wake.mark();
+                } else if stopped {
                     break;
                 }
             }
@@ -749,6 +782,9 @@ impl WorkspaceApp {
             worker_monitor_layout,
         );
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
+            if let Some(previous_worker_wake) = session.worker_wake.replace(worker_wake.clone()) {
+                previous_worker_wake.stop();
+            }
             let old_images = session.state.take_all_images();
             let old_textures = session.state.take_all_textures();
             session.state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
@@ -820,6 +856,9 @@ impl WorkspaceApp {
         );
         if let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) {
             session.request_tx = Some(request_tx);
+            if let Some(previous_worker_wake) = session.worker_wake.replace(worker_wake.clone()) {
+                previous_worker_wake.stop();
+            }
             session.worker_generation = generation;
             session.certificate_challenge = None;
             session.last_viewport_size = initial_viewport_size;
@@ -1094,19 +1133,7 @@ impl WorkspaceApp {
     ) {
         // The slot is already marked as queued. This timer only delays the
         // existing ready notification until the next visual presentation tick.
-        cx.spawn(async move |workspace, cx| {
-            Timer::after(delay).await;
-            let _ = workspace.update(cx, |this, cx| {
-                if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
-                    return;
-                }
-                let _ = this
-                    .remote_desktop_worker_tx
-                    .send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
-                cx.notify();
-            });
-        })
-        .detach();
+        self.schedule_remote_desktop_frame_ready_apply(tab_id, generation, delay, cx);
     }
 
     fn schedule_remote_desktop_followup_frame_ready(
@@ -1121,26 +1148,38 @@ impl WorkspaceApp {
         }
 
         let delay = frame_slot.next_frame_ready_delay();
-        let delivery_tx = self.remote_desktop_worker_tx.clone();
-        if delay.is_zero() {
-            let _ =
-                delivery_tx.send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
-            cx.notify();
-            return;
-        }
+        self.schedule_remote_desktop_frame_ready_apply(tab_id, generation, delay, cx);
+    }
 
+    fn schedule_remote_desktop_frame_ready_apply(
+        &self,
+        tab_id: TabId,
+        generation: u64,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(window_handle) = self
+            .remote_desktop_sessions
+            .get(&tab_id)
+            .map(|session| session.window_handle)
+        else {
+            return;
+        };
         cx.spawn(async move |workspace, cx| {
-            Timer::after(delay).await;
-            let _ = workspace.update(cx, |this, cx| {
-                if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
-                    return;
-                }
-                // The queued flag stays set while this timer waits, so new
-                // frame bursts coalesce into the existing delivery slot.
-                let _ = this
-                    .remote_desktop_worker_tx
-                    .send(RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation });
-                cx.notify();
+            if !delay.is_zero() {
+                Timer::after(delay).await;
+            }
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
+                        return;
+                    }
+                    // Apply the already queued frame directly so a completed helper does not
+                    // leave a delayed visual follow-up dependent on its stopped worker wake.
+                    if this.apply_remote_desktop_frame_ready(tab_id, generation, window, cx) {
+                        cx.notify();
+                    }
+                });
             });
         })
         .detach();

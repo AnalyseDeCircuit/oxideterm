@@ -57,6 +57,8 @@ const REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
 const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER: f32 = 100.0;
 const REMOTE_DESKTOP_SCROLL_PIXEL_STEP: f32 = 120.0;
+const REMOTE_DESKTOP_DELIVERY_BUDGET: delivery::DeliveryBudget =
+    delivery::DeliveryBudget::new(64, Duration::from_millis(4));
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 32;
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET: Duration = Duration::from_millis(6);
 const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
@@ -214,8 +216,10 @@ fn send_remote_desktop_worker_delivery(
     worker_wake: &RemoteDesktopWorkerWake,
     delivery: RemoteDesktopWorkerDelivery,
 ) {
-    worker_wake.mark();
-    let _ = delivery_tx.send(delivery);
+    // Publish before waking so the foreground task cannot observe an empty queue.
+    if delivery_tx.send(delivery).is_ok() {
+        worker_wake.mark();
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -249,7 +253,9 @@ pub(super) struct RemoteDesktopSession {
     geometry: SharedRemoteDesktopGeometry,
     frame_slot: RemoteDesktopFrameDeliverySlot,
     request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    worker_wake: Option<RemoteDesktopWorkerWake>,
     worker_generation: u64,
+    window_handle: AnyWindowHandle,
     last_viewport_size: Option<RemoteDesktopSize>,
     last_sent_resize: Option<RemoteDesktopResizeRequestState>,
     last_viewport_scale_factor: Option<u32>,
@@ -268,6 +274,7 @@ impl RemoteDesktopSession {
         provider: RemoteDesktopProviderManifest,
         password: Option<RemoteDesktopSecret>,
         frame_slot: RemoteDesktopFrameDeliverySlot,
+        window_handle: AnyWindowHandle,
     ) -> Self {
         let mut state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
             .with_read_only(profile.read_only);
@@ -287,7 +294,9 @@ impl RemoteDesktopSession {
             geometry: SharedRemoteDesktopGeometry::default(),
             frame_slot,
             request_tx: None,
+            worker_wake: None,
             worker_generation: 0,
+            window_handle,
             last_viewport_size: None,
             last_sent_resize: None,
             last_viewport_scale_factor: None,
@@ -324,6 +333,31 @@ mod tests {
         wake.stop();
         runtime.block_on(wake.wait());
         assert!(wake.is_stopped());
+    }
+
+    #[test]
+    fn worker_delivery_enqueues_before_marking_the_wake() {
+        let (sender, receiver) = mpsc::channel();
+        let wake = RemoteDesktopWorkerWake::default();
+        let tab_id = TabId(7);
+
+        send_remote_desktop_worker_delivery(
+            &sender,
+            &wake,
+            RemoteDesktopWorkerDelivery::FrameReady {
+                tab_id,
+                generation: 3,
+            },
+        );
+
+        assert!(wake.take());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(RemoteDesktopWorkerDelivery::FrameReady {
+                tab_id: received_tab_id,
+                generation: 3,
+            }) if received_tab_id == tab_id
+        ));
     }
 
     #[test]

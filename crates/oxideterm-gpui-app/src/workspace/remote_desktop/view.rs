@@ -67,7 +67,13 @@ impl WorkspaceApp {
     ) {
         let tab_id = self.alloc_tab_id();
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
-        let session = RemoteDesktopSession::new(profile, provider, password, frame_slot);
+        let session = RemoteDesktopSession::new(
+            profile,
+            provider,
+            password,
+            frame_slot,
+            window.window_handle(),
+        );
 
         if let Some(previous_tab_id) = self.main_window_tabs.active_tab_id {
             self.release_remote_desktop_inputs_for_tab(previous_tab_id);
