@@ -767,6 +767,47 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn push_host_tools_notice(&mut self, notice: HostToolsNotice) {
         let (message, variant) = match notice {
+            HostToolsNotice::ProcessActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_processes.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ProcessInvalidNice => (
+                self.i18n.t("sidebar.host_processes.toast.invalid_nice"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ProcessConnectionMissing => (
+                self.i18n
+                    .t("sidebar.host_processes.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ProcessPartialSupport { os_type } => (
+                self.i18n_replace(
+                    "sidebar.host_processes.toast.partial_support",
+                    &[("os", os_type)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::ProcessActionFailed => (
+                self.i18n.t("sidebar.host_processes.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::ProcessActionFinished { pid, succeeded } => {
+                if succeeded {
+                    (
+                        self.i18n_replace(
+                            "sidebar.host_processes.toast.action_succeeded",
+                            &[("pid", pid)],
+                        ),
+                        TerminalNoticeVariant::Success,
+                    )
+                } else {
+                    (
+                        self.i18n.t("sidebar.host_processes.toast.action_failed"),
+                        TerminalNoticeVariant::Error,
+                    )
+                }
+            }
             HostToolsNotice::LogSnapshotAlreadyRunning => (
                 self.i18n
                     .t("sidebar.host_logs.toast.snapshot_already_running"),

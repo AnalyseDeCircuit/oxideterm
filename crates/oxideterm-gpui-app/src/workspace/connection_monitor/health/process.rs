@@ -608,10 +608,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let is_running = self
-            .connection_monitor
-            .host_process_action_running
-            .as_ref()
-            .is_some_and(|request| request.pid == process.pid);
+            .host_tools
+            .read(cx)
+            .process_action_running_for(&process.pid);
         div()
             .flex_none()
             .flex()
@@ -749,10 +748,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let is_running = self
-            .connection_monitor
-            .host_process_action_running
-            .as_ref()
-            .is_some_and(|request| request.pid == process.pid);
+            .host_tools
+            .read(cx)
+            .process_action_running_for(&process.pid);
         div()
             .mt_2()
             .w_full()
@@ -803,9 +801,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label = self.i18n.t(label_key);
-        let unsupported = self
-            .host_process_action_command(connection_id, &process.pid, action.clone())
-            .is_err();
+        let unsupported = !self.host_tools.read(cx).process_action_supported(
+            connection_id,
+            &process.pid,
+            action.clone(),
+        );
         let disabled = disabled || unsupported;
         let icon_color = if danger { MONITOR_RED } else { theme.text };
         self.workspace_tooltip_icon_button(
@@ -900,20 +900,6 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    pub(super) fn host_process_action_command(
-        &self,
-        connection_id: &str,
-        pid: &str,
-        action: ProcessActionKind,
-    ) -> Result<oxideterm_connection_monitor::ProcessActionCommand, String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_process_action_command(&os_type, pid, action)
-    }
-
     pub(super) fn visible_host_process_rows(
         &self,
         processes: &[ResourceTopProcess],
@@ -991,36 +977,22 @@ impl WorkspaceApp {
         action: ProcessActionKind,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .connection_monitor
-            .host_process_action_running
-            .is_some()
-        {
-            self.push_host_process_toast(
-                self.i18n
-                    .t("sidebar.host_processes.toast.action_already_running"),
-                TerminalNoticeVariant::Warning,
-            );
+        let notice = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.open_process_action_confirm(
+                HostProcessActionRequest {
+                    connection_id,
+                    pid,
+                    // The confirmation and render tree share this zeroizing owner.
+                    display_command: Arc::new(zeroize::Zeroizing::new(command)),
+                    action,
+                },
+                cx,
+            )
+        });
+        if let Some(notice) = notice {
+            self.push_host_tools_notice(notice);
             return;
         }
-        if let ProcessActionKind::Renice { nice } = action
-            && !(-20..=19).contains(&nice)
-        {
-            self.push_host_process_toast(
-                self.i18n.t("sidebar.host_processes.toast.invalid_nice"),
-                TerminalNoticeVariant::Error,
-            );
-            return;
-        }
-        HostToolConfirmState::open(
-            &mut self.connection_monitor.host_process_pending_confirm,
-            HostProcessActionRequest {
-                connection_id,
-                pid,
-                command,
-                action,
-            },
-        );
         self.reset_standard_confirm_focus();
         cx.notify();
     }
@@ -1030,11 +1002,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self
-            .connection_monitor
-            .host_process_pending_confirm
-            .is_none()
-        {
+        if self.host_tools.read(cx).process_confirm_view().is_none() {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {
@@ -1052,220 +1020,51 @@ impl WorkspaceApp {
     }
 
     pub(super) fn confirm_host_process_action(&mut self, cx: &mut Context<Self>) {
-        let Some(request) = self
-            .connection_monitor
-            .host_process_pending_confirm
-            .as_ref()
-            .map(|state| state.request.clone())
-        else {
-            return;
-        };
-        if self.begin_host_process_confirm_exit(cx) {
-            self.start_host_process_action(request, cx);
-        }
-    }
-
-    /// Starts one exit and removes the preserved request only after the current generation finishes.
-    fn begin_host_process_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self
-            .connection_monitor
-            .host_process_pending_confirm
-            .as_mut()
-            .and_then(|state| state.presence.begin_exit())
-        else {
-            return false;
-        };
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        if delay.is_zero() {
-            self.connection_monitor.host_process_pending_confirm = None;
-            cx.notify();
-            return true;
+        let runtime = self.forwarding_runtime.handle().clone();
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.confirm_process_action(delay, runtime, cx)
+        });
+        for notice in notices {
+            self.push_host_tools_notice(notice);
         }
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                let finished = this
-                    .connection_monitor
-                    .host_process_pending_confirm
-                    .as_ref()
-                    .is_some_and(|state| state.presence.finish_exit(generation));
-                if finished {
-                    this.connection_monitor.host_process_pending_confirm = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-        true
     }
 
-    pub(super) fn start_host_process_action(
-        &mut self,
-        request: HostProcessActionRequest,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
-            self.push_host_process_toast(
-                self.i18n
-                    .t("sidebar.host_processes.toast.connection_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let os_type = handle
-            .remote_env()
-            .map(|env| env.os_type)
-            .unwrap_or_else(|| "Unknown".to_string());
-        let command =
-            match build_process_action_command(&os_type, &request.pid, request.action.clone()) {
-                Ok(command) => command,
-                Err(error) => {
-                    self.push_host_process_toast(error, TerminalNoticeVariant::Error);
-                    cx.notify();
-                    return;
-                }
-            };
-        if command.capability == ProcessCommandCapability::Partial {
-            self.push_host_process_toast(
-                self.i18n_replace(
-                    "sidebar.host_processes.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
+    /// Keeps the request mounted until the current exit generation completes.
+    fn begin_host_process_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.clear_standard_confirm_focus();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        let delivery_request = request.clone();
-        self.connection_monitor.host_process_action_running = Some(request);
-        self.connection_monitor.host_process_action_rx = Some(rx);
-        self.connection_monitor.host_process_action_polling = true;
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_PROCESS_ACTION_TIMEOUT,
-                    HOST_PROCESS_ACTION_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostProcessActionDelivery {
-                request: delivery_request,
-                result,
-            });
-        });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn poll_host_process_action_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.connection_monitor.host_process_action_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_process_action_rx.take() else {
-            self.connection_monitor.host_process_action_polling = false;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.connection_monitor.host_process_action_polling = false;
-                self.connection_monitor.host_process_action_running = None;
-                self.finish_host_process_action(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_process_action_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.connection_monitor.host_process_action_polling = false;
-                self.connection_monitor.host_process_action_running = None;
-                self.push_host_process_toast(
-                    self.i18n.t("sidebar.host_processes.toast.action_failed"),
-                    TerminalNoticeVariant::Error,
-                );
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_process_action(
-        &mut self,
-        delivery: HostProcessActionDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        match delivery.result {
-            Ok(output) => match interpret_process_action_output(
-                &output.stdout,
-                &output.stderr,
-                output.exit_code,
-            ) {
-                HostToolActionOutcome::Succeeded { message } => {
-                    self.push_host_process_toast(message, TerminalNoticeVariant::Success);
-                }
-                HostToolActionOutcome::Failed { message } => {
-                    self.push_host_process_toast(message, TerminalNoticeVariant::Error);
-                }
-            },
-            Err(error) => {
-                self.push_host_process_toast(error, TerminalNoticeVariant::Error);
-            }
-        }
-        self.host_tools
-            .read(cx)
-            .profiler_registry()
-            .stop(&delivery.request.connection_id);
-        self.start_connection_monitor_profiler(delivery.request.connection_id, cx);
-    }
-
-    pub(super) fn push_host_process_toast(
-        &mut self,
-        message: String,
-        variant: TerminalNoticeVariant,
-    ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: message,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_process_confirm_exit(delay, cx)
+        })
     }
 
     pub(in crate::workspace) fn render_host_process_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let request = self
-            .connection_monitor
-            .host_process_pending_confirm
-            .as_ref()?;
-        let request = &request.request;
+        let (request, phase) = self.host_tools.read(cx).process_confirm_view()?;
         let title = self.i18n.t("sidebar.host_processes.confirm.title");
         let description = self.i18n_replace(
             host_process_confirm_description_key(&request.action),
             &[
                 ("pid", request.pid.clone()),
-                ("command", request.command.clone()),
+                // This is the explicit UI boundary for the retained display name.
+                ("command", request.display_command.as_str().to_string()),
             ],
         );
         Some(
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
                 &self.tokens,
                 "host-process-confirm-motion",
-                self.connection_monitor
-                    .host_process_pending_confirm
-                    .as_ref()?
-                    .presence
-                    .phase(),
+                phase,
                 ConfirmDialogView {
                     variant: if matches!(request.action, ProcessActionKind::Kill) {
                         ConfirmDialogVariant::Danger
@@ -1291,6 +1090,182 @@ impl WorkspaceApp {
             )
             .into_any_element(),
         )
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn process_action_running_for(&self, pid: &str) -> bool {
+        self.host_process_actions
+            .running
+            .as_ref()
+            .is_some_and(|request| request.pid == pid)
+    }
+
+    pub(super) fn process_action_supported(
+        &self,
+        connection_id: &str,
+        pid: &str,
+        action: ProcessActionKind,
+    ) -> bool {
+        self.connection_os_type(connection_id)
+            .and_then(|os_type| build_process_action_command(&os_type, pid, action).ok())
+            .is_some()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn open_process_action_confirm(
+        &mut self,
+        request: HostProcessActionRequest,
+        cx: &mut Context<Self>,
+    ) -> Option<HostToolsNotice> {
+        if self.host_process_actions.running.is_some() {
+            return Some(HostToolsNotice::ProcessActionAlreadyRunning);
+        }
+        if let ProcessActionKind::Renice { nice } = &request.action
+            && !(-20..=19).contains(nice)
+        {
+            return Some(HostToolsNotice::ProcessInvalidNice);
+        }
+        HostToolConfirmState::open(&mut self.host_process_actions.pending_confirm, request);
+        cx.notify();
+        None
+    }
+
+    pub(in crate::workspace::connection_monitor) fn process_confirm_view(
+        &self,
+    ) -> Option<(
+        HostProcessActionRequest,
+        oxideterm_gpui_ui::motion::ExitPhase,
+    )> {
+        self.host_process_actions
+            .pending_confirm
+            .as_ref()
+            .map(|state| (state.request.clone(), state.presence.phase()))
+    }
+
+    /// Dismisses only UI confirmation state; a submitted remote action remains owned here.
+    pub(in crate::workspace::connection_monitor) fn dismiss_process_confirm(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_process_actions.pending_confirm.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn begin_process_confirm_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self
+            .host_process_actions
+            .pending_confirm
+            .as_mut()
+            .and_then(|state| state.presence.begin_exit())
+        else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.host_process_actions.pending_confirm = None;
+            cx.notify();
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |entity, cx| {
+                if entity
+                    .host_process_actions
+                    .pending_confirm
+                    .as_ref()
+                    .is_some_and(|state| state.presence.finish_exit(generation))
+                {
+                    entity.host_process_actions.pending_confirm = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    pub(super) fn confirm_process_action(
+        &mut self,
+        delay: Duration,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        let Some(request) = self.host_process_actions.pending_confirm.as_ref() else {
+            return Vec::new();
+        };
+        // The worker request intentionally omits the secret-bearing display command.
+        let request = HostProcessActionRun {
+            connection_id: request.request.connection_id.clone(),
+            pid: request.request.pid.clone(),
+            action: request.request.action.clone(),
+        };
+        if !self.begin_process_confirm_exit(delay, cx) {
+            return Vec::new();
+        }
+        self.start_process_action(request, runtime, cx)
+    }
+
+    fn start_process_action(
+        &mut self,
+        request: HostProcessActionRun,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        let Some(os_type) = self.connection_os_type(&request.connection_id) else {
+            return vec![HostToolsNotice::ProcessConnectionMissing];
+        };
+        let command =
+            match build_process_action_command(&os_type, &request.pid, request.action.clone()) {
+                Ok(command) => command,
+                Err(_) => return vec![HostToolsNotice::ProcessActionFailed],
+            };
+        let mut notices = Vec::new();
+        if command.capability == ProcessCommandCapability::Partial {
+            notices.push(HostToolsNotice::ProcessPartialSupport { os_type });
+        }
+        self.host_process_actions.running = Some(request.clone());
+        let spawned = self.spawn_process_action(
+            command.command,
+            request,
+            HOST_PROCESS_ACTION_TIMEOUT,
+            HOST_PROCESS_ACTION_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_process_actions.running = None;
+            return vec![HostToolsNotice::ProcessConnectionMissing];
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_process_action(
+        &mut self,
+        delivery: HostProcessActionDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_process_actions.running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        self.host_process_actions.running = None;
+        cx.emit(HostToolsEvent::ShowNotice(
+            HostToolsNotice::ProcessActionFinished {
+                pid: delivery.request.pid,
+                succeeded: delivery.result.unwrap_or(false),
+            },
+        ));
+        // Force the next workspace integration call to rebuild the sampler
+        // instead of treating the existing configuration as already running.
+        self.profiler_registry.stop(&delivery.request.connection_id);
+        cx.emit(HostToolsEvent::RefreshProfiler {
+            connection_id: delivery.request.connection_id,
+        });
+        cx.notify();
     }
 }
 

@@ -253,18 +253,40 @@ impl MonitorConnectionOption {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub(super) struct HostProcessActionRequest {
     pub(super) connection_id: String,
     pub(super) pid: String,
-    pub(super) command: String,
+    // Process names can contain credential-like command fragments. All UI
+    // clones share one buffer that is cleared when the confirmation closes.
+    pub(super) display_command: Arc<zeroize::Zeroizing<String>>,
     pub(super) action: ProcessActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct HostProcessActionRun {
+    pub(super) connection_id: String,
+    pub(super) pid: String,
+    pub(super) action: ProcessActionKind,
+}
+
 pub(super) struct HostProcessActionDelivery {
-    pub(super) request: HostProcessActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) request: HostProcessActionRun,
+    pub(super) result: Result<bool, ()>,
+}
+
+pub(super) struct HostProcessActionsState {
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostProcessActionRequest>>,
+    pub(super) running: Option<HostProcessActionRun>,
+}
+
+impl HostProcessActionsState {
+    pub(super) fn new() -> Self {
+        Self {
+            pending_confirm: None,
+            running: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -745,10 +767,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_process_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_process_renice_value: String,
     pub(in crate::workspace) host_process_renice_focused: bool,
-    pub(super) host_process_pending_confirm: Option<HostToolConfirmState<HostProcessActionRequest>>,
-    pub(super) host_process_action_running: Option<HostProcessActionRequest>,
-    pub(super) host_process_action_rx: Option<std::sync::mpsc::Receiver<HostProcessActionDelivery>>,
-    pub(super) host_process_action_polling: bool,
     pub(in crate::workspace) host_docker_search_query: String,
     pub(in crate::workspace) host_docker_search_focused: bool,
     pub(in crate::workspace) host_docker_expanded_id: Option<String>,
@@ -829,10 +847,6 @@ impl ConnectionMonitorState {
             host_process_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_process_renice_value: "0".to_string(),
             host_process_renice_focused: false,
-            host_process_pending_confirm: None,
-            host_process_action_running: None,
-            host_process_action_rx: None,
-            host_process_action_polling: false,
             host_docker_search_query: String::new(),
             host_docker_search_focused: false,
             host_docker_expanded_id: None,

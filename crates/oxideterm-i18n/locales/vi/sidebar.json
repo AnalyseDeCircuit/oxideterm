@@ -133,6 +133,7 @@
         "invalid_nice": "Nhập giá trị nice từ -20 đến 19.",
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
         "action_failed": "Thao tác tiến trình thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác tiến trình cho PID {{pid}}.",
         "partial_support": "Quản lý tiến trình chỉ được hỗ trợ một phần trên {{os}}."
       }
     },

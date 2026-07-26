@@ -133,6 +133,7 @@
         "invalid_nice": "Enter a nice value from -20 to 19.",
         "connection_missing": "The selected connection is no longer available.",
         "action_failed": "Process action failed.",
+        "action_succeeded": "Process action completed for PID {{pid}}.",
         "partial_support": "Process management is partial on {{os}}."
       }
     },

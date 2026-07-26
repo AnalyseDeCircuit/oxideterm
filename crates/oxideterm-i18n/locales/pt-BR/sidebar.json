@@ -133,6 +133,7 @@
         "invalid_nice": "Informe um valor nice entre -20 e 19.",
         "connection_missing": "A conexão selecionada não está mais disponível.",
         "action_failed": "A ação do processo falhou.",
+        "action_succeeded": "A ação do processo para o PID {{pid}} foi concluída.",
         "partial_support": "O gerenciamento de processos é parcial em {{os}}."
       }
     },

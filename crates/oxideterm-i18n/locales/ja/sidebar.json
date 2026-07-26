@@ -133,6 +133,7 @@
         "invalid_nice": "nice 値は -20 から 19 の範囲で入力してください。",
         "connection_missing": "選択した接続は利用できません。",
         "action_failed": "プロセス操作に失敗しました。",
+        "action_succeeded": "PID {{pid}} のプロセス操作が完了しました。",
         "partial_support": "{{os}} のプロセス管理は部分対応です。"
       }
     },

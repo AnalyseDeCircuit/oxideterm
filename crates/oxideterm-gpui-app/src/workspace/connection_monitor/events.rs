@@ -19,6 +19,17 @@ pub(in crate::workspace) enum ScheduleActionNoticeKind {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum HostToolsNotice {
+    ProcessActionAlreadyRunning,
+    ProcessInvalidNice,
+    ProcessConnectionMissing,
+    ProcessPartialSupport {
+        os_type: String,
+    },
+    ProcessActionFailed,
+    ProcessActionFinished {
+        pid: String,
+        succeeded: bool,
+    },
     LogSnapshotAlreadyRunning,
     LogConnectionMissing,
     LogPartialSupport {

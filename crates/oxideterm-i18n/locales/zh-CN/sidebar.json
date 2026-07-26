@@ -133,6 +133,7 @@
         "invalid_nice": "请输入 -20 到 19 之间的 nice 值。",
         "connection_missing": "所选连接已不可用。",
         "action_failed": "进程操作失败。",
+        "action_succeeded": "PID {{pid}} 的进程操作已完成。",
         "partial_support": "{{os}} 上的进程管理为部分支持。"
       }
     },

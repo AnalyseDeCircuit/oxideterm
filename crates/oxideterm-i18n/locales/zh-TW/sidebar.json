@@ -133,6 +133,7 @@
         "invalid_nice": "請輸入 -20 到 19 之間的 nice 值。",
         "connection_missing": "所選連線已無法使用。",
         "action_failed": "程序操作失敗。",
+        "action_succeeded": "PID {{pid}} 的程序操作已完成。",
         "partial_support": "{{os}} 上的程序管理為部分支援。"
       }
     },

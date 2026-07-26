@@ -133,6 +133,7 @@
         "invalid_nice": "-20부터 19 사이의 nice 값을 입력하세요.",
         "connection_missing": "선택한 연결을 사용할 수 없습니다.",
         "action_failed": "프로세스 작업에 실패했습니다.",
+        "action_succeeded": "PID {{pid}} 프로세스 작업을 완료했습니다.",
         "partial_support": "{{os}}의 프로세스 관리는 부분 지원입니다."
       }
     },

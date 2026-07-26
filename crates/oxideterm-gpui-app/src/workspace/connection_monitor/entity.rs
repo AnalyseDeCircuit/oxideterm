@@ -21,6 +21,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     >,
     pub(super) reliable_delivery_rx:
         std::sync::mpsc::Receiver<super::delivery::HostToolsReliableDelivery>,
+    pub(super) host_process_actions: HostProcessActionsState,
     pub(super) host_gpu: HostGpuViewState,
     pub(super) host_logs: HostLogsState,
     pub(super) host_ports: HostPortsState,
@@ -82,6 +83,7 @@ impl HostToolsEntity {
             reliable_delivery_wake,
             reliable_delivery_tx,
             reliable_delivery_rx,
+            host_process_actions: HostProcessActionsState::new(),
             host_gpu: HostGpuViewState::new(gpu_update_tx),
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
@@ -392,6 +394,38 @@ impl HostToolsEntity {
                 .map_err(|_| ());
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ScheduleAction(
                 HostScheduleActionDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_process_action(
+        &self,
+        command: String,
+        request: HostProcessActionRun,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Remote process output has no UI consumer. Reduce it in the worker
+        // and clear both buffers before crossing the Entity delivery boundary.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    let succeeded = output.exit_code.unwrap_or(0) == 0;
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    succeeded
+                })
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ProcessAction(
+                HostProcessActionDelivery { request, result },
             ));
         });
         true
@@ -1002,6 +1036,95 @@ mod tests {
             assert!(!entity.gpu_device_is_expanded("gpu-1"));
             entity.request_profiler_refresh("connection-1".to_string(), cx);
         });
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::RefreshProfiler {
+                connection_id: "connection-1".to_string(),
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn process_action_state_and_delivery_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let display_secret = Arc::new(zeroize::Zeroizing::new(
+            "worker --token should-not-reach-delivery".to_string(),
+        ));
+        let request = HostProcessActionRequest {
+            connection_id: "connection-1".to_string(),
+            pid: "42".to_string(),
+            display_command: display_secret.clone(),
+            action: ProcessActionKind::Term,
+        };
+
+        let (delivery_tx, delivery) = entity.update(cx, |entity, cx| {
+            let invalid_request = HostProcessActionRequest {
+                connection_id: "connection-1".to_string(),
+                pid: "42".to_string(),
+                display_command: display_secret.clone(),
+                action: ProcessActionKind::Renice { nice: 20 },
+            };
+            assert_eq!(
+                entity.open_process_action_confirm(invalid_request, cx),
+                Some(HostToolsNotice::ProcessInvalidNice)
+            );
+            assert!(
+                entity
+                    .open_process_action_confirm(request.clone(), cx)
+                    .is_none()
+            );
+            let (visible_request, _) = entity.process_confirm_view().unwrap();
+            assert!(Arc::ptr_eq(
+                &visible_request.display_command,
+                &display_secret
+            ));
+            entity.dismiss_process_confirm(cx);
+            assert!(entity.process_confirm_view().is_none());
+
+            let running = HostProcessActionRun {
+                connection_id: request.connection_id.clone(),
+                pid: request.pid.clone(),
+                action: request.action.clone(),
+            };
+            entity.host_process_actions.running = Some(running.clone());
+            (
+                entity.reliable_delivery_tx.clone(),
+                HostProcessActionDelivery {
+                    request: running,
+                    // The delivery type cannot carry captured command output.
+                    result: Ok(false),
+                },
+            )
+        });
+
+        delivery_tx
+            .send(super::delivery::HostToolsReliableDelivery::ProcessAction(
+                delivery,
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_process_actions.running.is_none());
+        });
+        let notice = events.try_recv().unwrap();
+        assert_eq!(
+            notice,
+            HostToolsEvent::ShowNotice(HostToolsNotice::ProcessActionFinished {
+                pid: "42".to_string(),
+                succeeded: false,
+            })
+        );
+        assert!(!format!("{notice:?}").contains(display_secret.as_str()));
         assert_eq!(
             events.try_recv().unwrap(),
             HostToolsEvent::RefreshProfiler {
