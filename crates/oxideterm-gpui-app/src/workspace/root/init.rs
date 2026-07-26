@@ -327,7 +327,6 @@ impl WorkspaceApp {
             context_sidebar_motion_generation: 0,
             ai,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
-            active_context_sidebar_tool: ContextSidebarTool::Monitor,
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::from_settings_key(
                 &settings.sidebar_ui.active_section,

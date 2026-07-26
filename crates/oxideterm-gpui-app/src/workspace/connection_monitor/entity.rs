@@ -21,6 +21,11 @@ pub(in crate::workspace) struct HostToolsEntity {
     selector_highlighted_index: Option<usize>,
     selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     tab_scroll_handle: ScrollHandle,
+    // Secondary navigation and its pointer capture remain stable across every
+    // Host Tools mount point.
+    active_tool: ContextSidebarTool,
+    previous_tool: ContextSidebarTool,
+    tab_scrollbar_drag: Option<HostToolsTabScrollbarDragState>,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
@@ -64,6 +69,9 @@ impl HostToolsEntity {
             selector_highlighted_index: None,
             selector_focus_origin: None,
             tab_scroll_handle: ScrollHandle::new(),
+            active_tool: ContextSidebarTool::Monitor,
+            previous_tool: ContextSidebarTool::Monitor,
+            tab_scrollbar_drag: None,
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -207,6 +215,56 @@ impl HostToolsEntity {
 
     pub(super) fn tab_scroll_handle(&self) -> ScrollHandle {
         self.tab_scroll_handle.clone()
+    }
+
+    pub(in crate::workspace) fn active_tool(&self) -> ContextSidebarTool {
+        self.active_tool
+    }
+
+    pub(super) fn previous_tool(&self) -> ContextSidebarTool {
+        self.previous_tool
+    }
+
+    pub(in crate::workspace) fn select_tool(
+        &mut self,
+        tool: ContextSidebarTool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_tool == tool {
+            return false;
+        }
+        self.previous_tool = self.active_tool;
+        self.active_tool = tool;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn reset_active_tool(&mut self, cx: &mut Context<Self>) -> bool {
+        self.select_tool(ContextSidebarTool::Monitor, cx)
+    }
+
+    pub(super) fn tab_scrollbar_drag_active(&self) -> bool {
+        self.tab_scrollbar_drag.is_some()
+    }
+
+    pub(super) fn tab_scrollbar_grab_offset(&self) -> Option<f32> {
+        self.tab_scrollbar_drag.map(|drag| drag.grab_offset_x)
+    }
+
+    pub(super) fn begin_tab_scrollbar_drag(&mut self, grab_offset_x: f32, cx: &mut Context<Self>) {
+        self.tab_scrollbar_drag = Some(HostToolsTabScrollbarDragState { grab_offset_x });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn finish_tab_scrollbar_drag(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.tab_scrollbar_drag.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     pub(in crate::workspace) fn selected_connection_id_owned(&self) -> Option<String> {
@@ -656,6 +714,33 @@ mod tests {
             assert!(entity.dismiss_topology_menu(cx));
             assert!(entity.topology_menu().is_none());
             assert!(!entity.dismiss_topology_menu(cx));
+        });
+    }
+
+    #[gpui::test]
+    fn tool_navigation_and_scrollbar_capture_are_entity_owned(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, cx| {
+            assert_eq!(entity.active_tool(), ContextSidebarTool::Monitor);
+            assert!(entity.select_tool(ContextSidebarTool::Logs, cx));
+            assert_eq!(entity.active_tool(), ContextSidebarTool::Logs);
+            assert_eq!(entity.previous_tool(), ContextSidebarTool::Monitor);
+            assert!(!entity.select_tool(ContextSidebarTool::Logs, cx));
+
+            entity.begin_tab_scrollbar_drag(7.5, cx);
+            assert!(entity.tab_scrollbar_drag_active());
+            assert_eq!(entity.tab_scrollbar_grab_offset(), Some(7.5));
+            assert!(entity.finish_tab_scrollbar_drag(cx));
+            assert!(!entity.tab_scrollbar_drag_active());
         });
     }
 

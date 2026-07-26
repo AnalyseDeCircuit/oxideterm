@@ -296,7 +296,9 @@ impl WorkspaceApp {
             // Non-AI context panels share the old right-sidebar shell, but must
             // not keep AI-specific focus or floating popovers alive.
             self.close_ai_sidebar_popovers();
-            self.active_context_sidebar_tool = ContextSidebarTool::Monitor;
+            self.host_tools.update(cx, |host_tools, cx| {
+                host_tools.reset_active_tool(cx);
+            });
             self.refresh_connection_monitor_pool_stats(cx);
             self.sync_connection_monitor_selection(cx);
         }

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, hash::Hash};
 
 use super::WorkspaceApp;
+use gpui::Context;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BrowserFocusOrigin {
@@ -519,7 +520,10 @@ pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptu
 }
 
 impl WorkspaceApp {
-    pub(super) fn browser_pointer_capture_owner(&self) -> Option<BrowserPointerCaptureOwner> {
+    pub(super) fn browser_pointer_capture_owner(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<BrowserPointerCaptureOwner> {
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {
             sidebar_resizing: self.sidebar_resizing,
             ai_sidebar_resizing: self.ai.chat.sidebar_resizing,
@@ -528,7 +532,7 @@ impl WorkspaceApp {
             pane_splitter_dragging: self.split_drag.is_some(),
             settings_slider_dragging: self.settings_slider_drag.is_some(),
             terminal_cast_seekbar_dragging: self.terminal_cast_seek_dragging,
-            host_tools_tab_scrollbar_dragging: self.host_tools_tab_scrollbar_drag_active(),
+            host_tools_tab_scrollbar_dragging: self.host_tools_tab_scrollbar_drag_active(cx),
             text_selection_dragging: self.ime_drag_selection.is_some(),
             sftp_file_dragging: self.sftp_view.has_drag_capture(),
             tab_dragging: self.main_window_tabs.drag.is_some(),

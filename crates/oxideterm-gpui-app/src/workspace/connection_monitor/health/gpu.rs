@@ -587,7 +587,7 @@ impl WorkspaceApp {
         let visible = enabled
             && self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-            && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
+            && self.host_tools.read(cx).active_tool() == ContextSidebarTool::Gpu;
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {
@@ -604,7 +604,7 @@ impl WorkspaceApp {
         let visible = enabled
             && self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-            && self.active_context_sidebar_tool == ContextSidebarTool::Gpu;
+            && self.host_tools.read(cx).active_tool() == ContextSidebarTool::Gpu;
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {

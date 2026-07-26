@@ -838,7 +838,6 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_motion_generation: u64,
     ai: ai_state::AiWorkspaceState,
     active_context_sidebar_panel: ContextSidebarPanel,
-    active_context_sidebar_tool: ContextSidebarTool,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
     active_surface: ActiveSurface,

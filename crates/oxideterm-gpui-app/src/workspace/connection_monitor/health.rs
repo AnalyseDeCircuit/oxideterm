@@ -175,7 +175,7 @@ impl WorkspaceApp {
             move |settings| tool.set_monitoring_enabled(&mut settings.host_tools, enabled),
             cx,
         );
-        if enabled && self.active_context_sidebar_tool == tool {
+        if enabled && self.host_tools.read(cx).active_tool() == tool {
             self.request_host_tool_snapshot_if_needed(tool, cx);
         }
     }
@@ -244,7 +244,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active_tool = self.active_context_sidebar_tool;
+        let active_tool = self.host_tools.read(cx).active_tool();
         let enabled = self.host_tool_monitoring_enabled(active_tool);
         let content = if enabled {
             match active_tool {
@@ -329,12 +329,12 @@ impl WorkspaceApp {
     }
 
     fn render_host_tools_context_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
-        let active_index = host_tools_tab_index(self.active_context_sidebar_tool);
+        let active_index = host_tools_tab_index(self.host_tools.read(cx).active_tool());
         let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
         let selection_geometry =
             host_tools_tab_selection_geometry(&tab_scroll_handle, active_index);
         let selection_indicator = selection_geometry.map(|geometry| {
-            self.render_host_tools_tab_selection_indicator(geometry, &tab_scroll_handle)
+            self.render_host_tools_tab_selection_indicator(geometry, &tab_scroll_handle, cx)
         });
         let selection_indicator_visible = selection_indicator.is_some();
         let mut tabs = div()
@@ -450,7 +450,7 @@ impl WorkspaceApp {
             ));
 
         let monitoring_enabled =
-            self.host_tool_monitoring_enabled(self.active_context_sidebar_tool);
+            self.host_tool_monitoring_enabled(self.host_tools.read(cx).active_tool());
         div()
             .id("host-tools-tab-strip")
             .flex_none()
@@ -485,7 +485,7 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let tool = self.active_context_sidebar_tool;
+        let tool = self.host_tools.read(cx).active_tool();
         let color = if enabled {
             MONITOR_EMERALD
         } else {
@@ -594,6 +594,7 @@ impl WorkspaceApp {
         &self,
         target: HostToolsTabSelectionGeometry,
         tab_scroll_handle: &ScrollHandle,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let surface = div()
             .absolute()
@@ -608,7 +609,7 @@ impl WorkspaceApp {
         // Host Tools keeps its compact geometry but shares the selected-card
         // chrome established by Settings navigation.
         let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &self.tokens);
-        let active_index = host_tools_tab_index(self.active_context_sidebar_tool);
+        let active_index = host_tools_tab_index(self.host_tools.read(cx).active_tool());
         let Some((generation, _)) = self.segmented_control_user_transition(
             selection_motion::HOST_TOOLS_SWITCHER_ID,
             active_index,
@@ -622,8 +623,7 @@ impl WorkspaceApp {
             gpui::ElementId::from(selection_motion::HOST_TOOLS_SWITCHER_ID),
             format!("selection-{generation}"),
         );
-        let source_index =
-            host_tools_tab_index(self.connection_monitor.previous_context_sidebar_tool);
+        let source_index = host_tools_tab_index(self.host_tools.read(cx).previous_tool());
         if motion.spatial
             && let Some(source) = host_tools_tab_selection_geometry(tab_scroll_handle, source_index)
         {
@@ -729,9 +729,11 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn host_tools_tab_scrollbar_drag_active(&self) -> bool {
-        // The root capture registry cannot access ConnectionMonitorState's private drag field.
-        self.connection_monitor.tab_scrollbar_drag.is_some()
+    pub(in crate::workspace) fn host_tools_tab_scrollbar_drag_active(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.host_tools.read(cx).tab_scrollbar_drag_active()
     }
 
     fn current_host_tools_tab_scroll_x(&self, tab_scroll_handle: &ScrollHandle) -> f32 {
@@ -769,8 +771,9 @@ impl WorkspaceApp {
         } else {
             geometry.thumb_width / 2.0
         };
-        self.connection_monitor.tab_scrollbar_drag =
-            Some(HostToolsTabScrollbarDragState { grab_offset_x });
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_tab_scrollbar_drag(grab_offset_x, cx);
+        });
         let thumb_left =
             (pointer_x - grab_offset_x).clamp(track_left, track_right - geometry.thumb_width);
         let ratio = (thumb_left - track_left) / (geometry.track_width - geometry.thumb_width);
@@ -783,7 +786,7 @@ impl WorkspaceApp {
         event: &MouseMoveEvent,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = self.connection_monitor.tab_scrollbar_drag else {
+        let Some(grab_offset_x) = self.host_tools.read(cx).tab_scrollbar_grab_offset() else {
             return;
         };
         if !event.dragging() {
@@ -798,7 +801,7 @@ impl WorkspaceApp {
         let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
         let track_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET;
         let max_thumb_left = track_left + geometry.track_width - geometry.thumb_width;
-        let thumb_left = (pointer_x - drag.grab_offset_x).clamp(track_left, max_thumb_left);
+        let thumb_left = (pointer_x - grab_offset_x).clamp(track_left, max_thumb_left);
         let ratio = (thumb_left - track_left) / (geometry.track_width - geometry.thumb_width);
         self.set_host_tools_tab_scroll_x(ratio * geometry.max_scroll, cx);
         cx.stop_propagation();
@@ -808,9 +811,9 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.connection_monitor.tab_scrollbar_drag.take().is_some() {
-            cx.notify();
-        }
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.finish_tab_scrollbar_drag(cx);
+        });
     }
 
     fn handle_host_tools_tab_scroll(
@@ -859,7 +862,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_context_sidebar_tool == tool;
+        let active = self.host_tools.read(cx).active_tool() == tool;
         let tab = div()
             .h(px(28.0))
             .flex_none()
@@ -925,10 +928,8 @@ impl WorkspaceApp {
             tab.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.active_context_sidebar_tool != tool {
-                        this.connection_monitor.previous_context_sidebar_tool =
-                            this.active_context_sidebar_tool;
-                        this.active_context_sidebar_tool = tool;
+                    let host_tools = this.host_tools.clone();
+                    if host_tools.update(cx, |host_tools, cx| host_tools.select_tool(tool, cx)) {
                         this.begin_user_segmented_control_transition(
                             selection_motion::HOST_TOOLS_SWITCHER_ID,
                             host_tools_tab_index(tool),
@@ -1196,45 +1197,46 @@ impl WorkspaceApp {
         self.connection_monitor.host_schedule_pending_confirm = None;
         self.sync_connection_monitor_selection(cx);
         self.sync_host_gpu_sampling(cx);
-        if self.active_context_sidebar_tool == ContextSidebarTool::Services {
+        let active_tool = self.host_tools.read(cx).active_tool();
+        if active_tool == ContextSidebarTool::Services {
             self.request_host_service_snapshot(connection_id.clone(), cx);
         }
-        if self.active_context_sidebar_tool == ContextSidebarTool::Logs {
+        if active_tool == ContextSidebarTool::Logs {
             self.request_host_logs_snapshot(
                 connection_id.clone(),
                 HostSnapshotFeedback::Silent,
                 cx,
             );
         }
-        if self.active_context_sidebar_tool == ContextSidebarTool::Tmux {
+        if active_tool == ContextSidebarTool::Tmux {
             self.request_host_tmux_snapshot(
                 connection_id.clone(),
                 HostSnapshotFeedback::Silent,
                 cx,
             );
         }
-        if self.active_context_sidebar_tool == ContextSidebarTool::Ports {
+        if active_tool == ContextSidebarTool::Ports {
             self.request_host_ports_snapshot(
                 connection_id.clone(),
                 HostSnapshotFeedback::Silent,
                 cx,
             );
         }
-        if self.active_context_sidebar_tool == ContextSidebarTool::Schedules {
+        if active_tool == ContextSidebarTool::Schedules {
             self.request_host_schedules_snapshot(
                 connection_id.clone(),
                 HostSnapshotFeedback::Silent,
                 cx,
             );
         }
-        if self.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
+        if active_tool == ContextSidebarTool::Filesystems {
             self.request_host_filesystems_snapshot(
                 connection_id.clone(),
                 HostSnapshotFeedback::Silent,
                 cx,
             );
         }
-        if self.active_context_sidebar_tool == ContextSidebarTool::Packages {
+        if active_tool == ContextSidebarTool::Packages {
             self.request_host_packages_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
         }
     }

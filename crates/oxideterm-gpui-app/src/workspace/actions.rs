@@ -748,7 +748,7 @@ impl WorkspaceApp {
             || (self.context_sidebar_visible()
                 && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
                 && matches!(
-                    self.active_context_sidebar_tool,
+                    self.host_tools.read(cx).active_tool(),
                     ContextSidebarTool::Monitor
                         | ContextSidebarTool::Gpu
                         | ContextSidebarTool::Processes

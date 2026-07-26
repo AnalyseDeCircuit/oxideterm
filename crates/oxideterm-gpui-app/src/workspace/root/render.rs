@@ -582,7 +582,7 @@ impl Render for WorkspaceApp {
                 }
                 this.update_sftp_drag_capture(event.position, cx);
                 this.update_tab_drag(event, window, cx);
-                if this.browser_pointer_capture_owner().is_some() {
+                if this.browser_pointer_capture_owner(cx).is_some() {
                     cx.stop_propagation();
                 }
             }))
@@ -619,7 +619,7 @@ impl Render for WorkspaceApp {
             }))
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, window, cx| {
                 if event.button == MouseButton::Left
-                    && this.browser_pointer_capture_owner().is_some()
+                    && this.browser_pointer_capture_owner(cx).is_some()
                 {
                     this.finish_workspace_pointer_captures(event, window, cx);
                 }
@@ -939,7 +939,7 @@ impl Render for WorkspaceApp {
                 )
             })
             .when(
-                self.browser_pointer_capture_owner()
+                self.browser_pointer_capture_owner(cx)
                     .is_some_and(browser_behavior::pointer_capture_needs_workspace_overlay),
                 |root| root.child(self.render_workspace_pointer_capture_overlay(cx)),
             )
@@ -1159,7 +1159,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let cursor = match self.browser_pointer_capture_owner() {
+        let cursor = match self.browser_pointer_capture_owner(cx) {
             Some(browser_behavior::BrowserPointerCaptureOwner::HostToolsTabScrollbar) => {
                 CursorStyle::ClosedHand
             }
@@ -1204,7 +1204,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let capture_owner = self.browser_pointer_capture_owner();
+        let capture_owner = self.browser_pointer_capture_owner(cx);
         let was_read_only_dragging = self.read_only_selection_drag_active();
         self.finish_sidebar_resize(cx);
         self.finish_ai_sidebar_resize(cx);

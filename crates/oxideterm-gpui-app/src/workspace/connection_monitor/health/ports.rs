@@ -896,7 +896,9 @@ impl WorkspaceApp {
     }
 
     pub(super) fn jump_host_port_to_process(&mut self, pid: String, cx: &mut Context<Self>) {
-        self.active_context_sidebar_tool = ContextSidebarTool::Processes;
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.select_tool(ContextSidebarTool::Processes, cx);
+        });
         self.connection_monitor.host_process_search_query = pid;
         self.connection_monitor.host_process_search_focused = false;
         self.connection_monitor.host_port_search_focused = false;
