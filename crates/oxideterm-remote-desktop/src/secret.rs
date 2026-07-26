@@ -1,27 +1,22 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 #[derive(Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct RemoteDesktopSecret(Arc<Zeroizing<String>>);
+pub struct RemoteDesktopSecret(Zeroizing<String>);
 
 impl RemoteDesktopSecret {
     pub fn new(value: impl Into<String>) -> Self {
-        Self(Arc::new(Zeroizing::new(value.into())))
+        Self(Zeroizing::new(value.into()))
     }
 
     pub fn expose_secret(&self) -> &str {
         self.0.as_str()
-    }
-
-    /// Shares one zeroizing allocation across reconnect and authentication owners.
-    pub fn share(&self) -> Self {
-        Self(Arc::clone(&self.0))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -43,13 +38,7 @@ impl From<&str> for RemoteDesktopSecret {
 
 impl From<Zeroizing<String>> for RemoteDesktopSecret {
     fn from(value: Zeroizing<String>) -> Self {
-        Self(Arc::new(value))
-    }
-}
-
-impl Clone for RemoteDesktopSecret {
-    fn clone(&self) -> Self {
-        self.share()
+        Self(value)
     }
 }
 
@@ -74,10 +63,11 @@ mod tests {
     }
 
     #[test]
-    fn shared_secret_reuses_one_zeroizing_allocation() {
-        let secret = RemoteDesktopSecret::from("rdp-password");
-        let shared = secret.share();
+    fn zeroizing_secret_handoff_reuses_the_original_buffer() {
+        let source = Zeroizing::new("rdp-password".to_string());
+        let source_buffer = source.as_ptr();
+        let secret = RemoteDesktopSecret::from(source);
 
-        assert!(Arc::ptr_eq(&secret.0, &shared.0));
+        assert_eq!(source_buffer, secret.0.as_ptr());
     }
 }

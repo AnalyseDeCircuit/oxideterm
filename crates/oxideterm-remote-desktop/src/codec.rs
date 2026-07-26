@@ -4,6 +4,7 @@
 use std::io::{BufRead, Read, Write};
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::{
     RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopFrame,
@@ -68,7 +69,7 @@ enum RemoteDesktopBinaryRequestHeader {
 
 pub fn encode_request_line(
     request: &RemoteDesktopHelperRequest,
-) -> Result<String, RemoteDesktopJsonLineError> {
+) -> Result<Zeroizing<String>, RemoteDesktopJsonLineError> {
     encode_line(request)
 }
 
@@ -98,7 +99,8 @@ pub fn write_request_line(
 pub fn read_request_line(
     reader: &mut impl BufRead,
 ) -> Result<Option<RemoteDesktopHelperRequest>, RemoteDesktopJsonLineError> {
-    let mut line = String::new();
+    // Requests can contain credentials during the authentication stage.
+    let mut line = Zeroizing::new(String::new());
     if reader.read_line(&mut line)? == 0 {
         return Ok(None);
     }
@@ -111,7 +113,7 @@ pub fn read_request_line(
 
 pub fn encode_event_line(
     event: &RemoteDesktopHelperEvent,
-) -> Result<String, RemoteDesktopJsonLineError> {
+) -> Result<Zeroizing<String>, RemoteDesktopJsonLineError> {
     encode_line(event)
 }
 
@@ -162,7 +164,8 @@ pub fn write_event_line(
 pub fn read_event_line(
     reader: &mut impl BufRead,
 ) -> Result<Option<RemoteDesktopHelperEvent>, RemoteDesktopJsonLineError> {
-    let mut line = String::new();
+    // Clipboard text can contain user secrets even when protocol events do not.
+    let mut line = Zeroizing::new(String::new());
     if reader.read_line(&mut line)? == 0 {
         return Ok(None);
     }
@@ -173,8 +176,12 @@ pub fn read_event_line(
     decode_line(trimmed).map(Some)
 }
 
-fn encode_line<T: serde::Serialize>(value: &T) -> Result<String, RemoteDesktopJsonLineError> {
-    let mut line = serde_json::to_string(value)?;
+fn encode_line<T: serde::Serialize>(
+    value: &T,
+) -> Result<Zeroizing<String>, RemoteDesktopJsonLineError> {
+    // Take ownership of serde's allocation immediately so secret-bearing JSON
+    // is cleared on success and every subsequent I/O error path.
+    let mut line = Zeroizing::new(serde_json::to_string(value)?);
     line.push('\n');
     Ok(line)
 }

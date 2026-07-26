@@ -136,7 +136,7 @@ pub enum RemoteDesktopErrorCategory {
     Unknown,
 }
 
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Deserialize, PartialEq, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",

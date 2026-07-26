@@ -290,7 +290,7 @@ impl WorkspaceApp {
         generation: u64,
         profile: RemoteDesktopConnectionProfile,
         provider: RemoteDesktopProviderManifest,
-        password: Option<RemoteDesktopSecret>,
+        password_available: bool,
         frame_slot: RemoteDesktopFrameDeliverySlot,
         worker_wake: RemoteDesktopWorkerWake,
         initial_size: RemoteDesktopSize,
@@ -307,7 +307,7 @@ impl WorkspaceApp {
                     generation,
                     profile,
                     provider,
-                    password,
+                    password_available,
                     initial_size,
                     scale_factor,
                     monitor_layout,
@@ -792,7 +792,7 @@ impl WorkspaceApp {
         let Some((
             profile,
             provider,
-            password,
+            password_available,
             delivery_tx,
             generation,
             initial_request_size,
@@ -805,7 +805,10 @@ impl WorkspaceApp {
             (
                 session.profile.clone(),
                 session.provider.clone(),
-                session.password.as_ref().map(RemoteDesktopSecret::share),
+                session
+                    .password
+                    .as_ref()
+                    .is_some_and(|password| !password.is_empty()),
                 session.delivery_tx.clone(),
                 next_remote_desktop_worker_generation(session.worker_generation),
                 initial_request_size,
@@ -830,7 +833,7 @@ impl WorkspaceApp {
             generation,
             profile.clone(),
             provider,
-            password,
+            password_available,
             frame_slot.clone(),
             worker_wake.clone(),
             initial_request_size,
@@ -877,22 +880,25 @@ impl WorkspaceApp {
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((profile, provider, password, frame_slot, delivery_tx, generation)) = self
-            .remote_desktop_sessions
-            .get(&tab_id)
-            .and_then(|session| {
-                if session.request_tx.is_some() {
-                    return None;
-                }
-                Some((
-                    session.profile.clone(),
-                    session.provider.clone(),
-                    session.password.as_ref().map(RemoteDesktopSecret::share),
-                    session.frame_slot.clone(),
-                    session.delivery_tx.clone(),
-                    next_remote_desktop_worker_generation(session.worker_generation),
-                ))
-            })
+        let Some((profile, provider, password_available, frame_slot, delivery_tx, generation)) =
+            self.remote_desktop_sessions
+                .get(&tab_id)
+                .and_then(|session| {
+                    if session.request_tx.is_some() {
+                        return None;
+                    }
+                    Some((
+                        session.profile.clone(),
+                        session.provider.clone(),
+                        session
+                            .password
+                            .as_ref()
+                            .is_some_and(|password| !password.is_empty()),
+                        session.frame_slot.clone(),
+                        session.delivery_tx.clone(),
+                        next_remote_desktop_worker_generation(session.worker_generation),
+                    ))
+                })
         else {
             return false;
         };
@@ -905,7 +911,7 @@ impl WorkspaceApp {
             generation,
             profile,
             provider,
-            password,
+            password_available,
             frame_slot,
             worker_wake.clone(),
             initial_request_size,

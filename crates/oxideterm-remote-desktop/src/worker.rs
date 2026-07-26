@@ -48,7 +48,7 @@ pub struct RemoteDesktopWorkerConfig {
     pub worker_id: RemoteDesktopWorkerId,
     pub profile: RemoteDesktopConnectionProfile,
     pub provider: RemoteDesktopProviderManifest,
-    pub password: Option<RemoteDesktopSecret>,
+    pub password_available: bool,
     pub initial_size: RemoteDesktopSize,
     pub scale_factor: Option<u32>,
     pub monitor_layout: RemoteDesktopMonitorLayout,
@@ -66,7 +66,7 @@ pub fn run_remote_desktop_worker(
             let connect = initial_connect_request(
                 &config.profile,
                 &config.provider,
-                config.password,
+                config.password_available,
                 config.initial_size,
                 config.scale_factor,
                 config.monitor_layout,
@@ -171,15 +171,11 @@ pub fn connect_request(
 pub fn initial_connect_request(
     profile: &RemoteDesktopConnectionProfile,
     provider: &RemoteDesktopProviderManifest,
-    password: Option<RemoteDesktopSecret>,
+    password_available: bool,
     initial_size: RemoteDesktopSize,
     scale_factor: Option<u32>,
     monitor_layout: RemoteDesktopMonitorLayout,
 ) -> RemoteDesktopHelperRequest {
-    let password_available = password.as_ref().is_some_and(|secret| !secret.is_empty());
-    // The password copy owned by worker startup is dropped here; helpers only
-    // receive the non-sensitive availability hint until Authenticate.
-    drop(password);
     let session_options = effective_session_options(profile.session_options, provider);
     let monitor_layout = if session_options.display.use_all_monitors {
         monitor_layout
@@ -382,7 +378,7 @@ mod tests {
         let request = initial_connect_request(
             &vnc_profile,
             &builtin_provider_manifest(RemoteDesktopProtocol::Vnc),
-            Some(RemoteDesktopSecret::from("wire-secret")),
+            true,
             RemoteDesktopSize {
                 width: 1280,
                 height: 720,

@@ -420,16 +420,21 @@ impl WorkspaceApp {
 }
 
 fn remote_desktop_authenticate_request(
-    session: &RemoteDesktopSession,
+    session: &mut RemoteDesktopSession,
     certificate: &RemoteDesktopServerCertificate,
 ) -> RemoteDesktopHelperRequest {
     let password = if matches!(
         certificate.security_method.as_str(),
         "none" | "tls-none" | "x509-none"
     ) {
+        // A password supplied for a no-authentication server must not remain
+        // resident for the rest of the session.
+        drop(session.password.take());
         None
     } else {
-        session.password.as_ref().map(RemoteDesktopSecret::share)
+        // Authentication is the single ownership handoff. Reconnect must load
+        // a new credential or ask the user instead of cloning this secret.
+        session.password.take()
     };
     RemoteDesktopHelperRequest::Authenticate {
         challenge_id: certificate.challenge_id.clone(),
@@ -441,10 +446,10 @@ fn remote_desktop_authenticate_request(
 }
 
 fn send_remote_desktop_authentication(
-    session: &RemoteDesktopSession,
+    session: &mut RemoteDesktopSession,
     certificate: &RemoteDesktopServerCertificate,
 ) {
-    let Some(sender) = session.request_tx.as_ref() else {
+    let Some(sender) = session.request_tx.clone() else {
         return;
     };
     // The helper validates which optional credentials the negotiated security

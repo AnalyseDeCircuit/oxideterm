@@ -305,8 +305,8 @@ impl RemoteDesktopSession {
         Self {
             profile,
             provider,
-            // Runtime credentials are kept only for this tab so a user-visible
-            // reconnect can start a fresh helper after the previous one exits.
+            // The tab owns the credential only until one accepted certificate
+            // moves it into the helper authentication request.
             password,
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
