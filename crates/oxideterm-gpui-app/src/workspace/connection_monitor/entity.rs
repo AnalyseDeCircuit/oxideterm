@@ -757,6 +757,50 @@ impl HostToolsEntity {
         true
     }
 
+    pub(super) fn select_sidebar_tool(
+        &mut self,
+        tool: ContextSidebarTool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.select_tool(tool, cx) {
+            return false;
+        }
+        self.ui.retain_input_focus_for_tool(tool);
+        if tool != ContextSidebarTool::Processes {
+            self.dismiss_process_confirm(cx);
+        }
+        if tool != ContextSidebarTool::Docker {
+            self.dismiss_docker_confirm(cx);
+        }
+        if tool != ContextSidebarTool::Services {
+            self.dismiss_service_confirm(cx);
+            self.pause_service_refreshes();
+        }
+        if tool != ContextSidebarTool::Tmux {
+            self.dismiss_tmux_confirm(cx);
+            self.dismiss_tmux_input_dialog(cx);
+        }
+        if tool != ContextSidebarTool::Schedules {
+            self.dismiss_schedule_confirm(cx);
+        }
+
+        if let Some(runtime) = self.lifecycle_runtime.clone() {
+            // Tool selection replaces only page samplers. Long-running SSH,
+            // transfer, and forwarding ownership remains outside this Entity.
+            self.update_lifecycle(
+                self.visibility,
+                self.monitoring.clone(),
+                self.sampling_config,
+                runtime,
+                true,
+                cx,
+            );
+            self.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+        }
+        cx.emit(HostToolsEvent::ToolSelected(tool));
+        true
+    }
+
     pub(in crate::workspace) fn reset_active_tool(&mut self, cx: &mut Context<Self>) -> bool {
         self.select_tool(ContextSidebarTool::Monitor, cx)
     }
@@ -1401,13 +1445,14 @@ mod tests {
                 cx,
             )
         });
+        let mut events = cx.events(&entity);
 
         entity.update(cx, |entity, cx| {
             assert_eq!(entity.active_tool(), ContextSidebarTool::Monitor);
-            assert!(entity.select_tool(ContextSidebarTool::Logs, cx));
+            assert!(entity.select_sidebar_tool(ContextSidebarTool::Logs, cx));
             assert_eq!(entity.active_tool(), ContextSidebarTool::Logs);
             assert_eq!(entity.previous_tool(), ContextSidebarTool::Monitor);
-            assert!(!entity.select_tool(ContextSidebarTool::Logs, cx));
+            assert!(!entity.select_sidebar_tool(ContextSidebarTool::Logs, cx));
 
             entity.begin_tab_scrollbar_drag(7.5, cx);
             assert!(entity.tab_scrollbar_drag_active());
@@ -1415,6 +1460,139 @@ mod tests {
             assert!(entity.finish_tab_scrollbar_drag(cx));
             assert!(!entity.tab_scrollbar_drag_active());
         });
+        assert_eq!(
+            events.try_recv().expect("tool selection event"),
+            HostToolsEvent::ToolSelected(ContextSidebarTool::Logs)
+        );
+        assert!(events.try_recv().is_err());
+    }
+
+    #[gpui::test]
+    fn sidebar_tool_selection_cleans_page_state_without_releasing_node_owner(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
+        let registry = SshConnectionRegistry::default();
+        let node_consumer = ConnectionConsumer::NodeRouter("node-1".to_string());
+        let handle = registry.acquire(
+            SshConfig {
+                host: "host.example".to_string(),
+                username: "alice".to_string(),
+                auth: AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+            node_consumer.clone(),
+        );
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity =
+            cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, registry, cx));
+        let mut events = cx.events(&entity);
+
+        entity.update(cx, |entity, cx| {
+            entity.lifecycle_runtime = Some(runtime.handle().clone());
+            entity.visibility = HostToolsVisibility::Hidden;
+
+            entity.active_tool = ContextSidebarTool::Processes;
+            entity.host_process_actions.pending_confirm =
+                Some(HostToolConfirmState::new(HostProcessActionRequest {
+                    connection_id: "connection-1".to_string(),
+                    pid: "42".to_string(),
+                    display_command: Arc::new(zeroize::Zeroizing::new(
+                        "process command stays private".to_string(),
+                    )),
+                    action: ProcessActionKind::Term,
+                }));
+            assert!(entity.select_sidebar_tool(ContextSidebarTool::Monitor, cx));
+            assert!(entity.host_process_actions.pending_confirm.is_none());
+
+            entity.active_tool = ContextSidebarTool::Docker;
+            entity.host_docker_operations.pending_confirm =
+                Some(HostToolConfirmState::new(HostDockerActionRequest {
+                    connection_id: "connection-1".to_string(),
+                    container_id: "container-1".to_string(),
+                    container_name: "web".to_string(),
+                    action: DockerActionKind::Restart,
+                }));
+            assert!(entity.select_sidebar_tool(ContextSidebarTool::Monitor, cx));
+            assert!(entity.host_docker_operations.pending_confirm.is_none());
+
+            entity.active_tool = ContextSidebarTool::Services;
+            entity.host_services.pending_confirm =
+                Some(HostToolConfirmState::new(HostServiceActionRequest {
+                    connection_id: "connection-1".to_string(),
+                    service_id: "ssh.service".to_string(),
+                    description: "SSH".to_string(),
+                    action: ServiceActionKind::Restart,
+                }));
+            entity.host_services.snapshot_pending = Some(HostServiceSnapshotPending {
+                request: HostServiceSnapshotRequest {
+                    connection_id: "connection-1".to_string(),
+                    connection_fallback: "Connection missing".to_string(),
+                    failure_fallback: "Service refresh failed".to_string(),
+                },
+                runtime: runtime.handle().clone(),
+            });
+            entity.host_services.snapshot_polling = true;
+            assert!(entity.select_sidebar_tool(ContextSidebarTool::Monitor, cx));
+            assert!(entity.host_services.pending_confirm.is_none());
+            // Leaving Services drops only its queued refresh; an in-flight capture may finish.
+            assert!(entity.host_services.snapshot_pending.is_none());
+            assert!(entity.host_services.snapshot_polling);
+
+            entity.active_tool = ContextSidebarTool::Tmux;
+            entity.host_tmux.pending_confirm =
+                Some(HostToolConfirmState::new(HostTmuxActionRequest {
+                    connection_id: "connection-1".to_string(),
+                    session_id: "$1".to_string(),
+                    session_name: "work".to_string(),
+                    target_label: "$1".to_string(),
+                    action: HostTmuxDestructiveAction::KillSession {
+                        target: "$1".to_string(),
+                    },
+                }));
+            entity.ui.host_tmux_input_dialog = Some(HostTmuxInputDialog {
+                connection_id: "connection-1".to_string(),
+                session_id: "$1".to_string(),
+                session_name: "work".to_string(),
+                target_label: "%1".to_string(),
+                value: zeroize::Zeroizing::new("tmux input stays private".to_string()),
+                kind: HostTmuxInputDialogKind::SendPaneCommand {
+                    target: "%1".to_string(),
+                },
+            });
+            entity.ui.focused_input = Some(HostToolsTextInput::TmuxDialog);
+            assert!(entity.select_sidebar_tool(ContextSidebarTool::Monitor, cx));
+            assert!(entity.host_tmux.pending_confirm.is_none());
+            assert!(entity.ui.host_tmux_input_dialog.is_none());
+            assert!(entity.ui.focused_input.is_none());
+
+            entity.active_tool = ContextSidebarTool::Schedules;
+            entity.host_schedules.pending_confirm =
+                Some(HostToolConfirmState::new(HostScheduleActionRequest {
+                    connection_id: "connection-1".to_string(),
+                    task_id: "backup.timer".to_string(),
+                    task_name: "Backup".to_string(),
+                    unit: "backup.service".to_string(),
+                    action: ScheduledTaskActionKind::RunNow {
+                        id: "backup.timer".to_string(),
+                        unit: "backup.service".to_string(),
+                    },
+                }));
+            assert!(entity.select_sidebar_tool(ContextSidebarTool::Monitor, cx));
+            assert!(entity.host_schedules.pending_confirm.is_none());
+            assert!(entity.lifecycle_runtime.is_some());
+        });
+
+        for _ in 0..5 {
+            assert_eq!(
+                events.try_recv().expect("tool selection event"),
+                HostToolsEvent::ToolSelected(ContextSidebarTool::Monitor)
+            );
+        }
+        assert!(events.try_recv().is_err());
+        // Tool changes may replace page samplers but must preserve the registry owner.
+        assert_eq!(handle.info().ref_count, 1);
+        assert_eq!(handle.info().consumers, vec![node_consumer]);
     }
 
     #[gpui::test]

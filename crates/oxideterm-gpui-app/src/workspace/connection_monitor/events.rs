@@ -5,6 +5,7 @@ use gpui::EventEmitter;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum HostToolsEvent {
     ShowNotice(HostToolsNotice),
+    ToolSelected(ContextSidebarTool),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

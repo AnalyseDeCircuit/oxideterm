@@ -110,6 +110,16 @@ impl WorkspaceApp {
                 HostToolsEvent::ShowNotice(notice) => {
                     workspace.push_host_tools_notice(notice.clone());
                 }
+                HostToolsEvent::ToolSelected(tool) => {
+                    workspace.begin_user_segmented_control_transition(
+                        selection_motion::HOST_TOOLS_SWITCHER_ID,
+                        connection_monitor::host_tools_tab_index(*tool),
+                        _cx,
+                    );
+                    workspace.clear_ime_selection();
+                    workspace.ime_marked_text = None;
+                    _cx.notify();
+                }
             },
         );
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());

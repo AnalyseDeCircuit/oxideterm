@@ -40,7 +40,7 @@ struct HostToolsTabScrollbarGeometry {
     max_scroll: f32,
 }
 
-fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
+pub(in crate::workspace) fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
     // Keep indices aligned with the stable render order in the scroll strip.
     match tool {
         ContextSidebarTool::Monitor => 0,
@@ -1122,97 +1122,9 @@ impl WorkspaceApp {
             tab.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    let host_tools = this.host_tools.clone();
-                    if host_tools.update(cx, |host_tools, cx| host_tools.select_tool(tool, cx)) {
-                        this.begin_user_segmented_control_transition(
-                            selection_motion::HOST_TOOLS_SWITCHER_ID,
-                            host_tools_tab_index(tool),
-                            cx,
-                        );
-                        this.host_tools.update(cx, |host_tools, _cx| {
-                            host_tools.ui.retain_input_focus_for_tool(tool);
-                        });
-                        if tool != ContextSidebarTool::Processes {
-                            this.host_tools.update(cx, |host_tools, cx| {
-                                host_tools.dismiss_process_confirm(cx);
-                            });
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Docker {
-                            this.host_tools.update(cx, |host_tools, cx| {
-                                host_tools.dismiss_docker_confirm(cx);
-                            });
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Services {
-                            this.host_tools.update(cx, |host_tools, cx| {
-                                host_tools.dismiss_service_confirm(cx);
-                                host_tools.pause_service_refreshes();
-                            });
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Logs {
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Tmux {
-                            this.host_tools.update(cx, |host_tools, cx| {
-                                host_tools.dismiss_tmux_confirm(cx);
-                                host_tools.dismiss_tmux_input_dialog(cx);
-                            });
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Ports {
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Schedules {
-                            this.host_tools.update(cx, |host_tools, cx| {
-                                host_tools.dismiss_schedule_confirm(cx);
-                            });
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Filesystems {
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Packages {
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        // Switching Host Tools pages should eagerly attach
-                        // the selected connection profiler. Waiting for the
-                        // heartbeat made data appear only after another
-                        // layout event, such as entering fullscreen.
-                        this.sync_host_tools_lifecycle(true, cx);
-                        if tool == ContextSidebarTool::Services {
-                            this.request_host_services_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Logs {
-                            this.request_host_logs_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Tmux {
-                            this.request_host_tmux_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Ports {
-                            this.request_host_ports_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Schedules {
-                            this.request_host_schedules_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Filesystems {
-                            this.request_host_filesystems_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Packages {
-                            this.request_host_packages_snapshot_for_selected_connection(cx);
-                        }
-                        cx.notify();
-                    }
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_sidebar_tool(tool, cx)
+                    });
                     cx.stop_propagation();
                 }),
             )
