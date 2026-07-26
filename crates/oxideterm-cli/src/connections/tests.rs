@@ -23,9 +23,12 @@ fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
         created_at: "2026-05-26T00:00:00Z".to_string(),
         last_used_at: None,
         color: None,
+        icon_background_color: None,
         icon: None,
         tags: vec!["primary".to_string()],
         agent_forwarding: false,
+        identity_agent: None,
+        agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
         post_connect_command: None,
     }
