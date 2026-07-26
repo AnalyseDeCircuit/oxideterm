@@ -121,7 +121,7 @@ impl Render for WorkspaceApp {
         self.poll_host_schedule_action_results(cx);
         self.maybe_refresh_connection_monitor(cx);
         self.poll_connection_trace_events(cx);
-        self.poll_terminal_notices(cx);
+        self.refresh_workspace_toast_expirations(cx);
         self.poll_native_plugin_terminal_ui_requests(window, cx);
         self.poll_native_plugin_product_ui_effects(window, cx);
         self.poll_ai_chat_stream_events(Some(window), cx);
@@ -1621,9 +1621,10 @@ impl WorkspaceApp {
         true
     }
 
-    pub(in crate::workspace) fn poll_terminal_notices(&mut self, cx: &mut Context<Self>) {
-        const WORKSPACE_TOAST_TTL: Duration = Duration::from_secs(4);
-
+    pub(in crate::workspace) fn refresh_workspace_toast_expirations(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         let now = Instant::now();
         let expired_toast_ids = self
             .workspace_toasts
@@ -1661,9 +1662,19 @@ impl WorkspaceApp {
         for attempt_id in expired_trace_ids {
             self.dismiss_connection_trace_toast(&attempt_id, cx);
         }
+    }
 
+    pub(in crate::workspace) fn poll_terminal_notices(&mut self, cx: &mut Context<Self>) -> bool {
+        const WORKSPACE_TOAST_TTL: Duration = Duration::from_secs(4);
+
+        self.refresh_workspace_toast_expirations(cx);
+        let now = Instant::now();
+        let drain = delivery::drain_channel(
+            &self.terminal_notice_rx,
+            delivery::NOTIFICATION_DELIVERY_BUDGET,
+        );
         let mut added = false;
-        while let Ok(notice) = self.terminal_notice_rx.try_recv() {
+        for notice in drain.items {
             let id = self.next_workspace_toast_id();
             self.workspace_toasts.push(WorkspaceToast {
                 id,
@@ -1710,6 +1721,40 @@ impl WorkspaceApp {
             })
             .detach();
         }
+        drain.outcome.backlog_remaining
+    }
+
+    pub(in crate::workspace) fn schedule_terminal_notice_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.terminal_notice_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Release stops the waiter even if external terminal sinks still hold senders.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let backlog_remaining = weak
+                    .update(cx, |workspace, cx| workspace.poll_terminal_notices(cx))
+                    .unwrap_or(false);
+                if backlog_remaining {
+                    // Store one continuation permit for the next bounded notification batch.
+                    delivery_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::workspace) fn render_workspace_toasts(

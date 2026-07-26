@@ -1047,7 +1047,7 @@ pub(crate) struct WorkspaceApp {
     local_shells: Vec<ShellInfo>,
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,
-    terminal_notice_tx: std::sync::mpsc::Sender<TerminalNotice>,
+    terminal_notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
     terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
     // Standard toasts need stable ids so the close button removes the rendered
     // toast, not whichever item later occupies the same list index.

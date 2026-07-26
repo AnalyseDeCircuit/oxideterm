@@ -67,7 +67,7 @@ impl WorkspaceApp {
         let (node_event_subscription, node_event_rx) = node_router.emitter().subscribe_bounded(256);
         let (reconnect_worker_tx, reconnect_worker_rx) = std::sync::mpsc::channel();
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (terminal_notice_tx, terminal_notice_rx) = std::sync::mpsc::channel();
+        let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
         let (terminal_cwd_tx, terminal_cwd_rx) = std::sync::mpsc::channel();
         let (terminal_git_tx, terminal_git_rx) = std::sync::mpsc::channel();
         let (terminal_project_tx, terminal_project_rx) = std::sync::mpsc::channel();
@@ -719,6 +719,7 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
+        workspace.schedule_terminal_notice_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {

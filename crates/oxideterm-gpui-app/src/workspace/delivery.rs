@@ -4,9 +4,15 @@
 //! Shared delivery budgets for workspace-owned background results.
 
 use std::{
-    sync::mpsc::{Receiver, TryRecvError},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, SendError, Sender, TryRecvError},
+    },
     time::{Duration, Instant},
 };
+
+use tokio::sync::Notify;
 
 /// Bounds one UI-thread delivery batch by both item count and elapsed time.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,6 +73,88 @@ pub(in crate::workspace) const LIFECYCLE_DELIVERY_BUDGET: DeliveryBudget =
     DeliveryBudget::new(64, Duration::from_millis(4));
 pub(in crate::workspace) const USER_ACTION_DELIVERY_BUDGET: DeliveryBudget =
     DeliveryBudget::new(32, Duration::from_millis(4));
+pub(in crate::workspace) const NOTIFICATION_DELIVERY_BUDGET: DeliveryBudget =
+    DeliveryBudget::new(64, Duration::from_millis(2));
+
+/// Coalesces producer wakeups while preserving every channel value.
+#[derive(Clone)]
+pub(in crate::workspace) struct ActiveDeliveryWake {
+    pending: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
+    notification: Arc<Notify>,
+}
+
+impl Default for ActiveDeliveryWake {
+    fn default() -> Self {
+        Self {
+            pending: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
+            notification: Arc::new(Notify::new()),
+        }
+    }
+}
+
+impl ActiveDeliveryWake {
+    pub(in crate::workspace) fn mark(&self) {
+        self.pending.store(true, Ordering::Release);
+        self.notification.notify_one();
+    }
+
+    pub(in crate::workspace) fn take(&self) -> bool {
+        self.pending.swap(false, Ordering::AcqRel)
+    }
+
+    pub(in crate::workspace) fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+        self.notification.notify_one();
+    }
+
+    pub(in crate::workspace) fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    pub(in crate::workspace) async fn wait(&self) {
+        self.notification.notified().await;
+    }
+}
+
+/// Sends one value before marking the shared foreground wake.
+pub(in crate::workspace) struct ActiveDeliverySender<T> {
+    sender: Sender<T>,
+    wake: ActiveDeliveryWake,
+}
+
+impl<T> Clone for ActiveDeliverySender<T> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            wake: self.wake.clone(),
+        }
+    }
+}
+
+impl<T> ActiveDeliverySender<T> {
+    pub(in crate::workspace) fn channel() -> (Self, Receiver<T>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        (
+            Self {
+                sender,
+                wake: ActiveDeliveryWake::default(),
+            },
+            receiver,
+        )
+    }
+
+    pub(in crate::workspace) fn send(&self, value: T) -> Result<(), SendError<T>> {
+        self.sender.send(value)?;
+        self.wake.mark();
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn wake(&self) -> ActiveDeliveryWake {
+        self.wake.clone()
+    }
+}
 
 /// Drains a standard-library channel until it is empty, disconnected, or over budget.
 pub(in crate::workspace) fn drain_channel<T>(
@@ -151,5 +239,18 @@ mod tests {
         assert_eq!(second.items, vec![3]);
         assert!(first.outcome.backlog_remaining);
         assert!(!second.outcome.backlog_remaining);
+    }
+
+    #[test]
+    fn active_sender_preserves_values_and_coalesces_wakes() {
+        let (sender, receiver) = ActiveDeliverySender::channel();
+
+        sender.send(1).unwrap();
+        sender.send(2).unwrap();
+
+        assert!(sender.wake().take());
+        assert!(!sender.wake().take());
+        assert_eq!(receiver.try_recv(), Ok(1));
+        assert_eq!(receiver.try_recv(), Ok(2));
     }
 }
