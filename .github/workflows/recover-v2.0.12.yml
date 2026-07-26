@@ -1,0 +1,100 @@
+name: Recover v2.0.12 Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/recover-v2.0.12.yml'
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: recover-v2.0.12-release
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Move protected tag and dispatch release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover failed release
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          RELEASE_TAG: v2.0.12
+          EXPECTED_TAG_OBJECT: add9b1e01b421699da3c2b6ea711edd08ce1d646
+          FIXED_COMMIT: fd04187a7aff1acafa8e285007a88fa7dea8e290
+          RELEASE_WORKFLOW: native-package.yml
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const releaseTag = process.env.RELEASE_TAG;
+            const expectedTagObject = process.env.EXPECTED_TAG_OBJECT;
+            const fixedCommit = process.env.FIXED_COMMIT;
+            const releaseWorkflow = process.env.RELEASE_WORKFLOW;
+
+            const currentRef = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: `tags/${releaseTag}`,
+            });
+            if (currentRef.data.object.sha !== expectedTagObject) {
+              throw new Error(
+                `Refusing to move ${releaseTag}: expected tag object ` +
+                `${expectedTagObject}, found ${currentRef.data.object.sha}.`,
+              );
+            }
+
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: releaseTag,
+              });
+              throw new Error(
+                `Refusing to republish ${releaseTag}: a GitHub Release already exists.`,
+              );
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            const tagObject = await github.rest.git.createTag({
+              owner,
+              repo,
+              tag: releaseTag,
+              message: 'OxideTerm 2.0.12',
+              object: fixedCommit,
+              type: 'commit',
+              tagger: {
+                name: 'github-actions[bot]',
+                email: '41898282+github-actions[bot]@users.noreply.github.com',
+                date: new Date().toISOString(),
+              },
+            });
+            await github.rest.git.updateRef({
+              owner,
+              repo,
+              ref: `tags/${releaseTag}`,
+              sha: tagObject.data.sha,
+              force: true,
+            });
+
+            const movedRef = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: `tags/${releaseTag}`,
+            });
+            if (movedRef.data.object.sha !== tagObject.data.sha) {
+              throw new Error(`Failed to verify the updated ${releaseTag} tag.`);
+            }
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: releaseWorkflow,
+              ref: releaseTag,
+            });
