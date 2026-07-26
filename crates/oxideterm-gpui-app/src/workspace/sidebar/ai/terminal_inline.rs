@@ -129,7 +129,7 @@ window.focus(&self.focus_handle, cx);
             }
             "enter"
                 if self
-                    .marked_text_for_target(WorkspaceImeTarget::AiInlinePrompt)
+                    .marked_text_for_target(WorkspaceImeTarget::AiInlinePrompt, cx)
                     .is_some() =>
             {
                 true
@@ -167,8 +167,8 @@ window.focus(&self.focus_handle, cx);
         let theme = self.tokens.ui;
         let target = WorkspaceImeTarget::AiInlinePrompt;
         let focused = self.ai.chat.inline_panel.prompt_focused;
-        let marked_text = self.marked_text_for_target(target);
-        let selected_range = self.ime_selected_range_for_target(target);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let showing_placeholder =
             self.ai.chat.inline_panel.prompt.is_empty() && marked_text.is_none();
         let placeholder = if self.ai.chat.inline_panel.has_selection {

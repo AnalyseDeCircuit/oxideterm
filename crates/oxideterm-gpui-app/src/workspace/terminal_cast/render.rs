@@ -200,7 +200,7 @@ impl WorkspaceApp {
             (position / duration).clamp(0.0, 1.0) as f32
         };
         let search_target = WorkspaceImeTarget::TerminalCastSearch;
-        let search_marked = self.marked_text_for_target(search_target);
+        let search_marked = self.marked_text_for_target(search_target, cx);
         let search_empty = player.search_query.is_empty() && search_marked.is_none();
         let search_text = if search_empty {
             self.i18n.t("terminal.recording.search_placeholder")

@@ -1072,7 +1072,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let focused = self.graphics.focused_input == Some(GraphicsInput::AppCommand);
         let target = WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand);
-        let marked = self.marked_text_for_target(target);
+        let marked = self.marked_text_for_target(target, cx);
         let workspace = cx.entity();
         div()
             .relative()
@@ -1087,7 +1087,7 @@ impl WorkspaceApp {
                         caret_visible: self.new_connection_caret_visible,
                         secret: false,
                         selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target),
+                        selected_range: self.ime_selected_range_for_target(target, cx),
                         marked_text: marked,
                     },
                 )

@@ -354,7 +354,7 @@ impl WorkspaceApp {
         } else {
             value.to_string()
         };
-        let selected_range = self.ime_selected_range_for_target(target);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let selection_range = selected_range
             .as_ref()
             .filter(|range| range.start < range.end)
@@ -363,7 +363,7 @@ impl WorkspaceApp {
             .as_ref()
             .filter(|range| range.start == range.end)
             .map(|range| range.start);
-        let marked_text = self.marked_text_for_target(target).unwrap_or_default();
+        let marked_text = self.marked_text_for_target(target, cx).unwrap_or_default();
         let workspace = cx.entity();
 
         text_input_anchor_probe(

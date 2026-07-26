@@ -1263,6 +1263,7 @@ impl WorkspaceApp {
                 "aider, custom-tui",
                 true,
                 line_height,
+                cx,
             );
         } else {
             command_editor = self.render_settings_multiline_textarea_lines(
@@ -1271,10 +1272,11 @@ impl WorkspaceApp {
                 &value,
                 false,
                 line_height,
+                cx,
             );
         }
 
-        if let Some(marked) = self.marked_text_for_target(target) {
+        if let Some(marked) = self.marked_text_for_target(target, cx) {
             command_editor = command_editor.child(
                 div()
                     .underline()
@@ -1674,8 +1676,9 @@ impl WorkspaceApp {
             &value,
             false,
             line_height,
+            cx,
         );
-        if let Some(marked) = self.marked_text_for_target(target) {
+        if let Some(marked) = self.marked_text_for_target(target, cx) {
             textarea = textarea.child(
                 div()
                     .underline()
@@ -1727,8 +1730,9 @@ impl WorkspaceApp {
         value: &str,
         placeholder: bool,
         line_height: f32,
+        cx: &App,
     ) -> Div {
-        let selection = self.ime_selected_range_for_target(target);
+        let selection = self.ime_selected_range_for_target(target, cx);
         let theme = self.tokens.ui;
         for (line_range, line_text) in settings_multiline_line_ranges(value) {
             let (selection_range, caret_offset) =

@@ -333,8 +333,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> SelectableTextRenderState {
         let active_group_selection =
-            if let Some(WorkspaceImeTarget::ReadOnlyText(group_id)) = self.active_ime_target() {
-                self.ime_selected_range_for_target(WorkspaceImeTarget::ReadOnlyText(group_id))
+            if let Some(WorkspaceImeTarget::ReadOnlyText(group_id)) = self.active_ime_target(cx) {
+                self.ime_selected_range_for_target(WorkspaceImeTarget::ReadOnlyText(group_id), cx)
                     .map(|range| (group_id, range))
             } else {
                 None
@@ -487,7 +487,7 @@ impl WorkspaceApp {
 
         let target = WorkspaceImeTarget::ReadOnlyText(id);
         let selection_range = selected_range_override.or_else(|| {
-            self.ime_selected_range_for_target(target)
+            self.ime_selected_range_for_target(target, cx)
                 .filter(|range| range.start < range.end)
         });
         let workspace = cx.entity();
@@ -624,7 +624,7 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::ReadOnlyText(group_id);
         let value = text.to_string();
         let selection_range = self
-            .ime_selected_range_for_target(target)
+            .ime_selected_range_for_target(target, cx)
             .and_then(|range| {
                 self.local_range_for_selectable_fragment(group_id, fragment_id, range)
             })
@@ -759,7 +759,7 @@ impl WorkspaceApp {
                 .retain(|_, fragment| !replaced_groups.contains(&fragment.group_id));
         }
 
-        let active_group = match self.active_ime_target() {
+        let active_group = match self.active_ime_target(cx) {
             Some(WorkspaceImeTarget::ReadOnlyText(group_id)) => Some(group_id),
             _ => None,
         };

@@ -1,6 +1,7 @@
 use super::*;
 
 use oxideterm_connection_monitor::ResourceSampler;
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_topology::ConnectionTopologySnapshot;
 
 /// Owns Host Tools sampling state independently from WorkspaceApp and SSH nodes.
@@ -21,6 +22,9 @@ pub(in crate::workspace) struct HostToolsEntity {
     >,
     pub(super) reliable_delivery_rx:
         std::sync::mpsc::Receiver<super::delivery::HostToolsReliableDelivery>,
+    // Search, list, expansion, and dialog state belongs to the shared Host
+    // Tools surface rather than whichever workspace mount renders it.
+    pub(in crate::workspace) ui: HostToolsUiState,
     pub(super) host_process_actions: HostProcessActionsState,
     pub(super) host_docker_operations: HostDockerOperationsState,
     pub(super) host_services: HostServicesState,
@@ -86,6 +90,7 @@ impl HostToolsEntity {
             reliable_delivery_wake,
             reliable_delivery_tx,
             reliable_delivery_rx,
+            ui: HostToolsUiState::new(),
             host_process_actions: HostProcessActionsState::new(),
             host_docker_operations: HostDockerOperationsState::new(),
             host_services: HostServicesState::new(),
@@ -147,6 +152,36 @@ impl HostToolsEntity {
         );
         entity.schedule_reliable_delivery(cx);
         entity
+    }
+
+    pub(in crate::workspace) fn replace_text_input(
+        &mut self,
+        input: HostToolsTextInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        let Some(value) = self.ui.input_value_mut(input) else {
+            return false;
+        };
+        replace_utf16(value, replacement_range, text);
+        // Search edits invalidate expansion identities owned by the same
+        // surface; command inputs preserve their surrounding action state.
+        match input {
+            HostToolsTextInput::ProcessSearch => self.ui.host_process_expanded_pid = None,
+            HostToolsTextInput::DockerSearch => self.ui.host_docker_expanded_id = None,
+            HostToolsTextInput::ServiceSearch => self.ui.host_service_expanded_id = None,
+            HostToolsTextInput::LogSearch => self.host_logs.expanded_index = None,
+            HostToolsTextInput::TmuxSearch => {
+                self.ui.host_tmux_expanded_session_id = None;
+                self.ui.host_tmux_expanded_window_id = None;
+            }
+            HostToolsTextInput::PortSearch => self.host_ports.expanded_index = None,
+            HostToolsTextInput::ScheduleSearch => self.host_schedules.expanded_index = None,
+            HostToolsTextInput::FilesystemSearch => self.host_filesystems.expanded_index = None,
+            HostToolsTextInput::PackageSearch => self.host_packages.expanded_index = None,
+            HostToolsTextInput::ProcessRenice | HostToolsTextInput::TmuxDialog => {}
+        }
+        true
     }
 
     pub(in crate::workspace) fn profiler_registry(&self) -> &ProfilerRegistry {
@@ -1207,6 +1242,58 @@ mod tests {
     }
 
     #[gpui::test]
+    fn search_focus_lists_and_tmux_input_are_entity_owned(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, cx| {
+            // Search edits and their dependent expansion state share one owner.
+            entity.ui.host_process_expanded_pid = Some("42".to_string());
+            entity.ui.focus_input(HostToolsTextInput::ProcessSearch);
+            assert!(entity.replace_text_input(HostToolsTextInput::ProcessSearch, None, "sshd"));
+            assert_eq!(
+                entity.ui.input_value(HostToolsTextInput::ProcessSearch),
+                Some("sshd")
+            );
+            assert!(entity.ui.host_process_expanded_pid.is_none());
+
+            let dialog = HostTmuxInputDialog {
+                connection_id: "connection-1".to_string(),
+                session_id: "$1".to_string(),
+                session_name: "work".to_string(),
+                target_label: "%1".to_string(),
+                value: zeroize::Zeroizing::new(String::new()),
+                kind: HostTmuxInputDialogKind::SendPaneCommand {
+                    target: "%1".to_string(),
+                },
+            };
+            entity.open_tmux_input_dialog(dialog, cx);
+            assert!(entity.replace_text_input(
+                HostToolsTextInput::TmuxDialog,
+                None,
+                "printf \"$TOKEN\""
+            ));
+            // Compare through a boolean so failed assertions never print the input.
+            assert!(
+                entity
+                    .ui
+                    .input_value(HostToolsTextInput::TmuxDialog)
+                    .is_some_and(|value| value == "printf \"$TOKEN\"")
+            );
+            entity.dismiss_tmux_input_dialog(cx);
+            assert!(entity.ui.host_tmux_input_dialog.is_none());
+            assert!(entity.ui.focused_input.is_none());
+        });
+    }
+
+    #[gpui::test]
     fn gpu_actions_and_expansion_are_entity_owned(cx: &mut TestAppContext) {
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let entity = cx.new(|cx| {
@@ -1657,13 +1744,13 @@ mod tests {
                 session_name: "work".to_string(),
                 target_label: "%1".to_string(),
                 value: zeroize::Zeroizing::new("   ".to_string()),
-                focused: true,
                 kind: HostTmuxInputDialogKind::SendPaneCommand {
                     target: "%1".to_string(),
                 },
             };
+            entity.open_tmux_input_dialog(empty_dialog, cx);
             assert_eq!(
-                entity.submit_tmux_input(empty_dialog, runtime_handle, cx),
+                entity.submit_tmux_input(runtime_handle, cx),
                 vec![HostToolsNotice::TmuxInputRequired]
             );
             entity.host_tmux.action_running = Some(action_request.clone());

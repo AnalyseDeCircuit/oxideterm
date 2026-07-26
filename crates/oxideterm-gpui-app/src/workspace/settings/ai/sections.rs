@@ -1426,7 +1426,7 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let marked_text = self
-            .marked_text_for_target(target)
+            .marked_text_for_target(target, cx)
             .map(|marked| marked.to_string());
         let caret = focused.then(|| {
             text_caret(&self.tokens, self.new_connection_caret_visible).into_any_element()

@@ -289,7 +289,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let focused = self.launcher.focused_input == Some(LauncherInput::Search);
         let target = WorkspaceImeTarget::Launcher(LauncherInput::Search);
-        let marked = self.marked_text_for_target(target);
+        let marked = self.marked_text_for_target(target, cx);
         let workspace = cx.entity();
         div()
             .px(px(LAUNCHER_WSL_HEADER_PADDING_X))
@@ -311,7 +311,7 @@ impl WorkspaceApp {
                                 caret_visible: self.new_connection_caret_visible,
                                 secret: false,
                                 selected_all: false,
-                                selected_range: self.ime_selected_range_for_target(target),
+                                selected_range: self.ime_selected_range_for_target(target, cx),
                                 marked_text: marked,
                             },
                         )
@@ -858,7 +858,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let focused = self.launcher.focused_input == Some(LauncherInput::Search);
         let target = WorkspaceImeTarget::Launcher(LauncherInput::Search);
-        let marked = self.marked_text_for_target(target);
+        let marked = self.marked_text_for_target(target, cx);
         let workspace = cx.entity();
         div()
             .flex()
@@ -882,7 +882,7 @@ impl WorkspaceApp {
                                 caret_visible: self.new_connection_caret_visible,
                                 secret: false,
                                 selected_all: false,
-                                selected_range: self.ime_selected_range_for_target(target),
+                                selected_range: self.ime_selected_range_for_target(target, cx),
                                 marked_text: marked,
                             },
                         )

@@ -426,7 +426,7 @@ impl WorkspaceApp {
                 // platform text owner never commits it. Route that fallback
                 // through the same IME replacement path as ordinary text.
                 let target = WorkspaceImeTarget::QuickCommand(input);
-                let replacement_range = self.ime_selection_range_for_target(target);
+                let replacement_range = self.ime_selection_range_for_target(target, cx);
                 let caret = replacement_range
                     .as_ref()
                     .map(|range| range.start + " ".encode_utf16().count());
@@ -1423,8 +1423,8 @@ window.focus(&this.focus_handle, cx);
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .h(px(32.0))

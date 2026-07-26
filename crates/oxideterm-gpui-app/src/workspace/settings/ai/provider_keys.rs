@@ -201,8 +201,8 @@ impl WorkspaceApp {
                     caret_visible: self.new_connection_caret_visible,
                     secret: true,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .w_full()

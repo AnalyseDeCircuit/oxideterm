@@ -25,14 +25,16 @@ impl WorkspaceApp {
             .unwrap_or(connections[0].connection_id.as_str());
         let snapshot = self.host_tools.read(cx).schedule_snapshot_for(selected_id);
         let filter = self.host_tools.read(cx).schedule_filter();
+        let schedule_search_query = self
+            .host_tools
+            .read(cx)
+            .ui
+            .host_schedule_search_query
+            .clone();
         let rows = snapshot
             .as_ref()
             .map(|snapshot| {
-                visible_scheduled_task_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_schedule_search_query,
-                    filter,
-                )
+                visible_scheduled_task_rows(&snapshot.entries, &schedule_search_query, filter)
             })
             .unwrap_or_default();
         let status = snapshot
@@ -90,21 +92,27 @@ impl WorkspaceApp {
 
     pub(super) fn render_host_schedule_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::HostScheduleSearch;
-        let focused = self.connection_monitor.host_schedule_search_focused;
+        let (focused, value) = {
+            let ui = &self.host_tools.read(cx).ui;
+            (
+                ui.input_is_focused(HostToolsTextInput::ScheduleSearch),
+                ui.host_schedule_search_query.clone(),
+            )
+        };
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.connection_monitor.host_schedule_search_query,
+                    value: &value,
                     placeholder: self.i18n.t("sidebar.host_schedules.search_placeholder"),
                     focused,
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .h(px(34.0))
@@ -112,16 +120,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.connection_monitor.host_schedule_search_focused = true;
-                    this.connection_monitor.host_process_search_focused = false;
-                    this.connection_monitor.host_process_renice_focused = false;
-                    this.connection_monitor.host_docker_search_focused = false;
-                    this.connection_monitor.host_service_search_focused = false;
-                    this.connection_monitor.host_log_search_focused = false;
-                    this.connection_monitor.host_tmux_search_focused = false;
-                    this.connection_monitor.host_port_search_focused = false;
-                    this.connection_monitor.host_filesystem_search_focused = false;
-                    this.connection_monitor.host_package_search_focused = false;
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        host_tools
+                            .ui
+                            .focus_input(HostToolsTextInput::ScheduleSearch);
+                    });
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle, cx);
@@ -860,7 +863,7 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let identity = format!(
             "host-schedules:{selected_id}:{}:{}:{}",
-            self.connection_monitor.host_schedule_search_query,
+            self.host_tools.read(cx).ui.host_schedule_search_query,
             self.host_tools.read(cx).schedule_filter() as u8,
             self.host_tools
                 .read(cx)
@@ -908,11 +911,18 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.connection_monitor.host_schedule_search_focused {
+        if !self
+            .host_tools
+            .read(cx)
+            .ui
+            .input_is_focused(HostToolsTextInput::ScheduleSearch)
+        {
             return false;
         }
         if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
-            self.connection_monitor.host_schedule_search_focused = false;
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+            });
             self.ime_marked_text = None;
             self.clear_ime_selection();
             cx.notify();
@@ -1541,12 +1551,6 @@ impl HostToolsEntity {
         self.host_schedules.expanded_index =
             (self.host_schedules.expanded_index != Some(index)).then_some(index);
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn clear_schedule_expanded(&mut self, cx: &mut Context<Self>) {
-        if self.host_schedules.expanded_index.take().is_some() {
-            cx.notify();
-        }
     }
 
     pub(super) fn sync_schedule_list_signatures(&self, identity: &str, signatures: &[u64]) {

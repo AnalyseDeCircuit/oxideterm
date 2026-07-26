@@ -2044,6 +2044,7 @@ impl WorkspaceApp {
                 "-----BEGIN OPENSSH PRIVATE KEY-----",
                 true,
                 line_height,
+                cx,
             );
         } else {
             textarea = self.render_settings_multiline_textarea_lines(
@@ -2052,6 +2053,7 @@ impl WorkspaceApp {
                 &value,
                 false,
                 line_height,
+                cx,
             );
         }
         let control =

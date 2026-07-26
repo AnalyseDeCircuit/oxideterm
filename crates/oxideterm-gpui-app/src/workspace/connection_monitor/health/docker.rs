@@ -31,18 +31,14 @@ impl WorkspaceApp {
             .profiler_registry()
             .current(&active_connection.connection_id);
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
+        let docker_search_query = self.host_tools.read(cx).ui.host_docker_search_query.clone();
         let rows = metrics
-            .map(|metrics| {
-                visible_docker_rows(
-                    &metrics.docker.containers,
-                    &self.connection_monitor.host_docker_search_query,
-                )
-            })
+            .map(|metrics| visible_docker_rows(&metrics.docker.containers, &docker_search_query))
             .unwrap_or_default();
         let docker_status = metrics
             .map(|metrics| metrics.docker.status.clone())
             .unwrap_or_default();
-        self.sync_host_docker_list_state(&rows, selected_id);
+        self.sync_host_docker_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-docker-panel")
@@ -91,21 +87,27 @@ impl WorkspaceApp {
 
     pub(super) fn render_host_docker_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::HostDockerSearch;
-        let focused = self.connection_monitor.host_docker_search_focused;
+        let (focused, value) = {
+            let ui = &self.host_tools.read(cx).ui;
+            (
+                ui.input_is_focused(HostToolsTextInput::DockerSearch),
+                ui.host_docker_search_query.clone(),
+            )
+        };
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.connection_monitor.host_docker_search_query,
+                    value: &value,
                     placeholder: self.i18n.t("sidebar.host_docker.search_placeholder"),
                     focused,
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .h(px(34.0))
@@ -113,16 +115,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.connection_monitor.host_docker_search_focused = true;
-                    this.connection_monitor.host_process_search_focused = false;
-                    this.connection_monitor.host_process_renice_focused = false;
-                    this.connection_monitor.host_service_search_focused = false;
-                    this.connection_monitor.host_log_search_focused = false;
-                    this.connection_monitor.host_tmux_search_focused = false;
-                    this.connection_monitor.host_port_search_focused = false;
-                    this.connection_monitor.host_schedule_search_focused = false;
-                    this.connection_monitor.host_filesystem_search_focused = false;
-                    this.connection_monitor.host_package_search_focused = false;
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        host_tools.ui.focus_input(HostToolsTextInput::DockerSearch);
+                    });
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle, cx);
@@ -236,7 +231,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_docker_list_state.clone();
+        let state = self.host_tools.read(cx).ui.host_docker_list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         div()
@@ -320,7 +315,12 @@ impl WorkspaceApp {
         let Some(container) = container else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_docker_expanded_id.as_deref()
+        let expanded = self
+            .host_tools
+            .read(cx)
+            .ui
+            .host_docker_expanded_id
+            .as_deref()
             == Some(container.id.as_str());
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
@@ -411,13 +411,14 @@ impl WorkspaceApp {
                 cx.listener({
                     let id = container.id.clone();
                     move |this, _event, _window, cx| {
-                        if this.connection_monitor.host_docker_expanded_id.as_deref()
-                            == Some(id.as_str())
-                        {
-                            this.connection_monitor.host_docker_expanded_id = None;
-                        } else {
-                            this.connection_monitor.host_docker_expanded_id = Some(id.clone());
-                        }
+                        this.host_tools.update(cx, |host_tools, _cx| {
+                            let expanded_id = &mut host_tools.ui.host_docker_expanded_id;
+                            if expanded_id.as_deref() == Some(id.as_str()) {
+                                *expanded_id = None;
+                            } else {
+                                *expanded_id = Some(id.clone());
+                            }
+                        });
                         cx.notify();
                         cx.stop_propagation();
                     }
@@ -735,23 +736,24 @@ impl WorkspaceApp {
         &self,
         rows: &[ResourceDockerContainer],
         selected_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let signatures = rows.iter().map(docker_row_signature).collect::<Vec<_>>();
-        let identity = format!(
-            "host-docker:{selected_id}:{}:{}",
-            self.connection_monitor.host_docker_search_query,
-            self.connection_monitor
-                .host_docker_expanded_id
-                .as_deref()
-                .unwrap_or_default()
-        );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_docker_list_state,
-            &mut self.connection_monitor.host_docker_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
+        self.host_tools.update(cx, |host_tools, _cx| {
+            let ui = &host_tools.ui;
+            let identity = format!(
+                "host-docker:{selected_id}:{}:{}",
+                ui.host_docker_search_query,
+                ui.host_docker_expanded_id.as_deref().unwrap_or_default()
+            );
+            sync_tauri_variable_list_state_by_signatures(
+                &ui.host_docker_list_state,
+                &mut ui.host_docker_list_cache.borrow_mut(),
+                &identity,
+                &signatures,
+                TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            );
+        });
     }
 
     pub(super) fn refresh_host_docker_snapshot(
@@ -771,11 +773,18 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.connection_monitor.host_docker_search_focused {
+        if !self
+            .host_tools
+            .read(cx)
+            .ui
+            .input_is_focused(HostToolsTextInput::DockerSearch)
+        {
             return false;
         }
         if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
-            self.connection_monitor.host_docker_search_focused = false;
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+            });
             self.ime_marked_text = None;
             self.clear_ime_selection();
             cx.notify();

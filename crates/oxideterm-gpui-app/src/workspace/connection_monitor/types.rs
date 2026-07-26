@@ -751,8 +751,22 @@ pub(in crate::workspace) struct HostTmuxInputDialog {
     // User commands may contain secrets; the dialog clears the only retained
     // input buffer when it closes or hands the value to command construction.
     pub(in crate::workspace) value: zeroize::Zeroizing<String>,
-    pub(in crate::workspace) focused: bool,
     pub(super) kind: HostTmuxInputDialogKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostToolsTextInput {
+    ProcessSearch,
+    ProcessRenice,
+    DockerSearch,
+    ServiceSearch,
+    LogSearch,
+    TmuxSearch,
+    TmuxDialog,
+    PortSearch,
+    ScheduleSearch,
+    FilesystemSearch,
+    PackageSearch,
 }
 
 pub(super) struct HostTmuxState {
@@ -845,9 +859,10 @@ impl<T> HostToolConfirmState<T> {
     }
 }
 
-pub(in crate::workspace) struct ConnectionMonitorState {
+/// Owns Host Tools input, selection, expansion, and virtual-list presentation state.
+pub(in crate::workspace) struct HostToolsUiState {
+    pub(in crate::workspace) focused_input: Option<HostToolsTextInput>,
     pub(in crate::workspace) host_process_search_query: String,
-    pub(in crate::workspace) host_process_search_focused: bool,
     pub(super) host_process_filter: ProcessFilter,
     pub(super) host_process_sort: ProcessSort,
     pub(super) host_process_sort_descending: bool,
@@ -855,41 +870,32 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_process_list_state: ListState,
     pub(super) host_process_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_process_renice_value: String,
-    pub(in crate::workspace) host_process_renice_focused: bool,
     pub(in crate::workspace) host_docker_search_query: String,
-    pub(in crate::workspace) host_docker_search_focused: bool,
     pub(in crate::workspace) host_docker_expanded_id: Option<String>,
     pub(super) host_docker_list_state: ListState,
     pub(super) host_docker_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_service_search_query: String,
-    pub(in crate::workspace) host_service_search_focused: bool,
     pub(in crate::workspace) host_service_expanded_id: Option<String>,
     pub(super) host_service_list_state: ListState,
     pub(super) host_service_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_log_search_query: String,
-    pub(in crate::workspace) host_log_search_focused: bool,
     pub(in crate::workspace) host_tmux_search_query: String,
-    pub(in crate::workspace) host_tmux_search_focused: bool,
     pub(in crate::workspace) host_tmux_expanded_session_id: Option<String>,
     pub(in crate::workspace) host_tmux_expanded_window_id: Option<String>,
     pub(in crate::workspace) host_tmux_input_dialog: Option<HostTmuxInputDialog>,
     pub(super) host_tmux_list_state: ListState,
     pub(super) host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_port_search_query: String,
-    pub(in crate::workspace) host_port_search_focused: bool,
     pub(in crate::workspace) host_schedule_search_query: String,
-    pub(in crate::workspace) host_schedule_search_focused: bool,
     pub(in crate::workspace) host_filesystem_search_query: String,
-    pub(in crate::workspace) host_filesystem_search_focused: bool,
     pub(in crate::workspace) host_package_search_query: String,
-    pub(in crate::workspace) host_package_search_focused: bool,
 }
 
-impl ConnectionMonitorState {
+impl HostToolsUiState {
     pub(in crate::workspace) fn new() -> Self {
         Self {
+            focused_input: None,
             host_process_search_query: String::new(),
-            host_process_search_focused: false,
             host_process_filter: ProcessFilter::All,
             host_process_sort: ProcessSort::Memory,
             host_process_sort_descending: true,
@@ -901,9 +907,7 @@ impl ConnectionMonitorState {
             ),
             host_process_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_process_renice_value: "0".to_string(),
-            host_process_renice_focused: false,
             host_docker_search_query: String::new(),
-            host_docker_search_focused: false,
             host_docker_expanded_id: None,
             host_docker_list_state: tauri_virtual_list_state(
                 0,
@@ -912,7 +916,6 @@ impl ConnectionMonitorState {
             ),
             host_docker_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_service_search_query: String::new(),
-            host_service_search_focused: false,
             host_service_expanded_id: None,
             host_service_list_state: tauri_virtual_list_state(
                 0,
@@ -921,9 +924,7 @@ impl ConnectionMonitorState {
             ),
             host_service_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_log_search_query: String::new(),
-            host_log_search_focused: false,
             host_tmux_search_query: String::new(),
-            host_tmux_search_focused: false,
             host_tmux_expanded_session_id: None,
             host_tmux_expanded_window_id: None,
             host_tmux_input_dialog: None,
@@ -934,13 +935,105 @@ impl ConnectionMonitorState {
             ),
             host_tmux_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_port_search_query: String::new(),
-            host_port_search_focused: false,
             host_schedule_search_query: String::new(),
-            host_schedule_search_focused: false,
             host_filesystem_search_query: String::new(),
-            host_filesystem_search_focused: false,
             host_package_search_query: String::new(),
-            host_package_search_focused: false,
+        }
+    }
+
+    pub(in crate::workspace) fn focus_input(&mut self, input: HostToolsTextInput) {
+        self.focused_input = Some(input);
+    }
+
+    pub(in crate::workspace) fn clear_input_focus(&mut self) {
+        self.focused_input = None;
+    }
+
+    pub(in crate::workspace) fn retain_input_focus_for_tool(&mut self, tool: ContextSidebarTool) {
+        let belongs_to_tool = matches!(
+            (self.focused_input, tool),
+            (
+                Some(HostToolsTextInput::ProcessSearch | HostToolsTextInput::ProcessRenice),
+                ContextSidebarTool::Processes
+            ) | (
+                Some(HostToolsTextInput::DockerSearch),
+                ContextSidebarTool::Docker
+            ) | (
+                Some(HostToolsTextInput::ServiceSearch),
+                ContextSidebarTool::Services
+            ) | (
+                Some(HostToolsTextInput::LogSearch),
+                ContextSidebarTool::Logs
+            ) | (
+                Some(HostToolsTextInput::TmuxSearch | HostToolsTextInput::TmuxDialog),
+                ContextSidebarTool::Tmux
+            ) | (
+                Some(HostToolsTextInput::PortSearch),
+                ContextSidebarTool::Ports
+            ) | (
+                Some(HostToolsTextInput::ScheduleSearch),
+                ContextSidebarTool::Schedules
+            ) | (
+                Some(HostToolsTextInput::FilesystemSearch),
+                ContextSidebarTool::Filesystems
+            ) | (
+                Some(HostToolsTextInput::PackageSearch),
+                ContextSidebarTool::Packages
+            )
+        );
+        if !belongs_to_tool {
+            self.clear_input_focus();
+        }
+    }
+
+    pub(in crate::workspace) fn input_is_focused(&self, input: HostToolsTextInput) -> bool {
+        self.focused_input == Some(input)
+    }
+
+    pub(in crate::workspace) fn input_value(&self, input: HostToolsTextInput) -> Option<&str> {
+        if !self.input_is_focused(input) {
+            return None;
+        }
+        match input {
+            HostToolsTextInput::ProcessSearch => Some(&self.host_process_search_query),
+            HostToolsTextInput::ProcessRenice => Some(&self.host_process_renice_value),
+            HostToolsTextInput::DockerSearch => Some(&self.host_docker_search_query),
+            HostToolsTextInput::ServiceSearch => Some(&self.host_service_search_query),
+            HostToolsTextInput::LogSearch => Some(&self.host_log_search_query),
+            HostToolsTextInput::TmuxSearch => Some(&self.host_tmux_search_query),
+            HostToolsTextInput::TmuxDialog => self
+                .host_tmux_input_dialog
+                .as_ref()
+                .map(|dialog| dialog.value.as_str()),
+            HostToolsTextInput::PortSearch => Some(&self.host_port_search_query),
+            HostToolsTextInput::ScheduleSearch => Some(&self.host_schedule_search_query),
+            HostToolsTextInput::FilesystemSearch => Some(&self.host_filesystem_search_query),
+            HostToolsTextInput::PackageSearch => Some(&self.host_package_search_query),
+        }
+    }
+
+    pub(in crate::workspace) fn input_value_mut(
+        &mut self,
+        input: HostToolsTextInput,
+    ) -> Option<&mut String> {
+        if !self.input_is_focused(input) {
+            return None;
+        }
+        match input {
+            HostToolsTextInput::ProcessSearch => Some(&mut self.host_process_search_query),
+            HostToolsTextInput::ProcessRenice => Some(&mut self.host_process_renice_value),
+            HostToolsTextInput::DockerSearch => Some(&mut self.host_docker_search_query),
+            HostToolsTextInput::ServiceSearch => Some(&mut self.host_service_search_query),
+            HostToolsTextInput::LogSearch => Some(&mut self.host_log_search_query),
+            HostToolsTextInput::TmuxSearch => Some(&mut self.host_tmux_search_query),
+            HostToolsTextInput::TmuxDialog => self
+                .host_tmux_input_dialog
+                .as_mut()
+                .map(|dialog| &mut *dialog.value),
+            HostToolsTextInput::PortSearch => Some(&mut self.host_port_search_query),
+            HostToolsTextInput::ScheduleSearch => Some(&mut self.host_schedule_search_query),
+            HostToolsTextInput::FilesystemSearch => Some(&mut self.host_filesystem_search_query),
+            HostToolsTextInput::PackageSearch => Some(&mut self.host_package_search_query),
         }
     }
 }

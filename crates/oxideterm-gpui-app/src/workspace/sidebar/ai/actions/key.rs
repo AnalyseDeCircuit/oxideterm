@@ -277,7 +277,7 @@ impl WorkspaceApp {
     ) {
         // Some GPUI platforms deliver Space without key_char, so write it
         // through the IME owner just like a browser textarea would.
-        let replacement_range = self.ime_selection_range_for_target(target);
+        let replacement_range = self.ime_selection_range_for_target(target, cx);
         let caret = replacement_range
             .as_ref()
             .map(|range| range.start + " ".encode_utf16().count());

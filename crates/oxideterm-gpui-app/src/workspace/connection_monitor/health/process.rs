@@ -30,9 +30,9 @@ impl WorkspaceApp {
             .current(&active_connection.connection_id);
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
         let rows = metrics
-            .map(|metrics| self.visible_host_process_rows(&metrics.top_processes))
+            .map(|metrics| self.visible_host_process_rows(&metrics.top_processes, cx))
             .unwrap_or_default();
-        self.sync_host_process_list_state(&rows, selected_id);
+        self.sync_host_process_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-processes-panel")
@@ -72,21 +72,27 @@ impl WorkspaceApp {
 
     pub(super) fn render_host_process_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::HostProcessSearch;
-        let focused = self.connection_monitor.host_process_search_focused;
+        let (focused, value) = {
+            let ui = &self.host_tools.read(cx).ui;
+            (
+                ui.input_is_focused(HostToolsTextInput::ProcessSearch),
+                ui.host_process_search_query.clone(),
+            )
+        };
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.connection_monitor.host_process_search_query,
+                    value: &value,
                     placeholder: self.i18n.t("sidebar.host_processes.search_placeholder"),
                     focused,
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .h(px(34.0))
@@ -94,15 +100,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.connection_monitor.host_process_search_focused = true;
-                    this.connection_monitor.host_docker_search_focused = false;
-                    this.connection_monitor.host_service_search_focused = false;
-                    this.connection_monitor.host_log_search_focused = false;
-                    this.connection_monitor.host_tmux_search_focused = false;
-                    this.connection_monitor.host_port_search_focused = false;
-                    this.connection_monitor.host_schedule_search_focused = false;
-                    this.connection_monitor.host_filesystem_search_focused = false;
-                    this.connection_monitor.host_package_search_focused = false;
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        host_tools.ui.focus_input(HostToolsTextInput::ProcessSearch);
+                    });
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle, cx);
@@ -157,7 +157,7 @@ impl WorkspaceApp {
         label_key: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_process_filter == filter;
+        let active = self.host_tools.read(cx).ui.host_process_filter == filter;
         let theme = self.tokens.ui;
         div()
             .flex_none()
@@ -190,8 +190,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.connection_monitor.host_process_filter = filter;
-                    this.connection_monitor.host_process_expanded_pid = None;
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        host_tools.ui.host_process_filter = filter;
+                        host_tools.ui.host_process_expanded_pid = None;
+                    });
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -259,15 +261,17 @@ impl WorkspaceApp {
         label_key: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_process_sort == sort;
+        let (active, descending) = {
+            let ui = &self.host_tools.read(cx).ui;
+            (
+                ui.host_process_sort == sort,
+                ui.host_process_sort_descending,
+            )
+        };
         let theme = self.tokens.ui;
         let mut label = self.i18n.t(label_key);
         if active {
-            label.push_str(if self.connection_monitor.host_process_sort_descending {
-                " ↓"
-            } else {
-                " ↑"
-            });
+            label.push_str(if descending { " ↓" } else { " ↑" });
         }
         div()
             .flex_none()
@@ -292,14 +296,16 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_process_sort == sort {
-                        this.connection_monitor.host_process_sort_descending =
-                            !this.connection_monitor.host_process_sort_descending;
-                    } else {
-                        this.connection_monitor.host_process_sort = sort;
-                        this.connection_monitor.host_process_sort_descending =
-                            !matches!(sort, ProcessSort::Command | ProcessSort::User);
-                    }
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        let ui = &mut host_tools.ui;
+                        if ui.host_process_sort == sort {
+                            ui.host_process_sort_descending = !ui.host_process_sort_descending;
+                        } else {
+                            ui.host_process_sort = sort;
+                            ui.host_process_sort_descending =
+                                !matches!(sort, ProcessSort::Command | ProcessSort::User);
+                        }
+                    });
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -335,7 +341,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_process_list_state.clone();
+        let state = self.host_tools.read(cx).ui.host_process_list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         let separate_user_column =
@@ -449,7 +455,12 @@ impl WorkspaceApp {
         let Some(process) = process else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_process_expanded_pid.as_deref()
+        let expanded = self
+            .host_tools
+            .read(cx)
+            .ui
+            .host_process_expanded_pid
+            .as_deref()
             == Some(process.pid.as_str());
         let theme = self.tokens.ui;
         let status = process
@@ -586,13 +597,14 @@ impl WorkspaceApp {
                 cx.listener({
                     let pid = process.pid.clone();
                     move |this, _event, _window, cx| {
-                        if this.connection_monitor.host_process_expanded_pid.as_deref()
-                            == Some(pid.as_str())
-                        {
-                            this.connection_monitor.host_process_expanded_pid = None;
-                        } else {
-                            this.connection_monitor.host_process_expanded_pid = Some(pid.clone());
-                        }
+                        this.host_tools.update(cx, |host_tools, _cx| {
+                            let expanded_pid = &mut host_tools.ui.host_process_expanded_pid;
+                            if expanded_pid.as_deref() == Some(pid.as_str()) {
+                                *expanded_pid = None;
+                            } else {
+                                *expanded_pid = Some(pid.clone());
+                            }
+                        });
                         cx.notify();
                         cx.stop_propagation();
                     }
@@ -776,7 +788,7 @@ impl WorkspaceApp {
                         connection_id,
                         process,
                         ProcessActionKind::Renice {
-                            nice: self.host_process_renice_value(),
+                            nice: self.host_process_renice_value(cx),
                         },
                         LucideIcon::Gauge,
                         "sidebar.host_processes.actions.apply",
@@ -853,14 +865,20 @@ impl WorkspaceApp {
 
     pub(super) fn render_host_process_renice_input(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::HostProcessRenice;
-        let focused = self.connection_monitor.host_process_renice_focused;
+        let (focused, value) = {
+            let ui = &self.host_tools.read(cx).ui;
+            (
+                ui.input_is_focused(HostToolsTextInput::ProcessRenice),
+                ui.host_process_renice_value.clone(),
+            )
+        };
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.connection_monitor.host_process_renice_value,
+                    value: &value,
                     placeholder: self
                         .i18n
                         .t("sidebar.host_processes.actions.renice_placeholder"),
@@ -868,8 +886,8 @@ impl WorkspaceApp {
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .w(px(54.0))
@@ -878,9 +896,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.connection_monitor.host_process_search_focused = false;
-                    this.connection_monitor.host_process_renice_focused = true;
-                    this.connection_monitor.host_package_search_focused = false;
+                    this.host_tools.update(cx, |host_tools, _cx| {
+                        host_tools.ui.focus_input(HostToolsTextInput::ProcessRenice);
+                    });
                     this.ime_marked_text = None;
                     this.new_connection_caret_visible = true;
                     window.focus(&this.focus_handle, cx);
@@ -903,13 +921,15 @@ impl WorkspaceApp {
     pub(super) fn visible_host_process_rows(
         &self,
         processes: &[ResourceTopProcess],
+        cx: &App,
     ) -> Vec<ResourceTopProcess> {
+        let ui = &self.host_tools.read(cx).ui;
         visible_process_rows(
             processes,
-            &self.connection_monitor.host_process_search_query,
-            self.connection_monitor.host_process_filter,
-            self.connection_monitor.host_process_sort,
-            self.connection_monitor.host_process_sort_descending,
+            &ui.host_process_search_query,
+            ui.host_process_filter,
+            ui.host_process_sort,
+            ui.host_process_sort_descending,
         )
     }
 
@@ -917,26 +937,27 @@ impl WorkspaceApp {
         &self,
         rows: &[ResourceTopProcess],
         selected_id: &str,
+        cx: &mut Context<Self>,
     ) {
         let signatures = rows.iter().map(process_row_signature).collect::<Vec<_>>();
-        let identity = format!(
-            "host-processes:{selected_id}:{}:{}:{}:{}:{}",
-            self.connection_monitor.host_process_search_query,
-            self.connection_monitor.host_process_filter as u8,
-            self.connection_monitor.host_process_sort as u8,
-            self.connection_monitor.host_process_sort_descending,
-            self.connection_monitor
-                .host_process_expanded_pid
-                .as_deref()
-                .unwrap_or_default()
-        );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_process_list_state,
-            &mut self.connection_monitor.host_process_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
+        self.host_tools.update(cx, |host_tools, _cx| {
+            let ui = &host_tools.ui;
+            let identity = format!(
+                "host-processes:{selected_id}:{}:{}:{}:{}:{}",
+                ui.host_process_search_query,
+                ui.host_process_filter as u8,
+                ui.host_process_sort as u8,
+                ui.host_process_sort_descending,
+                ui.host_process_expanded_pid.as_deref().unwrap_or_default()
+            );
+            sync_tauri_variable_list_state_by_signatures(
+                &ui.host_process_list_state,
+                &mut ui.host_process_list_cache.borrow_mut(),
+                &identity,
+                &signatures,
+                TauriVirtualListSpec::new(px(HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            );
+        });
     }
 
     pub(in crate::workspace) fn handle_host_process_search_key(
@@ -944,14 +965,17 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.connection_monitor.host_process_search_focused
-            && !self.connection_monitor.host_process_renice_focused
-        {
+        let focused_input = self.host_tools.read(cx).ui.focused_input;
+        if !matches!(
+            focused_input,
+            Some(HostToolsTextInput::ProcessSearch | HostToolsTextInput::ProcessRenice)
+        ) {
             return false;
         }
         if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
-            self.connection_monitor.host_process_search_focused = false;
-            self.connection_monitor.host_process_renice_focused = false;
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+            });
             self.ime_marked_text = None;
             self.clear_ime_selection();
             cx.notify();
@@ -960,8 +984,10 @@ impl WorkspaceApp {
         false
     }
 
-    pub(super) fn host_process_renice_value(&self) -> i32 {
-        self.connection_monitor
+    pub(super) fn host_process_renice_value(&self, cx: &App) -> i32 {
+        self.host_tools
+            .read(cx)
+            .ui
             .host_process_renice_value
             .trim()
             .parse::<i32>()

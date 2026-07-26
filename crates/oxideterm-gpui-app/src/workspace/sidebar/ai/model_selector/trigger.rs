@@ -150,7 +150,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let target = WorkspaceImeTarget::AiModelSelectorSearch;
         let focused = self.ai.models.selector_search_focused;
-        let marked_text = self.marked_text_for_target(target).unwrap_or_default();
+        let marked_text = self.marked_text_for_target(target, cx).unwrap_or_default();
         let showing_placeholder =
             self.ai.models.selector_search_query.is_empty() && marked_text.is_empty();
         let display_text = if showing_placeholder {

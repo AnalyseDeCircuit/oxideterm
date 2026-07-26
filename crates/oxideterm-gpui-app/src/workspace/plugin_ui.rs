@@ -759,8 +759,8 @@ impl WorkspaceApp {
             .unwrap_or_default()
             .to_string();
         let focused = self.native_plugin_ui.focused_input == Some(key);
-        let marked = self.marked_text_for_target(target).map(str::to_string);
-        let selected_range = self.ime_selected_range_for_target(target);
+        let marked = self.marked_text_for_target(target, cx).map(str::to_string);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let input = oxideterm_gpui_ui::input::input(
             &self.tokens,
             oxideterm_gpui_ui::input::InputView {

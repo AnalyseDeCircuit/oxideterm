@@ -245,8 +245,7 @@ use oxideterm_workspace::{
 
 use self::actions::SearchBarState;
 use self::connection_monitor::{
-    ConnectionMonitorState, ConnectionRuntimeSection, HostSnapshotFeedback, HostToolsEntity,
-    HostToolsEvent,
+    ConnectionRuntimeSection, HostSnapshotFeedback, HostToolsEntity, HostToolsEvent,
 };
 use self::file_manager::FileManagerState;
 use self::graphics::GraphicsState;
@@ -996,7 +995,6 @@ pub(crate) struct WorkspaceApp {
     launcher_app_grid_list_state: ListState,
     launcher_app_grid_list_cache: RefCell<VirtualListSignatureCache>,
     graphics: GraphicsState,
-    connection_monitor: ConnectionMonitorState,
     host_tools: Entity<HostToolsEntity>,
     _host_tools_subscription: Subscription,
     cloud_sync: cloud_sync::CloudSyncWorkspaceState,

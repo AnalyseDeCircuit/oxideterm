@@ -62,8 +62,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::AiChatInput;
         let focused = self.ai.chat.input_focused;
         let autocomplete_items = self.ai_chat_autocomplete_items();
-        let marked_text = self.marked_text_for_target(target).unwrap_or_default();
-        let selected_range = self.ime_selected_range_for_target(target);
+        let marked_text = self.marked_text_for_target(target, cx).unwrap_or_default();
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let showing_placeholder = self.ai.chat.draft.is_empty() && marked_text.is_empty();
         let input_text = if showing_placeholder {
             placeholder

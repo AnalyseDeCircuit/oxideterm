@@ -688,7 +688,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if active_ime_should_defer_input_key(
-            self.active_ime_target().is_some(),
+            self.active_ime_target(cx).is_some(),
             self.ime_marked_text.is_some(),
             &event.keystroke,
         ) {
@@ -940,7 +940,7 @@ impl WorkspaceApp {
         }
 
         if terminal_tab_capture_blocked_by_workspace_ui(
-            self.active_ime_target().is_some(),
+            self.active_ime_target(cx).is_some(),
             self.terminal_quick_commands_open,
             self.terminal_command_suggestions_open,
         ) {
@@ -1835,7 +1835,7 @@ impl WorkspaceApp {
                 // draft. Preserve Tauri textarea semantics by inserting the
                 // literal space through the shared IME replacement path.
                 let target = WorkspaceImeTarget::TerminalCommandBar;
-                let replacement_range = self.ime_selection_range_for_target(target);
+                let replacement_range = self.ime_selection_range_for_target(target, cx);
                 let caret = replacement_range
                     .as_ref()
                     .map(|range| range.start + " ".encode_utf16().count());
@@ -2269,8 +2269,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Search;
         let workspace = cx.entity();
         let has_query = !self.search.query.is_empty();
-        let marked_text = self.marked_text_for_target(target);
-        let selected_range = self.ime_selected_range_for_target(target);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let input_range = selected_range.filter(|_| has_query && marked_text.is_none());
         let selection_range = input_range.clone().filter(|range| range.start < range.end);
         let caret_offset = input_range

@@ -18,4 +18,4 @@ use types::*;
 
 pub(super) use entity::HostToolsEntity;
 pub(super) use events::{HostToolsEvent, HostToolsNotice, ScheduleActionNoticeKind};
-pub(super) use types::{ConnectionMonitorState, ConnectionRuntimeSection, HostSnapshotFeedback};
+pub(super) use types::{ConnectionRuntimeSection, HostSnapshotFeedback, HostToolsTextInput};

@@ -939,8 +939,10 @@ impl WorkspaceApp {
                             host_tools_tab_index(tool),
                             cx,
                         );
+                        this.host_tools.update(cx, |host_tools, _cx| {
+                            host_tools.ui.retain_input_focus_for_tool(tool);
+                        });
                         if tool != ContextSidebarTool::Processes {
-                            this.connection_monitor.host_process_search_focused = false;
                             this.host_tools.update(cx, |host_tools, cx| {
                                 host_tools.dismiss_process_confirm(cx);
                             });
@@ -948,7 +950,6 @@ impl WorkspaceApp {
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Docker {
-                            this.connection_monitor.host_docker_search_focused = false;
                             this.host_tools.update(cx, |host_tools, cx| {
                                 host_tools.dismiss_docker_confirm(cx);
                             });
@@ -956,7 +957,6 @@ impl WorkspaceApp {
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Services {
-                            this.connection_monitor.host_service_search_focused = false;
                             this.host_tools.update(cx, |host_tools, cx| {
                                 host_tools.dismiss_service_confirm(cx);
                                 host_tools.pause_service_refreshes();
@@ -965,26 +965,22 @@ impl WorkspaceApp {
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Logs {
-                            this.connection_monitor.host_log_search_focused = false;
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Tmux {
-                            this.connection_monitor.host_tmux_search_focused = false;
-                            this.connection_monitor.host_tmux_input_dialog = None;
                             this.host_tools.update(cx, |host_tools, cx| {
                                 host_tools.dismiss_tmux_confirm(cx);
+                                host_tools.dismiss_tmux_input_dialog(cx);
                             });
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Ports {
-                            this.connection_monitor.host_port_search_focused = false;
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Schedules {
-                            this.connection_monitor.host_schedule_search_focused = false;
                             this.host_tools.update(cx, |host_tools, cx| {
                                 host_tools.dismiss_schedule_confirm(cx);
                             });
@@ -992,12 +988,10 @@ impl WorkspaceApp {
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Filesystems {
-                            this.connection_monitor.host_filesystem_search_focused = false;
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
                         if tool != ContextSidebarTool::Packages {
-                            this.connection_monitor.host_package_search_focused = false;
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
@@ -1212,9 +1206,7 @@ impl WorkspaceApp {
             host_tools.dismiss_process_confirm(cx);
             host_tools.dismiss_docker_confirm(cx);
             host_tools.dismiss_service_confirm(cx);
-        });
-        self.connection_monitor.host_tmux_input_dialog = None;
-        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.dismiss_tmux_input_dialog(cx);
             host_tools.dismiss_tmux_confirm(cx);
             host_tools.dismiss_schedule_confirm(cx);
         });

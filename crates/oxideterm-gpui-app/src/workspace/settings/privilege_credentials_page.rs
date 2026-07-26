@@ -675,8 +675,9 @@ impl WorkspaceApp {
             &visible_value,
             placeholder,
             line_height,
+            cx,
         );
-        if let Some(marked) = self.marked_text_for_target(target) {
+        if let Some(marked) = self.marked_text_for_target(target, cx) {
             textarea = textarea.child(
                 div()
                     .underline()

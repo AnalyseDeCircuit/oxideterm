@@ -92,7 +92,6 @@ impl WorkspaceApp {
         let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
-        let connection_monitor = ConnectionMonitorState::new();
         let host_tools = cx.new(|cx| {
             HostToolsEntity::new(
                 profiler_update_tx,
@@ -598,7 +597,6 @@ impl WorkspaceApp {
             .measure_all(),
             launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics: GraphicsState::new(),
-            connection_monitor,
             host_tools,
             _host_tools_subscription: host_tools_subscription,
             cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
@@ -798,7 +796,7 @@ impl WorkspaceApp {
                                 // command-bar chip.
                                 cx.notify();
                             }
-                            if workspace.active_ime_target_blinks_caret() {
+                            if workspace.active_ime_target_blinks_caret(cx) {
                                 workspace.new_connection_caret_visible =
                                     !workspace.new_connection_caret_visible;
                                 cx.notify();

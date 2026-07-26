@@ -20,8 +20,8 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let input_collapsed = self.terminal_command_input_collapsed;
         let focused = self.terminal_command_bar_focused && !input_collapsed;
-        let marked_text = self.marked_text_for_target(target);
-        let selected_range = self.ime_selected_range_for_target(target);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let command_is_empty = self.terminal_command_bar_draft.is_empty();
         let command_suggestions = if focused {
             self.terminal_command_bar_suggestions(false, cx)

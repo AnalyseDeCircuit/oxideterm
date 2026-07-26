@@ -134,7 +134,7 @@ impl WorkspaceApp {
         let active = self.session_manager.focused_input == Some(target);
         let has_background = self.background_surface_active("session_manager");
         let marked = self
-            .marked_text_for_target(WorkspaceImeTarget::SessionManager(target))
+            .marked_text_for_target(WorkspaceImeTarget::SessionManager(target), cx)
             .unwrap_or_default();
         let visually_empty = value.is_empty() && marked.is_empty();
         let text = if value.is_empty() && marked.is_empty() {
@@ -153,7 +153,7 @@ impl WorkspaceApp {
         };
         let input_target = WorkspaceImeTarget::SessionManager(target);
         let input_range = if active && !value.is_empty() && marked.is_empty() {
-            self.ime_selected_range_for_target(input_target)
+            self.ime_selected_range_for_target(input_target, cx)
         } else {
             None
         }
