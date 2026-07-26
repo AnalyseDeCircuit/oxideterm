@@ -476,31 +476,49 @@ impl HostLogsState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostTmuxSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) search_query: String,
+    pub(super) failure_fallback: String,
+    pub(super) unavailable_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostTmuxSnapshotDelivery {
     pub(super) request: HostTmuxSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+pub(super) enum HostTmuxDestructiveAction {
+    KillSession { target: String },
+    KillWindow { target: String },
+    KillPane { target: String },
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostTmuxActionRequest {
     pub(super) connection_id: String,
     pub(super) session_id: String,
     pub(super) session_name: String,
     pub(super) target_label: String,
-    pub(super) action: TmuxActionKind,
+    // Confirm state accepts only destructive actions, so secret-bearing rename
+    // and send-command values can never enter its cloneable request type.
+    pub(super) action: HostTmuxDestructiveAction,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct HostTmuxActionRun {
+    pub(super) connection_id: String,
+    pub(super) session_id: String,
+    pub(super) session_name: String,
+    pub(super) target_label: String,
+}
+
 pub(super) struct HostTmuxActionDelivery {
-    pub(super) request: HostTmuxActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) request: HostTmuxActionRun,
+    pub(super) result: Result<bool, ()>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -718,22 +736,47 @@ pub(super) struct HostScheduleLogsDialog {
     pub(super) loading: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(in crate::workspace) enum HostTmuxInputDialogKind {
     RenameSession { target: String },
     RenameWindow { target: String },
     SendPaneCommand { target: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) struct HostTmuxInputDialog {
     pub(super) connection_id: String,
     pub(super) session_id: String,
     pub(super) session_name: String,
     pub(super) target_label: String,
-    pub(in crate::workspace) value: String,
+    // User commands may contain secrets; the dialog clears the only retained
+    // input buffer when it closes or hands the value to command construction.
+    pub(in crate::workspace) value: zeroize::Zeroizing<String>,
     pub(in crate::workspace) focused: bool,
     pub(super) kind: HostTmuxInputDialogKind,
+}
+
+pub(super) struct HostTmuxState {
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceTmuxSnapshot>,
+    pub(super) snapshot_running: Option<HostTmuxSnapshotRequest>,
+    pub(super) snapshot_polling: bool,
+    pub(super) last_error: Option<String>,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostTmuxActionRequest>>,
+    pub(super) action_running: Option<HostTmuxActionRun>,
+}
+
+impl HostTmuxState {
+    pub(super) fn new() -> Self {
+        Self {
+            snapshot_connection_id: None,
+            snapshot: None,
+            snapshot_running: None,
+            snapshot_polling: false,
+            last_error: None,
+            pending_confirm: None,
+            action_running: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -803,10 +846,6 @@ impl<T> HostToolConfirmState<T> {
 }
 
 pub(in crate::workspace) struct ConnectionMonitorState {
-    // Reliable Host Tools action results remain view-owned until their pages
-    // move into HostToolsEntity in the following Phase 3A slices.
-    pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
-    pub(super) delivery_cursor: usize,
     pub(in crate::workspace) host_process_search_query: String,
     pub(in crate::workspace) host_process_search_focused: bool,
     pub(super) host_process_filter: ProcessFilter,
@@ -833,17 +872,7 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(in crate::workspace) host_tmux_search_focused: bool,
     pub(in crate::workspace) host_tmux_expanded_session_id: Option<String>,
     pub(in crate::workspace) host_tmux_expanded_window_id: Option<String>,
-    pub(super) host_tmux_snapshot_connection_id: Option<String>,
-    pub(super) host_tmux_snapshot: Option<ResourceTmuxSnapshot>,
-    pub(super) host_tmux_snapshot_rx: Option<std::sync::mpsc::Receiver<HostTmuxSnapshotDelivery>>,
-    pub(super) host_tmux_snapshot_running: Option<HostTmuxSnapshotRequest>,
-    pub(super) host_tmux_snapshot_polling: bool,
-    pub(super) host_tmux_last_error: Option<String>,
-    pub(super) host_tmux_pending_confirm: Option<HostToolConfirmState<HostTmuxActionRequest>>,
     pub(in crate::workspace) host_tmux_input_dialog: Option<HostTmuxInputDialog>,
-    pub(super) host_tmux_action_running: Option<HostTmuxActionRequest>,
-    pub(super) host_tmux_action_rx: Option<std::sync::mpsc::Receiver<HostTmuxActionDelivery>>,
-    pub(super) host_tmux_action_polling: bool,
     pub(super) host_tmux_list_state: ListState,
     pub(super) host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_port_search_query: String,
@@ -858,10 +887,7 @@ pub(in crate::workspace) struct ConnectionMonitorState {
 
 impl ConnectionMonitorState {
     pub(in crate::workspace) fn new() -> Self {
-        let delivery_wake = crate::workspace::delivery::ActiveDeliveryWake::default();
         Self {
-            delivery_wake,
-            delivery_cursor: 0,
             host_process_search_query: String::new(),
             host_process_search_focused: false,
             host_process_filter: ProcessFilter::All,
@@ -900,17 +926,7 @@ impl ConnectionMonitorState {
             host_tmux_search_focused: false,
             host_tmux_expanded_session_id: None,
             host_tmux_expanded_window_id: None,
-            host_tmux_snapshot_connection_id: None,
-            host_tmux_snapshot: None,
-            host_tmux_snapshot_rx: None,
-            host_tmux_snapshot_running: None,
-            host_tmux_snapshot_polling: false,
-            host_tmux_last_error: None,
-            host_tmux_pending_confirm: None,
             host_tmux_input_dialog: None,
-            host_tmux_action_running: None,
-            host_tmux_action_rx: None,
-            host_tmux_action_polling: false,
             host_tmux_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,

@@ -382,6 +382,7 @@
         "new_session_opened": "{{name}}을 여는 중입니다.",
         "action_already_running": "tmux 작업이 이미 실행 중입니다.",
         "action_failed": "tmux 작업 실패.",
+        "action_succeeded": "{{target}} tmux 작업을 완료했습니다.",
         "unknown_error": "알 수 없는 오류",
         "input_required": "계속하기 전에 값을 입력하세요."
       },

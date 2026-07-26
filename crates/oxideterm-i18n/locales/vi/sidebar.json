@@ -382,6 +382,7 @@
         "new_session_opened": "Đang mở {{name}}.",
         "action_already_running": "Một thao tác tmux đang chạy.",
         "action_failed": "Thao tác tmux thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác tmux cho {{target}}.",
         "unknown_error": "Lỗi không rõ",
         "input_required": "Nhập một giá trị trước khi tiếp tục."
       },

@@ -898,6 +898,68 @@ impl WorkspaceApp {
                     )
                 }
             }
+            HostToolsNotice::TmuxSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_tmux.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::TmuxConnectionMissing => (
+                self.i18n.t("sidebar.host_tmux.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::TmuxSnapshotLoaded { count } => (
+                self.i18n_replace(
+                    "sidebar.host_tmux.toast.snapshot_loaded",
+                    &[("count", count.to_string())],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::TmuxUnavailable => (
+                self.i18n.t("sidebar.host_tmux.toast.unavailable"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::TmuxSnapshotFailed => (
+                self.i18n_replace(
+                    "sidebar.host_tmux.toast.snapshot_failed",
+                    &[(
+                        "reason",
+                        self.i18n.t("sidebar.host_tmux.toast.unknown_error"),
+                    )],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::TmuxActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_tmux.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::TmuxInputRequired => (
+                self.i18n.t("sidebar.host_tmux.toast.input_required"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::TmuxActionFailed => (
+                self.i18n.t("sidebar.host_tmux.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::TmuxActionFinished {
+                target_label,
+                succeeded,
+            } => {
+                if succeeded {
+                    (
+                        self.i18n_replace(
+                            "sidebar.host_tmux.toast.action_succeeded",
+                            &[("target", target_label)],
+                        ),
+                        TerminalNoticeVariant::Success,
+                    )
+                } else {
+                    (
+                        self.i18n.t("sidebar.host_tmux.toast.action_failed"),
+                        TerminalNoticeVariant::Error,
+                    )
+                }
+            }
             HostToolsNotice::LogSnapshotAlreadyRunning => (
                 self.i18n
                     .t("sidebar.host_logs.toast.snapshot_already_running"),

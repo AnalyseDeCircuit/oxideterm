@@ -24,6 +24,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) host_process_actions: HostProcessActionsState,
     pub(super) host_docker_operations: HostDockerOperationsState,
     pub(super) host_services: HostServicesState,
+    pub(super) host_tmux: HostTmuxState,
     pub(super) host_gpu: HostGpuViewState,
     pub(super) host_logs: HostLogsState,
     pub(super) host_ports: HostPortsState,
@@ -88,6 +89,7 @@ impl HostToolsEntity {
             host_process_actions: HostProcessActionsState::new(),
             host_docker_operations: HostDockerOperationsState::new(),
             host_services: HostServicesState::new(),
+            host_tmux: HostTmuxState::new(),
             host_gpu: HostGpuViewState::new(gpu_update_tx),
             host_logs: HostLogsState::new(),
             host_ports: HostPortsState::new(),
@@ -567,6 +569,63 @@ impl HostToolsEntity {
                 .map_err(|_| ());
             let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::ServiceLogs(
                 HostServiceLogsDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_tmux_snapshot_capture(
+        &self,
+        command: String,
+        request: HostTmuxSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Raw tmux inventory stays inside the Entity delivery boundary.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::TmuxSnapshot(
+                HostTmuxSnapshotDelivery { request, result },
+            ));
+        });
+        true
+    }
+
+    pub(super) fn spawn_tmux_action(
+        &self,
+        command: zeroize::Zeroizing<String>,
+        request: HostTmuxActionRun,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // The generated command is moved once into the worker. Captured output
+        // is cleared before only a success bit crosses delivery.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(command.as_str(), timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    let succeeded = output.exit_code.unwrap_or(0) == 0;
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    succeeded
+                })
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::TmuxAction(
+                HostTmuxActionDelivery { request, result },
             ));
         });
         true
@@ -1505,6 +1564,136 @@ mod tests {
         assert_eq!(
             events.try_recv().unwrap(),
             HostToolsEvent::RefreshServices {
+                connection_id: "connection-1".to_string(),
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn tmux_snapshot_action_and_confirm_are_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
+        let runtime_handle = runtime.handle().clone();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let snapshot_request = HostTmuxSnapshotRequest {
+            connection_id: "connection-1".to_string(),
+            feedback: HostSnapshotFeedback::Silent,
+            search_query: String::new(),
+            failure_fallback: "tmux capture failed".to_string(),
+            unavailable_fallback: "tmux unavailable".to_string(),
+        };
+        let sender = entity.update(cx, |entity, _cx| {
+            entity.host_tmux.snapshot_running = Some(snapshot_request.clone());
+            entity.host_tmux.snapshot_polling = true;
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "Authorization: should-not-reach-tmux-state";
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::TmuxSnapshot(
+                HostTmuxSnapshotDelivery {
+                    request: snapshot_request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(!entity.host_tmux.snapshot_polling);
+            assert_eq!(
+                entity.host_tmux.snapshot.as_ref().unwrap().status,
+                ResourceTmuxStatus::Error {
+                    message: "tmux capture failed".to_string(),
+                }
+            );
+            assert!(
+                !format!("{:?}", entity.host_tmux.snapshot.as_ref().unwrap().status)
+                    .contains(secret_marker)
+            );
+        });
+        assert!(events.try_recv().is_err());
+
+        let confirm_request = HostTmuxActionRequest {
+            connection_id: "connection-1".to_string(),
+            session_id: "$1".to_string(),
+            session_name: "work".to_string(),
+            target_label: "$1".to_string(),
+            action: HostTmuxDestructiveAction::KillSession {
+                target: "$1".to_string(),
+            },
+        };
+        let action_request = HostTmuxActionRun {
+            connection_id: "connection-1".to_string(),
+            session_id: "$1".to_string(),
+            session_name: "work".to_string(),
+            target_label: "$1".to_string(),
+        };
+        let sender = entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .open_tmux_action_confirm(confirm_request, cx)
+                    .is_none()
+            );
+            assert!(entity.tmux_confirm_view().is_some());
+            entity.dismiss_tmux_confirm(cx);
+            assert!(entity.tmux_confirm_view().is_none());
+            let empty_dialog = HostTmuxInputDialog {
+                connection_id: "connection-1".to_string(),
+                session_id: "$1".to_string(),
+                session_name: "work".to_string(),
+                target_label: "%1".to_string(),
+                value: zeroize::Zeroizing::new("   ".to_string()),
+                focused: true,
+                kind: HostTmuxInputDialogKind::SendPaneCommand {
+                    target: "%1".to_string(),
+                },
+            };
+            assert_eq!(
+                entity.submit_tmux_input(empty_dialog, runtime_handle, cx),
+                vec![HostToolsNotice::TmuxInputRequired]
+            );
+            entity.host_tmux.action_running = Some(action_request.clone());
+            entity.reliable_delivery_tx.clone()
+        });
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::TmuxAction(
+                HostTmuxActionDelivery {
+                    request: action_request,
+                    // Worker output is intentionally reduced to this boolean.
+                    result: Ok(false),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_tmux.action_running.is_none());
+        });
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::ShowNotice(HostToolsNotice::TmuxActionFinished {
+                target_label: "$1".to_string(),
+                succeeded: false,
+            })
+        );
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::RefreshTmux {
                 connection_id: "connection-1".to_string(),
             }
         );

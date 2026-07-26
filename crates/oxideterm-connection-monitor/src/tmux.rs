@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::capture::capture_failure_message;
 use crate::shell::{posix_shell_command, powershell_quote, shell_quote};
@@ -282,6 +283,82 @@ pub fn build_tmux_action_command(
         command,
         capability: TmuxCommandCapability::Unknown,
     })
+}
+
+/// Builds a rename-session command without taking ownership of the caller's input buffer.
+pub fn build_tmux_rename_session_command(
+    os_type: &str,
+    target: &str,
+    name: &str,
+) -> Result<Zeroizing<String>, String> {
+    let target = validated_tmux_target_ref(target, "tmux session")?;
+    let name = validated_tmux_name_ref(name, "tmux session name")?;
+    if is_windows_os(os_type) {
+        Ok(Zeroizing::new(format!(
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"tmux rename-session -t {} {}\"",
+            powershell_quote(target),
+            powershell_quote(name)
+        )))
+    } else {
+        Ok(Zeroizing::new(format!(
+            "tmux rename-session -t {} {}",
+            shell_quote(target),
+            shell_quote(name)
+        )))
+    }
+}
+
+/// Builds a rename-window command without taking ownership of the caller's input buffer.
+pub fn build_tmux_rename_window_command(
+    os_type: &str,
+    target: &str,
+    name: &str,
+) -> Result<Zeroizing<String>, String> {
+    let target = validated_tmux_target_ref(target, "tmux window")?;
+    let name = validated_tmux_name_ref(name, "tmux window name")?;
+    if is_windows_os(os_type) {
+        Ok(Zeroizing::new(format!(
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"tmux rename-window -t {} {}\"",
+            powershell_quote(target),
+            powershell_quote(name)
+        )))
+    } else {
+        Ok(Zeroizing::new(format!(
+            "tmux rename-window -t {} {}",
+            shell_quote(target),
+            shell_quote(name)
+        )))
+    }
+}
+
+/// Builds a send-keys command while the caller retains and clears the input buffer.
+pub fn build_tmux_send_pane_command(
+    os_type: &str,
+    target: &str,
+    command: &str,
+) -> Result<Zeroizing<String>, String> {
+    let target = validated_tmux_target_ref(target, "tmux pane")?;
+    let command = validated_tmux_send_command_ref(command)?;
+    if is_windows_os(os_type) {
+        Ok(Zeroizing::new(format!(
+            concat!(
+                "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+                "tmux send-keys -t {} -l -- {}; ",
+                "if($LASTEXITCODE -eq 0){{tmux send-keys -t {} Enter}}",
+                "\""
+            ),
+            powershell_quote(target),
+            powershell_quote(command),
+            powershell_quote(target)
+        )))
+    } else {
+        Ok(Zeroizing::new(format!(
+            "tmux send-keys -t {} -l -- {} && tmux send-keys -t {} Enter",
+            shell_quote(target),
+            shell_quote(command),
+            shell_quote(target)
+        )))
+    }
 }
 
 pub fn build_tmux_attach_command(os_type: &str, target: &str) -> Result<String, String> {
@@ -705,6 +782,10 @@ fn split_tmux_fields(payload: &str, expected: usize) -> Option<Vec<&str>> {
 }
 
 fn validated_tmux_target(value: &str, label: &str) -> Result<String, String> {
+    validated_tmux_target_ref(value, label).map(str::to_string)
+}
+
+fn validated_tmux_target_ref<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(format!("{label} cannot be empty."));
@@ -715,11 +796,15 @@ fn validated_tmux_target(value: &str, label: &str) -> Result<String, String> {
     if trimmed.chars().any(char::is_control) {
         return Err(format!("{label} contains unsupported control characters."));
     }
-    Ok(trimmed.to_string())
+    Ok(trimmed)
 }
 
 fn validated_tmux_name(value: &str, label: &str) -> Result<String, String> {
-    let trimmed = validated_tmux_target(value, label)?;
+    validated_tmux_name_ref(value, label).map(str::to_string)
+}
+
+fn validated_tmux_name_ref<'a>(value: &'a str, label: &str) -> Result<&'a str, String> {
+    let trimmed = validated_tmux_target_ref(value, label)?;
     if trimmed.contains(TMUX_FIELD_SEPARATOR) {
         return Err(format!(
             "{label} contains unsupported separator characters."
@@ -729,6 +814,10 @@ fn validated_tmux_name(value: &str, label: &str) -> Result<String, String> {
 }
 
 fn validated_tmux_send_command(value: &str) -> Result<String, String> {
+    validated_tmux_send_command_ref(value).map(str::to_string)
+}
+
+fn validated_tmux_send_command_ref(value: &str) -> Result<&str, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err("tmux command cannot be empty.".to_string());
@@ -739,7 +828,7 @@ fn validated_tmux_send_command(value: &str) -> Result<String, String> {
     if trimmed.chars().any(char::is_control) {
         return Err("tmux command must be a single printable line.".to_string());
     }
-    Ok(trimmed.to_string())
+    Ok(trimmed)
 }
 
 fn is_windows_os(os_type: &str) -> bool {
@@ -1035,6 +1124,28 @@ mod tests {
             "tmux send-keys -t '%3' -l -- 'echo '\"'\"'safe'\"'\"' && pwd' && tmux send-keys -t '%3' Enter"
         );
         assert!(invalid_send.is_err());
+    }
+
+    #[test]
+    fn borrowed_tmux_mutation_builders_keep_generated_commands_zeroizing() {
+        let rename_session =
+            build_tmux_rename_session_command("Linux", "$1", "work's shell").unwrap();
+        let rename_window =
+            build_tmux_rename_window_command("Windows", "@2", "deploy's logs").unwrap();
+        let send_command =
+            build_tmux_send_pane_command("Linux", "%3", "printf '%s' \"$TOKEN\"").unwrap();
+        let invalid_command = build_tmux_send_pane_command("Linux", "%3", "echo ok\nwhoami");
+
+        assert_eq!(
+            rename_session.as_str(),
+            "tmux rename-session -t '$1' 'work'\"'\"'s shell'"
+        );
+        assert!(rename_window.as_str().contains("'deploy''s logs'"));
+        assert_eq!(
+            send_command.as_str(),
+            "tmux send-keys -t '%3' -l -- 'printf '\"'\"'%s'\"'\"' \"$TOKEN\"' && tmux send-keys -t '%3' Enter"
+        );
+        assert!(invalid_command.is_err());
     }
 
     #[test]

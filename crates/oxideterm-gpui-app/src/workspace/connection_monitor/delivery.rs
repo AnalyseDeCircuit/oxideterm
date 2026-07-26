@@ -1,8 +1,6 @@
 use super::*;
 use crate::workspace::delivery as workspace_delivery;
 
-const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 2;
-
 pub(super) enum HostToolsSamplerDelivery {
     ProfilerUpdated,
     GpuUpdated(GpuUpdate),
@@ -17,6 +15,8 @@ pub(super) enum HostToolsReliableDelivery {
     ServiceSnapshot(HostServiceSnapshotDelivery),
     ServiceAction(HostServiceActionDelivery),
     ServiceLogs(HostServiceLogsDelivery),
+    TmuxSnapshot(HostTmuxSnapshotDelivery),
+    TmuxAction(HostTmuxActionDelivery),
     LogSnapshot(HostLogSnapshotDelivery),
     PortSnapshot(HostPortSnapshotDelivery),
     FilesystemSnapshot(HostFilesystemSnapshotDelivery),
@@ -203,6 +203,12 @@ impl HostToolsEntity {
                 HostToolsReliableDelivery::ServiceLogs(delivery) => {
                     self.finish_host_service_logs(delivery, cx);
                 }
+                HostToolsReliableDelivery::TmuxSnapshot(delivery) => {
+                    self.finish_host_tmux_snapshot(delivery, cx);
+                }
+                HostToolsReliableDelivery::TmuxAction(delivery) => {
+                    self.finish_host_tmux_action(delivery, cx);
+                }
                 HostToolsReliableDelivery::LogSnapshot(delivery) => {
                     self.finish_host_logs_snapshot(delivery, cx);
                 }
@@ -227,63 +233,5 @@ impl HostToolsEntity {
             }
         }
         drain.outcome.backlog_remaining
-    }
-}
-
-impl WorkspaceApp {
-    pub(in crate::workspace) fn schedule_host_tools_result_delivery(&self, cx: &mut Context<Self>) {
-        let delivery_wake = self.connection_monitor.delivery_wake.clone();
-        let release_wake = delivery_wake.clone();
-        cx.on_release(move |_, _| {
-            // HostToolsEntity owns samplers; this waiter owns only reliable action results.
-            release_wake.stop();
-        })
-        .detach();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                delivery_wake.wait().await;
-                let should_drain = delivery_wake.take();
-                let stopped = delivery_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let backlog_remaining = weak
-                    .update(cx, |workspace, cx| {
-                        workspace.poll_host_tools_result_receivers(cx)
-                    })
-                    .unwrap_or(false);
-                if backlog_remaining {
-                    delivery_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_host_tools_result_receivers(&mut self, cx: &mut Context<Self>) -> bool {
-        let started_at = Instant::now();
-        let mut checked = 0usize;
-
-        while checked < HOST_TOOLS_RESULT_RECEIVER_COUNT
-            && workspace_delivery::USER_ACTION_DELIVERY_BUDGET
-                .allows_next(checked, started_at.elapsed())
-        {
-            match self.connection_monitor.delivery_cursor {
-                0 => self.poll_host_tmux_snapshot_results(cx),
-                1 => self.poll_host_tmux_action_results(cx),
-                _ => unreachable!("Host Tools delivery cursor must stay within receiver count"),
-            }
-            self.connection_monitor.delivery_cursor =
-                (self.connection_monitor.delivery_cursor + 1) % HOST_TOOLS_RESULT_RECEIVER_COUNT;
-            checked += 1;
-        }
-
-        // An incomplete fair scan may have skipped the receiver that caused this wake.
-        checked < HOST_TOOLS_RESULT_RECEIVER_COUNT
     }
 }

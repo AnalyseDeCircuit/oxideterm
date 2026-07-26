@@ -1368,7 +1368,8 @@ impl WorkspaceApp {
                 .host_tmux_input_dialog
                 .as_ref()
                 .filter(|dialog| dialog.focused)
-                .map(|dialog| dialog.value.clone()),
+                // GPUI's platform InputHandler requires an owned frame-boundary value.
+                .map(|dialog| dialog.value.as_str().to_string()),
             WorkspaceImeTarget::HostPortSearch => self
                 .connection_monitor
                 .host_port_search_focused

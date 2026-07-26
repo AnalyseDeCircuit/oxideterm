@@ -120,6 +120,13 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
+                HostToolsEvent::RefreshTmux { connection_id } => {
+                    workspace.request_host_tmux_snapshot(
+                        connection_id.clone(),
+                        HostSnapshotFeedback::Silent,
+                        cx,
+                    );
+                }
                 HostToolsEvent::ShowNotice(notice) => {
                     workspace.push_host_tools_notice(notice.clone());
                 }
@@ -758,7 +765,6 @@ impl WorkspaceApp {
         workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_native_update_delivery(cx);
         workspace.schedule_forwarding_delivery(cx);
-        workspace.schedule_host_tools_result_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_runtime_worker_delivery(window_handle, cx);

@@ -8,6 +8,7 @@ pub(in crate::workspace) enum HostToolsEvent {
     RefreshProfiler { connection_id: String },
     RefreshServices { connection_id: String },
     RefreshSchedules { connection_id: String },
+    RefreshTmux { connection_id: String },
     ShowNotice(HostToolsNotice),
 }
 
@@ -50,6 +51,20 @@ pub(in crate::workspace) enum HostToolsNotice {
     ServiceLogsFailed,
     ServiceActionFinished {
         description: String,
+        succeeded: bool,
+    },
+    TmuxSnapshotAlreadyRunning,
+    TmuxConnectionMissing,
+    TmuxSnapshotLoaded {
+        count: usize,
+    },
+    TmuxUnavailable,
+    TmuxSnapshotFailed,
+    TmuxActionAlreadyRunning,
+    TmuxInputRequired,
+    TmuxActionFailed,
+    TmuxActionFinished {
+        target_label: String,
         succeeded: bool,
     },
     LogSnapshotAlreadyRunning,

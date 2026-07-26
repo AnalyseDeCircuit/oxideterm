@@ -382,6 +382,7 @@
         "new_session_opened": "Abriendo {{name}}.",
         "action_already_running": "Ya hay una acción tmux en ejecución.",
         "action_failed": "La acción tmux falló.",
+        "action_succeeded": "La acción tmux para {{target}} se completó.",
         "unknown_error": "Error desconocido",
         "input_required": "Introduce un valor antes de continuar."
       },

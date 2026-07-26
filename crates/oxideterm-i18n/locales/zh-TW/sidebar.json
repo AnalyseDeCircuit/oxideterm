@@ -382,6 +382,7 @@
         "new_session_opened": "正在開啟 {{name}}。",
         "action_already_running": "已有 tmux 操作正在執行。",
         "action_failed": "tmux 操作失敗。",
+        "action_succeeded": "tmux 對 {{target}} 的操作已完成。",
         "unknown_error": "未知錯誤",
         "input_required": "繼續前請輸入內容。"
       },

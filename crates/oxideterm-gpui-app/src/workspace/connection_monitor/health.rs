@@ -971,8 +971,10 @@ impl WorkspaceApp {
                         }
                         if tool != ContextSidebarTool::Tmux {
                             this.connection_monitor.host_tmux_search_focused = false;
-                            this.connection_monitor.host_tmux_pending_confirm = None;
                             this.connection_monitor.host_tmux_input_dialog = None;
+                            this.host_tools.update(cx, |host_tools, cx| {
+                                host_tools.dismiss_tmux_confirm(cx);
+                            });
                             this.clear_ime_selection();
                             this.ime_marked_text = None;
                         }
@@ -1211,9 +1213,9 @@ impl WorkspaceApp {
             host_tools.dismiss_docker_confirm(cx);
             host_tools.dismiss_service_confirm(cx);
         });
-        self.connection_monitor.host_tmux_pending_confirm = None;
         self.connection_monitor.host_tmux_input_dialog = None;
         self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.dismiss_tmux_confirm(cx);
             host_tools.dismiss_schedule_confirm(cx);
         });
         self.sync_connection_monitor_selection(cx);
