@@ -179,7 +179,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn start_connection_monitor_profiler(
+    pub(in crate::workspace) fn start_connection_monitor_profiler(
         &mut self,
         connection_id: String,
         cx: &mut Context<Self>,

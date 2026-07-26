@@ -5,6 +5,7 @@ use gpui::EventEmitter;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum HostToolsEvent {
     RefreshGpu { connection_id: String },
+    RefreshProfiler { connection_id: String },
 }
 
 impl EventEmitter<HostToolsEvent> for HostToolsEntity {}

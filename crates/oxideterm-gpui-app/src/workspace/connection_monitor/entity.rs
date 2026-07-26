@@ -26,6 +26,8 @@ pub(in crate::workspace) struct HostToolsEntity {
     topology_snapshot: Option<ConnectionTopologySnapshot>,
     pool_error: Option<String>,
     last_pool_refresh: Option<Instant>,
+    compact_monitor_list_state: ListState,
+    compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) section_list_state: ListState,
     pub(in crate::workspace) section_list_cache: RefCell<VirtualListSignatureCache>,
 }
@@ -62,6 +64,15 @@ impl HostToolsEntity {
             topology_snapshot: None,
             pool_error: None,
             last_pool_refresh: None,
+            compact_monitor_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
+                    COMPACT_MONITOR_LIST_OVERSCAN,
+                ),
+            ),
+            compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             // Monitor pages have variable-height browser sections and retain one
             // ListState owner across the main tab and detached-window surfaces.
             section_list_state: ListState::new(
@@ -141,6 +152,31 @@ impl HostToolsEntity {
             monitor_connection_label(left).cmp(&monitor_connection_label(right))
         });
         connections
+    }
+
+    pub(super) fn compact_monitor_list_state(&self) -> ListState {
+        self.compact_monitor_list_state.clone()
+    }
+
+    pub(super) fn sync_compact_monitor_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.compact_monitor_list_state,
+            &mut self.compact_monitor_list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(
+                px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
+                COMPACT_MONITOR_LIST_OVERSCAN,
+            ),
+        );
+    }
+
+    pub(super) fn request_profiler_refresh(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(HostToolsEvent::RefreshProfiler { connection_id });
     }
 
     pub(super) fn set_runtime_section(&mut self, section: ConnectionRuntimeSection) -> bool {
@@ -609,6 +645,13 @@ mod tests {
         entity.update(cx, |entity, cx| {
             entity.toggle_gpu_device("gpu-1".to_string(), cx);
             assert!(!entity.gpu_device_is_expanded("gpu-1"));
+            entity.request_profiler_refresh("connection-1".to_string(), cx);
         });
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::RefreshProfiler {
+                connection_id: "connection-1".to_string(),
+            }
+        );
     }
 }

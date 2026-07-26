@@ -573,8 +573,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     // move into HostToolsEntity in the following Phase 3A slices.
     pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
     pub(super) delivery_cursor: usize,
-    pub(super) compact_monitor_list_state: ListState,
-    pub(super) compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_process_search_query: String,
     pub(in crate::workspace) host_process_search_focused: bool,
     pub(super) host_process_filter: ProcessFilter,
@@ -722,15 +720,6 @@ impl ConnectionMonitorState {
         Self {
             delivery_wake,
             delivery_cursor: 0,
-            compact_monitor_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
-                    COMPACT_MONITOR_LIST_OVERSCAN,
-                ),
-            ),
-            compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_process_search_query: String::new(),
             host_process_search_focused: false,
             host_process_filter: ProcessFilter::All,

@@ -107,6 +107,9 @@ impl WorkspaceApp {
                 HostToolsEvent::RefreshGpu { connection_id } => {
                     workspace.restart_host_gpu_sampling(connection_id.clone(), cx);
                 }
+                HostToolsEvent::RefreshProfiler { connection_id } => {
+                    workspace.start_connection_monitor_profiler(connection_id.clone(), cx);
+                }
             },
         );
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());

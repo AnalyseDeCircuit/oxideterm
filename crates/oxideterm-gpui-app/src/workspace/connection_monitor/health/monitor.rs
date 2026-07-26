@@ -562,7 +562,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.start_connection_monitor_profiler(connection_id.clone(), cx);
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.request_profiler_refresh(connection_id.clone(), cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -580,8 +582,8 @@ impl WorkspaceApp {
             metrics,
             can_retry_sampling.then_some(connection_id),
         ));
-        self.sync_compact_monitor_list_state(&rows);
-        let state = self.connection_monitor.compact_monitor_list_state.clone();
+        self.sync_compact_monitor_list_state(&rows, cx);
+        let state = self.host_tools.read(cx).compact_monitor_list_state();
         let spec = self.compact_monitor_list_spec();
         let layout = compact_monitor_layout_for_width(self.ai.chat.sidebar_width);
         let workspace = cx.entity();
@@ -605,22 +607,22 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn sync_compact_monitor_list_state(&self, rows: &[CompactMonitorRow]) {
+    pub(super) fn sync_compact_monitor_list_state(
+        &self,
+        rows: &[CompactMonitorRow],
+        cx: &mut Context<Self>,
+    ) {
         let signatures = rows
             .iter()
             .map(compact_monitor_row_signature)
             .collect::<Vec<_>>();
         let layout = compact_monitor_layout_for_width(self.ai.chat.sidebar_width);
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.compact_monitor_list_state,
-            &mut self
-                .connection_monitor
-                .compact_monitor_list_cache
-                .borrow_mut(),
-            compact_monitor_list_identity(layout),
-            &signatures,
-            self.compact_monitor_list_spec(),
-        );
+        self.host_tools
+            .read(cx)
+            .sync_compact_monitor_list_signatures(
+                compact_monitor_list_identity(layout),
+                &signatures,
+            );
     }
 
     pub(super) fn compact_monitor_list_spec(&self) -> TauriVirtualListSpec {
