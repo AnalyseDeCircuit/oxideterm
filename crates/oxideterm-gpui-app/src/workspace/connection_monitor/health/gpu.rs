@@ -33,6 +33,22 @@ impl WorkspaceApp {
         self.host_tools
             .read(cx)
             .sync_gpu_list_state(&devices, snapshot, selected_id);
+        let tokens = self.tokens;
+        let i18n = self.i18n.clone();
+        let summary = snapshot.map(|snapshot| {
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.render_host_gpu_summary(snapshot, &tokens, &i18n)
+            })
+        });
+        let status = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_gpu_status_row(
+                devices.len(),
+                selected_id.to_string(),
+                &tokens,
+                &i18n,
+                cx,
+            )
+        });
 
         div()
             .id("host-gpu-panel")
@@ -62,152 +78,10 @@ impl WorkspaceApp {
                         is_running,
                         cx,
                     ))
-                    .when_some(snapshot, |header, snapshot| {
-                        header.child(self.render_host_gpu_summary(snapshot, cx))
-                    })
-                    .child(self.render_host_gpu_status_row(
-                        devices.len(),
-                        selected_id.to_string(),
-                        cx,
-                    )),
+                    .when_some(summary, |header, summary| header.child(summary))
+                    .child(status),
             )
             .child(self.render_host_gpu_list(devices, snapshot.cloned(), cx))
-            .into_any_element()
-    }
-
-    fn render_host_gpu_summary(
-        &self,
-        snapshot: &GpuSnapshot,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let summary = snapshot.summary();
-        let utilization = summary
-            .average_utilization_percent
-            .map(|value| format!("{value:.0}%"))
-            .unwrap_or_else(|| "—".to_string());
-        let memory = if summary.memory_total > 0 {
-            format!(
-                "{} / {}",
-                format_bytes(summary.memory_used),
-                format_bytes(summary.memory_total)
-            )
-        } else {
-            "—".to_string()
-        };
-        let temperature = summary
-            .maximum_temperature_celsius
-            .map(|value| format!("{value:.0} °C"))
-            .unwrap_or_else(|| "—".to_string());
-        let power = summary
-            .power_draw_watts
-            .map(|value| format!("{value:.0} W"))
-            .unwrap_or_else(|| "—".to_string());
-
-        div()
-            .w_full()
-            .min_w_0()
-            .grid()
-            .grid_cols(2)
-            .gap_1()
-            .child(self.render_host_gpu_summary_item(
-                "sidebar.host_gpu.summary.utilization",
-                utilization,
-                cx,
-            ))
-            .child(self.render_host_gpu_summary_item("sidebar.host_gpu.summary.memory", memory, cx))
-            .child(self.render_host_gpu_summary_item(
-                "sidebar.host_gpu.summary.temperature",
-                temperature,
-                cx,
-            ))
-            .child(self.render_host_gpu_summary_item("sidebar.host_gpu.summary.power", power, cx))
-            .into_any_element()
-    }
-
-    fn render_host_gpu_summary_item(
-        &self,
-        label_key: &'static str,
-        value: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .min_w_0()
-            .px_2()
-            .py_1()
-            .rounded(px(self.tokens.radii.md))
-            .bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA))
-            .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .child(
-                div()
-                    .text_size(px(10.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "host-gpu-summary-label",
-                        label_key,
-                        self.i18n.t(label_key),
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(12.0))
-                    .text_color(rgb(theme.text))
-                    .child(value),
-            )
-            .into_any_element()
-    }
-
-    fn render_host_gpu_status_row(
-        &self,
-        count: usize,
-        selected_id: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .min_w_0()
-            .text_size(px(11.0))
-            .text_color(rgb(theme.text_muted))
-            .child(div().min_w_0().flex_1().truncate().child(format!(
-                "{} {} · {}",
-                count,
-                self.i18n.t("sidebar.host_gpu.count_suffix"),
-                self.i18n.t("sidebar.host_gpu.refresh_interval")
-            )))
-            .child(self.workspace_tooltip_icon_button(
-                LucideIcon::RefreshCw,
-                13.0,
-                rgb(theme.text),
-                oxideterm_gpui_ui::button::IconButtonOptions {
-                    size: 24.0,
-                    has_background: true,
-                    background: Some(rgb(theme.bg_hover)),
-                    hover_background: Some(rgb(theme.bg_panel)),
-                    idle_opacity: 1.0,
-                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
-                },
-                self.i18n.t("sidebar.host_gpu.actions.refresh"),
-                "host-gpu-refresh",
-                true,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.host_tools.update(cx, |host_tools, cx| {
-                        host_tools.request_gpu_refresh(selected_id.clone(), cx);
-                    });
-                    cx.stop_propagation();
-                }),
-                cx.entity(),
-            ))
             .into_any_element()
     }
 
@@ -284,6 +158,148 @@ impl WorkspaceApp {
 }
 
 impl HostToolsEntity {
+    fn render_host_gpu_summary(
+        &self,
+        snapshot: &GpuSnapshot,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+    ) -> AnyElement {
+        let summary = snapshot.summary();
+        let utilization = summary
+            .average_utilization_percent
+            .map(|value| format!("{value:.0}%"))
+            .unwrap_or_else(|| "—".to_string());
+        let memory = if summary.memory_total > 0 {
+            format!(
+                "{} / {}",
+                format_bytes(summary.memory_used),
+                format_bytes(summary.memory_total)
+            )
+        } else {
+            "—".to_string()
+        };
+        let temperature = summary
+            .maximum_temperature_celsius
+            .map(|value| format!("{value:.0} °C"))
+            .unwrap_or_else(|| "—".to_string());
+        let power = summary
+            .power_draw_watts
+            .map(|value| format!("{value:.0} W"))
+            .unwrap_or_else(|| "—".to_string());
+
+        div()
+            .w_full()
+            .min_w_0()
+            .grid()
+            .grid_cols(2)
+            .gap_1()
+            .child(Self::render_host_gpu_summary_item(
+                "sidebar.host_gpu.summary.utilization",
+                utilization,
+                tokens,
+                i18n,
+            ))
+            .child(Self::render_host_gpu_summary_item(
+                "sidebar.host_gpu.summary.memory",
+                memory,
+                tokens,
+                i18n,
+            ))
+            .child(Self::render_host_gpu_summary_item(
+                "sidebar.host_gpu.summary.temperature",
+                temperature,
+                tokens,
+                i18n,
+            ))
+            .child(Self::render_host_gpu_summary_item(
+                "sidebar.host_gpu.summary.power",
+                power,
+                tokens,
+                i18n,
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_gpu_summary_item(
+        label_key: &'static str,
+        value: String,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        div()
+            .min_w_0()
+            .px_2()
+            .py_1()
+            .rounded(px(tokens.radii.md))
+            .bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA))
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_size(px(10.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(i18n.t(label_key)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(12.0))
+                    .text_color(rgb(theme.text))
+                    .child(value),
+            )
+            .into_any_element()
+    }
+
+    fn render_host_gpu_status_row(
+        &self,
+        count: usize,
+        selected_id: String,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .min_w_0()
+            .text_size(px(11.0))
+            .text_color(rgb(theme.text_muted))
+            .child(div().min_w_0().flex_1().truncate().child(format!(
+                "{} {} · {}",
+                count,
+                i18n.t("sidebar.host_gpu.count_suffix"),
+                i18n.t("sidebar.host_gpu.refresh_interval")
+            )))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::RefreshCw,
+                13.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 24.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
+                },
+                i18n.t("sidebar.host_gpu.actions.refresh"),
+                "host-gpu-refresh",
+                true,
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.request_gpu_refresh(selected_id.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            ))
+            .into_any_element()
+    }
+
     fn render_gpu_device_list(
         &self,
         devices: Vec<GpuDevice>,
@@ -317,9 +333,6 @@ impl HostToolsEntity {
                         state,
                         spec,
                         move |index, _window, cx| {
-                            let devices = devices.clone();
-                            let snapshot = snapshot.clone();
-                            let row_i18n = row_i18n.clone();
                             host_tools.update(cx, |host_tools, cx| {
                                 host_tools.render_host_gpu_row(
                                     devices.get(index).cloned(),
