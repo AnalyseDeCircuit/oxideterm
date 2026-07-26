@@ -13,7 +13,9 @@ impl WorkspaceApp {
         let i18n = self.i18n.clone();
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         let selectable_text = self.selectable_text_render_state(cx);
-        let search = self.render_host_service_search(cx);
+        let search_ime = self
+            .host_tools_plain_text_ime_frame(HostToolsTextInput::ServiceSearch, cx)
+            .expect("service search is a non-secret Host Tools input");
         let connections = self.monitor_connections(cx);
         let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
         let selected_connection_id = selected_connection_id.as_deref().or_else(|| {
@@ -26,7 +28,7 @@ impl WorkspaceApp {
             .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_services_panel(
-                search,
+                search_ime,
                 follow_terminal_available,
                 &tokens,
                 &i18n,
@@ -35,105 +37,6 @@ impl WorkspaceApp {
                 cx,
             )
         })
-    }
-
-    pub(super) fn render_host_service_search(&self, cx: &mut Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::HostServiceSearch;
-        let (focused, value) = {
-            let ui = &self.host_tools.read(cx).ui;
-            (
-                ui.input_is_focused(HostToolsTextInput::ServiceSearch),
-                ui.host_service_search_query.clone(),
-            )
-        };
-        let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value: &value,
-                    placeholder: self.i18n.t("sidebar.host_services.search_placeholder"),
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .h(px(34.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.host_tools.update(cx, |host_tools, _cx| {
-                        host_tools.ui.focus_input(HostToolsTextInput::ServiceSearch);
-                    });
-                    this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
-            },
-        )
-        .into_any_element()
-    }
-
-    pub(super) fn request_host_services_snapshot_for_selected_connection(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let connections = self.monitor_connections(cx);
-        let Some(connection_id) = self
-            .host_tools
-            .read(cx)
-            .selected_connection_id_owned()
-            .or_else(|| {
-                connections
-                    .first()
-                    .map(|connection| connection.connection_id.clone())
-            })
-        else {
-            return;
-        };
-        self.request_host_service_snapshot(connection_id, cx);
-    }
-
-    pub(in crate::workspace) fn request_host_service_snapshot(
-        &mut self,
-        connection_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Services)
-            || !self.host_tools_surface_visible()
-            || self.host_tools.read(cx).active_tool() != ContextSidebarTool::Services
-        {
-            return;
-        }
-        let runtime = self.forwarding_runtime.handle().clone();
-        let connection_fallback = self
-            .i18n
-            .t("sidebar.host_services.toast.connection_missing");
-        let failure_fallback = self.i18n.t("sidebar.host_services.toast.action_failed");
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.request_service_snapshot(
-                connection_id,
-                runtime,
-                connection_fallback,
-                failure_fallback,
-                cx,
-            );
-        });
     }
 
     pub(in crate::workspace) fn handle_host_service_search_key(
@@ -528,7 +431,7 @@ impl HostToolsEntity {
 
     pub(in crate::workspace::connection_monitor) fn render_host_services_panel(
         &self,
-        search: AnyElement,
+        search_ime: HostToolsPlainTextImeFrame,
         follow_terminal_available: bool,
         tokens: &ThemeTokens,
         i18n: &I18n,
@@ -596,8 +499,7 @@ impl HostToolsEntity {
                         selectable_text,
                         cx,
                     ))
-                    // IME composition and anchor tracking remain a workspace service.
-                    .child(search)
+                    .child(self.render_host_service_search(&search_ime, tokens, i18n, cx))
                     .child(self.render_host_service_status_row(
                         rows.len(),
                         selected_id.to_string(),
@@ -620,6 +522,56 @@ impl HostToolsEntity {
                 cx,
             ))
             .into_any_element()
+    }
+
+    fn render_host_service_search(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = ime.input();
+        let anchor_frame = ime.clone();
+        text_input_anchor_probe(
+            ime.anchor_id(),
+            text_input(
+                tokens,
+                TextInputView {
+                    value: &self.ui.host_service_search_query,
+                    placeholder: i18n.t("sidebar.host_services.search_placeholder"),
+                    focused: self.ui.input_is_focused(input),
+                    caret_visible: ime.caret_visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: ime.selected_range(),
+                    marked_text: ime.marked_text(),
+                },
+            )
+            .h(px(34.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
+                    host_tools.ui.focus_input(input);
+                    // The Entity keeps input state while the root owns window IME selection.
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::BeginPlainTextImeSelection {
+                                input,
+                                event: event.clone(),
+                            },
+                        )),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            ),
+            move |anchor, _window, _cx| {
+                anchor_frame.update_anchor(anchor);
+            },
+        )
+        .into_any_element()
     }
 
     fn render_host_service_status_row(
