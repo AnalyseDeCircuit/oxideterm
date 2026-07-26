@@ -1407,18 +1407,20 @@ mod tests {
             &vnc.capabilities,
             RemoteDesktopSessionFeature::ClipboardText
         ));
+        // VNC advertises client-side extension support here; the negotiated
+        // session capabilities still gate features unsupported by a server.
         for feature in [
             RemoteDesktopSessionFeature::ClipboardImages,
             RemoteDesktopSessionFeature::ClipboardFiles,
             RemoteDesktopSessionFeature::AudioPlayback,
-            RemoteDesktopSessionFeature::AudioCapture,
             RemoteDesktopSessionFeature::MultiMonitor,
         ] {
-            assert!(!remote_desktop_feature_supported(
-                &vnc.capabilities,
-                feature
-            ));
+            assert!(remote_desktop_feature_supported(&vnc.capabilities, feature));
         }
+        assert!(!remote_desktop_feature_supported(
+            &vnc.capabilities,
+            RemoteDesktopSessionFeature::AudioCapture
+        ));
     }
 
     #[test]
