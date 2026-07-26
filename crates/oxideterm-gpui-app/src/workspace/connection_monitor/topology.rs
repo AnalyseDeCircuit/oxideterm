@@ -86,277 +86,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_connection_pool_monitor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
-        if let Some(error) = self.host_tools.read(cx).pool_error() {
-            return monitor_center_state(
-                self,
-                LucideIcon::AlertTriangle,
-                MONITOR_RED,
-                error.to_string(),
-                cx,
-            );
-        }
-        let Some(stats) = self.host_tools.read(cx).pool_stats_snapshot() else {
-            return monitor_center_state(
-                self,
-                LucideIcon::RefreshCw,
-                theme.text_muted,
-                self.i18n.t("connections.monitor.loading"),
-                cx,
-            );
-        };
-
-        let idle_timeout_label = if stats.idle_timeout_secs == 0 {
-            self.i18n.t("connections.monitor.idle_timeout_never")
-        } else {
-            self.i18n
-                .t("connections.monitor.idle_timeout")
-                .replace("{{min}}", &(stats.idle_timeout_secs / 60).to_string())
-        };
-        let capacity = if stats.pool_capacity == 0 {
-            "∞".to_string()
-        } else {
-            stats.pool_capacity.to_string()
-        };
-        let capacity_label = self
-            .i18n
-            .t("connections.monitor.capacity")
-            .replace("{{capacity}}", &capacity);
-
-        div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .p_4()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(14.0))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "topology-monitor-header",
-                                "title",
-                                self.i18n.t("connections.monitor.title"),
-                                theme.text,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .text_size(px(12.0))
-                            .text_color(rgb(theme.text_muted))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Clock,
-                                14.0,
-                                rgb(theme.text_muted),
-                            ))
-                            .child(idle_timeout_label)
-                            .child("•")
-                            .child(capacity_label),
-                    ),
-            )
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(4)
-                    .gap_2()
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.active"),
-                        stats.active_connections,
-                        LucideIcon::Activity,
-                        if stats.active_connections > 0 {
-                            MONITOR_EMERALD_DARK
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.idle"),
-                        stats.idle_connections,
-                        LucideIcon::Link2,
-                        if stats.idle_connections > 0 {
-                            MONITOR_BLUE
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.reconnecting"),
-                        stats.reconnecting_connections,
-                        LucideIcon::RefreshCw,
-                        if stats.reconnecting_connections > 0 {
-                            MONITOR_AMBER
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.link_down"),
-                        stats.link_down_connections,
-                        LucideIcon::AlertTriangle,
-                        if stats.link_down_connections > 0 {
-                            MONITOR_RED
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(3)
-                    .gap_2()
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.terminals"),
-                        stats.total_terminals,
-                        LucideIcon::Terminal,
-                        if stats.total_terminals > 0 {
-                            MONITOR_EMERALD_DARK
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.sftp"),
-                        stats.total_sftp_sessions,
-                        LucideIcon::FolderSync,
-                        if stats.total_sftp_sessions > 0 {
-                            MONITOR_BLUE
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.forwards"),
-                        stats.total_forwards,
-                        LucideIcon::ArrowLeftRight,
-                        if stats.total_forwards > 0 {
-                            MONITOR_BLUE
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .pt_3()
-                    .border_t_1()
-                    .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
-                    .text_size(px(12.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(
-                        self.i18n
-                            .t("connections.monitor.summary")
-                            .replace("{{total}}", &stats.total_connections.to_string())
-                            .replace("{{refs}}", &stats.total_ref_count.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::RefreshCw,
-                                12.0,
-                                rgb(theme.text_muted),
-                            ))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "topology-monitor-header",
-                                "live",
-                                self.i18n.t("connections.monitor.live"),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_pool_stat_card(
-        &self,
-        label: String,
-        value: usize,
-        icon: LucideIcon,
-        color: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let background = if color == theme.text_muted {
-            rgba((theme.bg_hover << 8) | 0x4d)
-        } else {
-            rgba((color << 8) | MONITOR_TINT_ALPHA)
-        };
-        oxideterm_gpui_ui::semantic_surface(
-            &self.tokens,
-            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
-                .padding(oxideterm_gpui_ui::SurfacePadding::None),
-        )
-        // Runtime stat cards use a value tint as their semantic signal, while
-        // the shared surface keeps radius and future border policy aligned.
-        .bg(background)
-        .p_3()
-        .shadow_sm()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.render_selectable_display_text(
-                            "connection-pool-stat-label",
-                            &label,
-                            label.clone(),
-                            theme.text_muted,
-                            cx,
-                        )),
-                ),
-        )
-        .child(
-            div()
-                .mt_1()
-                .flex()
-                .items_baseline()
-                .gap_1()
-                .text_size(px(24.0))
-                .font_weight(gpui::FontWeight::BOLD)
-                .text_color(rgb(color))
-                .child(self.render_selectable_display_text(
-                    "connection-pool-stat-value",
-                    &label,
-                    value.to_string(),
-                    color,
-                    cx,
-                )),
-        )
-        .into_any_element()
-    }
-
     fn render_connection_topology(
         &self,
         has_background: bool,
@@ -1094,5 +823,72 @@ impl HostToolsEntity {
             y,
         });
         cx.notify();
+    }
+}
+
+impl WorkspaceApp {
+    pub(super) fn render_pool_stat_card(
+        &self,
+        label: String,
+        value: usize,
+        icon: LucideIcon,
+        color: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let background = if color == theme.text_muted {
+            rgba((theme.bg_hover << 8) | 0x4d)
+        } else {
+            rgba((color << 8) | MONITOR_TINT_ALPHA)
+        };
+        oxideterm_gpui_ui::semantic_surface(
+            &self.tokens,
+            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
+                .padding(oxideterm_gpui_ui::SurfacePadding::None),
+        )
+        // Runtime stat cards use a value tint as their semantic signal, while
+        // the shared surface keeps radius and future border policy aligned.
+        .bg(background)
+        .p_3()
+        .shadow_sm()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.render_selectable_display_text(
+                            "connection-pool-stat-label",
+                            &label,
+                            label.clone(),
+                            theme.text_muted,
+                            cx,
+                        )),
+                ),
+        )
+        .child(
+            div()
+                .mt_1()
+                .flex()
+                .items_baseline()
+                .gap_1()
+                .text_size(px(24.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(color))
+                .child(self.render_selectable_display_text(
+                    "connection-pool-stat-value",
+                    &label,
+                    value.to_string(),
+                    color,
+                    cx,
+                )),
+        )
+        .into_any_element()
     }
 }

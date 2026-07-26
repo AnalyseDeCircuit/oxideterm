@@ -5,12 +5,12 @@ use super::*;
 use oxideterm_connection_monitor::ProfilerState;
 use oxideterm_gpui_ui::progress::progress;
 
-struct MonitorRenderContext {
-    tokens: ThemeTokens,
-    i18n: I18n,
-    mono_font_family: SharedString,
-    selectable_text: SelectableTextRenderState,
-    sidebar_width: f32,
+pub(in crate::workspace::connection_monitor) struct MonitorRenderContext {
+    pub(in crate::workspace::connection_monitor) tokens: ThemeTokens,
+    pub(in crate::workspace::connection_monitor) i18n: I18n,
+    pub(in crate::workspace::connection_monitor) mono_font_family: SharedString,
+    pub(in crate::workspace::connection_monitor) selectable_text: SelectableTextRenderState,
+    pub(in crate::workspace::connection_monitor) sidebar_width: f32,
 }
 
 #[derive(Clone)]
@@ -21,22 +21,41 @@ struct CompactMonitorRenderContext {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace::connection_monitor) fn render_system_health_panel(
+    pub(in crate::workspace::connection_monitor) fn monitor_render_context(
         &self,
-        compact: bool,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> MonitorRenderContext {
         // This snapshot is frame-scoped. Cloning I18n shares its catalog Arc
         // and does not duplicate the locale tables.
-        let render = MonitorRenderContext {
+        MonitorRenderContext {
             tokens: self.tokens,
             i18n: self.i18n.clone(),
             mono_font_family: settings_mono_font_family(self.settings_store.settings()),
             selectable_text: self.selectable_text_render_state(cx),
             sidebar_width: self.ai.chat.sidebar_width,
-        };
+        }
+    }
+
+    pub(in crate::workspace::connection_monitor) fn render_system_health_panel(
+        &self,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let render = self.monitor_render_context(cx);
         let monitor_enabled = self.settings_store.settings().host_tools.monitor_enabled;
-        let enable_control = div()
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_system_health_panel(compact, &render, monitor_enabled, cx)
+        })
+    }
+}
+
+impl HostToolsEntity {
+    fn render_monitor_enable_control(
+        &self,
+        render: &MonitorRenderContext,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
             .px_3()
             .py_1()
             .rounded(px(render.tokens.radii.md))
@@ -45,7 +64,8 @@ impl WorkspaceApp {
             .text_size(px(12.0))
             .cursor_pointer()
             .hover(|button| button.bg(rgb(render.tokens.ui.bg_hover)))
-            .child(self.render_display_text_with_role(
+            .child(Self::render_monitor_text_with_role(
+                render,
                 SelectableTextRole::NonSelectable,
                 "system-health-profiler",
                 "enable",
@@ -55,13 +75,29 @@ impl WorkspaceApp {
             ))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.set_host_tool_monitoring_enabled(ContextSidebarTool::Monitor, true, cx);
+                cx.listener(|_host_tools, _event, window, cx| {
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::SetMonitoringEnabled {
+                                tool: ContextSidebarTool::Monitor,
+                                enabled: true,
+                            },
+                        )),
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
             )
-            .into_any_element();
-        let toggle_control = div()
+            .into_any_element()
+    }
+
+    fn render_monitor_toggle_control(
+        &self,
+        render: &MonitorRenderContext,
+        monitor_enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
             .flex_none()
             .p_1()
             .rounded(px(render.tokens.radii.md))
@@ -82,7 +118,7 @@ impl WorkspaceApp {
                         .bg(rgba((MONITOR_EMERALD_DARK << 8) | MONITOR_TINT_ALPHA))
                 }
             })
-            .child(Self::render_lucide_icon(
+            .child(WorkspaceApp::render_lucide_icon(
                 LucideIcon::Power,
                 14.0,
                 if monitor_enabled {
@@ -93,42 +129,31 @@ impl WorkspaceApp {
             ))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.set_host_tool_monitoring_enabled(
-                        ContextSidebarTool::Monitor,
-                        !monitor_enabled,
+                cx.listener(move |_host_tools, _event, window, cx| {
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::SetMonitoringEnabled {
+                                tool: ContextSidebarTool::Monitor,
+                                enabled: !monitor_enabled,
+                            },
+                        )),
                         cx,
                     );
                     cx.stop_propagation();
                 }),
             )
-            .into_any_element();
-
-        // Settings persistence remains a workspace concern. The Entity receives
-        // only transient controls and render services and never retains WorkspaceApp.
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.render_system_health_panel(
-                compact,
-                &render,
-                monitor_enabled,
-                enable_control,
-                toggle_control,
-                cx,
-            )
-        })
+            .into_any_element()
     }
-}
 
-impl HostToolsEntity {
-    fn render_system_health_panel(
+    pub(in crate::workspace::connection_monitor) fn render_system_health_panel(
         &self,
         compact: bool,
         render: &MonitorRenderContext,
         monitor_enabled: bool,
-        enable_control: AnyElement,
-        toggle_control: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let enable_control = self.render_monitor_enable_control(render, cx);
+        let toggle_control = self.render_monitor_toggle_control(render, monitor_enabled, cx);
         let connections = self.monitor_connections();
         if connections.is_empty() {
             return div()

@@ -153,10 +153,6 @@ impl WorkspaceApp {
         host_tools_visibility(main_tab_visible, detached_tab_visible, sidebar_visible)
     }
 
-    pub(in crate::workspace) fn host_tools_surface_visible(&self) -> bool {
-        self.host_tools_visibility().is_visible()
-    }
-
     pub(in crate::workspace) fn set_connection_runtime_section(
         &mut self,
         section: ConnectionRuntimeSection,

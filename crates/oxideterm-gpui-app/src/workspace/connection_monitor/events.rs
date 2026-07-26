@@ -55,6 +55,15 @@ pub(in crate::workspace) enum HostToolsWindowIntent {
         input: HostToolsTextInput,
         event: MouseDownEvent,
     },
+    /// Gives the workspace focus to a secret-capable tmux input without moving its value.
+    PrepareTmuxInputDialog,
+    /// Resets the shared confirmation focus before showing an Entity-owned tmux action.
+    PrepareTmuxConfirm,
+    /// Persists a Host Tools monitoring toggle while the Entity owns its UI.
+    SetMonitoringEnabled {
+        tool: ContextSidebarTool,
+        enabled: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -132,6 +141,10 @@ pub(in crate::workspace) enum HostToolsNotice {
     },
     PortUnavailable,
     PortSnapshotFailed,
+    /// Reports the endpoint that the user explicitly copied from the port table.
+    PortEndpointCopied {
+        endpoint: String,
+    },
     FilesystemSnapshotAlreadyRunning,
     FilesystemConnectionMissing,
     FilesystemPartialSupport {
@@ -142,6 +155,10 @@ pub(in crate::workspace) enum HostToolsNotice {
     },
     FilesystemUnavailable,
     FilesystemSnapshotFailed,
+    /// Reports the path that the user explicitly copied from the filesystem table.
+    FilesystemPathCopied {
+        path: String,
+    },
     PackageSnapshotAlreadyRunning,
     PackageConnectionMissing,
     PackageSnapshotLoaded {
@@ -149,6 +166,14 @@ pub(in crate::workspace) enum HostToolsNotice {
     },
     PackageUnavailable,
     PackageSnapshotFailed,
+    /// Reports the package manager whose inspect command is not supported.
+    PackageInspectUnsupported {
+        manager: String,
+    },
+    /// Reports the package name that the user explicitly copied from the package table.
+    PackageNameCopied {
+        package_name: String,
+    },
     ScheduleSnapshotAlreadyRunning,
     ScheduleConnectionMissing,
     SchedulePartialSupport {

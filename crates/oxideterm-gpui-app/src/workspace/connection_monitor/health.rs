@@ -322,6 +322,7 @@ mod gpu;
 mod logs;
 #[path = "health/monitor.rs"]
 mod monitor;
+pub(in crate::workspace::connection_monitor) use monitor::MonitorRenderContext;
 #[path = "health/packages.rs"]
 mod packages;
 #[path = "health/ports.rs"]
@@ -340,7 +341,7 @@ impl WorkspaceApp {
         tool.monitoring_enabled(&self.settings_store.settings().host_tools)
     }
 
-    fn set_host_tool_monitoring_enabled(
+    pub(in crate::workspace) fn set_host_tool_monitoring_enabled(
         &mut self,
         tool: ContextSidebarTool,
         enabled: bool,
@@ -364,58 +365,20 @@ impl WorkspaceApp {
         tool: ContextSidebarTool,
         cx: &mut Context<Self>,
     ) {
-        match tool {
-            ContextSidebarTool::Services => {
-                self.request_host_services_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Logs => {
-                self.request_host_logs_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Tmux => {
-                self.request_host_tmux_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Ports => {
-                self.request_host_ports_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Schedules => {
-                self.request_host_schedules_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Filesystems => {
-                self.request_host_filesystems_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Packages => {
-                self.request_host_packages_snapshot_for_selected_connection(cx);
-            }
+        if matches!(
+            tool,
             ContextSidebarTool::Monitor
-            | ContextSidebarTool::Gpu
-            | ContextSidebarTool::Processes
-            | ContextSidebarTool::Docker => {}
+                | ContextSidebarTool::Gpu
+                | ContextSidebarTool::Processes
+                | ContextSidebarTool::Docker
+        ) {
+            return;
         }
-    }
-
-    // Keep Host Tools filter chips visually consistent across resource panels.
-    fn host_tools_filter_chip(&self, active: bool) -> Div {
-        let theme = self.tokens.ui;
-        div()
-            .flex_none()
-            .h(px(self.tokens.metrics.ui_button_sm_height * 0.75))
-            .px(px(self.tokens.spacing.two))
-            .flex()
-            .items_center()
-            .rounded(px(self.tokens.radii.md))
-            .cursor_pointer()
-            .bg(if active {
-                rgb(theme.bg_hover)
-            } else {
-                rgba(0x00000000)
-            })
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(if active {
-                rgb(theme.text)
-            } else {
-                rgb(theme.text_muted)
-            })
-            .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
+        // Snapshot ownership stays in the Entity; the root only persists the
+        // monitoring toggle that led to this request.
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+        });
     }
 
     pub(in crate::workspace) fn render_host_tools_context_panel(
@@ -1130,29 +1093,6 @@ impl WorkspaceApp {
             )
         })
         .into_any_element()
-    }
-
-    fn render_connection_switcher_row(
-        &self,
-        connections: &[MonitorConnectionOption],
-        selected_id: &str,
-        is_running: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let tokens = self.tokens;
-        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
-        let selectable_text = self.selectable_text_render_state(cx);
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.render_connection_switcher(
-                connections,
-                selected_id,
-                is_running,
-                &tokens,
-                mono_font_family,
-                &selectable_text,
-                cx,
-            )
-        })
     }
 
     fn select_host_tools_connection(
