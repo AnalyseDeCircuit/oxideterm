@@ -151,7 +151,8 @@ use oxideterm_connections::{
     SshConfigSyncService,
 };
 use oxideterm_forwarding::{
-    ForwardEvent, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry, SavedForwardStore,
+    ForwardEvent, ForwardEventDeliverySender, ForwardRule, ForwardStatus, ForwardType,
+    ForwardingRegistry, SavedForwardStore,
 };
 use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{

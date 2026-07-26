@@ -46,7 +46,7 @@ pub use error::ForwardingError;
 #[cfg(feature = "runtime")]
 pub(crate) use error::{tauri_dynamic_bind_error, tauri_local_bind_error};
 #[cfg(feature = "runtime")]
-pub use events::ForwardEvent;
+pub use events::{ForwardEvent, ForwardEventDeliverySender};
 #[cfg(feature = "runtime")]
 pub use manager::ForwardingManager;
 pub use model::{ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUpdate};

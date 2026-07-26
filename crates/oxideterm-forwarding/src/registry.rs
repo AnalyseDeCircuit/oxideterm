@@ -7,17 +7,17 @@ use dashmap::DashMap;
 use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
-    ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingError,
-    ForwardingManager, OwnedForwardImportRecord, PersistedForward, PortDetectionProfiler,
-    PortDetectionSnapshot, SavedForwardCheckpoint, SavedForwardError, SavedForwardStore,
-    SavedForwardsSyncSnapshot,
+    ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardEventDeliverySender, ForwardRule,
+    ForwardingError, ForwardingManager, OwnedForwardImportRecord, PersistedForward,
+    PortDetectionProfiler, PortDetectionSnapshot, SavedForwardCheckpoint, SavedForwardError,
+    SavedForwardStore, SavedForwardsSyncSnapshot,
 };
 
 #[derive(Clone, Debug, Default)]
 pub struct ForwardingRegistry {
     managers: Arc<DashMap<String, Arc<ForwardingManager>>>,
     port_profilers: Arc<DashMap<String, Arc<PortDetectionProfiler>>>,
-    event_tx: Option<Sender<ForwardEvent>>,
+    event_tx: Option<ForwardEventDeliverySender>,
     saved_store: Option<Arc<SavedForwardStore>>,
 }
 
@@ -36,6 +36,10 @@ impl ForwardingRegistry {
     }
 
     pub fn new_with_event_sender(event_tx: Sender<ForwardEvent>) -> Self {
+        Self::new_with_event_delivery(ForwardEventDeliverySender::new(event_tx))
+    }
+
+    pub fn new_with_event_delivery(event_tx: ForwardEventDeliverySender) -> Self {
         Self {
             managers: Arc::new(DashMap::new()),
             port_profilers: Arc::new(DashMap::new()),
@@ -46,6 +50,16 @@ impl ForwardingRegistry {
 
     pub fn new_with_event_sender_and_store(
         event_tx: Sender<ForwardEvent>,
+        saved_store: SavedForwardStore,
+    ) -> Self {
+        Self::new_with_event_delivery_and_store(
+            ForwardEventDeliverySender::new(event_tx),
+            saved_store,
+        )
+    }
+
+    pub fn new_with_event_delivery_and_store(
+        event_tx: ForwardEventDeliverySender,
         saved_store: SavedForwardStore,
     ) -> Self {
         Self {
@@ -66,7 +80,7 @@ impl ForwardingRegistry {
             .entry(session_id.clone())
             .and_modify(|manager| manager.replace_ssh_connection(ssh_connection.clone()))
             .or_insert_with(|| {
-                Arc::new(ForwardingManager::new_with_event_sender(
+                Arc::new(ForwardingManager::new_with_event_delivery(
                     session_id,
                     ssh_connection,
                     self.event_tx.clone(),
@@ -191,7 +205,7 @@ impl ForwardingRegistry {
             self.port_profilers
                 .entry(connection_id.clone())
                 .or_insert_with(|| {
-                    Arc::new(PortDetectionProfiler::spawn(
+                    Arc::new(PortDetectionProfiler::spawn_with_event_delivery(
                         connection_id,
                         ssh_connection,
                         event_tx,

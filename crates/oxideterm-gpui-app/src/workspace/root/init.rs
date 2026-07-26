@@ -44,14 +44,20 @@ impl WorkspaceApp {
             )),
             ..ConnectionPoolConfig::default()
         });
+        let forwarding_delivery_wake = delivery::ActiveDeliveryWake::default();
         let (forwarding_event_tx, forwarding_event_rx) = std::sync::mpsc::channel();
+        let event_wake = forwarding_delivery_wake.clone();
+        let forwarding_event_tx = ForwardEventDeliverySender::with_wake(
+            forwarding_event_tx,
+            Arc::new(move || event_wake.mark()),
+        );
         let forwarding_registry = match SavedForwardStore::load(default_saved_forwards_path()) {
             Ok(store) => {
-                ForwardingRegistry::new_with_event_sender_and_store(forwarding_event_tx, store)
+                ForwardingRegistry::new_with_event_delivery_and_store(forwarding_event_tx, store)
             }
             Err(error) => {
                 eprintln!("failed to load saved forwards store: {error}");
-                ForwardingRegistry::new_with_event_sender(forwarding_event_tx)
+                ForwardingRegistry::new_with_event_delivery(forwarding_event_tx)
             }
         };
         // Mirror Tauri's split between SessionTree runtime state and NodeRouter:
@@ -64,7 +70,7 @@ impl WorkspaceApp {
         let (ssh_worker_tx, ssh_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake.clone());
         let (forwarding_worker_tx, forwarding_worker_rx) =
-            delivery::ActiveDeliverySender::channel();
+            delivery::ActiveDeliverySender::channel_with_wake(forwarding_delivery_wake);
         // Node state is a latest-value stream. Bound and coalesce its mailbox so
         // a suspended UI cannot retain an unbounded event backlog.
         let node_event_wake = delivery::ActiveDeliveryWake::default();
@@ -738,7 +744,7 @@ impl WorkspaceApp {
         workspace.schedule_connection_trace_delivery(cx);
         workspace.schedule_launcher_worker_delivery(cx);
         workspace.schedule_terminal_metadata_delivery(cx);
-        workspace.schedule_forwarding_worker_delivery(cx);
+        workspace.schedule_forwarding_delivery(cx);
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
@@ -759,7 +765,6 @@ impl WorkspaceApp {
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);
-                            workspace.poll_forwarding_events(cx);
                             workspace.sync_ssh_node_lifecycle(cx);
                             workspace.maybe_probe_active_ssh_connections(cx);
                             workspace.maybe_start_forwards_port_scan(cx);

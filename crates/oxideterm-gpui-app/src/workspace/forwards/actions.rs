@@ -556,7 +556,7 @@ impl WorkspaceApp {
         drain.outcome.backlog_remaining
     }
 
-    pub(in crate::workspace) fn poll_forwarding_events(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_forwarding_events(&mut self, cx: &mut Context<Self>) -> bool {
         let drain = delivery::drain_channel(
             &self.forwarding_event_rx,
             delivery::LIFECYCLE_DELIVERY_BUDGET,
@@ -645,12 +645,10 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
-        if drain.outcome.backlog_remaining {
-            self.schedule_forwarding_event_delivery_continuation(cx);
-        }
+        drain.outcome.backlog_remaining
     }
 
-    pub(in crate::workspace) fn schedule_forwarding_worker_delivery(&self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn schedule_forwarding_delivery(&self, cx: &mut Context<Self>) {
         let delivery_wake = self.forwarding_worker_tx.wake();
         let release_wake = delivery_wake.clone();
         cx.on_release(move |_, _| {
@@ -671,7 +669,9 @@ impl WorkspaceApp {
                 }
                 let backlog_remaining = weak
                     .update(cx, |workspace, cx| {
-                        workspace.poll_forwarding_worker_results(cx)
+                        let worker_backlog = workspace.poll_forwarding_worker_results(cx);
+                        let event_backlog = workspace.poll_forwarding_events(cx);
+                        worker_backlog || event_backlog
                     })
                     .unwrap_or(false);
                 if backlog_remaining {
@@ -681,16 +681,6 @@ impl WorkspaceApp {
                     break;
                 }
             }
-        })
-        .detach();
-    }
-
-    fn schedule_forwarding_event_delivery_continuation(&self, cx: &mut Context<Self>) {
-        // Preserve lifecycle delivery without extending the current UI-thread batch.
-        cx.spawn(async move |weak, cx| {
-            let _ = weak.update(cx, |workspace, cx| {
-                workspace.poll_forwarding_events(cx);
-            });
         })
         .detach();
     }

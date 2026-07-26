@@ -12,8 +12,8 @@ use dashmap::DashMap;
 use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
-    ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUpdate,
-    ForwardingError, PortDetectionSnapshot, PortDetectionTracker,
+    ForwardEvent, ForwardEventDeliverySender, ForwardRule, ForwardStats, ForwardStatus,
+    ForwardType, ForwardUpdate, ForwardingError, PortDetectionSnapshot, PortDetectionTracker,
     detection::{
         PORT_SCAN_MAX_OUTPUT_SIZE, PORT_SCAN_TIMEOUT_SECS, REMOTE_OS_PROBE_TIMEOUT_SECS,
         REMOTE_OS_PROBE_UNIX, REMOTE_OS_PROBE_WINDOWS, RemotePortScanPlatform,
@@ -26,7 +26,7 @@ use crate::{
 pub struct ForwardingManager {
     session_id: String,
     ssh_connection: Mutex<SshConnectionHandle>,
-    event_tx: Option<Sender<ForwardEvent>>,
+    event_tx: Option<ForwardEventDeliverySender>,
     remote_router: Arc<RemoteForwardRouter>,
     local_forwards: DashMap<String, LocalForward>,
     remote_forwards: DashMap<String, RemoteForward>,
@@ -45,6 +45,18 @@ impl ForwardingManager {
         session_id: impl Into<String>,
         ssh_connection: SshConnectionHandle,
         event_tx: Option<Sender<ForwardEvent>>,
+    ) -> Self {
+        Self::new_with_event_delivery(
+            session_id,
+            ssh_connection,
+            event_tx.map(ForwardEventDeliverySender::new),
+        )
+    }
+
+    pub fn new_with_event_delivery(
+        session_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+        event_tx: Option<ForwardEventDeliverySender>,
     ) -> Self {
         Self {
             session_id: session_id.into(),
