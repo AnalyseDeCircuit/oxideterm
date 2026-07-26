@@ -52,7 +52,7 @@ fn validate_proxy_chain_depth(chain: &[ProxyHopConfig]) -> Result<(), SshTranspo
     Ok(())
 }
 
-fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
+fn proxy_hop_handler(hop: &ProxyHopConfig) -> Result<NativeClientHandler, SshTransportError> {
     NativeClientHandler::new(
         hop.host.clone(),
         hop.port,
@@ -60,6 +60,8 @@ fn proxy_hop_handler(hop: &ProxyHopConfig) -> NativeClientHandler {
         hop.trust_host_key,
         hop.expected_host_key_fingerprint.clone(),
         hop.agent_forwarding,
+        hop.identity_agent.clone(),
+        hop.agent_forwarding_socket.clone(),
         Arc::new(RwLock::new(None)),
         Arc::new(RwLock::new(None)),
     )
@@ -80,6 +82,8 @@ async fn authenticate_proxy_hop(
         trust_host_key: hop.trust_host_key,
         expected_host_key_fingerprint: hop.expected_host_key_fingerprint.clone(),
         agent_forwarding: hop.agent_forwarding,
+        identity_agent: hop.identity_agent.clone(),
+        agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
         ..SshConfig::default()
     };
@@ -95,7 +99,6 @@ async fn authenticate_proxy_hop(
     .await
 }
 
-#[derive(Clone)]
 struct NativeClientHandler {
     host: String,
     port: u16,
@@ -103,7 +106,10 @@ struct NativeClientHandler {
     trust_host_key: Option<bool>,
     expected_host_key_fingerprint: Option<String>,
     agent_forwarding_requested: bool,
+    agent_forwarding_accepted: Arc<AtomicBool>,
+    agent_forwarding_endpoint: Option<SshAgentEndpoint>,
     agent_forward_semaphore: Arc<Semaphore>,
+    agent_forward_tasks: JoinSet<()>,
     remote_forward_handler: RemoteForwardHandlerSlot,
     x11_forward_handler: X11ForwardHandlerSlot,
     auth_banners: AuthBannerSink,
@@ -117,25 +123,44 @@ impl NativeClientHandler {
         trust_host_key: Option<bool>,
         expected_host_key_fingerprint: Option<String>,
         agent_forwarding_requested: bool,
+        identity_agent: Option<String>,
+        agent_forwarding_socket: Option<String>,
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, SshTransportError> {
+        let agent_forwarding_endpoint = if agent_forwarding_requested {
+            let endpoint = if let Some(forwarding_socket) = agent_forwarding_socket.as_deref() {
+                resolve_ssh_agent_forwarding_endpoint(Some(forwarding_socket))
+            } else {
+                resolve_ssh_agent_endpoint(identity_agent.as_deref())
+            };
+            Some(endpoint.map_err(SshTransportError::ConnectionFailed)?)
+        } else {
+            None
+        };
+        Ok(Self {
             host,
             port,
             strict,
             trust_host_key,
             expected_host_key_fingerprint,
             agent_forwarding_requested,
+            agent_forwarding_accepted: Arc::new(AtomicBool::new(false)),
+            agent_forwarding_endpoint,
             agent_forward_semaphore: Arc::new(Semaphore::new(16)),
+            agent_forward_tasks: JoinSet::new(),
             remote_forward_handler,
             x11_forward_handler,
             auth_banners: new_auth_banner_sink(),
-        }
+        })
     }
 
     fn auth_banners(&self) -> AuthBannerSink {
         self.auth_banners.clone()
+    }
+
+    fn agent_forwarding_acceptance(&self) -> Arc<AtomicBool> {
+        self.agent_forwarding_accepted.clone()
     }
 }
 
@@ -287,7 +312,9 @@ impl client::Handler for NativeClientHandler {
         channel: Channel<client::Msg>,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        if !self.agent_forwarding_requested {
+        if !self.agent_forwarding_requested
+            || !self.agent_forwarding_accepted.load(Ordering::Acquire)
+        {
             let _ = channel.eof().await;
             return Ok(());
         }
@@ -297,8 +324,12 @@ impl client::Handler for NativeClientHandler {
             return Ok(());
         };
 
-        tokio::spawn(async move {
-            handle_agent_forward_channel(channel).await;
+        let agent_forwarding_endpoint = self.agent_forwarding_endpoint.clone();
+        while self.agent_forward_tasks.try_join_next().is_some() {}
+        // The SSH handler owns relay tasks, so dropping the protocol session
+        // aborts every agent bridge instead of detaching them.
+        self.agent_forward_tasks.spawn(async move {
+            handle_agent_forward_channel(channel, agent_forwarding_endpoint.as_ref()).await;
             drop(permit);
         });
         Ok(())

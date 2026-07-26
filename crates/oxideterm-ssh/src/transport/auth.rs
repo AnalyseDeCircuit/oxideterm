@@ -590,7 +590,7 @@ async fn authenticate_agent(
     config: &SshConfig,
 ) -> AgentAuthenticationAttempt {
     let mut offered_public_keys = HashSet::new();
-    let mut agent = match connect_agent_client().await {
+    let mut agent = match connect_agent_client(config.identity_agent.as_deref()).await {
         Ok(agent) => agent,
         Err(_) => {
             return AgentAuthenticationAttempt {
@@ -628,7 +628,12 @@ async fn authenticate_agent(
     let mut publickey_exhausted = false;
     for (identity_index, identity) in identities.into_iter().enumerate() {
         let public_key = identity.public_key().into_owned();
-        offered_public_keys.insert(public_key.public_key_base64());
+        if matches!(&identity, AgentIdentity::PublicKey { .. }) {
+            // A certificate and its underlying public key are distinct SSH
+            // identities. Keep the plain key eligible for disk fallback when
+            // the agent only offered the certificate form.
+            offered_public_keys.insert(public_key.public_key_base64());
+        }
         let algorithms = auth_algorithm_attempt_order(
             matches!(public_key.algorithm(), Algorithm::Rsa { .. }),
             server_rsa_preference,
@@ -640,15 +645,31 @@ async fn authenticate_agent(
                 rsa_hash_algorithm = ?hash_alg,
                 "SSH agent authentication attempt"
             );
-            match handle
-                .authenticate_publickey_with(
-                    config.username.clone(),
-                    public_key.clone(),
-                    hash_alg,
-                    &mut AgentSigner { agent: &mut agent },
-                )
-                .await
-            {
+            let result = match &identity {
+                AgentIdentity::PublicKey { .. } => {
+                    handle
+                        .authenticate_publickey_with(
+                            config.username.clone(),
+                            public_key.clone(),
+                            hash_alg,
+                            &mut AgentSigner { agent: &mut agent },
+                        )
+                        .await
+                }
+                AgentIdentity::Certificate { certificate, .. } => {
+                    // Preserve certificate principals and the CA signature while
+                    // the agent retains ownership of the private signing key.
+                    handle
+                        .authenticate_certificate_with(
+                            config.username.clone(),
+                            certificate.clone(),
+                            hash_alg,
+                            &mut AgentSigner { agent: &mut agent },
+                        )
+                        .await
+                }
+            };
+            match result {
                 Ok(result) if result.success() => {
                     return AgentAuthenticationAttempt {
                         result: Some(client::AuthResult::Success),
@@ -689,29 +710,24 @@ async fn authenticate_agent(
     }
 }
 
-async fn connect_agent_client() -> Result<NativeAgentClient, String> {
+async fn connect_agent_client(configured_endpoint: Option<&str>) -> Result<NativeAgentClient, String> {
+    let endpoint = resolve_ssh_agent_endpoint(configured_endpoint)?;
     #[cfg(unix)]
     {
-        AgentClient::connect_env()
+        let SshAgentEndpoint::UnixSocket(socket_path) = endpoint;
+        AgentClient::connect_uds(socket_path)
             .await
             .map(|agent| agent.dynamic())
-            .map_err(|error| {
-                format!(
-                    "Failed to connect to SSH Agent: {error}. Make sure SSH_AUTH_SOCK is set and ssh-agent is running."
-                )
-            })
+            .map_err(|_| "Failed to connect to the configured SSH Agent".to_string())
     }
 
     #[cfg(windows)]
     {
-        AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent")
+        let SshAgentEndpoint::WindowsNamedPipe(pipe_name) = endpoint;
+        AgentClient::connect_named_pipe(pipe_name)
             .await
             .map(|agent| agent.dynamic())
-            .map_err(|error| {
-                format!(
-                    "Failed to connect to SSH Agent via named pipe: {error}. Make sure the OpenSSH Authentication Agent service is running."
-                )
-            })
+            .map_err(|_| "Failed to connect to SSH Agent via named pipe".to_string())
     }
 
     #[cfg(not(any(unix, windows)))]
@@ -779,8 +795,11 @@ mod private_key_auth_error_tests {
     }
 }
 
-async fn handle_agent_forward_channel(channel: Channel<client::Msg>) {
-    let agent_stream = match connect_agent_stream().await {
+async fn handle_agent_forward_channel(
+    channel: Channel<client::Msg>,
+    endpoint: Option<&SshAgentEndpoint>,
+) {
+    let agent_stream = match connect_agent_stream(endpoint).await {
         Ok(stream) => stream,
         Err(_) => {
             let _ = channel.eof().await;
@@ -799,25 +818,31 @@ async fn relay_agent_forward_channel(
 }
 
 #[cfg(unix)]
-async fn connect_agent_stream() -> Result<tokio::net::UnixStream, String> {
-    let socket_path =
-        std::env::var("SSH_AUTH_SOCK").map_err(|_| "SSH_AUTH_SOCK is not set".to_string())?;
-    tokio::net::UnixStream::connect(&socket_path)
+async fn connect_agent_stream(
+    endpoint: Option<&SshAgentEndpoint>,
+) -> Result<tokio::net::UnixStream, String> {
+    let Some(SshAgentEndpoint::UnixSocket(socket_path)) = endpoint else {
+        return Err("SSH agent forwarding socket is unavailable".to_string());
+    };
+    tokio::net::UnixStream::connect(socket_path)
         .await
-        .map_err(|error| format!("failed to connect to SSH agent socket {socket_path}: {error}"))
+        .map_err(|_| "failed to connect to SSH agent forwarding socket".to_string())
 }
 
 #[cfg(windows)]
-async fn connect_agent_stream() -> Result<tokio::net::windows::named_pipe::NamedPipeClient, String>
-{
+async fn connect_agent_stream(
+    endpoint: Option<&SshAgentEndpoint>,
+) -> Result<tokio::net::windows::named_pipe::NamedPipeClient, String> {
     use tokio::net::windows::named_pipe::ClientOptions;
-    let pipe_name = r"\\.\pipe\openssh-ssh-agent";
+    let Some(SshAgentEndpoint::WindowsNamedPipe(pipe_name)) = endpoint else {
+        return Err("SSH agent forwarding named pipe is unavailable".to_string());
+    };
     ClientOptions::new()
         .open(pipe_name)
-        .map_err(|error| format!("failed to connect to SSH agent named pipe {pipe_name}: {error}"))
+        .map_err(|_| "failed to connect to SSH agent forwarding named pipe".to_string())
 }
 
 #[cfg(not(any(unix, windows)))]
-async fn connect_agent_stream() -> Result<(), String> {
+async fn connect_agent_stream(_endpoint: Option<&SshAgentEndpoint>) -> Result<(), String> {
     Err("SSH agent forwarding is not supported on this platform".to_string())
 }

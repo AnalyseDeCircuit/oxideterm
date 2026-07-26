@@ -26,5 +26,8 @@ tracing.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
 [dev-dependencies]
 rand10.workspace = true

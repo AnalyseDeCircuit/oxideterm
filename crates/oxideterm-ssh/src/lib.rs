@@ -8,6 +8,7 @@
 //! and reconnect orchestration. The actual russh PTY transport plugs into this
 //! crate without leaking SSH state into GPUI views.
 
+mod agent_endpoint;
 mod capability;
 mod config;
 mod connection_registry;
@@ -21,6 +22,7 @@ mod session_tree_plan;
 mod transport;
 mod upstream_proxy;
 
+pub use agent_endpoint::ssh_agent_available;
 pub use capability::{
     SshAlgorithmOffer, SshCapabilityLayer, SshCapabilityLimitation, SshCapabilityReport,
     SshCapabilityStatus, SshIntegrationCapabilities, ssh_capability_report,

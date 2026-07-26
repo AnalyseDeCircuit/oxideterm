@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::HashSet, future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration,
+    collections::HashSet,
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
 
 use oxideterm_sftp::{SftpChannelOpener, SftpError, SftpExecChannelOpener};
@@ -26,6 +34,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::Semaphore,
     sync::mpsc,
+    task::JoinSet,
     time::{Instant, sleep_until, timeout},
 };
 use zeroize::Zeroizing;
@@ -33,6 +42,9 @@ use zeroize::Zeroizing;
 use crate::{
     AuthMethod, ConnectionConsumer, ConnectionState, ConnectionTransportStatus,
     KeepaliveProbeResult, ProxyHopConfig, SshConfig, SshConnectionHandle, SshConnectionRegistry,
+    agent_endpoint::{
+        SshAgentEndpoint, resolve_ssh_agent_endpoint, resolve_ssh_agent_forwarding_endpoint,
+    },
     host_key::{
         HostKeyStatus, HostKeyVerification, accept_host_key_for_session, check_host_key_via_stream,
         learn_host_key, public_key_fingerprint, verify_host_key,

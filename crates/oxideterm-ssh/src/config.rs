@@ -7,8 +7,36 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::upstream_proxy::UpstreamProxyConfig;
+use crate::{
+    agent_endpoint::{
+        ssh_agent_endpoint_pool_identity, ssh_agent_forwarding_endpoint_pool_identity,
+    },
+    upstream_proxy::UpstreamProxyConfig,
+};
 use oxideterm_x11_forwarding::X11SshRequest;
+
+fn agent_endpoint_key_suffix(label: &str, endpoint: Option<&str>) -> String {
+    let endpoint = ssh_agent_endpoint_pool_identity(endpoint);
+    // Agent endpoint paths can reveal local account layout, so pool identity
+    // retains only a one-way digest of the configured selector.
+    let digest = Sha256::digest(endpoint.as_bytes());
+    format!(":{label}={digest:x}")
+}
+
+fn agent_forwarding_endpoint_key_suffix(
+    label: &str,
+    forwarding_endpoint: Option<&str>,
+    identity_endpoint: Option<&str>,
+) -> String {
+    let endpoint = forwarding_endpoint.map_or_else(
+        || ssh_agent_endpoint_pool_identity(identity_endpoint),
+        |endpoint| ssh_agent_forwarding_endpoint_pool_identity(Some(endpoint)),
+    );
+    // ForwardAgent endpoint paths receive the same redaction as IdentityAgent
+    // while preserving their distinct OpenSSH option semantics.
+    let digest = Sha256::digest(endpoint.as_bytes());
+    format!(":{label}={digest:x}")
+}
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SshConfig {
@@ -37,6 +65,10 @@ pub struct SshConfig {
     pub expected_host_key_fingerprint: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
     #[serde(default, skip)]
@@ -66,6 +98,11 @@ impl fmt::Debug for SshConfig {
                 &self.expected_host_key_fingerprint,
             )
             .field("agent_forwarding", &self.agent_forwarding)
+            .field("identity_agent_configured", &self.identity_agent.is_some())
+            .field(
+                "agent_forwarding_socket_configured",
+                &self.agent_forwarding_socket.is_some(),
+            )
             .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
             .field("x11_forwarding", &self.x11_forwarding)
             .field("post_connect_command", &self.post_connect_command)
@@ -152,9 +189,35 @@ impl SshConfig {
                     } else {
                         ""
                     };
+                    let agent_forwarding_suffix = if hop.agent_forwarding {
+                        ":agent-forwarding"
+                    } else {
+                        ""
+                    };
+                    let identity_agent_suffix = hop
+                        .identity_agent
+                        .as_deref()
+                        .map_or_else(String::new, |endpoint| {
+                            agent_endpoint_key_suffix("identity-agent", Some(endpoint))
+                        });
+                    let forwarding_socket_suffix = if hop.agent_forwarding {
+                        agent_forwarding_endpoint_key_suffix(
+                            "forwarding-agent",
+                            hop.agent_forwarding_socket.as_deref(),
+                            hop.identity_agent.as_deref(),
+                        )
+                    } else {
+                        String::new()
+                    };
                     format!(
-                        "{}@{}:{}{}",
-                        hop.username, hop.host, hop.port, legacy_suffix
+                        "{}@{}:{}{}{}{}{}",
+                        hop.username,
+                        hop.host,
+                        hop.port,
+                        legacy_suffix,
+                        agent_forwarding_suffix,
+                        identity_agent_suffix,
+                        forwarding_socket_suffix
                     )
                 })
                 .collect::<Vec<_>>()
@@ -164,6 +227,26 @@ impl SshConfig {
             "|legacy_ssh=true"
         } else {
             ""
+        };
+        let agent_forwarding_key = if self.agent_forwarding {
+            "|agent_forwarding=true"
+        } else {
+            ""
+        };
+        let identity_agent_key = self
+            .identity_agent
+            .as_deref()
+            .map_or_else(String::new, |endpoint| {
+                agent_endpoint_key_suffix("identity_agent", Some(endpoint))
+            });
+        let agent_forwarding_socket_key = if self.agent_forwarding {
+            agent_forwarding_endpoint_key_suffix(
+                "agent_forwarding_socket",
+                self.agent_forwarding_socket.as_deref(),
+                self.identity_agent.as_deref(),
+            )
+        } else {
+            String::new()
         };
         let upstream_proxy_key = self
             .upstream_proxy
@@ -179,13 +262,16 @@ impl SshConfig {
             .as_ref()
             .map_or_else(String::new, ProxyCommandConfig::connection_key_suffix);
         format!(
-            "{}@{}:{}|{}{}{}{}",
+            "{}@{}:{}|{}{}{}{}{}{}{}",
             self.username,
             self.host,
             self.port,
             proxy_key,
             upstream_proxy_key,
             legacy_key,
+            agent_forwarding_key,
+            identity_agent_key,
+            agent_forwarding_socket_key,
             proxy_command_key
         )
     }
@@ -209,6 +295,10 @@ pub struct ProxyHopConfig {
     pub auth: AuthMethod,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
     #[serde(default = "default_proxy_strict_host_key_checking")]
@@ -382,6 +472,8 @@ impl Default for SshConfig {
             trust_host_key: None,
             expected_host_key_fingerprint: None,
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             x11_forwarding: None,
             post_connect_command: None,
@@ -447,6 +539,8 @@ mod tests {
                 username: "ops".to_string(),
                 auth: AuthMethod::Agent,
                 agent_forwarding: false,
+                identity_agent: None,
+                agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
                 strict_host_key_checking: true,
                 trust_host_key: None,
@@ -458,6 +552,8 @@ mod tests {
                 username: "root".to_string(),
                 auth: AuthMethod::Agent,
                 agent_forwarding: true,
+                identity_agent: None,
+                agent_forwarding_socket: None,
                 legacy_ssh_compatibility: true,
                 strict_host_key_checking: true,
                 trust_host_key: None,
@@ -465,10 +561,61 @@ mod tests {
             },
         ]);
 
-        assert_eq!(
-            config.connection_key(),
-            "app@target:22|ops@jump-a:2222>root@jump-b:22:legacy"
-        );
+        assert!(config.connection_key().starts_with(
+            "app@target:22|ops@jump-a:2222>root@jump-b:22:legacy:agent-forwarding:forwarding-agent="
+        ));
+    }
+
+    #[test]
+    fn connection_key_separates_target_and_proxy_agent_forwarding_policy() {
+        let mut config = SshConfig {
+            host: "target".to_string(),
+            username: "operator".to_string(),
+            auth: AuthMethod::Agent,
+            ..SshConfig::default()
+        };
+        let without_target_forwarding = config.connection_key();
+        config.agent_forwarding = true;
+        let with_target_forwarding = config.connection_key();
+        assert_ne!(without_target_forwarding, with_target_forwarding);
+
+        config.agent_forwarding = false;
+        config.proxy_chain = Some(vec![ProxyHopConfig {
+            host: "jump".to_string(),
+            port: 22,
+            username: "operator".to_string(),
+            auth: AuthMethod::Agent,
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+            strict_host_key_checking: true,
+            trust_host_key: None,
+            expected_host_key_fingerprint: None,
+        }]);
+        let without_proxy_forwarding = config.connection_key();
+        config.proxy_chain.as_mut().unwrap()[0].agent_forwarding = true;
+        let with_proxy_forwarding = config.connection_key();
+        assert_ne!(without_proxy_forwarding, with_proxy_forwarding);
+    }
+
+    #[test]
+    fn connection_key_redacts_agent_endpoint_paths() {
+        let private_endpoint = "/Users/private-account/.ssh/agent.sock";
+        let config = SshConfig {
+            host: "target".to_string(),
+            username: "operator".to_string(),
+            auth: AuthMethod::Agent,
+            agent_forwarding: true,
+            identity_agent: Some(private_endpoint.to_string()),
+            ..SshConfig::default()
+        };
+
+        let key = config.connection_key();
+
+        assert!(!key.contains(private_endpoint));
+        assert!(key.contains("identity_agent="));
+        assert!(key.contains("agent_forwarding_socket="));
     }
 
     #[test]
@@ -494,6 +641,8 @@ mod tests {
             username: "operator".to_string(),
             auth: AuthMethod::password("proxy-password"),
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             strict_host_key_checking: false,
             trust_host_key: None,

@@ -4,6 +4,7 @@ struct PooledSshConnection {
     remote_forward_handler: RemoteForwardHandlerSlot,
     x11_forward_handler: X11ForwardHandlerSlot,
     auth_banners: AuthBannerSink,
+    agent_forwarding_accepted: Arc<AtomicBool>,
 }
 
 fn append_limited_command_output(
@@ -34,6 +35,7 @@ impl PooledSshConnection {
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
         auth_banners: AuthBannerSink,
+        agent_forwarding_accepted: Arc<AtomicBool>,
     ) -> Self {
         Self {
             target: handle,
@@ -41,6 +43,7 @@ impl PooledSshConnection {
             remote_forward_handler,
             x11_forward_handler,
             auth_banners,
+            agent_forwarding_accepted,
         }
     }
 
@@ -50,6 +53,7 @@ impl PooledSshConnection {
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
         auth_banners: AuthBannerSink,
+        agent_forwarding_accepted: Arc<AtomicBool>,
     ) -> Self {
         Self {
             target,
@@ -57,6 +61,7 @@ impl PooledSshConnection {
             remote_forward_handler,
             x11_forward_handler,
             auth_banners,
+            agent_forwarding_accepted,
         }
     }
 

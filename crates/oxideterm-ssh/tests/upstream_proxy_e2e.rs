@@ -320,6 +320,8 @@ LogLevel VERBOSE
             username: self.username.clone(),
             auth: AuthMethod::key(self.client_key.display().to_string(), None),
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             strict_host_key_checking: false,
             trust_host_key: Some(false),
