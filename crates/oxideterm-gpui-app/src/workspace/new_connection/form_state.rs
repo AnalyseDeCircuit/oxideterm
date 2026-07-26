@@ -431,6 +431,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) managed_key_id: String,
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
+    pub(in crate::workspace) passphrase_visible: bool,
     pub(in crate::workspace) save_password: bool,
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) post_connect_command: String,
@@ -500,6 +501,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("managed_key_id", &self.managed_key_id)
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
+            .field("passphrase_visible", &self.passphrase_visible)
             .field("save_password", &self.save_password)
             .field("group", &self.group)
             .field("post_connect_command", &self.post_connect_command)
@@ -567,6 +569,7 @@ impl Default for NewConnectionForm {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: String::new(),
+            passphrase_visible: false,
             save_password: false,
             group: String::new(),
             post_connect_command: String::new(),
@@ -631,6 +634,36 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
         group: profile.group.clone().unwrap_or(ungrouped_label),
         focused_field: NewConnectionField::Name,
         ..NewConnectionForm::default()
+    }
+}
+
+/// Returns the presentation-only visibility state for primary credential fields.
+pub(in crate::workspace) fn connection_secret_field_visible(
+    form: &NewConnectionForm,
+    field: NewConnectionField,
+) -> Option<bool> {
+    match field {
+        NewConnectionField::Password => Some(form.password_visible),
+        NewConnectionField::Passphrase => Some(form.passphrase_visible),
+        _ => None,
+    }
+}
+
+/// Toggles visibility without changing or copying the underlying secret draft.
+pub(in crate::workspace) fn toggle_connection_secret_field_visibility(
+    form: &mut NewConnectionForm,
+    field: NewConnectionField,
+) -> bool {
+    match field {
+        NewConnectionField::Password => {
+            form.password_visible = !form.password_visible;
+            true
+        }
+        NewConnectionField::Passphrase => {
+            form.passphrase_visible = !form.passphrase_visible;
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1139,11 +1172,13 @@ mod tests {
         SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
         VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
-        backspace_current_connection_field, default_auth_tab_for_family,
-        form_from_remote_desktop_profile, insert_text_into_current_connection_field,
-        key_source_from_tab, new_connection_form_mode, next_connection_field,
-        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
-        select_current_connection_field, text_from_keystroke, toggle_remote_desktop_feature,
+        backspace_current_connection_field, connection_secret_field_visible,
+        default_auth_tab_for_family, form_from_remote_desktop_profile,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, remote_desktop_feature_supported,
+        remote_desktop_vnc_preference_selected, select_current_connection_field,
+        text_from_keystroke, toggle_connection_secret_field_visibility,
+        toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1152,6 +1187,61 @@ mod tests {
             key: key.to_string(),
             key_char: key_char.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn primary_secret_visibility_is_hidden_and_toggles_independently() {
+        let mut form = NewConnectionForm::default();
+
+        assert_eq!(
+            connection_secret_field_visible(&form, NewConnectionField::Password),
+            Some(false)
+        );
+        assert_eq!(
+            connection_secret_field_visible(&form, NewConnectionField::Passphrase),
+            Some(false)
+        );
+        assert!(toggle_connection_secret_field_visibility(
+            &mut form,
+            NewConnectionField::Password
+        ));
+        assert_eq!(
+            connection_secret_field_visible(&form, NewConnectionField::Password),
+            Some(true)
+        );
+        assert_eq!(
+            connection_secret_field_visible(&form, NewConnectionField::Passphrase),
+            Some(false)
+        );
+        assert!(toggle_connection_secret_field_visibility(
+            &mut form,
+            NewConnectionField::Passphrase
+        ));
+        assert_eq!(
+            connection_secret_field_visible(&form, NewConnectionField::Passphrase),
+            Some(true)
+        );
+        assert!(!toggle_connection_secret_field_visibility(
+            &mut form,
+            NewConnectionField::Host
+        ));
+    }
+
+    #[test]
+    fn visible_secret_drafts_remain_redacted_from_debug_output() {
+        let form = NewConnectionForm {
+            password: "password-value".to_string(),
+            password_visible: true,
+            passphrase: "passphrase-value".to_string(),
+            passphrase_visible: true,
+            ..NewConnectionForm::default()
+        };
+
+        let debug_output = format!("{form:?}");
+
+        assert!(!debug_output.contains("password-value"));
+        assert!(!debug_output.contains("passphrase-value"));
+        assert!(debug_output.contains("[redacted secret]"));
     }
 
     #[test]

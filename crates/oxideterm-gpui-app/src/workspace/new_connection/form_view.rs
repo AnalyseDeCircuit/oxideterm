@@ -14,12 +14,13 @@ use super::{
         TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference,
         apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
         auth_tab_from_key_source, backspace_current_connection_field, clear_connection_selection,
-        clear_current_connection_field, connection_field_is_selected, current_connection_field,
-        default_auth_tab_for_family, insert_text_into_current_connection_field,
-        key_source_from_tab, new_connection_form_mode, next_connection_field,
-        next_jump_connection_field, remote_desktop_feature_selected,
+        clear_current_connection_field, connection_field_is_selected,
+        connection_secret_field_visible, current_connection_field, default_auth_tab_for_family,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, next_jump_connection_field, remote_desktop_feature_selected,
         remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
-        select_current_connection_field, text_from_keystroke, toggle_remote_desktop_feature,
+        select_current_connection_field, text_from_keystroke,
+        toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
     },
     ssh_flow::SshConnectionIntent,
 };
@@ -66,9 +67,9 @@ const TAURI_EDIT_COLOR_FALLBACK: u32 = 0x22d3ee;
 const TAURI_EDIT_COLOR_FALLBACK_TEXT: &str = "#22d3ee";
 const TAURI_PROMPT_ERROR_ALPHA: u32 = 0x1a; // Tailwind red-500/10
 const TAURI_PROMPT_ERROR_BORDER_ALPHA: u32 = 0x80; // Tailwind red-500/50
-const TAURI_PASSWORD_ICON_BUTTON_SIZE: f32 = 28.0; // Tauri h-7 w-7
-const TAURI_PASSWORD_ICON_BUTTON_OFFSET: f32 = 4.0; // Tauri right-1 top-1
-const TAURI_PASSWORD_ICON_SIZE: f32 = 16.0; // Tauri h-4 w-4
+const SECRET_VISIBILITY_BUTTON_SIZE: f32 = 28.0;
+const SECRET_VISIBILITY_BUTTON_OFFSET: f32 = 4.0;
+const SECRET_VISIBILITY_ICON_SIZE: f32 = 16.0;
 const TAURI_JUMP_MODAL_WIDTH: f32 = 425.0; // Tauri sm:max-w-[425px]
 const TAURI_DRILL_DOWN_MODAL_WIDTH: f32 = 480.0; // Tauri DrillDownDialog sm:max-w-[480px]
 const TAURI_PROXY_CHAIN_MAX_HEIGHT: f32 = 250.0; // Tauri max-h-[250px]

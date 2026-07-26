@@ -297,11 +297,58 @@ impl WorkspaceApp {
         secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        form_field(
-            &self.tokens,
-            label,
-            self.render_connection_input(value, placeholder, field, secret, cx),
-        )
+        let secret_visible = self
+            .new_connection_form
+            .as_ref()
+            .and_then(|form| connection_secret_field_visible(form, field));
+        let input = self.render_connection_input(
+            value,
+            placeholder,
+            field,
+            secret && !secret_visible.unwrap_or(false),
+            cx,
+        );
+        let control = if secret && let Some(visible) = secret_visible {
+            let icon = if visible {
+                LucideIcon::EyeOff
+            } else {
+                LucideIcon::Eye
+            };
+            div()
+                .relative()
+                .child(input)
+                .child(
+                    self.workspace_icon_action_button(
+                        icon,
+                        SECRET_VISIBILITY_ICON_SIZE,
+                        rgb(self.tokens.ui.text_muted),
+                        IconButtonOptions {
+                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                            ..IconButtonOptions::opaque_toolbar(
+                                SECRET_VISIBILITY_BUTTON_SIZE,
+                                ButtonRadius::Sm,
+                            )
+                        },
+                        move |this, _event, _window, cx| {
+                            if let Some(form) = this.new_connection_form.as_mut()
+                                && toggle_connection_secret_field_visibility(form, field)
+                            {
+                                cx.notify();
+                            }
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    )
+                    .absolute()
+                    .right(px(SECRET_VISIBILITY_BUTTON_OFFSET))
+                    .top(px(SECRET_VISIBILITY_BUTTON_OFFSET)),
+                )
+                .into_any_element()
+        } else {
+            input
+        };
+
+        form_field(&self.tokens, label, control)
     }
 
     pub(super) fn render_edit_saved_password_field(
@@ -341,14 +388,14 @@ impl WorkspaceApp {
                             &self.tokens,
                             self.render_loading_icon(
                                 "saved-password-loading",
-                                TAURI_PASSWORD_ICON_SIZE,
+                                SECRET_VISIBILITY_ICON_SIZE,
                                 rgb(self.tokens.ui.text_muted),
                             ),
                             IconButtonOptions {
                                 loading: true,
                                 hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
                                 ..IconButtonOptions::opaque_toolbar(
-                                    TAURI_PASSWORD_ICON_BUTTON_SIZE,
+                                    SECRET_VISIBILITY_BUTTON_SIZE,
                                     ButtonRadius::Sm,
                                 )
                             },
@@ -362,14 +409,12 @@ impl WorkspaceApp {
                     } else {
                         self.workspace_icon_action_button(
                             icon,
-                            TAURI_PASSWORD_ICON_SIZE,
+                            SECRET_VISIBILITY_ICON_SIZE,
                             rgb(self.tokens.ui.text_muted),
                             IconButtonOptions {
                                 hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                                // Tauri places the reveal affordance inside the
-                                // password input as an icon-only toolbar button.
                                 ..IconButtonOptions::opaque_toolbar(
-                                    TAURI_PASSWORD_ICON_BUTTON_SIZE,
+                                    SECRET_VISIBILITY_BUTTON_SIZE,
                                     ButtonRadius::Sm,
                                 )
                             },
@@ -381,8 +426,8 @@ impl WorkspaceApp {
                         )
                     }
                     .absolute()
-                    .right(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET))
-                    .top(px(TAURI_PASSWORD_ICON_BUTTON_OFFSET)),
+                    .right(px(SECRET_VISIBILITY_BUTTON_OFFSET))
+                    .top(px(SECRET_VISIBILITY_BUTTON_OFFSET)),
                 ),
         )
     }
