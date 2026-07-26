@@ -34,8 +34,9 @@ impl X11Display {
             physical_bounds: Bounds {
                 origin: Default::default(),
                 size: Size {
-                    width: screen.width_in_pixels.into(),
-                    height: screen.height_in_pixels.into(),
+                    // X11 screen dimensions are u16, so widen them before converting to device pixels.
+                    width: u32::from(screen.width_in_pixels).into(),
+                    height: u32::from(screen.height_in_pixels).into(),
                 },
             },
             bounds: Bounds {
