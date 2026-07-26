@@ -366,12 +366,42 @@ pub(super) struct HostLogSnapshotRequest {
     pub(super) preset: LogPreset,
     pub(super) limit: usize,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostLogSnapshotDelivery {
     pub(super) request: HostLogSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostLogsState {
+    pub(super) expanded_index: Option<usize>,
+    pub(super) preset: LogPreset,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceLogSnapshot>,
+    pub(super) running: Option<HostLogSnapshotRequest>,
+    pub(super) polling: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostLogsState {
+    pub(super) fn new() -> Self {
+        Self {
+            expanded_index: None,
+            preset: LogPreset::All,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            polling: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -620,16 +650,6 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_service_logs_polling: bool,
     pub(in crate::workspace) host_log_search_query: String,
     pub(in crate::workspace) host_log_search_focused: bool,
-    pub(in crate::workspace) host_log_expanded_index: Option<usize>,
-    pub(super) host_log_preset: LogPreset,
-    pub(super) host_log_snapshot_connection_id: Option<String>,
-    pub(super) host_log_snapshot: Option<ResourceLogSnapshot>,
-    pub(super) host_log_snapshot_rx: Option<std::sync::mpsc::Receiver<HostLogSnapshotDelivery>>,
-    pub(super) host_log_snapshot_running: Option<HostLogSnapshotRequest>,
-    pub(super) host_log_snapshot_polling: bool,
-    pub(super) host_log_last_error: Option<String>,
-    pub(super) host_log_list_state: ListState,
-    pub(super) host_log_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_tmux_search_query: String,
     pub(in crate::workspace) host_tmux_search_focused: bool,
     pub(in crate::workspace) host_tmux_expanded_session_id: Option<String>,
@@ -773,20 +793,6 @@ impl ConnectionMonitorState {
             host_service_logs_polling: false,
             host_log_search_query: String::new(),
             host_log_search_focused: false,
-            host_log_expanded_index: None,
-            host_log_preset: LogPreset::All,
-            host_log_snapshot_connection_id: None,
-            host_log_snapshot: None,
-            host_log_snapshot_rx: None,
-            host_log_snapshot_running: None,
-            host_log_snapshot_polling: false,
-            host_log_last_error: None,
-            host_log_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_log_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_tmux_search_query: String::new(),
             host_tmux_search_focused: false,
             host_tmux_expanded_session_id: None,

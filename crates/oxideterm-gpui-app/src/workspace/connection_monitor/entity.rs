@@ -13,7 +13,16 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) sampler_delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
     pub(super) sampler_delivery_rx:
         std::sync::mpsc::Receiver<super::delivery::HostToolsSamplerDelivery>,
+    // Reliable user-action results have their own wake and budget so sampler
+    // traffic cannot delay a completed Host Tools operation.
+    pub(super) reliable_delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
+    pub(super) reliable_delivery_tx: crate::workspace::delivery::ActiveDeliverySender<
+        super::delivery::HostToolsReliableDelivery,
+    >,
+    pub(super) reliable_delivery_rx:
+        std::sync::mpsc::Receiver<super::delivery::HostToolsReliableDelivery>,
     pub(super) host_gpu: HostGpuViewState,
+    pub(super) host_logs: HostLogsState,
     pub(in crate::workspace) active_runtime_section: ConnectionRuntimeSection,
     pub(in crate::workspace) previous_runtime_section: ConnectionRuntimeSection,
     selected_connection_id: Option<String>,
@@ -55,13 +64,22 @@ impl HostToolsEntity {
                 sampler_delivery_wake.clone(),
             );
         let (gpu_update_tx, gpu_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let reliable_delivery_wake = crate::workspace::delivery::ActiveDeliveryWake::default();
+        let (reliable_delivery_tx, reliable_delivery_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                reliable_delivery_wake.clone(),
+            );
         let entity = Self {
             ssh_registry,
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
             sampler_delivery_wake,
             sampler_delivery_rx,
+            reliable_delivery_wake,
+            reliable_delivery_tx,
+            reliable_delivery_rx,
             host_gpu: HostGpuViewState::new(gpu_update_tx),
+            host_logs: HostLogsState::new(),
             active_runtime_section: ConnectionRuntimeSection::Overview,
             previous_runtime_section: ConnectionRuntimeSection::Overview,
             selected_connection_id: None,
@@ -111,6 +129,7 @@ impl HostToolsEntity {
             },
             cx,
         );
+        entity.schedule_reliable_delivery(cx);
         entity
     }
 
@@ -168,6 +187,41 @@ impl HostToolsEntity {
             monitor_connection_label(left).cmp(&monitor_connection_label(right))
         });
         connections
+    }
+
+    pub(super) fn log_connection_os_type(&self, connection_id: &str) -> Option<String> {
+        self.ssh_registry.get(connection_id).map(|handle| {
+            handle
+                .remote_env()
+                .map(|environment| environment.os_type)
+                .unwrap_or_else(|| "Unknown".to_string())
+        })
+    }
+
+    pub(super) fn spawn_log_snapshot_capture(
+        &self,
+        command: String,
+        request: HostLogSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> bool {
+        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+            return false;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Only the generated log command crosses the task boundary. The
+        // registry-owned handle keeps credentials and node lifetime private.
+        runtime.spawn(async move {
+            let result = handle
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::LogSnapshot(
+                HostLogSnapshotDelivery { request, result },
+            ));
+        });
+        true
     }
 
     pub(super) fn compact_monitor_list_state(&self) -> ListState {
@@ -587,6 +641,7 @@ impl HostToolsEntity {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use oxideterm_ssh::SshCommandOutput;
 
     #[gpui::test]
     fn runtime_navigation_transition_is_entity_owned(cx: &mut TestAppContext) {
@@ -780,5 +835,65 @@ mod tests {
                 connection_id: "connection-1".to_string(),
             }
         );
+    }
+
+    #[gpui::test]
+    fn log_snapshot_delivery_is_entity_owned_and_redacted(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let request = HostLogSnapshotRequest {
+            connection_id: "connection-1".to_string(),
+            preset: LogPreset::All,
+            limit: HOST_LOG_SNAPSHOT_LIMIT,
+            feedback: HostSnapshotFeedback::Toast,
+            failure_fallback: "Log capture failed".to_string(),
+        };
+        let sender = entity.update(cx, |entity, _cx| {
+            entity.host_logs.running = Some(request.clone());
+            entity.host_logs.polling = true;
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "Bearer should-not-reach-ui";
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::LogSnapshot(
+                HostLogSnapshotDelivery {
+                    request,
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(!entity.host_logs.polling);
+            let snapshot = entity.host_logs.snapshot.as_ref().unwrap();
+            assert_eq!(
+                snapshot.status,
+                ResourceLogStatus::Error {
+                    message: "Log capture failed".to_string(),
+                }
+            );
+            assert!(!format!("{:?}", snapshot.status).contains(secret_marker));
+        });
+        let notice = events.try_recv().unwrap();
+        assert_eq!(
+            notice,
+            HostToolsEvent::ShowNotice(HostToolsNotice::LogSnapshotFailed)
+        );
+        assert!(!format!("{notice:?}").contains(secret_marker));
     }
 }

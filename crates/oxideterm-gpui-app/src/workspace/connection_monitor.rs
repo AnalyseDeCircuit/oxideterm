@@ -17,5 +17,5 @@ use helpers::*;
 use types::*;
 
 pub(super) use entity::HostToolsEntity;
-pub(super) use events::HostToolsEvent;
+pub(super) use events::{HostToolsEvent, HostToolsNotice};
 pub(super) use types::{ConnectionMonitorState, ConnectionRuntimeSection};

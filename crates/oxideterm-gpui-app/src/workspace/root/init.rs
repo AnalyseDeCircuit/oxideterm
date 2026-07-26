@@ -110,6 +110,9 @@ impl WorkspaceApp {
                 HostToolsEvent::RefreshProfiler { connection_id } => {
                     workspace.start_connection_monitor_profiler(connection_id.clone(), cx);
                 }
+                HostToolsEvent::ShowNotice(notice) => {
+                    workspace.push_host_tools_notice(notice.clone());
+                }
             },
         );
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());

@@ -1,11 +1,17 @@
 use super::*;
 use crate::workspace::delivery as workspace_delivery;
 
-const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 15;
+const HOST_TOOLS_RESULT_RECEIVER_COUNT: usize = 14;
 
 pub(super) enum HostToolsSamplerDelivery {
     ProfilerUpdated,
     GpuUpdated(GpuUpdate),
+}
+
+pub(super) enum HostToolsReliableDelivery {
+    // Command output stays inside the Entity-owned delivery queue and never
+    // crosses the typed GPUI event boundary or a Debug formatter.
+    LogSnapshot(HostLogSnapshotDelivery),
 }
 
 pub(in crate::workspace) struct HostToolsDeliveryBridges {
@@ -127,6 +133,53 @@ impl HostToolsEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    pub(super) fn schedule_reliable_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.reliable_delivery_wake.clone();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Page results outlive visibility changes but stop with the Entity.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let backlog_remaining = weak
+                    .update(cx, |entity, cx| entity.poll_reliable_deliveries(cx))
+                    .unwrap_or(false);
+                if backlog_remaining {
+                    delivery_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn poll_reliable_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = workspace_delivery::drain_channel(
+            &self.reliable_delivery_rx,
+            workspace_delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        for delivery in drain.items {
+            match delivery {
+                HostToolsReliableDelivery::LogSnapshot(delivery) => {
+                    self.finish_host_logs_snapshot(delivery, cx);
+                }
+            }
+        }
+        drain.outcome.backlog_remaining
+    }
 }
 
 impl WorkspaceApp {
@@ -179,15 +232,14 @@ impl WorkspaceApp {
                 3 => self.poll_host_service_action_results(cx),
                 4 => self.poll_host_service_snapshot_results(cx),
                 5 => self.poll_host_service_logs_results(cx),
-                6 => self.poll_host_logs_snapshot_results(cx),
-                7 => self.poll_host_tmux_snapshot_results(cx),
-                8 => self.poll_host_tmux_action_results(cx),
-                9 => self.poll_host_ports_snapshot_results(cx),
-                10 => self.poll_host_schedules_snapshot_results(cx),
-                11 => self.poll_host_filesystems_snapshot_results(cx),
-                12 => self.poll_host_packages_snapshot_results(cx),
-                13 => self.poll_host_schedule_logs_results(cx),
-                14 => self.poll_host_schedule_action_results(cx),
+                6 => self.poll_host_tmux_snapshot_results(cx),
+                7 => self.poll_host_tmux_action_results(cx),
+                8 => self.poll_host_ports_snapshot_results(cx),
+                9 => self.poll_host_schedules_snapshot_results(cx),
+                10 => self.poll_host_filesystems_snapshot_results(cx),
+                11 => self.poll_host_packages_snapshot_results(cx),
+                12 => self.poll_host_schedule_logs_results(cx),
+                13 => self.poll_host_schedule_action_results(cx),
                 _ => unreachable!("Host Tools delivery cursor must stay within receiver count"),
             }
             self.connection_monitor.delivery_cursor =

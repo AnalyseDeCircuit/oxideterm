@@ -19,29 +19,23 @@ impl WorkspaceApp {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_log_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_log_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.host_tools.read(cx).log_snapshot_for(selected_id);
+        let preset = self.host_tools.read(cx).log_preset();
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_log_rows(
                     &snapshot.entries,
                     &self.connection_monitor.host_log_search_query,
-                    self.connection_monitor.host_log_preset,
+                    preset,
                 )
             })
             .unwrap_or_default();
         let status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_log_list_state(&rows, selected_id);
+        self.sync_host_log_list_state(&rows, selected_id, cx);
 
         div()
             .id("host-logs-panel")
@@ -68,7 +62,7 @@ impl WorkspaceApp {
                     .child(self.render_connection_switcher_row(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_log_snapshot_polling,
+                        !self.host_tools.read(cx).log_snapshot_polling(),
                         cx,
                     ))
                     .child(self.render_host_log_search(cx))
@@ -82,7 +76,7 @@ impl WorkspaceApp {
             )
             .child(self.render_host_log_list(
                 rows,
-                self.connection_monitor.host_log_snapshot_polling,
+                self.host_tools.read(cx).log_snapshot_polling(),
                 status,
                 selected_id,
                 cx,
@@ -167,15 +161,16 @@ impl WorkspaceApp {
         preset: LogPreset,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_log_preset == preset;
+        let active = self.host_tools.read(cx).log_preset() == preset;
         self.host_tools_filter_chip(active)
             .child(self.i18n.t(log_preset_label_key(preset)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_log_preset != preset {
-                        this.connection_monitor.host_log_preset = preset;
-                        this.connection_monitor.host_log_expanded_index = None;
+                    let host_tools = this.host_tools.clone();
+                    if host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_log_preset(preset, cx)
+                    }) {
                         this.request_host_logs_snapshot_for_selected_connection(cx);
                     }
                     cx.stop_propagation();
@@ -257,7 +252,7 @@ impl WorkspaceApp {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.connection_monitor.host_log_snapshot_polling,
+                            disabled: self.host_tools.read(cx).log_snapshot_polling(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -331,7 +326,7 @@ impl WorkspaceApp {
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_log_list_state.clone();
+        let state = self.host_tools.read(cx).log_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8);
         let workspace = cx.entity();
         let show_context_columns = self.ai.chat.sidebar_width >= HOST_LOG_CONTEXT_COLUMNS_MIN_WIDTH;
@@ -436,7 +431,7 @@ impl WorkspaceApp {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_log_expanded_index == Some(index);
+        let expanded = self.host_tools.read(cx).log_expanded_index() == Some(index);
         let theme = self.tokens.ui;
         let mono_font = settings_mono_font_family(self.settings_store.settings());
         let level_label = self.i18n.t(log_level_label_key(&entry.level));
@@ -533,12 +528,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_log_expanded_index == Some(index) {
-                        this.connection_monitor.host_log_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_log_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.toggle_log_expanded(index, cx);
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -591,50 +583,25 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn sync_host_log_list_state(&self, rows: &[ResourceLogEntry], selected_id: &str) {
+    pub(super) fn sync_host_log_list_state(
+        &self,
+        rows: &[ResourceLogEntry],
+        selected_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let signatures = rows.iter().map(log_row_signature).collect::<Vec<_>>();
         let identity = format!(
             "host-logs:{selected_id}:{}:{}:{}",
             self.connection_monitor.host_log_search_query,
-            self.connection_monitor.host_log_preset as u8,
-            self.connection_monitor
-                .host_log_expanded_index
+            self.host_tools.read(cx).log_preset() as u8,
+            self.host_tools
+                .read(cx)
+                .log_expanded_index()
                 .unwrap_or(usize::MAX)
         );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_log_list_state,
-            &mut self.connection_monitor.host_log_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
-    }
-
-    pub(super) fn host_log_snapshot_command(
-        &self,
-        connection_id: &str,
-        preset: LogPreset,
-        limit: usize,
-    ) -> Result<(oxideterm_connection_monitor::LogCaptureCommand, String), String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_log_snapshot_command(&os_type, preset, limit).map(|command| (command, os_type))
-    }
-
-    pub(super) fn host_log_follow_command(
-        &self,
-        connection_id: &str,
-        preset: LogPreset,
-    ) -> Result<(oxideterm_connection_monitor::LogCaptureCommand, String), String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_log_follow_command(&os_type, preset).map(|command| (command, os_type))
+        self.host_tools
+            .read(cx)
+            .sync_log_list_signatures(&identity, &signatures);
     }
 
     pub(in crate::workspace) fn handle_host_log_search_key(
@@ -681,79 +648,22 @@ impl WorkspaceApp {
         feedback: HostSnapshotFeedback,
         cx: &mut Context<Self>,
     ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Logs) {
-            return;
-        }
-        if self.connection_monitor.host_log_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_log_toast(
-                    self.i18n
-                        .t("sidebar.host_logs.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
-        }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_log_toast(
-                    self.i18n.t("sidebar.host_logs.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
-        };
-        let preset = self.connection_monitor.host_log_preset;
-        let (command, os_type) =
-            match self.host_log_snapshot_command(&connection_id, preset, HOST_LOG_SNAPSHOT_LIMIT) {
-                Ok(command) => command,
-                Err(error) => {
-                    if feedback.should_toast() {
-                        self.push_host_log_toast(error, TerminalNoticeVariant::Error);
-                    }
-                    cx.notify();
-                    return;
-                }
-            };
-        if feedback.should_toast() && command.capability == LogCommandCapability::Partial {
-            self.push_host_log_toast(
-                self.i18n_replace(
-                    "sidebar.host_logs.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
-        }
-
-        let request = HostLogSnapshotRequest {
-            connection_id: connection_id.clone(),
-            preset,
-            limit: HOST_LOG_SNAPSHOT_LIMIT,
-            feedback,
-        };
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.connection_monitor.delivery_wake.clone(),
-        );
-        self.connection_monitor.host_log_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_log_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_log_snapshot_rx = Some(rx);
-        self.connection_monitor.host_log_snapshot_polling = true;
-        self.connection_monitor.host_log_last_error = None;
-        // Host logs are intentionally snapshot-driven. Do not join the profiler
-        // refresh loop; journal/log commands are too expensive for high-frequency polling.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_LOG_SNAPSHOT_TIMEOUT,
-                    HOST_LOG_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostLogSnapshotDelivery { request, result });
+        let monitoring_enabled = self.host_tool_monitoring_enabled(ContextSidebarTool::Logs);
+        let runtime = self.forwarding_runtime.handle().clone();
+        let failure_fallback = self.i18n.t("sidebar.host_logs.toast.unknown_error");
+        let notices = self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_log_snapshot(
+                connection_id,
+                feedback,
+                monitoring_enabled,
+                runtime,
+                failure_fallback,
+                cx,
+            )
         });
-        cx.notify();
+        for notice in notices {
+            self.push_host_tools_notice(notice);
+        }
     }
 
     pub(super) fn open_host_logs_follow_terminal(
@@ -762,8 +672,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let preset = self.connection_monitor.host_log_preset;
-        let (command, os_type) = match self.host_log_follow_command(&connection_id, preset) {
+        let preset = self.host_tools.read(cx).log_preset();
+        let (command, os_type) = match self
+            .host_tools
+            .read(cx)
+            .prepare_log_follow_command(&connection_id)
+        {
             Ok(command) => command,
             Err(error) => {
                 self.push_host_log_toast(error, TerminalNoticeVariant::Error);
@@ -841,165 +755,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_host_logs_snapshot_results(&mut self, cx: &mut Context<Self>) {
-        if !self.connection_monitor.host_log_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_log_snapshot_rx.take() else {
-            self.connection_monitor.host_log_snapshot_polling = false;
-            self.connection_monitor.host_log_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_logs_snapshot(delivery, cx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_log_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_log_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_log_snapshot_polling = false;
-                self.connection_monitor.host_log_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_logs.toast.unknown_error");
-                self.connection_monitor.host_log_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_log_toast(
-                        self.i18n_replace(
-                            "sidebar.host_logs.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_logs_snapshot(
-        &mut self,
-        delivery: HostLogSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_log_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
-            return;
-        }
-        let feedback = delivery.request.feedback;
-        self.connection_monitor.host_log_snapshot_polling = false;
-        self.connection_monitor.host_log_snapshot_running = None;
-        self.connection_monitor.host_log_snapshot_rx = None;
-        match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_log_snapshot(&output.stdout);
-                let visible_count = visible_log_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_log_search_query,
-                    self.connection_monitor.host_log_preset,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourceLogStatus::Available { .. } => {
-                        self.connection_monitor.host_log_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_log_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_logs.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourceLogStatus::Unavailable => {
-                        self.connection_monitor.host_log_last_error =
-                            Some(self.i18n.t("sidebar.host_logs.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_log_toast(
-                                self.i18n.t("sidebar.host_logs.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourceLogStatus::Error { message } => {
-                        self.connection_monitor.host_log_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_log_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_logs.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourceLogStatus::Unknown => {}
-                }
-                self.connection_monitor.host_log_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_log_snapshot = Some(snapshot);
-            }
-            Ok(output) => {
-                let reason = host_log_capture_failure_message(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                    self.i18n.t("sidebar.host_logs.toast.unknown_error"),
-                );
-                self.connection_monitor.host_log_last_error = Some(reason.clone());
-                self.connection_monitor.host_log_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_log_snapshot = Some(ResourceLogSnapshot {
-                    status: ResourceLogStatus::Error {
-                        message: reason.clone(),
-                    },
-                    entries: Vec::new(),
-                });
-                if feedback.should_toast() {
-                    self.push_host_log_toast(
-                        self.i18n_replace(
-                            "sidebar.host_logs.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-            Err(error) => {
-                self.connection_monitor.host_log_last_error = Some(error.clone());
-                self.connection_monitor.host_log_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_log_snapshot = Some(ResourceLogSnapshot {
-                    status: ResourceLogStatus::Error {
-                        message: error.clone(),
-                    },
-                    entries: Vec::new(),
-                });
-                if feedback.should_toast() {
-                    self.push_host_log_toast(
-                        self.i18n_replace(
-                            "sidebar.host_logs.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-        }
-        cx.notify();
-    }
-
     pub(super) fn push_host_log_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
         let _ = self.terminal_notice_tx.send(TerminalNotice {
             title: message,
@@ -1008,6 +763,268 @@ impl WorkspaceApp {
             progress: None,
             variant,
         });
+    }
+
+    pub(in crate::workspace) fn push_host_tools_notice(&mut self, notice: HostToolsNotice) {
+        let (message, variant) = match notice {
+            HostToolsNotice::LogSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.host_logs.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::LogConnectionMissing => (
+                self.i18n.t("sidebar.host_logs.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::LogPartialSupport { os_type } => (
+                self.i18n_replace(
+                    "sidebar.host_logs.toast.partial_support",
+                    &[("os", os_type)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::LogSnapshotLoaded { count } => (
+                self.i18n_replace(
+                    "sidebar.host_logs.toast.snapshot_loaded",
+                    &[("count", count.to_string())],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::LogUnavailable => (
+                self.i18n.t("sidebar.host_logs.toast.unavailable"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::LogSnapshotFailed => (
+                self.i18n_replace(
+                    "sidebar.host_logs.toast.snapshot_failed",
+                    &[(
+                        "reason",
+                        self.i18n.t("sidebar.host_logs.toast.unknown_error"),
+                    )],
+                ),
+                TerminalNoticeVariant::Error,
+            ),
+        };
+        self.push_host_log_toast(message, variant);
+    }
+}
+
+impl HostToolsEntity {
+    pub(super) fn log_snapshot_for(&self, connection_id: &str) -> Option<ResourceLogSnapshot> {
+        self.host_logs
+            .snapshot
+            .as_ref()
+            .filter(|_| self.host_logs.snapshot_connection_id.as_deref() == Some(connection_id))
+            .cloned()
+    }
+
+    pub(super) fn log_preset(&self) -> LogPreset {
+        self.host_logs.preset
+    }
+
+    pub(super) fn log_snapshot_polling(&self) -> bool {
+        self.host_logs.polling
+    }
+
+    pub(super) fn log_list_state(&self) -> ListState {
+        self.host_logs.list_state.clone()
+    }
+
+    pub(super) fn log_expanded_index(&self) -> Option<usize> {
+        self.host_logs.expanded_index
+    }
+
+    pub(super) fn select_log_preset(&mut self, preset: LogPreset, cx: &mut Context<Self>) -> bool {
+        if self.host_logs.preset == preset {
+            return false;
+        }
+        self.host_logs.preset = preset;
+        self.host_logs.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn toggle_log_expanded(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.host_logs.expanded_index =
+            (self.host_logs.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_log_expanded(&mut self, cx: &mut Context<Self>) {
+        if self.host_logs.expanded_index.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn sync_log_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_logs.list_state,
+            &mut self.host_logs.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn prepare_log_follow_command(
+        &self,
+        connection_id: &str,
+    ) -> Result<(oxideterm_connection_monitor::LogCaptureCommand, String), String> {
+        let os_type = self
+            .log_connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_log_follow_command(&os_type, self.host_logs.preset).map(|command| (command, os_type))
+    }
+
+    pub(super) fn request_log_snapshot(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
+        }
+        if self.host_logs.polling {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::LogSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
+        }
+        let Some(os_type) = self.log_connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::LogConnectionMissing)
+                .into_iter()
+                .collect();
+        };
+        let command = match build_log_snapshot_command(
+            &os_type,
+            self.host_logs.preset,
+            HOST_LOG_SNAPSHOT_LIMIT,
+        ) {
+            Ok(command) => command,
+            Err(error) => {
+                self.host_logs.snapshot_connection_id = Some(connection_id);
+                self.host_logs.snapshot = Some(ResourceLogSnapshot {
+                    status: ResourceLogStatus::Error { message: error },
+                    entries: Vec::new(),
+                });
+                cx.notify();
+                return feedback
+                    .should_toast()
+                    .then_some(HostToolsNotice::LogSnapshotFailed)
+                    .into_iter()
+                    .collect();
+            }
+        };
+        let mut notices = Vec::new();
+        if feedback.should_toast() && command.capability == LogCommandCapability::Partial {
+            notices.push(HostToolsNotice::LogPartialSupport { os_type });
+        }
+
+        let request = HostLogSnapshotRequest {
+            connection_id: connection_id.clone(),
+            preset: self.host_logs.preset,
+            limit: HOST_LOG_SNAPSHOT_LIMIT,
+            feedback,
+            failure_fallback,
+        };
+        self.host_logs.snapshot_connection_id = Some(connection_id);
+        self.host_logs.running = Some(request.clone());
+        self.host_logs.polling = true;
+        let spawned = self.spawn_log_snapshot_capture(
+            command.command,
+            request,
+            HOST_LOG_SNAPSHOT_TIMEOUT,
+            HOST_LOG_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
+        );
+        if !spawned {
+            self.host_logs.polling = false;
+            self.host_logs.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::LogConnectionMissing)
+                .into_iter()
+                .collect();
+        }
+        cx.notify();
+        notices
+    }
+
+    pub(in crate::workspace::connection_monitor) fn finish_host_logs_snapshot(
+        &mut self,
+        delivery: HostLogSnapshotDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_logs.running.as_ref() != Some(&delivery.request) {
+            return;
+        }
+        let feedback = delivery.request.feedback;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_logs.polling = false;
+        self.host_logs.running = None;
+        match delivery.result {
+            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
+                let snapshot = parse_log_snapshot(&output.stdout);
+                if feedback.should_toast() {
+                    match &snapshot.status {
+                        ResourceLogStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::LogSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourceLogStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(HostToolsNotice::LogUnavailable));
+                        }
+                        ResourceLogStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::LogSnapshotFailed,
+                            ));
+                        }
+                        ResourceLogStatus::Unknown => {}
+                    }
+                }
+                self.host_logs.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_logs.snapshot = Some(snapshot);
+            }
+            Ok(_) => {
+                self.host_logs.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_logs.snapshot = Some(ResourceLogSnapshot {
+                    status: ResourceLogStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::LogSnapshotFailed,
+                    ));
+                }
+            }
+            Err(()) => {
+                self.host_logs.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_logs.snapshot = Some(ResourceLogSnapshot {
+                    status: ResourceLogStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::LogSnapshotFailed,
+                    ));
+                }
+            }
+        }
+        cx.notify();
     }
 }
 
@@ -1047,23 +1064,5 @@ fn log_level_color(level: &str, muted_color: u32) -> u32 {
         "debug" => muted_color,
         "info" | "notice" => MONITOR_EMERALD,
         _ => muted_color,
-    }
-}
-
-fn host_log_capture_failure_message(
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-    fallback: String,
-) -> String {
-    let reason = stderr
-        .lines()
-        .chain(stdout.lines())
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or(fallback.as_str());
-    match exit_code {
-        Some(code) => format!("{reason} (exit {code})"),
-        None => reason.to_string(),
     }
 }
