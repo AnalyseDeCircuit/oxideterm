@@ -8,6 +8,7 @@ use super::{
     PortDetectionSnapshot, TabId, TabKind, TerminalNotice, TerminalNoticeVariant, WorkspaceApp,
     thread,
 };
+use crate::workspace::delivery;
 
 impl WorkspaceApp {
     pub(super) fn submit_forward_create(
@@ -468,11 +469,12 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn poll_forwarding_worker_results(&mut self, cx: &mut Context<Self>) {
-        let mut results = Vec::new();
-        while let Ok(result) = self.forwarding_worker_rx.try_recv() {
-            results.push(result);
-        }
-        for result in results {
+        let drain = delivery::drain_channel(
+            &self.forwarding_worker_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        let mut changed = false;
+        for result in drain.items {
             match result {
                 ForwardingWorkerResult::Operation {
                     tab_id,
@@ -506,12 +508,12 @@ impl WorkspaceApp {
                             }
                             Err(error) => self.forwarding_view.error = Some(error),
                         }
-                        cx.notify();
+                        changed = true;
                     }
                 }
                 ForwardingWorkerResult::Binding { binding } => {
                     self.remember_forwarding_binding(binding);
-                    cx.notify();
+                    changed = true;
                 }
                 ForwardingWorkerResult::PortScan {
                     node_id,
@@ -523,20 +525,26 @@ impl WorkspaceApp {
                     self.apply_port_detection_result(&node_id, connection_id, result);
                     if self.active_forwards_tab_matches_node(&node_id) {
                         self.sync_forwarding_view_port_detection(&node_id);
-                        cx.notify();
+                        changed = true;
                     }
                 }
             }
         }
+        if changed {
+            cx.notify();
+        }
+        if drain.outcome.backlog_remaining {
+            self.schedule_forwarding_worker_delivery_continuation(cx);
+        }
     }
 
     pub(in crate::workspace) fn poll_forwarding_events(&mut self, cx: &mut Context<Self>) {
-        let mut events = Vec::new();
-        while let Ok(event) = self.forwarding_event_rx.try_recv() {
-            events.push(event);
-        }
-
-        for event in events {
+        let drain = delivery::drain_channel(
+            &self.forwarding_event_rx,
+            delivery::LIFECYCLE_DELIVERY_BUDGET,
+        );
+        let mut changed = false;
+        for event in drain.items {
             match event {
                 ForwardEvent::StatusChanged {
                     session_id,
@@ -565,11 +573,11 @@ impl WorkspaceApp {
                         }
                         _ => {}
                     }
-                    cx.notify();
+                    changed = true;
                 }
                 ForwardEvent::StatsUpdated { session_id, .. } => {
                     if self.active_forwards_tab_matches_session(&session_id) {
-                        cx.notify();
+                        changed = true;
                     }
                 }
                 ForwardEvent::SessionSuspended {
@@ -591,7 +599,7 @@ impl WorkspaceApp {
                         ),
                         TerminalNoticeVariant::Warning,
                     );
-                    cx.notify();
+                    changed = true;
                 }
                 ForwardEvent::PortDetected {
                     connection_id,
@@ -615,11 +623,37 @@ impl WorkspaceApp {
                     );
                     if self.active_forwards_tab_matches_node(&node_id) {
                         self.sync_forwarding_view_port_detection(&node_id);
-                        cx.notify();
+                        changed = true;
                     }
                 }
             }
         }
+        if changed {
+            cx.notify();
+        }
+        if drain.outcome.backlog_remaining {
+            self.schedule_forwarding_event_delivery_continuation(cx);
+        }
+    }
+
+    fn schedule_forwarding_worker_delivery_continuation(&self, cx: &mut Context<Self>) {
+        // Continue immediately so completed user actions never wait for the workspace heartbeat.
+        cx.spawn(async move |weak, cx| {
+            let _ = weak.update(cx, |workspace, cx| {
+                workspace.poll_forwarding_worker_results(cx);
+            });
+        })
+        .detach();
+    }
+
+    fn schedule_forwarding_event_delivery_continuation(&self, cx: &mut Context<Self>) {
+        // Preserve lifecycle delivery without extending the current UI-thread batch.
+        cx.spawn(async move |weak, cx| {
+            let _ = weak.update(cx, |workspace, cx| {
+                workspace.poll_forwarding_events(cx);
+            });
+        })
+        .detach();
     }
 
     fn push_forward_status_notice(

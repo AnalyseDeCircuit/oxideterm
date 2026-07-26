@@ -7,6 +7,7 @@ mod browser_behavior;
 mod cloud_sync;
 mod command_palette;
 mod connection_monitor;
+mod delivery;
 mod desktop_presence;
 mod detached_tab_window;
 mod file_manager;
