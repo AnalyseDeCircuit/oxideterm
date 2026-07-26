@@ -20,6 +20,16 @@ impl RemoteDesktopSessionEntity {
         .detach();
     }
 
+    pub(super) fn bind_window(&mut self, window_handle: AnyWindowHandle) {
+        let window_changed = self.window_handle != window_handle;
+        self.window_handle = window_handle;
+        if window_changed && let Some(worker_wake) = self.worker_wake.as_ref() {
+            // A wake may have targeted the old window during handoff. Store
+            // one fresh permit without polling render.
+            worker_wake.mark();
+        }
+    }
+
     fn shutdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(worker_wake) = self.worker_wake.take() {
             worker_wake.stop();
@@ -646,13 +656,7 @@ impl WorkspaceApp {
             // Window affinity is a lifecycle property: delivery and resource
             // cleanup must follow the tab across detach and dock transitions.
             session.update(cx, |session, _cx| {
-                let window_changed = session.window_handle != window_handle;
-                session.window_handle = window_handle;
-                if window_changed && let Some(worker_wake) = session.worker_wake.as_ref() {
-                    // A wake may have targeted the old window during handoff.
-                    // Rebinding stores one fresh permit without polling render.
-                    worker_wake.mark();
-                }
+                session.bind_window(window_handle);
             });
         }
     }
@@ -1222,4 +1226,116 @@ fn remote_desktop_monitor_layout(
     monitors.sort_by_key(|monitor| (!monitor.primary, monitor.top, monitor.left));
 
     RemoteDesktopMonitorLayout { monitors }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    struct RemoteDesktopSessionTestRoot;
+
+    impl Render for RemoteDesktopSessionTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    #[gpui::test]
+    fn hidden_session_still_applies_reliable_lifecycle_delivery(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
+        let protocol = RemoteDesktopProtocol::Rdp;
+        let profile = preview_remote_desktop_profile(protocol);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(protocol)
+            .cloned()
+            .unwrap();
+        let session = cx.new(|_cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(11),
+                profile,
+                provider,
+                None,
+                std::env::temp_dir().join("oxideterm-hidden-test-certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                window.into(),
+            );
+            session.worker_generation = 1;
+            session
+        });
+
+        // Hidden sessions suppress frame uploads, not reliable lifecycle events.
+        let outcome = window
+            .update(cx, |_root, window, cx| {
+                session.update(cx, |session, cx| {
+                    session
+                        .delivery_tx
+                        .send(RemoteDesktopWorkerDelivery::Event {
+                            tab_id: TabId(11),
+                            generation: 1,
+                            event: RemoteDesktopHelperEvent::Disconnected { reason: None },
+                        })
+                        .unwrap();
+                    session.poll_deliveries(false, window, cx)
+                })
+            })
+            .unwrap();
+
+        assert!(outcome.changed);
+        assert!(!outcome.backlog_remaining);
+        let status = cx.read(|cx| session.read(cx).state.snapshot().status);
+        assert_eq!(status, RemoteDesktopSessionStatus::Disconnected);
+    }
+
+    #[gpui::test]
+    fn repeated_shutdown_closes_only_once(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
+        let protocol = RemoteDesktopProtocol::Rdp;
+        let profile = preview_remote_desktop_profile(protocol);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(protocol)
+            .cloned()
+            .unwrap();
+        let worker_wake = RemoteDesktopWorkerWake::default();
+        let observed_wake = worker_wake.clone();
+        let (request_tx, request_rx) = mpsc::channel();
+        let session = cx.new(|_cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(12),
+                profile,
+                provider,
+                Some(RemoteDesktopSecret::from("shutdown-test-secret")),
+                std::env::temp_dir().join("oxideterm-shutdown-test-certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                window.into(),
+            );
+            session.worker_wake = Some(worker_wake);
+            session.request_tx = Some(request_tx);
+            session
+        });
+
+        // Repeated close paths must not duplicate helper shutdown or retain
+        // session-owned credentials.
+        window
+            .update(cx, |_root, window, cx| {
+                session.update(cx, |session, cx| session.shutdown(window, cx));
+                session.update(cx, |session, cx| session.shutdown(window, cx));
+            })
+            .unwrap();
+
+        assert!(observed_wake.is_stopped());
+        assert!(matches!(
+            request_rx.recv().unwrap(),
+            RemoteDesktopHelperRequest::ReleaseAllInputs
+        ));
+        assert!(matches!(
+            request_rx.recv().unwrap(),
+            RemoteDesktopHelperRequest::Close
+        ));
+        assert!(request_rx.try_recv().is_err());
+        let password_consumed = cx.read(|cx| session.read(cx).password.is_none());
+        assert!(password_consumed);
+    }
 }

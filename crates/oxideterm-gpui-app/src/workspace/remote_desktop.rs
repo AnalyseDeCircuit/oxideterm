@@ -455,6 +455,15 @@ struct RemoteDesktopResizeRequestState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::TestAppContext;
+
+    struct RemoteDesktopTestRoot;
+
+    impl Render for RemoteDesktopTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
 
     #[test]
     fn worker_wake_uses_event_notification_and_stops_explicitly() {
@@ -528,6 +537,86 @@ mod tests {
         assert!(second_wake.take());
         assert!(second_receiver.try_recv().is_ok());
         assert!(first_receiver.try_recv().is_err());
+    }
+
+    #[gpui::test]
+    fn session_release_stops_waiter_and_closes_only_its_helper(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
+        let protocol = RemoteDesktopProtocol::Rdp;
+        let profile = preview_remote_desktop_profile(protocol);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(protocol)
+            .cloned()
+            .unwrap();
+        let worker_wake = RemoteDesktopWorkerWake::default();
+        let observed_wake = worker_wake.clone();
+        let (request_tx, request_rx) = mpsc::channel();
+        let session = cx.new(|cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(9),
+                profile,
+                provider,
+                Some(RemoteDesktopSecret::from("release-test-secret")),
+                std::env::temp_dir().join("oxideterm-release-test-certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                window.into(),
+            );
+            session.worker_wake = Some(worker_wake);
+            session.request_tx = Some(request_tx);
+            session.install_release_handler(cx);
+            session
+        });
+
+        drop(session);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(observed_wake.is_stopped());
+        assert!(matches!(
+            request_rx.recv().unwrap(),
+            RemoteDesktopHelperRequest::ReleaseAllInputs
+        ));
+        assert!(matches!(
+            request_rx.recv().unwrap(),
+            RemoteDesktopHelperRequest::Close
+        ));
+        assert!(request_rx.try_recv().is_err());
+    }
+
+    #[gpui::test]
+    fn session_window_handoff_resumes_delivery_without_stopping_runtime(cx: &mut TestAppContext) {
+        let first_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
+        let second_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
+        let protocol = RemoteDesktopProtocol::Rdp;
+        let profile = preview_remote_desktop_profile(protocol);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(protocol)
+            .cloned()
+            .unwrap();
+        let worker_wake = RemoteDesktopWorkerWake::default();
+        let observed_wake = worker_wake.clone();
+        let session = cx.new(|_cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(10),
+                profile,
+                provider,
+                None,
+                std::env::temp_dir().join("oxideterm-handoff-test-certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                first_window.into(),
+            );
+            session.worker_wake = Some(worker_wake);
+            session
+        });
+
+        session.update(cx, |session, _cx| {
+            session.bind_window(second_window.into());
+        });
+
+        assert!(observed_wake.take());
+        assert!(!observed_wake.is_stopped());
     }
 
     #[test]
