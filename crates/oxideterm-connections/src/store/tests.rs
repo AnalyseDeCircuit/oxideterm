@@ -2012,6 +2012,135 @@ mod tests {
     }
 
     #[test]
+    fn remote_desktop_profile_update_preserves_options_and_controls_credential_lifecycle() {
+        let mut store = load_empty_store("remote-desktop-update");
+        let initial_options = oxideterm_remote_desktop::RemoteDesktopSessionOptions {
+            clipboard: oxideterm_remote_desktop::RemoteDesktopClipboardOptions {
+                text: false,
+                images: true,
+                files: true,
+            },
+            audio: oxideterm_remote_desktop::RemoteDesktopAudioOptions {
+                playback: false,
+                capture: true,
+            },
+            display: oxideterm_remote_desktop::RemoteDesktopDisplayOptions {
+                use_all_monitors: true,
+            },
+            vnc: oxideterm_remote_desktop::RemoteDesktopVncOptions {
+                security_policy:
+                    oxideterm_remote_desktop::RemoteDesktopVncSecurityPolicy::AllowLegacy,
+                session_mode: oxideterm_remote_desktop::RemoteDesktopVncSessionMode::Exclusive,
+                image_quality:
+                    oxideterm_remote_desktop::RemoteDesktopVncImageQuality::BestQuality,
+                compression: oxideterm_remote_desktop::RemoteDesktopVncCompression::High,
+            },
+        };
+        let created = store
+            .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some("remote-edit".to_string()),
+                name: "Original".to_string(),
+                protocol: RemoteDesktopProtocol::Rdp,
+                host: "old.example.com".to_string(),
+                port: 3389,
+                username: Some("operator".to_string()),
+                domain: Some("EXAMPLE".to_string()),
+                credential: Some(SecretString::from("original-secret")),
+                read_only: true,
+                session_options: initial_options,
+                ..SaveRemoteDesktopProfileRequest::default()
+            })
+            .unwrap();
+        let credential_ref = created.credential_ref.clone();
+
+        let updated = store
+            .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some(created.id.clone()),
+                name: "Updated".to_string(),
+                group: Some("Lab".to_string()),
+                protocol: RemoteDesktopProtocol::Rdp,
+                host: "new.example.com".to_string(),
+                port: 3390,
+                username: Some("admin".to_string()),
+                domain: created.domain.clone(),
+                read_only: created.read_only,
+                session_options: created.session_options,
+                ..SaveRemoteDesktopProfileRequest::default()
+            })
+            .unwrap();
+
+        assert_eq!(updated.created_at, created.created_at);
+        assert_eq!(updated.credential_ref, credential_ref);
+        assert_eq!(updated.session_options, initial_options);
+        assert_eq!(updated.domain.as_deref(), Some("EXAMPLE"));
+        assert!(updated.read_only);
+        assert_eq!(
+            store
+                .get_remote_desktop_credential(&updated.id)
+                .unwrap()
+                .unwrap(),
+            "original-secret"
+        );
+
+        let store_path = store.path().to_path_buf();
+        let mut store = ConnectionStore::load(store_path).unwrap();
+        let reloaded = store
+            .get_remote_desktop_profile(&updated.id)
+            .cloned()
+            .expect("updated remote desktop profile should reload");
+        assert_eq!(reloaded, updated);
+
+        let cleared = store
+            .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+                id: Some(reloaded.id.clone()),
+                name: reloaded.name.clone(),
+                group: reloaded.group.clone(),
+                protocol: reloaded.protocol,
+                host: reloaded.host.clone(),
+                port: reloaded.port,
+                username: reloaded.username.clone(),
+                domain: reloaded.domain.clone(),
+                clear_credential: true,
+                read_only: reloaded.read_only,
+                session_options: reloaded.session_options,
+                ..SaveRemoteDesktopProfileRequest::default()
+            })
+            .unwrap();
+
+        assert!(cleared.credential_ref.is_none());
+        assert!(
+            store
+                .get_remote_desktop_credential(&cleared.id)
+                .unwrap()
+                .is_none()
+        );
+
+        store
+            .upsert(request("ssh-move", SavedAuth::Agent))
+            .unwrap();
+        assert_eq!(
+            store
+                .move_session_assets_to_group(
+                    &["ssh-move".to_string()],
+                    std::slice::from_ref(&cleared.id),
+                    Some("Moved"),
+                )
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .get_remote_desktop_profile(&cleared.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+    }
+
+    #[test]
     fn remote_desktop_snapshot_drops_device_local_credential_references() {
         let mut store = load_empty_store("remote-desktop-snapshot-redaction");
         let profile = store

@@ -686,7 +686,17 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if protocol == RemoteDesktopProtocol::Rdp && form.password.is_empty() {
+        let editing_profile_id = form.remote_desktop_profile_id.clone();
+        let existing_profile = editing_profile_id
+            .as_deref()
+            .and_then(|id| self.connection_store.get_remote_desktop_profile(id))
+            .cloned();
+        let has_saved_credential = form.saved_password_keychain_id.is_some();
+        if protocol == RemoteDesktopProtocol::Rdp
+            && action != NewConnectionSubmitAction::Save
+            && form.password.is_empty()
+            && !has_saved_credential
+        {
             form.error = Some(
                 self.i18n
                     .t("modals.new_connection.remote_desktop_password_required"),
@@ -705,19 +715,35 @@ impl WorkspaceApp {
             None
         };
         let save_credential = form.save_password;
-        let should_save = action != NewConnectionSubmitAction::Connect;
+        let should_save =
+            editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
+        let clear_credential =
+            editing_profile_id.is_some() && has_saved_credential && !save_credential;
+        let (credential_to_save, mut runtime_password) = if should_save && save_credential {
+            // Saving and connecting reloads the protected value below instead of cloning it.
+            (password, None)
+        } else {
+            (None, password)
+        };
+        let domain = existing_profile
+            .as_ref()
+            .and_then(|profile| profile.domain.clone());
+        let read_only = existing_profile
+            .as_ref()
+            .is_some_and(|profile| profile.read_only);
         let save_request = should_save.then(|| SaveRemoteDesktopProfileRequest {
-            id: None,
+            id: editing_profile_id,
             name: label.clone(),
-            group: (!form.group.trim().is_empty()).then(|| form.group.trim().to_string()),
+            group: serial_profile_group_from_form(&form.group, &self.i18n),
             protocol,
             host: host.clone(),
             port,
             username: username.clone(),
-            domain: None,
+            domain: domain.clone(),
             credential_ref: None,
-            credential: save_credential.then(|| password.clone()).flatten(),
-            read_only: false,
+            credential: credential_to_save,
+            clear_credential,
+            read_only,
             session_options: form.remote_desktop_session_options,
         });
         let mut profile = RemoteDesktopConnectionProfile {
@@ -726,9 +752,9 @@ impl WorkspaceApp {
             protocol,
             endpoint: RemoteDesktopEndpoint::new(host, port),
             username,
-            domain: None,
+            domain,
             credential_ref: None,
-            read_only: false,
+            read_only,
             // A reconnect reuses the profile, so keep the user's per-session
             // redirection choices on the profile instead of rebuilding defaults.
             session_options: form.remote_desktop_session_options,
@@ -743,6 +769,27 @@ impl WorkspaceApp {
                     profile.label = saved.name;
                     profile.credential_ref = saved.credential_ref;
                     self.queue_cloud_sync_dirty_refresh(cx);
+                    if action != NewConnectionSubmitAction::Save && runtime_password.is_none() {
+                        match self
+                            .connection_store
+                            .get_remote_desktop_credential(&profile.id)
+                        {
+                            Ok(password) => runtime_password = password,
+                            Err(error) => {
+                                if let Some(form) = self.new_connection_form.as_mut() {
+                                    form.pending = false;
+                                    form.error = Some(format!(
+                                        "{}: {error}",
+                                        self.i18n.t(
+                                            "sessionManager.remote_desktop_profiles.open_failed"
+                                        )
+                                    ));
+                                }
+                                cx.notify();
+                                return;
+                            }
+                        }
+                    }
                 }
                 Err(error) => {
                     if let Some(form) = self.new_connection_form.as_mut() {
@@ -763,7 +810,7 @@ impl WorkspaceApp {
         self.close_new_connection_select();
         if action != NewConnectionSubmitAction::Save {
             let runtime_password =
-                password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
+                runtime_password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
             self.open_remote_desktop_connection_tab(profile, runtime_password, window, cx);
         }
         cx.notify();

@@ -8,7 +8,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let selected_count = self.session_manager.selected_ids.len();
+        let selected_count = self.session_manager.selected_items.len();
         let viewport_width = f32::from(window.viewport_size().width);
         let show_primary_labels = viewport_width >= MANAGER_RESPONSIVE_SM;
         let show_transfer_labels = viewport_width >= MANAGER_RESPONSIVE_MD;

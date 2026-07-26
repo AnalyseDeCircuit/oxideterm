@@ -372,14 +372,32 @@ impl ConnectionStore {
     }
 
     pub fn move_to_group(&mut self, ids: &[String], group: Option<&str>) -> Result<usize> {
+        self.move_session_assets_to_group(ids, &[], group)
+    }
+
+    /// Moves a mixed Session Manager selection in one metadata save.
+    pub fn move_session_assets_to_group(
+        &mut self,
+        connection_ids: &[String],
+        remote_desktop_ids: &[String],
+        group: Option<&str>,
+    ) -> Result<usize> {
         let group = normalize_optional_group_name(group)?;
-        let id_set = ids.iter().collect::<HashSet<_>>();
+        let connection_id_set = connection_ids.iter().collect::<HashSet<_>>();
+        let remote_desktop_id_set = remote_desktop_ids.iter().collect::<HashSet<_>>();
         let now = Utc::now();
         let mut updated = 0;
         for conn in &mut self.data.connections {
-            if id_set.contains(&conn.id) {
+            if connection_id_set.contains(&conn.id) {
                 conn.group = group.clone();
                 conn.updated_at = Some(now);
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.remote_desktop_profiles {
+            if remote_desktop_id_set.contains(&profile.id) {
+                profile.group = group.clone();
+                profile.updated_at = now;
                 updated += 1;
             }
         }
@@ -594,9 +612,17 @@ impl ConnectionStore {
         let old_credential_ref = existing
             .as_ref()
             .and_then(|profile| profile.credential_ref.clone());
+        if request.clear_credential
+            && (request.credential.is_some() || request.credential_ref.is_some())
+        {
+            bail!("Cannot replace and clear a remote desktop credential in one update");
+        }
         let requested_credential_ref = normalize_optional_text(request.credential_ref);
-        let mut credential_ref =
-            requested_credential_ref.or_else(|| old_credential_ref.clone());
+        let mut credential_ref = if request.clear_credential {
+            None
+        } else {
+            requested_credential_ref.or_else(|| old_credential_ref.clone())
+        };
         if request.credential.is_some() && credential_ref.is_none() {
             credential_ref = Some(remote_desktop_credential_ref(&id));
         }

@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "Enter an RDP password",
       "remote_desktop_save_failed": "Failed to save remote desktop connection",
       "remote_desktop_password_placeholder": "RDP password",
+      "remote_desktop_password_keep_placeholder": "Leave blank to keep the saved password",
       "remote_desktop_features_title": "Session features",
       "remote_desktop_features_hint": "Choose which local resources this remote desktop session may use.",
       "remote_desktop_clipboard_group": "Clipboard",

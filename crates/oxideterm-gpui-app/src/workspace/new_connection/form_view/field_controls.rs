@@ -1804,7 +1804,12 @@ impl WorkspaceApp {
             .child(self.render_connection_field(
                 self.i18n.t("ssh.form.password"),
                 &form.password,
-                if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
+                if form.remote_desktop_profile_id.is_some()
+                    && form.saved_password_keychain_id.is_some()
+                {
+                    self.i18n
+                        .t("modals.new_connection.remote_desktop_password_keep_placeholder")
+                } else if protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp {
                     self.i18n
                         .t("modals.new_connection.remote_desktop_password_placeholder")
                 } else {
@@ -1818,6 +1823,11 @@ impl WorkspaceApp {
                 self.i18n.t("ssh.form.save_password"),
                 form.save_password,
                 |form| form.save_password = !form.save_password,
+                cx,
+            ))
+            .child(self.render_connection_group_select(
+                self.i18n.t("ssh.form.group"),
+                &form.group,
                 cx,
             ))
             .when(

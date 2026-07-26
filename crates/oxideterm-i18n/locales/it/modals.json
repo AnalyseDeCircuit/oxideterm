@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "Inserisci una password RDP",
       "remote_desktop_save_failed": "Impossibile salvare la connessione desktop remoto",
       "remote_desktop_password_placeholder": "Password RDP",
+      "remote_desktop_password_keep_placeholder": "Lascia vuoto per mantenere la password salvata",
       "remote_desktop_features_title": "Funzioni della sessione",
       "remote_desktop_features_hint": "Scegli quali risorse locali può usare questa sessione desktop remoto.",
       "remote_desktop_clipboard_group": "Appunti",

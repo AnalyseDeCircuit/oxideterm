@@ -131,6 +131,45 @@ pub(super) fn connection_display_item_falls_back_to_server_icon() {
 }
 
 #[test]
+pub(super) fn remote_desktop_selection_is_typed_separately_from_ssh_ids() {
+    let now = Utc::now();
+    let ssh = SessionManagerDisplayItem::Connection(ConnectionInfo {
+        id: "shared-id".to_string(),
+        ..connection_info_fixture(None)
+    });
+    let remote = SessionManagerDisplayItem::RemoteDesktop(RemoteDesktopProfile {
+        id: "shared-id".to_string(),
+        name: "Remote desktop".to_string(),
+        group: None,
+        protocol: oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
+        host: "rdp.example.com".to_string(),
+        port: 3389,
+        username: Some("operator".to_string()),
+        domain: None,
+        credential_ref: None,
+        read_only: false,
+        session_options: oxideterm_remote_desktop::RemoteDesktopSessionOptions::default(),
+        created_at: now,
+        updated_at: now,
+        last_used_at: None,
+    });
+
+    assert_eq!(
+        ssh.selection_target(),
+        Some(SessionManagerSelectionTarget::Connection(
+            "shared-id".to_string()
+        ))
+    );
+    assert_eq!(
+        remote.selection_target(),
+        Some(SessionManagerSelectionTarget::RemoteDesktop(
+            "shared-id".to_string()
+        ))
+    );
+    assert_ne!(ssh.selection_target(), remote.selection_target());
+}
+
+#[test]
 pub(super) fn save_request_from_form_preserves_custom_icon() {
     let form = NewConnectionForm {
         icon: "cloud".to_string(),

@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "Informe uma senha RDP",
       "remote_desktop_save_failed": "Não foi possível salvar a conexão de área de trabalho remota",
       "remote_desktop_password_placeholder": "Senha RDP",
+      "remote_desktop_password_keep_placeholder": "Deixe em branco para manter a senha salva",
       "remote_desktop_features_title": "Recursos da sessão",
       "remote_desktop_features_hint": "Escolha quais recursos locais esta sessão de área de trabalho remota pode usar.",
       "remote_desktop_clipboard_group": "Área de transferência",

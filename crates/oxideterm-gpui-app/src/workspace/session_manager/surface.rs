@@ -159,7 +159,7 @@ impl WorkspaceApp {
                 ))
             })
             .when(
-                !self.session_manager.selected_ids.is_empty()
+                !self.session_manager.selected_items.is_empty()
                     && self.session_manager.show_batch_move,
                 |surface| {
                     surface.child(self.workspace_context_menu_backdrop(
@@ -201,8 +201,8 @@ impl WorkspaceApp {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.remote_desktop_profiles.delete"),
             ),
-            SessionManagerDeleteConfirm::Batch { ids } => (
-                confirm_batch_delete_label(&self.i18n, ids.len()),
+            SessionManagerDeleteConfirm::Batch { targets } => (
+                confirm_batch_delete_label(&self.i18n, targets.len()),
                 self.i18n.t("common.actions.confirm"),
             ),
         };

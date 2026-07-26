@@ -1,8 +1,9 @@
 use std::fmt;
 
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, PrivilegeCredentialKind, SavedUpstreamProxyProtocol,
-    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
+    AuthType, ConnectionInfo, PrivilegeCredentialKind, RemoteDesktopProfile,
+    SavedUpstreamProxyProtocol, TransportUsernameTransition, transport_port_replacement,
+    transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -419,6 +420,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) auth_tab: SshAuthTab,
     pub(in crate::workspace) password: String,
     pub(in crate::workspace) remote_desktop_session_options: RemoteDesktopSessionOptions,
+    /// Identifies an existing RDP/VNC asset without overloading SSH edit state.
+    pub(in crate::workspace) remote_desktop_profile_id: Option<String>,
     pub(in crate::workspace) saved_password_keychain_id: Option<String>,
     pub(in crate::workspace) password_loaded: bool,
     pub(in crate::workspace) password_visible: bool,
@@ -484,6 +487,7 @@ impl fmt::Debug for NewConnectionForm {
                 "remote_desktop_session_options",
                 &self.remote_desktop_session_options,
             )
+            .field("remote_desktop_profile_id", &self.remote_desktop_profile_id)
             .field(
                 "saved_password_keychain_id",
                 &self.saved_password_keychain_id,
@@ -553,6 +557,7 @@ impl Default for NewConnectionForm {
             auth_tab: SshAuthTab::Password,
             password: String::new(),
             remote_desktop_session_options: RemoteDesktopSessionOptions::default(),
+            remote_desktop_profile_id: None,
             saved_password_keychain_id: None,
             password_loaded: true,
             password_visible: false,
@@ -602,6 +607,30 @@ impl Default for NewConnectionForm {
             serial_profile_name: String::new(),
             telnet_profile_name: String::new(),
         }
+    }
+}
+
+pub(in crate::workspace) fn form_from_remote_desktop_profile(
+    profile: &RemoteDesktopProfile,
+    ungrouped_label: String,
+) -> NewConnectionForm {
+    // Editing carries only the keychain reference; the credential value is never loaded.
+    NewConnectionForm {
+        transport: match profile.protocol {
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => NewConnectionTransport::Rdp,
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => NewConnectionTransport::Vnc,
+        },
+        name: profile.name.clone(),
+        host: profile.host.clone(),
+        port: profile.port.to_string(),
+        username: profile.username.clone().unwrap_or_default(),
+        remote_desktop_session_options: profile.session_options,
+        remote_desktop_profile_id: Some(profile.id.clone()),
+        saved_password_keychain_id: profile.credential_ref.clone(),
+        save_password: profile.credential_ref.is_some(),
+        group: profile.group.clone().unwrap_or(ungrouped_label),
+        focused_field: NewConnectionField::Name,
+        ..NewConnectionForm::default()
     }
 }
 
@@ -1091,8 +1120,15 @@ pub(in crate::workspace) fn text_from_keystroke(keystroke: &gpui::Keystroke) -> 
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
     use gpui::{Keystroke, Modifiers};
-    use oxideterm_connections::{AuthType, ConnectionInfo, SavedUpstreamProxyPolicy};
+    use oxideterm_connections::{
+        AuthType, ConnectionInfo, RemoteDesktopProfile, SavedUpstreamProxyPolicy,
+    };
+    use oxideterm_remote_desktop::{
+        RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
+        RemoteDesktopProtocol,
+    };
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
@@ -1104,10 +1140,10 @@ mod tests {
         VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
         backspace_current_connection_field, default_auth_tab_for_family,
-        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
-        next_connection_field, remote_desktop_feature_supported,
-        remote_desktop_vnc_preference_selected, select_current_connection_field,
-        text_from_keystroke, toggle_remote_desktop_feature,
+        form_from_remote_desktop_profile, insert_text_into_current_connection_field,
+        key_source_from_tab, new_connection_form_mode, next_connection_field,
+        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
+        select_current_connection_field, text_from_keystroke, toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1116,6 +1152,64 @@ mod tests {
             key: key.to_string(),
             key_char: key_char.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn remote_desktop_edit_form_restores_options_without_loading_secret() {
+        let session_options = RemoteDesktopSessionOptions {
+            clipboard: RemoteDesktopClipboardOptions {
+                text: false,
+                images: false,
+                files: true,
+            },
+            audio: RemoteDesktopAudioOptions {
+                playback: false,
+                capture: true,
+            },
+            display: RemoteDesktopDisplayOptions {
+                use_all_monitors: true,
+            },
+            vnc: RemoteDesktopVncOptions {
+                security_policy: RemoteDesktopVncSecurityPolicy::AllowLegacy,
+                session_mode: RemoteDesktopVncSessionMode::Exclusive,
+                image_quality: RemoteDesktopVncImageQuality::BestQuality,
+                compression: RemoteDesktopVncCompression::High,
+            },
+        };
+        let now = Utc::now();
+        let profile = RemoteDesktopProfile {
+            id: "remote-1".to_string(),
+            name: "Lab desktop".to_string(),
+            group: Some("Lab".to_string()),
+            protocol: RemoteDesktopProtocol::Rdp,
+            host: "rdp.example.com".to_string(),
+            port: 3389,
+            username: Some("operator".to_string()),
+            domain: Some("EXAMPLE".to_string()),
+            credential_ref: Some("remote-desktop:remote-1".to_string()),
+            read_only: true,
+            session_options,
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        };
+
+        let form = form_from_remote_desktop_profile(&profile, "Ungrouped".to_string());
+
+        assert_eq!(form.remote_desktop_profile_id.as_deref(), Some("remote-1"));
+        assert_eq!(form.transport, NewConnectionTransport::Rdp);
+        assert_eq!(form.name, "Lab desktop");
+        assert_eq!(form.host, "rdp.example.com");
+        assert_eq!(form.port, "3389");
+        assert_eq!(form.username, "operator");
+        assert_eq!(form.group, "Lab");
+        assert_eq!(form.remote_desktop_session_options, session_options);
+        assert_eq!(
+            form.saved_password_keychain_id.as_deref(),
+            Some("remote-desktop:remote-1")
+        );
+        assert!(form.save_password);
+        assert!(form.password.is_empty());
     }
 
     #[test]

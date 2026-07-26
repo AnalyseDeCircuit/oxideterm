@@ -566,6 +566,8 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub credential_ref: Option<String>,
     /// The store moves this secret into the protected credential backend.
     pub credential: Option<SecretString>,
+    /// Explicitly removes the device-local protected credential while updating the profile.
+    pub clear_credential: bool,
     pub read_only: bool,
     pub session_options: RemoteDesktopSessionOptions,
 }

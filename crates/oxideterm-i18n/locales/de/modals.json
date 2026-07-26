@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "RDP-Passwort eingeben",
       "remote_desktop_save_failed": "Remotedesktop-Verbindung konnte nicht gespeichert werden",
       "remote_desktop_password_placeholder": "RDP-Passwort",
+      "remote_desktop_password_keep_placeholder": "Leer lassen, um das gespeicherte Passwort beizubehalten",
       "remote_desktop_features_title": "Sitzungsfunktionen",
       "remote_desktop_features_hint": "Wählen Sie aus, welche lokalen Ressourcen diese Remotedesktopsitzung verwenden darf.",
       "remote_desktop_clipboard_group": "Zwischenablage",

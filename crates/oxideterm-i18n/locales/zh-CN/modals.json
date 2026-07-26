@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "请输入 RDP 密码",
       "remote_desktop_save_failed": "保存远程桌面连接失败",
       "remote_desktop_password_placeholder": "RDP 密码",
+      "remote_desktop_password_keep_placeholder": "留空以保留已保存的密码",
       "remote_desktop_features_title": "会话功能",
       "remote_desktop_features_hint": "选择此远程桌面会话可以使用的本地资源。",
       "remote_desktop_clipboard_group": "剪贴板",

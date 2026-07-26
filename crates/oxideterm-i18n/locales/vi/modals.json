@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "Nhập mật khẩu RDP",
       "remote_desktop_save_failed": "Không thể lưu kết nối máy tính từ xa",
       "remote_desktop_password_placeholder": "Mật khẩu RDP",
+      "remote_desktop_password_keep_placeholder": "Để trống để giữ mật khẩu đã lưu",
       "remote_desktop_features_title": "Tính năng phiên",
       "remote_desktop_features_hint": "Chọn các tài nguyên cục bộ mà phiên màn hình từ xa này được phép sử dụng.",
       "remote_desktop_clipboard_group": "Bảng nhớ tạm",

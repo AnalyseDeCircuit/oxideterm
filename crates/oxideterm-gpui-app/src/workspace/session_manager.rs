@@ -55,8 +55,6 @@ use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtoco
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
 
-const UNGROUPED_FILTER: &str = "__ungrouped__";
-const RECENT_FILTER: &str = "__recent__";
 const BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] color-mix(... 40%, transparent)
 const BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri bg-hover 50%
 const BG_ACTIVE_ROW_HOVER_ALPHA: u32 = 0x4d; // Keep full-width row hover quieter than compact controls.
@@ -83,6 +81,7 @@ const MANAGER_RECENT_ACCENT_BG_ALPHA: u32 = 0x1a;
 const MANAGER_ROW_ACTION_MENU_WIDTH: f32 = 176.0;
 const MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT: f32 = 120.0;
 const MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT: f32 = 44.0;
+const MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT: f32 = 80.0;
 const MANAGER_VIEW_MODE_MENU_WIDTH: f32 = 168.0; // Tauri DropdownMenuContent min-w-[160px] plus native menu padding.
 const MANAGER_VIEW_MODE_MENU_HEIGHT: f32 = 104.0; // Three compact radio rows plus menu padding.
 const MANAGER_SORT_MENU_WIDTH: f32 = 184.0; // Sort fields reuse the compact toolbar dropdown rhythm.
@@ -247,11 +246,31 @@ pub(super) enum SessionTransferAction {
 
 #[derive(Clone, Debug)]
 pub(super) enum SessionManagerDeleteConfirm {
-    Single { id: String, name: String },
-    SerialProfile { id: String, name: String },
-    TelnetProfile { id: String, name: String },
-    RemoteDesktopProfile { id: String, name: String },
-    Batch { ids: Vec<String> },
+    Single {
+        id: String,
+        name: String,
+    },
+    SerialProfile {
+        id: String,
+        name: String,
+    },
+    TelnetProfile {
+        id: String,
+        name: String,
+    },
+    RemoteDesktopProfile {
+        id: String,
+        name: String,
+    },
+    Batch {
+        targets: Vec<SessionManagerSelectionTarget>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) enum SessionManagerSelectionTarget {
+    Connection(String),
+    RemoteDesktop(String),
 }
 
 #[derive(Clone, Debug)]
@@ -327,7 +346,7 @@ pub(super) struct SessionManagerState {
     pub(super) sort_direction: SortDirection,
     pub(super) search_query: String,
     pub(super) saved_search_query: String,
-    pub(super) selected_ids: HashSet<String>,
+    pub(super) selected_items: HashSet<SessionManagerSelectionTarget>,
     pub(super) view_mode_menu_open: bool,
     pub(super) sort_menu_open: bool,
     pub(super) row_action_menu: Option<SessionManagerRowActionMenu>,
@@ -354,7 +373,7 @@ impl Default for SessionManagerState {
             sort_direction: SortDirection::Desc,
             search_query: String::new(),
             saved_search_query: String::new(),
-            selected_ids: HashSet::new(),
+            selected_items: HashSet::new(),
             view_mode_menu_open: false,
             sort_menu_open: false,
             row_action_menu: None,

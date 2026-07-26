@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "請輸入 RDP 密碼",
       "remote_desktop_save_failed": "儲存遠端桌面連線失敗",
       "remote_desktop_password_placeholder": "RDP 密碼",
+      "remote_desktop_password_keep_placeholder": "留空以保留已儲存的密碼",
       "remote_desktop_features_title": "工作階段功能",
       "remote_desktop_features_hint": "選擇此遠端桌面工作階段可以使用的本機資源。",
       "remote_desktop_clipboard_group": "剪貼簿",

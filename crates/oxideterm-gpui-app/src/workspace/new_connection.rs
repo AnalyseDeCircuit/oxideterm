@@ -9,6 +9,7 @@ pub(super) use form_state::{
     NewConnectionField, NewConnectionForm, NewConnectionProxyHop, NewConnectionSelect,
     NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
     PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab,
+    form_from_remote_desktop_profile,
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;

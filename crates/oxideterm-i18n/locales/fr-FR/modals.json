@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "Saisissez un mot de passe RDP",
       "remote_desktop_save_failed": "Impossible d’enregistrer la connexion Bureau à distance",
       "remote_desktop_password_placeholder": "Mot de passe RDP",
+      "remote_desktop_password_keep_placeholder": "Laissez vide pour conserver le mot de passe enregistré",
       "remote_desktop_features_title": "Fonctions de la session",
       "remote_desktop_features_hint": "Choisissez les ressources locales que cette session de bureau à distance peut utiliser.",
       "remote_desktop_clipboard_group": "Presse-papiers",

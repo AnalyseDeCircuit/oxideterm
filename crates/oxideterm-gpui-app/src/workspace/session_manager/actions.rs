@@ -1,37 +1,10 @@
 use super::*;
-use crate::workspace::new_connection::NewConnectionTransport;
+use crate::workspace::new_connection::{NewConnectionTransport, form_from_remote_desktop_profile};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
 };
 
 impl WorkspaceApp {
-    pub(super) fn filtered_session_connections(&self) -> Vec<ConnectionInfo> {
-        let query = self.session_manager.search_query.trim().to_lowercase();
-        let mut rows = self.connection_store.connection_infos();
-        rows.retain(|conn| self.connection_matches_filter(conn));
-        if !query.is_empty() {
-            rows.retain(|conn| conn.matches_search_query(&query));
-        }
-        // The new grid/list/tree display model owns presentation sorting. This
-        // helper is only used to retain valid checkbox selections after filters.
-        rows.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-        if self.session_manager.selected_group.as_deref() == Some(RECENT_FILTER) {
-            rows.truncate(20);
-        }
-        rows
-    }
-
-    pub(super) fn connection_matches_filter(&self, conn: &ConnectionInfo) -> bool {
-        match self.session_manager.selected_group.as_deref() {
-            None => true,
-            Some(UNGROUPED_FILTER) => conn.group.is_none(),
-            Some(RECENT_FILTER) => conn.last_used_at.is_some(),
-            Some(group) => conn.group.as_deref().is_some_and(|conn_group| {
-                conn_group == group || conn_group.starts_with(&format!("{group}/"))
-            }),
-        }
-    }
-
     pub(super) fn connection_count_for_group(&self, group: &str) -> usize {
         let connection_count = self
             .connection_store
@@ -180,23 +153,23 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn toggle_connection_selection(&mut self, id: &str) {
-        if self.session_manager.selected_ids.contains(id) {
-            self.session_manager.selected_ids.remove(id);
+    pub(super) fn toggle_session_selection(&mut self, target: SessionManagerSelectionTarget) {
+        if self.session_manager.selected_items.contains(&target) {
+            self.session_manager.selected_items.remove(&target);
         } else {
-            self.session_manager.selected_ids.insert(id.to_string());
+            self.session_manager.selected_items.insert(target);
         }
     }
 
     pub(in crate::workspace) fn clear_session_selection_for_invisible_rows(&mut self) {
-        let visible_ids = self
-            .filtered_session_connections()
+        let visible_items = self
+            .session_manager_display_items()
             .into_iter()
-            .map(|conn| conn.id)
+            .filter_map(|item| item.selection_target())
             .collect::<HashSet<_>>();
         self.session_manager
-            .selected_ids
-            .retain(|id| visible_ids.contains(id));
+            .selected_items
+            .retain(|target| visible_items.contains(target));
     }
 
     pub(super) fn create_session_group(&mut self, cx: &mut Context<Self>) {
@@ -241,7 +214,9 @@ impl WorkspaceApp {
                 return;
             }
             self.release_ide_runtime_for_saved_connection(id, cx);
-            self.session_manager.selected_ids.remove(id);
+            self.session_manager
+                .selected_items
+                .remove(&SessionManagerSelectionTarget::Connection(id.to_string()));
             self.session_manager.status =
                 Some(self.i18n.t("sessionManager.toast.connection_deleted"));
             self.queue_cloud_sync_dirty_refresh(cx);
@@ -315,18 +290,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
-        let ids = self
+        let targets = self
             .session_manager
-            .selected_ids
+            .selected_items
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        if ids.is_empty() {
+        if targets.is_empty() {
             return;
         }
         // Batch delete follows Tauri's confirm closure and freezes the selected
         // ids at the time the destructive action is requested.
-        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Batch { ids });
+        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Batch { targets });
         self.session_manager.show_batch_move = false;
         self.close_session_row_menus();
         cx.notify();
@@ -352,7 +327,9 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::RemoteDesktopProfile { id, .. } => {
                 self.delete_remote_desktop_profile(&id, cx)
             }
-            SessionManagerDeleteConfirm::Batch { ids } => self.delete_connections_by_id(ids, cx),
+            SessionManagerDeleteConfirm::Batch { targets } => {
+                self.delete_selected_session_items(targets, cx)
+            }
         }
     }
 
@@ -400,6 +377,9 @@ impl WorkspaceApp {
     pub(super) fn delete_remote_desktop_profile(&mut self, id: &str, cx: &mut Context<Self>) {
         match self.connection_store.delete_remote_desktop_profile(id) {
             Ok(true) => {
+                self.session_manager.selected_items.remove(
+                    &SessionManagerSelectionTarget::RemoteDesktop(id.to_string()),
+                );
                 self.session_manager.status =
                     Some(self.i18n.t("sessionManager.remote_desktop_profiles.delete"));
                 self.queue_cloud_sync_dirty_refresh(cx);
@@ -558,21 +538,59 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn delete_connections_by_id(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
+    pub(super) fn open_saved_remote_desktop_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self
+            .connection_store
+            .get_remote_desktop_profile(id)
+            .cloned()
+        else {
+            return;
+        };
+        self.open_new_connection_form(window, cx);
+        self.new_connection_form = Some(form_from_remote_desktop_profile(
+            &saved,
+            self.i18n.t("ssh.form.ungrouped"),
+        ));
+        cx.notify();
+    }
+
+    pub(super) fn delete_selected_session_items(
+        &mut self,
+        targets: Vec<SessionManagerSelectionTarget>,
+        cx: &mut Context<Self>,
+    ) {
         let mut deleted = 0;
-        for id in ids {
-            if self.connection_store.delete(&id).unwrap_or(false) {
-                // Keep batch delete aligned with the single-delete command path.
-                if let Err(error) = self.forwarding_registry.delete_owned_forwards(&id) {
-                    self.session_manager.status = Some(error.to_string());
-                    cx.notify();
-                    return;
+        for target in targets {
+            match target {
+                SessionManagerSelectionTarget::Connection(id) => {
+                    if self.connection_store.delete(&id).unwrap_or(false) {
+                        // Keep batch delete aligned with the single-delete command path.
+                        if let Err(error) = self.forwarding_registry.delete_owned_forwards(&id) {
+                            self.session_manager.status = Some(error.to_string());
+                            cx.notify();
+                            return;
+                        }
+                        self.release_ide_runtime_for_saved_connection(&id, cx);
+                        deleted += 1;
+                    }
                 }
-                self.release_ide_runtime_for_saved_connection(&id, cx);
-                deleted += 1;
+                SessionManagerSelectionTarget::RemoteDesktop(id) => {
+                    if self
+                        .connection_store
+                        .delete_remote_desktop_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
             }
         }
-        self.session_manager.selected_ids.clear();
+        self.session_manager.selected_items.clear();
         self.session_manager.show_batch_move = false;
         self.session_manager.status = Some(connections_deleted_label(&self.i18n, deleted));
         if deleted > 0 {
@@ -653,20 +671,32 @@ impl WorkspaceApp {
         group: Option<&str>,
         cx: &mut Context<Self>,
     ) {
-        let ids = self
+        let targets = self
             .session_manager
-            .selected_ids
+            .selected_items
             .iter()
             .cloned()
             .collect::<Vec<_>>();
-        match self.connection_store.move_to_group(&ids, group) {
+        let mut connection_ids = Vec::new();
+        let mut remote_desktop_ids = Vec::new();
+        for target in targets {
+            match target {
+                SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id),
+                SessionManagerSelectionTarget::RemoteDesktop(id) => remote_desktop_ids.push(id),
+            }
+        }
+        match self.connection_store.move_session_assets_to_group(
+            &connection_ids,
+            &remote_desktop_ids,
+            group,
+        ) {
             Ok(count) => {
                 self.session_manager.status = Some(connections_moved_label(
                     &self.i18n,
                     count,
                     group_label(&self.i18n, group),
                 ));
-                self.session_manager.selected_ids.clear();
+                self.session_manager.selected_items.clear();
                 self.session_manager.show_batch_move = false;
                 if count > 0 {
                     self.queue_cloud_sync_dirty_refresh(cx);

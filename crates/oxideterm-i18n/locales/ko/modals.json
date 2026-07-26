@@ -370,6 +370,7 @@
       "remote_desktop_password_required": "RDP 비밀번호를 입력하세요",
       "remote_desktop_save_failed": "원격 데스크톱 연결을 저장하지 못했습니다",
       "remote_desktop_password_placeholder": "RDP 비밀번호",
+      "remote_desktop_password_keep_placeholder": "비워 두면 저장된 비밀번호를 유지합니다",
       "remote_desktop_features_title": "세션 기능",
       "remote_desktop_features_hint": "이 원격 데스크톱 세션에서 사용할 로컬 리소스를 선택하세요.",
       "remote_desktop_clipboard_group": "클립보드",
