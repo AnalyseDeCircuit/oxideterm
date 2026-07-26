@@ -779,7 +779,7 @@ impl WorkspaceApp {
             (
                 session.profile.clone(),
                 session.provider.clone(),
-                session.password.clone(),
+                session.password.as_ref().map(RemoteDesktopSecret::share),
                 next_remote_desktop_worker_generation(session.worker_generation),
                 initial_request_size,
                 initial_viewport_size,
@@ -859,7 +859,7 @@ impl WorkspaceApp {
                 Some((
                     session.profile.clone(),
                     session.provider.clone(),
-                    session.password.clone(),
+                    session.password.as_ref().map(RemoteDesktopSecret::share),
                     session.frame_slot.clone(),
                     next_remote_desktop_worker_generation(session.worker_generation),
                 ))

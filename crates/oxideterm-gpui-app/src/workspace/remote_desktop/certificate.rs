@@ -429,7 +429,7 @@ fn remote_desktop_authenticate_request(
     ) {
         None
     } else {
-        session.password.clone()
+        session.password.as_ref().map(RemoteDesktopSecret::share)
     };
     RemoteDesktopHelperRequest::Authenticate {
         challenge_id: certificate.challenge_id.clone(),
