@@ -76,9 +76,13 @@ impl WorkspaceApp {
             delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake);
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
         let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
-        let (terminal_cwd_tx, terminal_cwd_rx) = std::sync::mpsc::channel();
-        let (terminal_git_tx, terminal_git_rx) = std::sync::mpsc::channel();
-        let (terminal_project_tx, terminal_project_rx) = std::sync::mpsc::channel();
+        let terminal_metadata_wake = delivery::ActiveDeliveryWake::default();
+        let (terminal_cwd_tx, terminal_cwd_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
+        let (terminal_git_tx, terminal_git_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
+        let (terminal_project_tx, terminal_project_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake);
         let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
         let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -733,6 +737,7 @@ impl WorkspaceApp {
         workspace.schedule_terminal_notice_delivery(cx);
         workspace.schedule_connection_trace_delivery(cx);
         workspace.schedule_launcher_worker_delivery(cx);
+        workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_forwarding_worker_delivery(cx);
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
@@ -751,9 +756,6 @@ impl WorkspaceApp {
                     .update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {
                             workspace.poll_external_settings_store_changes(cx);
-                            workspace.poll_terminal_cwd_results(cx);
-                            workspace.poll_terminal_git_results(cx);
-                            workspace.poll_terminal_project_results(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);

@@ -227,9 +227,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn poll_terminal_git_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_terminal_git_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.terminal_git_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
         let mut changed = false;
-        while let Ok(delivery) = self.terminal_git_rx.try_recv() {
+        for delivery in delivery_batch.items {
             match delivery {
                 TerminalGitDelivery::Probe {
                     key,
@@ -262,6 +267,7 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
+        delivery_batch.outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn open_terminal_git_branch_picker(&mut self, cx: &mut Context<Self>) {

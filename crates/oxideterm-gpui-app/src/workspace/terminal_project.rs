@@ -79,19 +79,26 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn poll_terminal_project_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_terminal_project_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let delivery_batch = delivery::drain_channel(
+            &self.terminal_project_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
         if !self.terminal_project_tasks_enabled() {
             // Drop stale probe results while the feature is disabled so a
             // completed background probe cannot resurrect the project panel.
-            while self.terminal_project_rx.try_recv().is_ok() {}
+            drop(delivery_batch.items);
             if self.close_terminal_project_panel() {
                 cx.notify();
             }
-            return;
+            return delivery_batch.outcome.backlog_remaining;
         }
 
         let mut changed = false;
-        while let Ok(delivery) = self.terminal_project_rx.try_recv() {
+        for delivery in delivery_batch.items {
             match delivery {
                 TerminalProjectDelivery::Probe {
                     key,
@@ -113,6 +120,7 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
+        delivery_batch.outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn open_terminal_project_panel(&mut self, cx: &mut Context<Self>) {

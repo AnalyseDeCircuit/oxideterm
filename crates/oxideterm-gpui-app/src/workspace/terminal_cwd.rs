@@ -696,9 +696,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn poll_terminal_cwd_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_terminal_cwd_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.terminal_cwd_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
         let mut changed = false;
-        while let Ok(delivery) = self.terminal_cwd_rx.try_recv() {
+        for delivery in delivery_batch.items {
             match delivery {
                 TerminalCwdDelivery::DirectoryList {
                     key,
@@ -713,6 +718,45 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
+        delivery_batch.outcome.backlog_remaining
+    }
+
+    pub(in crate::workspace) fn schedule_terminal_metadata_delivery(&self, cx: &mut Context<Self>) {
+        let metadata_wake = self.terminal_cwd_tx.wake();
+        let release_wake = metadata_wake.clone();
+        cx.on_release(move |_, _| {
+            // Metadata probes may finish after their workspace UI is released.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                metadata_wake.wait().await;
+                let should_drain = metadata_wake.take();
+                let stopped = metadata_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(backlog_remaining) = weak.update(cx, |workspace, cx| {
+                    let cwd_backlog = workspace.poll_terminal_cwd_results(cx);
+                    let git_backlog = workspace.poll_terminal_git_results(cx);
+                    let project_backlog = workspace.poll_terminal_project_results(cx);
+                    cwd_backlog || git_backlog || project_backlog
+                }) else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Continue bounded metadata batches without the workspace heartbeat.
+                    metadata_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn spawn_remote_terminal_cwd_directory_list(
