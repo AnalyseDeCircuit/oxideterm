@@ -5,6 +5,27 @@ mod tests {
     use oxideterm_workspace::TabKind;
 
     use super::super::super::*;
+    use super::super::render::coalesce_connection_trace_running_events;
+
+    fn connection_trace_event(
+        status: ConnectionTraceStatus,
+        stage: ConnectionTraceStage,
+        progress: f32,
+    ) -> ConnectionTraceEvent {
+        ConnectionTraceEvent {
+            attempt_id: "attempt-1".to_string(),
+            node_id: NodeId::new("node-1"),
+            stage,
+            status,
+            progress,
+            elapsed_ms: 0,
+            detail: None,
+            label: None,
+            step_index: Some(1),
+            total_steps: Some(1),
+            mode: ConnectionTraceMode::Connect,
+        }
+    }
 
     #[test]
     fn background_tab_options_cover_native_tab_background_keys() {
@@ -70,6 +91,61 @@ mod tests {
         let expected = "Roboto";
 
         assert_eq!(settings_ui_font_family("").as_ref(), expected);
+    }
+
+    #[test]
+    fn connection_trace_coalesces_running_progress_before_terminal_state() {
+        let events = vec![
+            connection_trace_event(
+                ConnectionTraceStatus::Running,
+                ConnectionTraceStage::Queued,
+                5.0,
+            ),
+            connection_trace_event(
+                ConnectionTraceStatus::Running,
+                ConnectionTraceStage::Authentication,
+                62.0,
+            ),
+            connection_trace_event(
+                ConnectionTraceStatus::Ready,
+                ConnectionTraceStage::Ready,
+                100.0,
+            ),
+        ];
+
+        let coalesced = coalesce_connection_trace_running_events(events);
+
+        assert_eq!(coalesced.len(), 2);
+        assert_eq!(coalesced[0].stage, ConnectionTraceStage::Authentication);
+        assert_eq!(coalesced[1].status, ConnectionTraceStatus::Ready);
+    }
+
+    #[test]
+    fn connection_trace_never_merges_terminal_transitions() {
+        let events = vec![
+            connection_trace_event(
+                ConnectionTraceStatus::Ready,
+                ConnectionTraceStage::Ready,
+                100.0,
+            ),
+            connection_trace_event(
+                ConnectionTraceStatus::Failed,
+                ConnectionTraceStage::Authentication,
+                100.0,
+            ),
+            connection_trace_event(
+                ConnectionTraceStatus::Cancelled,
+                ConnectionTraceStage::Authentication,
+                100.0,
+            ),
+        ];
+
+        let coalesced = coalesce_connection_trace_running_events(events);
+
+        assert_eq!(coalesced.len(), 3);
+        assert_eq!(coalesced[0].status, ConnectionTraceStatus::Ready);
+        assert_eq!(coalesced[1].status, ConnectionTraceStatus::Failed);
+        assert_eq!(coalesced[2].status, ConnectionTraceStatus::Cancelled);
     }
 
     #[test]

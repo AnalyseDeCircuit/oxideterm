@@ -72,7 +72,7 @@ impl WorkspaceApp {
         let (terminal_git_tx, terminal_git_rx) = std::sync::mpsc::channel();
         let (terminal_project_tx, terminal_project_rx) = std::sync::mpsc::channel();
         let (remote_desktop_worker_tx, remote_desktop_worker_rx) = std::sync::mpsc::channel();
-        let (connection_trace_tx, connection_trace_rx) = std::sync::mpsc::channel();
+        let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
@@ -720,6 +720,7 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         workspace.schedule_terminal_notice_delivery(cx);
+        workspace.schedule_connection_trace_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {

@@ -1054,7 +1054,7 @@ pub(crate) struct WorkspaceApp {
     workspace_toast_next_id: u64,
     workspace_toasts: Vec<WorkspaceToast>,
     plugin_progress_toasts: HashMap<String, WorkspaceToast>,
-    connection_trace_tx: std::sync::mpsc::Sender<ConnectionTraceEvent>,
+    connection_trace_tx: delivery::ActiveDeliverySender<ConnectionTraceEvent>,
     connection_trace_rx: std::sync::mpsc::Receiver<ConnectionTraceEvent>,
     connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
     connection_trace_state: ConnectionTraceState,

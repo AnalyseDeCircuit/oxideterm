@@ -7,6 +7,29 @@ const TERMINAL_FONT_SIZE_HUD_UNIT_TEXT_SIZE: f32 = 16.0;
 const TERMINAL_FONT_SIZE_HUD_UNIT_GAP: f32 = 2.0;
 const TERMINAL_FONT_SIZE_HUD_BACKGROUND_ALPHA: u32 = 0xe6;
 
+pub(super) fn coalesce_connection_trace_running_events(
+    events: Vec<ConnectionTraceEvent>,
+) -> Vec<ConnectionTraceEvent> {
+    let mut coalesced = Vec::with_capacity(events.len());
+    let mut pending_running_by_attempt = HashMap::<String, usize>::new();
+    for event in events {
+        if event.status == ConnectionTraceStatus::Running {
+            if let Some(index) = pending_running_by_attempt.get(&event.attempt_id).copied() {
+                // Running progress is a latest-value snapshot until a terminal state arrives.
+                coalesced[index] = event;
+            } else {
+                pending_running_by_attempt.insert(event.attempt_id.clone(), coalesced.len());
+                coalesced.push(event);
+            }
+        } else {
+            // Terminal transitions are never merged and split later running snapshots.
+            pending_running_by_attempt.remove(&event.attempt_id);
+            coalesced.push(event);
+        }
+    }
+    coalesced
+}
+
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -120,7 +143,6 @@ impl Render for WorkspaceApp {
         self.poll_host_schedule_logs_results(cx);
         self.poll_host_schedule_action_results(cx);
         self.maybe_refresh_connection_monitor(cx);
-        self.poll_connection_trace_events(cx);
         self.refresh_workspace_toast_expirations(cx);
         self.poll_native_plugin_terminal_ui_requests(window, cx);
         self.poll_native_plugin_product_ui_effects(window, cx);
@@ -1872,14 +1894,21 @@ impl WorkspaceApp {
         Some(toaster(&self.tokens, toasts).into_any_element())
     }
 
-    pub(in crate::workspace) fn poll_connection_trace_events(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_connection_trace_events(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         const DISPLAY_DELAY: Duration = Duration::from_millis(1200);
         const UPDATE_COALESCE: Duration = Duration::from_millis(300);
         const SUCCESS_DISMISS: Duration = Duration::from_millis(1800);
         const FAILURE_DISMISS: Duration = Duration::from_secs(16);
 
+        let drain = delivery::drain_channel(
+            &self.connection_trace_rx,
+            delivery::NOTIFICATION_DELIVERY_BUDGET,
+        );
         let mut changed = false;
-        while let Ok(event) = self.connection_trace_rx.try_recv() {
+        for event in coalesce_connection_trace_running_events(drain.items) {
             let now = Instant::now();
             let attempt_id = event.attempt_id.clone();
             let trace = self
@@ -1988,6 +2017,42 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
+        drain.outcome.backlog_remaining
+    }
+
+    pub(in crate::workspace) fn schedule_connection_trace_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.connection_trace_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Connection runtime outlives its toast, but this UI waiter ends with the workspace.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let backlog_remaining = weak
+                    .update(cx, |workspace, cx| {
+                        workspace.poll_connection_trace_events(cx)
+                    })
+                    .unwrap_or(false);
+                if backlog_remaining {
+                    // Store one continuation permit for the next bounded trace batch.
+                    delivery_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::workspace) fn show_connection_trace(
