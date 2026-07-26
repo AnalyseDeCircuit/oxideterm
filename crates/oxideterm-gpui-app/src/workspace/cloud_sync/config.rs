@@ -730,6 +730,29 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn render_cloud_sync_form_toggle(
+        &self,
+        label_key: &str,
+        checked: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        cloud_sync_form_toggle(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "cloud-sync-form-toggle-label",
+                label_key,
+                self.i18n.t(label_key),
+                theme.text_muted,
+                cx,
+            ),
+            checked,
+            listener,
+        )
+    }
+
     pub(super) fn render_cloud_sync_inline_button(
         &self,
         label_key: &str,

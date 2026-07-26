@@ -1053,6 +1053,41 @@ pub fn cloud_sync_toggle(
     checked: bool,
     listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> AnyElement {
+    cloud_sync_toggle_with_layout(
+        tokens,
+        label,
+        checked,
+        tokens.metrics.ui_text_sm,
+        5.0,
+        listener,
+    )
+}
+
+/// Aligns a toggle with the label baseline used by neighboring form fields.
+pub fn cloud_sync_form_toggle(
+    tokens: &ThemeTokens,
+    label: AnyElement,
+    checked: bool,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    cloud_sync_toggle_with_layout(
+        tokens,
+        label,
+        checked,
+        tokens.metrics.ui_text_xs,
+        0.0,
+        listener,
+    )
+}
+
+fn cloud_sync_toggle_with_layout(
+    tokens: &ThemeTokens,
+    label: AnyElement,
+    checked: bool,
+    text_size: f32,
+    vertical_padding: f32,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
     let theme = tokens.ui;
     div()
         .w_full()
@@ -1061,14 +1096,14 @@ pub fn cloud_sync_toggle(
         .items_center()
         .justify_between()
         .gap(px(12.0))
-        .py(px(5.0))
+        .py(px(vertical_padding))
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, listener)
         .child(
             div()
                 .min_w(px(0.0))
                 .flex_1()
-                .text_size(px(tokens.metrics.ui_text_sm))
+                .text_size(px(text_size))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(rgb(theme.text))
                 .child(label),

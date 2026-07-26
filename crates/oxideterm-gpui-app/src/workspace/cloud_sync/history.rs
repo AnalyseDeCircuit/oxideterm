@@ -519,7 +519,7 @@ impl WorkspaceApp {
                     field.secret_key,
                     cx,
                 ),
-                CloudSyncConfigRow::AutoUploadToggle => self.render_cloud_sync_toggle(
+                CloudSyncConfigRow::AutoUploadToggle => self.render_cloud_sync_form_toggle(
                     "plugin.cloud_sync.settings.auto_upload_enabled",
                     form.auto_upload_enabled,
                     cx.listener(
