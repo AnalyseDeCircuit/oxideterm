@@ -20,7 +20,7 @@ impl WorkspaceApp {
             }
             return false;
         }
-        if key == "escape" && self.dismiss_workspace_context_menus() {
+        if key == "escape" && self.dismiss_workspace_context_menus(cx) {
             cx.notify();
             return true;
         }

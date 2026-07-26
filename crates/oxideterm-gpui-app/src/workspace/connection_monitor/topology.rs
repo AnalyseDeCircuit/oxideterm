@@ -407,50 +407,58 @@ impl WorkspaceApp {
         }
 
         let edges = layout.edges.clone();
-        let transform = self.connection_monitor.topology_transform;
+        let (transform, topology_dragging, topology_menu) = {
+            let host_tools = self.host_tools.read(cx);
+            (
+                host_tools.topology_transform(),
+                host_tools.topology_dragging(),
+                host_tools.topology_menu(),
+            )
+        };
         let mut graph = div()
             .relative()
             .size_full()
             .overflow_hidden()
             .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .rounded(px(self.tokens.radii.lg))
-            .cursor(if self.connection_monitor.topology_drag.is_some() {
+            .cursor(if topology_dragging {
                 CursorStyle::ClosedHand
             } else {
                 CursorStyle::OpenHand
             })
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                let zoom_changed = this.zoom_topology_graph(event);
-                let menu_changed = this.connection_monitor.dismiss_topology_menu();
+                let host_tools = this.host_tools.clone();
+                host_tools.update(cx, |host_tools, cx| {
+                    host_tools.zoom_topology_graph(event, cx);
+                    host_tools.dismiss_topology_menu(cx);
+                });
                 cx.stop_propagation();
-                if zoom_changed || menu_changed {
-                    cx.notify();
-                }
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                    this.connection_monitor.dismiss_topology_menu();
-                    this.connection_monitor.topology_drag = Some(TopologyDragState {
-                        last_x: f32::from(event.position.x),
-                        last_y: f32::from(event.position.y),
+                    let host_tools = this.host_tools.clone();
+                    host_tools.update(cx, |host_tools, cx| {
+                        host_tools.dismiss_topology_menu(cx);
+                        host_tools.begin_topology_drag(event, cx);
                     });
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-                if this.pan_topology_graph(event) {
+                let host_tools = this.host_tools.clone();
+                if host_tools.update(cx, |host_tools, cx| {
+                    host_tools.pan_topology_graph(event, cx)
+                }) {
                     cx.stop_propagation();
-                    cx.notify();
                 }
             }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-                    if this.connection_monitor.topology_drag.take().is_some() {
+                    let host_tools = this.host_tools.clone();
+                    if host_tools.update(cx, |host_tools, cx| host_tools.end_topology_drag(cx)) {
                         cx.stop_propagation();
-                        cx.notify();
                     }
                 }),
             )
@@ -605,7 +613,7 @@ impl WorkspaceApp {
             graph = graph.child(self.render_topology_graph_node(node, transform, cx));
         }
 
-        if let Some(menu) = self.connection_monitor.topology_menu.clone() {
+        if let Some(menu) = topology_menu {
             // Topology node actions are a context menu, not a graph child popover:
             // keep outside pointer and Esc dismissal on the same workspace menu
             // owner as FileManager/SFTP/session menus.
@@ -735,11 +743,16 @@ impl WorkspaceApp {
                     let node = node;
                     move |this, event: &MouseDownEvent, window, cx| {
                         if event.click_count >= 2 {
-                            this.open_topology_node_menu(&node, window);
+                            let node_id =
+                                this.node_router.node_id_for_connection(&node.connection_id);
+                            this.host_tools.update(cx, |host_tools, cx| {
+                                host_tools.open_topology_node_menu(node_id, &node, window, cx);
+                            });
                         }
-                        this.connection_monitor.topology_drag = None;
+                        this.host_tools.update(cx, |host_tools, cx| {
+                            host_tools.end_topology_drag(cx);
+                        });
                         cx.stop_propagation();
-                        cx.notify();
                     }
                 }),
             )
@@ -944,23 +957,53 @@ impl WorkspaceApp {
                 hover_background: Some(rgba((theme.accent << 8) | 0x1a)),
                 hover_text_color: Some(rgb(theme.text)),
             },
-            |this| {
-                this.connection_monitor.dismiss_topology_menu();
+            |_this| {
+                // The menu helper does not receive a GPUI context. The action
+                // listener below closes the Entity-owned menu before routing.
             },
-            listener,
+            move |this, event, window, cx| {
+                this.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.dismiss_topology_menu(cx);
+                });
+                listener(this, event, window, cx);
+            },
             cx,
         )
         .into_any_element()
     }
+}
 
-    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) -> bool {
+impl HostToolsEntity {
+    pub(super) fn topology_transform(&self) -> TopologyTransform {
+        self.topology_transform
+    }
+
+    pub(super) fn topology_dragging(&self) -> bool {
+        self.topology_drag.is_some()
+    }
+
+    pub(super) fn topology_menu(&self) -> Option<TopologyNodeMenuState> {
+        self.topology_menu.clone()
+    }
+
+    pub(in crate::workspace) fn dismiss_topology_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        // The menu contains only node display metadata and remains local to the
+        // Host Tools Entity across main-tab and detached-window renderers.
+        let changed = self.topology_menu.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) -> bool {
         let delta = event.delta.pixel_delta(px(16.0));
         let vertical = f32::from(delta.y);
         if vertical == 0.0 {
             return false;
         }
 
-        let old = self.connection_monitor.topology_transform;
+        let old = self.topology_transform;
         let wheel_factor = (1.0 - vertical * 0.001).clamp(0.85, 1.15);
         let next_k = (old.k * wheel_factor).clamp(TOPOLOGY_ZOOM_MIN, TOPOLOGY_ZOOM_MAX);
         if (next_k - old.k).abs() < f32::EPSILON {
@@ -971,16 +1014,25 @@ impl WorkspaceApp {
         let cursor_y = f32::from(event.position.y);
         let graph_x = (cursor_x - old.x) / old.k;
         let graph_y = (cursor_y - old.y) / old.k;
-        self.connection_monitor.topology_transform = TopologyTransform {
+        self.topology_transform = TopologyTransform {
             x: cursor_x - graph_x * next_k,
             y: cursor_y - graph_y * next_k,
             k: next_k,
         };
+        cx.notify();
         true
     }
 
-    fn pan_topology_graph(&mut self, event: &MouseMoveEvent) -> bool {
-        let Some(drag) = self.connection_monitor.topology_drag else {
+    fn begin_topology_drag(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.topology_drag = Some(TopologyDragState {
+            last_x: f32::from(event.position.x),
+            last_y: f32::from(event.position.y),
+        });
+        cx.notify();
+    }
+
+    fn pan_topology_graph(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.topology_drag else {
             return false;
         };
         if !event.dragging() {
@@ -994,18 +1046,32 @@ impl WorkspaceApp {
         if dx == 0.0 && dy == 0.0 {
             return false;
         }
-        self.connection_monitor.topology_transform.x += dx;
-        self.connection_monitor.topology_transform.y += dy;
-        self.connection_monitor.topology_drag = Some(TopologyDragState {
+        self.topology_transform.x += dx;
+        self.topology_transform.y += dy;
+        self.topology_drag = Some(TopologyDragState {
             last_x: x,
             last_y: y,
         });
+        cx.notify();
         true
     }
 
-    fn open_topology_node_menu(&mut self, node: &TopologyLayoutNode, window: &Window) {
-        let transform = self.connection_monitor.topology_transform;
-        let node_id = self.node_router.node_id_for_connection(&node.connection_id);
+    fn end_topology_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.topology_drag.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    fn open_topology_node_menu(
+        &mut self,
+        node_id: Option<NodeId>,
+        node: &TopologyLayoutNode,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let transform = self.topology_transform;
         let window_bounds = window.inner_window_bounds().get_bounds();
         let max_x = (f32::from(window_bounds.size.width) - TOPOLOGY_MENU_WIDTH).max(0.0);
         let max_y = (f32::from(window_bounds.size.height) - TOPOLOGY_MENU_MAX_HEIGHT).max(0.0);
@@ -1019,7 +1085,7 @@ impl WorkspaceApp {
             .min(max_y)
             .max(0.0);
 
-        self.connection_monitor.topology_menu = Some(TopologyNodeMenuState {
+        self.topology_menu = Some(TopologyNodeMenuState {
             node_id,
             name: node.name.clone(),
             host: node.host.clone(),
@@ -1027,5 +1093,6 @@ impl WorkspaceApp {
             x,
             y,
         });
+        cx.notify();
     }
 }

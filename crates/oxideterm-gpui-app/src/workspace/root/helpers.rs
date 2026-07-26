@@ -1076,7 +1076,7 @@ impl WorkspaceApp {
             self.session_manager.show_batch_move = false;
             changed = true;
         }
-        if self.dismiss_workspace_context_menus() {
+        if self.dismiss_workspace_context_menus(cx) {
             changed = true;
         }
         if self.detached_local_terminals_popover_open {
@@ -1117,13 +1117,19 @@ impl WorkspaceApp {
         changed
     }
 
-    pub(in crate::workspace) fn dismiss_workspace_context_menus(&mut self) -> bool {
+    pub(in crate::workspace) fn dismiss_workspace_context_menus(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let mut changed = false;
 
         // Radix ContextMenu uses one close policy for outside pointer and Esc.
         // Keep all native context-menu owners here so feature handlers do not
         // each mutate their own menu state differently.
-        if self.connection_monitor.dismiss_topology_menu() {
+        if self
+            .host_tools
+            .update(cx, |host_tools, cx| host_tools.dismiss_topology_menu(cx))
+        {
             changed = true;
         }
         if self.close_session_row_menus() {

@@ -26,6 +26,11 @@ pub(in crate::workspace) struct HostToolsEntity {
     topology_snapshot: Option<ConnectionTopologySnapshot>,
     pool_error: Option<String>,
     last_pool_refresh: Option<Instant>,
+    // Topology interactions belong to the shared Host Tools surface, not to
+    // the workspace window that happens to render the graph.
+    pub(super) topology_transform: TopologyTransform,
+    pub(super) topology_drag: Option<TopologyDragState>,
+    pub(super) topology_menu: Option<TopologyNodeMenuState>,
     compact_monitor_list_state: ListState,
     compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) section_list_state: ListState,
@@ -64,6 +69,9 @@ impl HostToolsEntity {
             topology_snapshot: None,
             pool_error: None,
             last_pool_refresh: None,
+            topology_transform: TopologyTransform::default(),
+            topology_drag: None,
+            topology_menu: None,
             compact_monitor_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -615,6 +623,40 @@ mod tests {
         // Sampling/page refresh must not consume or release the node owner.
         assert_eq!(handle.info().ref_count, 1);
         assert_eq!(handle.info().consumers, vec![node_consumer]);
+    }
+
+    #[gpui::test]
+    fn topology_interaction_state_is_entity_owned(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, cx| {
+            entity.topology_drag = Some(TopologyDragState {
+                last_x: 12.0,
+                last_y: 18.0,
+            });
+            entity.topology_menu = Some(TopologyNodeMenuState {
+                node_id: Some(NodeId::new("node-1")),
+                name: "host".to_string(),
+                host: "host.example".to_string(),
+                view_status: oxideterm_topology::TopologyViewStatus::Connected,
+                x: 20.0,
+                y: 24.0,
+            });
+
+            assert!(entity.topology_dragging());
+            assert!(entity.topology_menu().is_some());
+            assert!(entity.dismiss_topology_menu(cx));
+            assert!(entity.topology_menu().is_none());
+            assert!(!entity.dismiss_topology_menu(cx));
+        });
     }
 
     #[gpui::test]

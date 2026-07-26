@@ -707,11 +707,8 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_package_last_error: Option<String>,
     pub(super) host_package_list_state: ListState,
     pub(super) host_package_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) topology_transform: TopologyTransform,
     pub(super) previous_context_sidebar_tool: ContextSidebarTool,
     pub(super) tab_scrollbar_drag: Option<HostToolsTabScrollbarDragState>,
-    pub(super) topology_drag: Option<TopologyDragState>,
-    pub(super) topology_menu: Option<TopologyNodeMenuState>,
 }
 
 impl ConnectionMonitorState {
@@ -884,17 +881,8 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_package_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            topology_transform: TopologyTransform::default(),
             previous_context_sidebar_tool: ContextSidebarTool::Monitor,
             tab_scrollbar_drag: None,
-            topology_drag: None,
-            topology_menu: None,
         }
-    }
-
-    pub(in crate::workspace) fn dismiss_topology_menu(&mut self) -> bool {
-        // Topology menu state owns a private node snapshot; expose only the
-        // browser-style transient dismissal result to the workspace root.
-        self.topology_menu.take().is_some()
     }
 }
