@@ -126,10 +126,6 @@ impl Render for WorkspaceApp {
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.refresh_workspace_toast_expirations(cx);
-        self.poll_ai_chat_stream_events(Some(window), cx);
-        self.poll_ai_compaction_results(cx);
-        self.poll_ai_model_selector_probe_results(cx);
-        self.poll_ai_model_refresh_results(cx);
         if self.ai_sidebar_visible() || self.ai.chat.inline_panel.open {
             self.ensure_ai_model_selector_mount_statuses(cx);
         }

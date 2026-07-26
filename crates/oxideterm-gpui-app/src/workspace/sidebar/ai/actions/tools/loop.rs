@@ -51,7 +51,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
     generation: u64,
     conversation_id: String,
     assistant_id: String,
-    ui_tx: std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: AiStreamDeliverySender,
 ) {
     if config.execution_backend == AiExecutionBackend::Acp {
         run_acp_chat_loop(
@@ -1105,7 +1105,7 @@ fn acp_visible_terminal_tool_definitions(
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_acp_visible_terminal_tool_on_ui(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -1149,7 +1149,7 @@ async fn execute_acp_visible_terminal_tool_on_ui(
 async fn handle_acp_visible_terminal_tool_call(
     call: oxideterm_acp_host_tools::AcpHostToolCall,
     config: &AiChatStreamConfig,
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -1368,7 +1368,7 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
     generation: u64,
     conversation_id: String,
     assistant_id: String,
-    ui_tx: std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: AiStreamDeliverySender,
 ) {
     let Some(agent_id) = config
         .acp_agent_id
@@ -1729,7 +1729,7 @@ pub(in crate::workspace) fn acp_session_cwd_from_agent(
 }
 
 pub(in crate::workspace) fn flush_ai_required_tool_buffer(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,

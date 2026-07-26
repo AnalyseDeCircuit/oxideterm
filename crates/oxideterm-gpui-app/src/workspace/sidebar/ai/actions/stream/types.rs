@@ -5,6 +5,9 @@ pub(in crate::workspace) struct AiStreamDelivery {
     pub(in crate::workspace) event: AiStreamDeliveryEvent,
 }
 
+pub(in crate::workspace) type AiStreamDeliverySender =
+    crate::workspace::delivery::ActiveDeliverySender<AiStreamDelivery>;
+
 pub(in crate::workspace) struct AiCompactionDelivery {
     pub(in crate::workspace) kind: AiCompactionDeliveryKind,
     pub(in crate::workspace) conversation_id: String,
@@ -15,6 +18,9 @@ pub(in crate::workspace) struct AiCompactionDelivery {
     pub(in crate::workspace) resume_after: Option<AiPendingChatStream>,
     pub(in crate::workspace) silent: bool,
 }
+
+pub(in crate::workspace) type AiCompactionDeliverySender =
+    crate::workspace::delivery::ActiveDeliverySender<AiCompactionDelivery>;
 
 pub(in crate::workspace) enum AiCompactionDeliveryKind {
     Compact,

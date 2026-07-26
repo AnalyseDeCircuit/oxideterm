@@ -727,6 +727,7 @@ impl WorkspaceApp {
         workspace.schedule_forwarding_worker_delivery(cx);
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
+        workspace.schedule_ai_delivery(window_handle, cx);
         workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {

@@ -148,5 +148,6 @@ include!("ai/render.rs");
 include!("ai/input.rs");
 include!("ai/model_selector.rs");
 include!("ai/actions.rs");
+include!("ai/delivery.rs");
 include!("ai/helpers.rs");
 include!("ai/terminal_inline.rs");

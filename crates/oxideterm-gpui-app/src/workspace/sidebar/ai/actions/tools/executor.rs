@@ -2163,7 +2163,7 @@ pub(in crate::workspace) fn make_ai_state_version(
 
 pub(in crate::workspace) async fn execute_ai_tool(
     snapshot: &AiOrchestratorRuntimeSnapshot,
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,

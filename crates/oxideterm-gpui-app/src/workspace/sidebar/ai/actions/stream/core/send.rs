@@ -283,7 +283,10 @@ impl WorkspaceApp {
         self.ai.chat.loading = true;
         self.ai.chat.stream_generation = self.ai.chat.stream_generation.saturating_add(1);
         let generation = self.ai.chat.stream_generation;
-        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        let (ui_tx, ui_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
         if let Some(task) = self.ai.chat.stream_task.take() {
             task.abort();
         }
@@ -299,6 +302,5 @@ impl WorkspaceApp {
             assistant_id,
             ui_tx,
         )));
-        self.schedule_ai_chat_stream_poll(cx);
     }
 }

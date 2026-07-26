@@ -13,7 +13,7 @@ pub(in crate::workspace) fn record_completed_ai_tool_call(
 }
 
 pub(in crate::workspace) fn reject_ai_tool_calls_for_protocol_guard(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -44,7 +44,7 @@ pub(in crate::workspace) fn reject_ai_tool_calls_for_protocol_guard(
 }
 
 pub(in crate::workspace) fn send_ai_guardrail(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -67,7 +67,7 @@ pub(in crate::workspace) fn send_ai_guardrail(
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn send_ai_assistant_round(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -97,7 +97,7 @@ pub(in crate::workspace) fn send_ai_assistant_round(
 }
 
 pub(in crate::workspace) fn send_ai_round_summary(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -119,7 +119,7 @@ pub(in crate::workspace) fn send_ai_round_summary(
 }
 
 pub(in crate::workspace) fn send_ai_round_stateful_marker(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -136,7 +136,7 @@ pub(in crate::workspace) fn send_ai_round_stateful_marker(
 }
 
 pub(in crate::workspace) fn send_ai_diagnostic(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -199,7 +199,7 @@ pub(in crate::workspace) fn ai_round_summary_text(results: &[AiRoundToolResultSu
 }
 
 pub(in crate::workspace) fn send_ai_stream_delivery(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -214,7 +214,7 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
 }
 
 pub(in crate::workspace) fn send_ai_tool_status(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -243,7 +243,7 @@ pub(in crate::workspace) fn send_ai_tool_status(
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn send_ai_tool_status_with_payload(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,

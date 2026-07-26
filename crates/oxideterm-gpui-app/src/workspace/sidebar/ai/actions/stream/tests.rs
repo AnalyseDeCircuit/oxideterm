@@ -1382,7 +1382,7 @@ fn acp_bridge_exposes_only_visible_terminal_tools() {
 
     #[test]
     fn required_tool_buffer_flushes_only_after_tool_call() {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel();
         let mut assistant_content = String::new();
         let mut assistant_thinking = String::new();
         let mut buffered_content = "我已经打开了终端。".to_string();

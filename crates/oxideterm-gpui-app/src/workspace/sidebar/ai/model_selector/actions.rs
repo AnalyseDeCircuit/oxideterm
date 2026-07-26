@@ -413,7 +413,6 @@ window.focus(&self.focus_handle, cx);
                         self.schedule_ai_model_selector_online_probe(
                             provider.clone(),
                             endpoint,
-                            cx,
                         );
                     } else {
                         self.ai
@@ -430,7 +429,6 @@ window.focus(&self.focus_handle, cx);
         &mut self,
         provider: AiProviderView,
         endpoint: &'static str,
-        cx: &mut Context<Self>,
     ) {
         self.ai.models.next_selector_probe_generation = self
             .ai
@@ -444,7 +442,10 @@ window.focus(&self.focus_handle, cx);
             .selector_probe_generations
             .insert(provider_id.clone(), generation);
         if self.ai.models.selector_probe_tx.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) =
+                crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                    self.ai.delivery_wake.clone(),
+                );
             self.ai.models.selector_probe_tx = Some(tx);
             self.ai.models.selector_probe_rx = Some(rx);
         }
@@ -461,20 +462,25 @@ window.focus(&self.focus_handle, cx);
                 online,
             });
         });
-        self.schedule_ai_model_selector_probe_poll(cx);
     }
 
     pub(in crate::workspace) fn poll_ai_model_selector_probe_results(
         &mut self,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(rx) = self.ai.models.selector_probe_rx.take() else {
-            return;
+            return false;
         };
         let mut keep_rx = true;
-        loop {
+        let mut source_exhausted = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
+            .allows_next(processed, started_at.elapsed())
+        {
             match rx.try_recv() {
                 Ok(delivery) => {
+                    processed += 1;
                     self.ai.models.selector_probe_pending =
                         self.ai.models.selector_probe_pending.saturating_sub(1);
                     if self
@@ -491,8 +497,12 @@ window.focus(&self.focus_handle, cx);
                         cx.notify();
                     }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     keep_rx = false;
                     self.ai.models.selector_probe_tx = None;
                     self.ai.models.selector_probe_pending = 0;
@@ -505,27 +515,7 @@ window.focus(&self.focus_handle, cx);
         } else if self.ai.models.selector_probe_pending == 0 {
             self.ai.models.selector_probe_tx = None;
         }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_model_selector_probe_poll(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.models.selector_probe_polling {
-            return;
-        }
-        self.ai.models.selector_probe_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.models.selector_probe_polling = false;
-                this.poll_ai_model_selector_probe_results(cx);
-                if this.ai.models.selector_probe_pending > 0 {
-                    this.schedule_ai_model_selector_probe_poll(cx);
-                }
-            });
-        })
-        .detach();
+        keep_rx && self.ai.models.selector_probe_pending > 0 && !source_exhausted
     }
 
     pub(in crate::workspace) fn ai_model_selector_has_key(

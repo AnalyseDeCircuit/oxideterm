@@ -2,6 +2,7 @@ use super::*;
 
 /// Owns all AI-related workspace state while preserving the existing feature boundaries.
 pub(super) struct AiWorkspaceState {
+    pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
     pub(super) chat: AiChatWorkspaceState,
     pub(super) runtime: AiRuntimeWorkspaceState,
     pub(super) models: AiModelWorkspaceState,
@@ -61,9 +62,7 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) stream_generation: u64,
     pub(super) stream_task: Option<tokio::task::JoinHandle<()>>,
     pub(super) stream_rx: Option<std::sync::mpsc::Receiver<AiStreamDelivery>>,
-    pub(super) stream_polling: bool,
     pub(super) compaction_rx: Option<std::sync::mpsc::Receiver<AiCompactionDelivery>>,
-    pub(super) compaction_polling: bool,
     pub(super) compacting_conversations: HashSet<String>,
     pub(super) compaction_notice: Option<AiCompactionNotice>,
     pub(super) pending_after_compaction: Option<AiPendingChatStream>,
@@ -124,15 +123,15 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) provider_key_status_polling: bool,
     pub(super) refresh_generations: HashMap<String, u64>,
     pub(super) refreshing: HashSet<String>,
-    pub(super) refresh_tx: Option<std::sync::mpsc::Sender<AiModelRefreshDelivery>>,
+    pub(super) refresh_tx:
+        Option<crate::workspace::delivery::ActiveDeliverySender<AiModelRefreshDelivery>>,
     pub(super) refresh_rx: Option<std::sync::mpsc::Receiver<AiModelRefreshDelivery>>,
-    pub(super) refresh_polling: bool,
     pub(super) refresh_pending: usize,
     pub(super) next_refresh_generation: u64,
     pub(super) next_selector_probe_generation: u64,
     pub(super) selector_probe_rx: Option<std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>>,
-    pub(super) selector_probe_tx: Option<std::sync::mpsc::Sender<AiModelSelectorProbeDelivery>>,
-    pub(super) selector_probe_polling: bool,
+    pub(super) selector_probe_tx:
+        Option<crate::workspace::delivery::ActiveDeliverySender<AiModelSelectorProbeDelivery>>,
     pub(super) selector_probe_pending: usize,
 }
 
@@ -157,6 +156,7 @@ impl AiWorkspaceState {
         let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
 
         Self {
+            delivery_wake: crate::workspace::delivery::ActiveDeliveryWake::default(),
             chat: AiChatWorkspaceState::new(sidebar_width, overlay_window_size),
             runtime: AiRuntimeWorkspaceState::new(agent_fs, mcp_registry),
             models: AiModelWorkspaceState::new(key_store),
@@ -216,9 +216,7 @@ impl AiChatWorkspaceState {
             stream_generation: 0,
             stream_task: None,
             stream_rx: None,
-            stream_polling: false,
             compaction_rx: None,
-            compaction_polling: false,
             compacting_conversations: HashSet::new(),
             compaction_notice: None,
             pending_after_compaction: None,
@@ -303,13 +301,11 @@ impl AiModelWorkspaceState {
             refreshing: HashSet::new(),
             refresh_tx: None,
             refresh_rx: None,
-            refresh_polling: false,
             refresh_pending: 0,
             next_refresh_generation: 0,
             next_selector_probe_generation: 0,
             selector_probe_rx: None,
             selector_probe_tx: None,
-            selector_probe_polling: false,
             selector_probe_pending: 0,
         }
     }

@@ -128,7 +128,10 @@ impl WorkspaceApp {
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        let (ui_tx, ui_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
         self.start_ai_compaction_stream_after_api_key_lookup(
             config,
             AiCompactionDeliveryKind::Compact,
@@ -180,7 +183,10 @@ impl WorkspaceApp {
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let (ui_tx, ui_rx) = std::sync::mpsc::channel();
+        let (ui_tx, ui_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
         self.ai.chat.loading = true;
         self.start_ai_compaction_stream_after_api_key_lookup(
             config,
@@ -213,7 +219,7 @@ impl WorkspaceApp {
         silent: bool,
         tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
         rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
-        ui_tx: std::sync::mpsc::Sender<AiCompactionDelivery>,
+        ui_tx: AiCompactionDeliverySender,
         ui_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
         cx: &mut Context<Self>,
     ) {
@@ -267,7 +273,6 @@ impl WorkspaceApp {
                         rx,
                         ui_tx,
                         ui_rx,
-                        cx,
                     );
                 }
                 Err(_) if requires_key => {
@@ -302,7 +307,6 @@ impl WorkspaceApp {
                         rx,
                         ui_tx,
                         ui_rx,
-                        cx,
                     );
                 }
             });
@@ -323,9 +327,8 @@ impl WorkspaceApp {
         silent: bool,
         tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
         mut rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
-        ui_tx: std::sync::mpsc::Sender<AiCompactionDelivery>,
+        ui_tx: AiCompactionDeliverySender,
         ui_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
-        cx: &mut Context<Self>,
     ) {
         if resume_after.is_some() {
             self.ai.chat.pending_after_compaction = resume_after.clone();
@@ -362,6 +365,5 @@ impl WorkspaceApp {
                 silent,
             });
         });
-        self.schedule_ai_compaction_poll(cx);
     }
 }

@@ -24,7 +24,9 @@ impl WorkspaceApp {
 
         let provider_id = provider.id.clone();
         if self.ai.models.refresh_tx.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.ai.delivery_wake.clone(),
+            );
             self.ai.models.refresh_tx = Some(tx);
             self.ai.models.refresh_rx = Some(rx);
         }
@@ -94,17 +96,25 @@ impl WorkspaceApp {
                 result,
             });
         });
-        self.schedule_ai_model_refresh_poll(cx);
     }
 
-    pub(in crate::workspace) fn poll_ai_model_refresh_results(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn poll_ai_model_refresh_results(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(rx) = self.ai.models.refresh_rx.take() else {
-            return;
+            return false;
         };
         let mut keep_rx = true;
-        loop {
+        let mut source_exhausted = false;
+        let started_at = Instant::now();
+        let mut processed = 0usize;
+        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
+            .allows_next(processed, started_at.elapsed())
+        {
             match rx.try_recv() {
                 Ok(delivery) => {
+                    processed += 1;
                     self.ai.models.refresh_pending =
                         self.ai.models.refresh_pending.saturating_sub(1);
                     if self
@@ -152,8 +162,12 @@ impl WorkspaceApp {
                         }
                     }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    source_exhausted = true;
+                    break;
+                }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    source_exhausted = true;
                     keep_rx = false;
                     self.ai.models.refresh_tx = None;
                     self.ai.models.refresh_pending = 0;
@@ -166,24 +180,7 @@ impl WorkspaceApp {
         } else if self.ai.models.refresh_pending == 0 {
             self.ai.models.refresh_tx = None;
         }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_model_refresh_poll(&mut self, cx: &mut Context<Self>) {
-        if self.ai.models.refresh_polling {
-            return;
-        }
-        self.ai.models.refresh_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.models.refresh_polling = false;
-                this.poll_ai_model_refresh_results(cx);
-                if this.ai.models.refresh_pending > 0 {
-                    this.schedule_ai_model_refresh_poll(cx);
-                }
-            });
-        })
-        .detach();
+        keep_rx && self.ai.models.refresh_pending > 0 && !source_exhausted
     }
 
     pub(in crate::workspace) fn push_ai_settings_toast(
