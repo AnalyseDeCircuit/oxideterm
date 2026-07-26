@@ -732,6 +732,7 @@ impl WorkspaceApp {
         workspace.restore_session_tree_snapshot();
         workspace.schedule_terminal_notice_delivery(cx);
         workspace.schedule_connection_trace_delivery(cx);
+        workspace.schedule_launcher_worker_delivery(cx);
         workspace.schedule_forwarding_worker_delivery(cx);
         workspace.schedule_host_tools_delivery(host_tools_delivery_bridges, cx);
         let window_handle = window.window_handle();
@@ -749,7 +750,6 @@ impl WorkspaceApp {
                 if cx
                     .update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {
-                            workspace.poll_launcher_worker_results(cx);
                             workspace.poll_external_settings_store_changes(cx);
                             workspace.poll_terminal_cwd_results(cx);
                             workspace.poll_terminal_git_results(cx);

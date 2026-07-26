@@ -2,7 +2,6 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     path::PathBuf,
-    sync::mpsc,
     thread,
 };
 
@@ -97,13 +96,13 @@ pub(super) struct LauncherState {
     pub(super) hovered_app_path: Option<String>,
     pub(super) hovered_wsl_distro: Option<String>,
     pub(super) pressed_app_path: Option<String>,
-    worker_tx: mpsc::Sender<LauncherWorkerResult>,
-    worker_rx: mpsc::Receiver<LauncherWorkerResult>,
+    worker_tx: delivery::ActiveDeliverySender<LauncherWorkerResult>,
+    worker_rx: std::sync::mpsc::Receiver<LauncherWorkerResult>,
 }
 
 impl LauncherState {
     pub(super) fn new(enabled: bool) -> Self {
-        let (worker_tx, worker_rx) = mpsc::channel();
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         Self {
             core: LauncherRuntimeState::new(enabled),
             focused_input: None,
@@ -555,9 +554,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn poll_launcher_worker_results(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn poll_launcher_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let result_batch = delivery::drain_channel(
+            &self.launcher.worker_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
         let mut changed = false;
-        while let Ok(result) = self.launcher.worker_rx.try_recv() {
+        for result in result_batch.items {
             match result {
                 LauncherWorkerResult::LoadEntries { generation, result } => {
                     if self.launcher.core.apply_load_result(
@@ -573,6 +576,42 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
+        result_batch.outcome.backlog_remaining
+    }
+
+    pub(super) fn schedule_launcher_worker_delivery(&self, cx: &mut Context<Self>) {
+        let worker_wake = self.launcher.worker_tx.wake();
+        let release_wake = worker_wake.clone();
+        cx.on_release(move |_, _| {
+            // The scan thread may finish after the workspace UI has been released.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                worker_wake.wait().await;
+                let should_drain = worker_wake.take();
+                let stopped = worker_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(backlog_remaining) = weak.update(cx, |workspace, cx| {
+                    workspace.poll_launcher_worker_results(cx)
+                }) else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Continue a bounded scan-result batch without the workspace heartbeat.
+                    worker_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(super) fn handle_launcher_key(
