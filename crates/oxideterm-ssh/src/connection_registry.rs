@@ -406,6 +406,12 @@ impl SshConnectionHandle {
         &self.entry.key
     }
 
+    pub(crate) fn config(&self) -> &SshConfig {
+        // The registry remains the sole owner of authentication material while
+        // consumers borrow non-reconnect shell settings from the live entry.
+        &self.entry.config
+    }
+
     pub fn info(&self) -> ConnectionInfo {
         self.entry.info()
     }

@@ -632,7 +632,7 @@ include!("transport/proxy_command.rs");
 
 #[cfg(test)]
 mod transport_lost_tests {
-    use super::{RegistryConsumerGuard, ssh_channel_error_is_transport_lost};
+    use super::{RegistryConsumerGuard, SshTransportClient, ssh_channel_error_is_transport_lost};
     use crate::{ConnectionConsumer, SshConfig, SshConnectionRegistry};
 
     #[test]
@@ -663,6 +663,30 @@ mod transport_lost_tests {
         drop(guard);
 
         assert_eq!(handle.info().ref_count, 0);
+    }
+
+    #[tokio::test]
+    async fn existing_shell_does_not_bootstrap_a_missing_node_transport() {
+        let registry = SshConnectionRegistry::default();
+        let node_consumer = ConnectionConsumer::NodeRouter("node-1".to_string());
+        let handle = registry.acquire(
+            SshConfig::password("host", 22, "me", "secret"),
+            node_consumer.clone(),
+        );
+        let connection_id = handle.connection_id().to_string();
+
+        let result = SshTransportClient::connect_shell_on_existing_connection(
+            registry,
+            connection_id,
+            ConnectionConsumer::Terminal("term-1".to_string()),
+            80,
+            24,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(handle.info().ref_count, 1);
+        assert_eq!(handle.info().consumers, vec![node_consumer]);
     }
 }
 
