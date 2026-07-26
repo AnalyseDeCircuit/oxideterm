@@ -194,6 +194,7 @@ impl WorkspaceApp {
                 self.release_remote_desktop_inputs_for_tab(previous_tab_id);
             }
             self.main_window_tabs.active_tab_id = Some(tab_id);
+            self.resume_remote_desktop_frame_delivery(tab_id, cx);
             self.sync_active_tab_surface();
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)

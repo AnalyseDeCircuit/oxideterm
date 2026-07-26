@@ -19,7 +19,9 @@ impl WorkspaceApp {
         for delivery in drain.items {
             match delivery {
                 RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation } => {
-                    if self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx) {
+                    if self.remote_desktop_tab_visible(tab_id)
+                        && self.apply_remote_desktop_frame_ready(tab_id, generation, window, cx)
+                    {
                         changed = true;
                     }
                 }
@@ -149,6 +151,33 @@ impl WorkspaceApp {
                 });
             }
             session.last_monitor_layout = layout;
+        }
+    }
+
+    pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId) -> bool {
+        let main_tab_visible = self.main_window_tabs.active_tab_id == Some(tab_id)
+            && !self.detached_tabs.contains(&tab_id);
+        let detached_tab_visible = self.detached_tab_windows.contains_key(&tab_id);
+        remote_desktop_tab_visible(main_tab_visible, detached_tab_visible)
+    }
+
+    pub(in crate::workspace) fn resume_remote_desktop_frame_delivery(
+        &self,
+        tab_id: TabId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.remote_desktop_sessions.get(&tab_id) else {
+            return;
+        };
+        if session.frame_slot.has_queued_frame_events() {
+            // Hidden tabs retain a coalesced frame slot. Visibility resumes that existing
+            // delivery without restarting or disconnecting the remote session.
+            self.schedule_remote_desktop_frame_ready_apply(
+                tab_id,
+                session.worker_generation,
+                Duration::ZERO,
+                cx,
+            );
         }
     }
 
@@ -1172,6 +1201,9 @@ impl WorkspaceApp {
             let _ = cx.update_window(window_handle, |_, window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     if !this.remote_desktop_worker_generation_matches(tab_id, generation) {
+                        return;
+                    }
+                    if !this.remote_desktop_tab_visible(tab_id) {
                         return;
                     }
                     // Apply the already queued frame directly so a completed helper does not

@@ -63,6 +63,10 @@ const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 32;
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET: Duration = Duration::from_millis(6);
 const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
 
+fn remote_desktop_tab_visible(main_tab_visible: bool, detached_tab_visible: bool) -> bool {
+    main_tab_visible || detached_tab_visible
+}
+
 #[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
     FrameReady {
@@ -125,6 +129,19 @@ impl RemoteDesktopWorkerWake {
 
     async fn wait(&self) {
         self.notification.notified().await;
+    }
+}
+
+#[cfg(test)]
+mod visibility_tests {
+    use super::remote_desktop_tab_visible;
+
+    #[test]
+    fn remote_desktop_visibility_covers_main_detached_and_hidden_tabs() {
+        assert!(remote_desktop_tab_visible(true, false));
+        assert!(remote_desktop_tab_visible(false, true));
+        assert!(remote_desktop_tab_visible(true, true));
+        assert!(!remote_desktop_tab_visible(false, false));
     }
 }
 

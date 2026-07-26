@@ -186,6 +186,7 @@ impl WorkspaceApp {
         match open_result {
             Ok(handle) => {
                 self.detached_tab_windows.insert(tab_id, handle.into());
+                self.resume_remote_desktop_frame_delivery(tab_id, cx);
                 if let Some(exiting_visual) = exiting_visual {
                     self.begin_tab_visual_exit(exiting_visual, cx);
                 }
