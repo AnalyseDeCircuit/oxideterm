@@ -212,7 +212,8 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
                         LucideIcon::Activity,
                         13.0,
                         rgb(theme.text),
@@ -238,9 +239,9 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }
                         }),
-                        cx.entity(),
                     ))
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
                         LucideIcon::RefreshCw,
                         13.0,
                         rgb(theme.text),
@@ -264,7 +265,6 @@ impl WorkspaceApp {
                             );
                             cx.stop_propagation();
                         }),
-                        cx.entity(),
                     )),
             )
             .into_any_element()
@@ -1254,7 +1254,7 @@ impl HostToolsEntity {
         build_log_follow_command(&os_type, self.host_logs.preset).map(|command| (command, os_type))
     }
 
-    pub(super) fn request_log_snapshot(
+    pub(in crate::workspace::connection_monitor) fn request_log_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,

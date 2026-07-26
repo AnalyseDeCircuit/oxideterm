@@ -54,10 +54,9 @@ pub(in crate::workspace) struct HostToolsEntity {
     // The runtime handle has no registry release or disconnect capability.
     pub(super) lifecycle_runtime: Option<tokio::runtime::Handle>,
     pub(super) sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
-    pub(super) gpu_enabled: bool,
-    pub(super) services_enabled: bool,
-    pub(super) schedules_enabled: bool,
-    pub(super) tmux_enabled: bool,
+    // Host Tools receives one read-only settings snapshot. Persistent writes
+    // remain owned by SettingsStore and are applied back through lifecycle.
+    pub(super) monitoring: oxideterm_settings::HostToolsSettings,
     pub(super) messages: Option<HostToolsMessages>,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
@@ -126,10 +125,7 @@ impl HostToolsEntity {
             visibility: HostToolsVisibility::Hidden,
             lifecycle_runtime: None,
             sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig::default(),
-            gpu_enabled: true,
-            services_enabled: true,
-            schedules_enabled: true,
-            tmux_enabled: true,
+            monitoring: oxideterm_settings::HostToolsSettings::default(),
             messages: None,
             pool_stats: None,
             pool_summaries: Vec::new(),
@@ -893,6 +889,125 @@ impl HostToolsEntity {
         cx.notify();
     }
 
+    pub(super) fn select_connection_for_active_tool(
+        &mut self,
+        connection_id: String,
+        focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_connection(connection_id, focus_origin, cx);
+        self.dismiss_process_confirm(cx);
+        self.dismiss_docker_confirm(cx);
+        self.dismiss_service_confirm(cx);
+        self.dismiss_tmux_input_dialog(cx);
+        self.dismiss_tmux_confirm(cx);
+        self.dismiss_schedule_confirm(cx);
+
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            return;
+        };
+        // Reuse the Entity lifecycle transition so a connection switch
+        // replaces page samplers without releasing the registry-owned node.
+        self.update_lifecycle(
+            self.visibility,
+            self.monitoring.clone(),
+            self.sampling_config,
+            runtime,
+            true,
+            cx,
+        );
+        self.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+    }
+
+    pub(super) fn request_active_tool_snapshot(
+        &mut self,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.visibility.sidebar_is_visible()
+            || !self.active_tool.monitoring_enabled(&self.monitoring)
+        {
+            return;
+        }
+        let Some(connection_id) = self.selected_connection_id_owned() else {
+            return;
+        };
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            return;
+        };
+        let Some(messages) = self.messages.clone() else {
+            return;
+        };
+        let notices = match self.active_tool {
+            ContextSidebarTool::Services => {
+                self.request_service_snapshot(
+                    connection_id,
+                    runtime,
+                    messages.service_connection_missing,
+                    messages.service_action_failed,
+                    cx,
+                );
+                Vec::new()
+            }
+            ContextSidebarTool::Logs => self.request_log_snapshot(
+                connection_id,
+                feedback,
+                self.monitoring.logs_enabled,
+                runtime,
+                messages.log_unknown_error,
+                cx,
+            ),
+            ContextSidebarTool::Tmux => self.request_tmux_snapshot(
+                connection_id,
+                feedback,
+                self.ui.host_tmux_search_query.clone(),
+                messages.tmux_unknown_error,
+                messages.tmux_unavailable,
+                runtime,
+                cx,
+            ),
+            ContextSidebarTool::Ports => self.request_port_snapshot(
+                connection_id,
+                feedback,
+                self.monitoring.ports_enabled,
+                runtime,
+                messages.port_unknown_error,
+                cx,
+            ),
+            ContextSidebarTool::Schedules => self.request_schedule_snapshot(
+                connection_id,
+                feedback,
+                self.monitoring.schedules_enabled,
+                runtime,
+                messages.schedule_unknown_error,
+                cx,
+            ),
+            ContextSidebarTool::Filesystems => self.request_filesystem_snapshot(
+                connection_id,
+                feedback,
+                self.monitoring.filesystems_enabled,
+                runtime,
+                messages.filesystem_unknown_error,
+                cx,
+            ),
+            ContextSidebarTool::Packages => self.request_package_snapshot(
+                connection_id,
+                feedback,
+                self.monitoring.packages_enabled,
+                runtime,
+                messages.package_unknown_error,
+                cx,
+            ),
+            ContextSidebarTool::Monitor
+            | ContextSidebarTool::Gpu
+            | ContextSidebarTool::Processes
+            | ContextSidebarTool::Docker => Vec::new(),
+        };
+        for notice in notices {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+
     pub(in crate::workspace) fn take_selected_connection(
         &mut self,
         cx: &mut Context<Self>,
@@ -1078,7 +1193,7 @@ impl HostToolsEntity {
     }
 
     pub(super) fn request_gpu_refresh(&mut self, connection_id: String, cx: &mut Context<Self>) {
-        let enabled_and_visible = self.gpu_enabled
+        let enabled_and_visible = self.monitoring.gpu_enabled
             && self.visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
         let selected_connection_id = self.selected_connection_id_owned();
@@ -1154,6 +1269,7 @@ mod tests {
 
     #[gpui::test]
     fn connection_selector_state_is_entity_owned(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let entity = cx.new(|cx| {
             HostToolsEntity::new(
@@ -1177,6 +1293,19 @@ mod tests {
             entity.select_connection("connection-2".to_string(), None, cx);
             assert_eq!(entity.selected_connection_id(), Some("connection-2"));
             assert!(!entity.selector_open());
+
+            entity.lifecycle_runtime = Some(runtime.handle().clone());
+            entity.visibility = HostToolsVisibility::Hidden;
+            entity.select_connection_for_active_tool(
+                "connection-1".to_string(),
+                Some(browser_behavior::BrowserFocusOrigin::Keyboard),
+                cx,
+            );
+            assert_eq!(entity.selected_connection_id(), Some("connection-1"));
+            assert_eq!(
+                entity.selector_focus_origin(),
+                Some(browser_behavior::BrowserFocusOrigin::Keyboard)
+            );
 
             assert_eq!(
                 entity.ensure_selected_connection(&["connection-1".to_string()], cx),
@@ -1213,10 +1342,7 @@ mod tests {
             assert!(entity.topology_snapshot().is_some());
             entity.update_lifecycle(
                 HostToolsVisibility::Hidden,
-                true,
-                true,
-                true,
-                true,
+                oxideterm_settings::HostToolsSettings::default(),
                 oxideterm_connection_monitor::ResourceSamplingConfig::default(),
                 runtime.handle().clone(),
                 false,
@@ -1652,6 +1778,10 @@ mod tests {
             entity.messages = Some(HostToolsMessages {
                 service_connection_missing: "Service connection missing".to_string(),
                 service_action_failed: "Service capture failed".to_string(),
+                log_unknown_error: "Log capture failed".to_string(),
+                port_unknown_error: "Port capture failed".to_string(),
+                filesystem_unknown_error: "Filesystem capture failed".to_string(),
+                package_unknown_error: "Package capture failed".to_string(),
                 schedule_unknown_error: "Schedule capture failed".to_string(),
                 tmux_unknown_error: "tmux capture failed".to_string(),
                 tmux_unavailable: "tmux unavailable".to_string(),

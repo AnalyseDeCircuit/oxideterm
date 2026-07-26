@@ -6,6 +6,8 @@ use oxideterm_gpui_ui::select::{
 };
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 
+use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
+
 const HOST_TOOLS_CONNECTION_ROW_HEIGHT: f32 = 32.0;
 const SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT: f32 = 36.0;
 const SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
@@ -56,7 +58,10 @@ fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
 }
 
 impl ContextSidebarTool {
-    fn monitoring_enabled(self, settings: &oxideterm_settings::HostToolsSettings) -> bool {
+    pub(super) fn monitoring_enabled(
+        self,
+        settings: &oxideterm_settings::HostToolsSettings,
+    ) -> bool {
         match self {
             Self::Monitor => settings.monitor_enabled,
             Self::Gpu => settings.gpu_enabled,
@@ -91,6 +96,176 @@ impl ContextSidebarTool {
             Self::Filesystems => settings.filesystems_enabled = enabled,
             Self::Packages => settings.packages_enabled = enabled,
         }
+    }
+}
+
+impl HostToolsEntity {
+    fn render_connection_switcher(
+        &self,
+        connections: &[MonitorConnectionOption],
+        selected_id: &str,
+        is_running: bool,
+        tokens: &ThemeTokens,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(connection) = connections
+            .iter()
+            .find(|connection| connection.connection_id == selected_id)
+            .or_else(|| connections.first())
+        else {
+            return div().into_any_element();
+        };
+
+        let theme = tokens.ui;
+        let selected_index = monitor_connection_selected_index(connections, selected_id);
+        let can_switch = monitor_connection_can_switch(connections);
+        let selector_focus_origin = self.selector_focus_origin();
+        let focus_visible = browser_behavior::browser_focus_visible(
+            selector_focus_origin.is_some(),
+            selector_focus_origin,
+        );
+        // The selector owns its pointer state and connection transition. The
+        // selectable text snapshot is a transient workspace text service and
+        // is never retained by HostToolsEntity.
+        let selector_bottom_margin = if can_switch && self.selector_open() {
+            let visible_options = connections
+                .len()
+                .max(1)
+                .min(SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS)
+                as f32;
+            SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
+                + (visible_options * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)
+                + (SYSTEM_HEALTH_SELECTOR_GAP * 2.0)
+        } else {
+            0.0
+        };
+        let mut trigger = div()
+            .h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_1()
+            .rounded(px(tokens.radii.md))
+            .when(can_switch, |row| row.cursor_pointer())
+            .when(
+                can_switch && (self.selector_open() || focus_visible),
+                |row| row.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)),
+            )
+            .when(can_switch, |row| {
+                row.hover(|hovered| hovered.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            host_tools.toggle_selector_from_pointer(selected_index, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+            })
+            .child(WorkspaceApp::render_lucide_icon(
+                LucideIcon::Server,
+                14.0,
+                if is_running {
+                    rgb(MONITOR_EMERALD)
+                } else {
+                    rgb(theme.text_muted)
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .whitespace_nowrap()
+                    .text_size(px(13.0))
+                    .font_family(mono_font_family.clone())
+                    .text_color(rgb(theme.text))
+                    .child(selectable_text.render_display_text_with_role_in_group(
+                        SelectableTextRole::PlainDocument,
+                        selectable_document_group_id(),
+                        "host-tools-connection-endpoint",
+                        connection.connection_id.as_str(),
+                        0,
+                        monitor_connection_label(connection),
+                        theme.text,
+                        cx,
+                    )),
+            );
+        if can_switch {
+            trigger = trigger.child(div().flex_none().opacity(0.75).child(
+                WorkspaceApp::render_lucide_icon(
+                    LucideIcon::ChevronDown,
+                    14.0,
+                    rgb(theme.text_muted),
+                ),
+            ));
+        }
+
+        let mut wrapper = div()
+            .relative()
+            .mb(px(selector_bottom_margin))
+            .child(trigger);
+        if can_switch && self.selector_open() {
+            let highlighted = self.selector_highlighted_index().unwrap_or(selected_index);
+            let mut popup = select_event_boundary(
+                div()
+                    .absolute()
+                    .top(px(
+                        HOST_TOOLS_CONNECTION_ROW_HEIGHT + SYSTEM_HEALTH_SELECTOR_GAP
+                    ))
+                    .left_0()
+                    .right_0()
+                    .overflow_hidden()
+                    .max_h(px(SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
+                        + (SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS as f32
+                            * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)))
+                    .rounded(px(tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(tokens.ui.border))
+                    .bg(rgb(tokens.ui.bg_panel))
+                    .p_1()
+                    .shadow_lg(),
+            );
+            for (index, connection) in connections.iter().enumerate() {
+                let connection_id = connection.connection_id.clone();
+                let selected = connection.connection_id == selected_id;
+                let highlighted = highlighted == index;
+                popup = popup.child(select_option_action(
+                    select_option_highlighted(
+                        tokens,
+                        monitor_connection_label(connection),
+                        selected,
+                        highlighted,
+                    )
+                    .font_family(mono_font_family.clone())
+                    .on_mouse_move(cx.listener(move |host_tools, _event, _window, cx| {
+                        host_tools.highlight_selector_index(index, cx);
+                    }))
+                    .child(div().mr_2().child(
+                        WorkspaceApp::render_lucide_icon(
+                            LucideIcon::Server,
+                            14.0,
+                            rgb(tokens.ui.text_muted),
+                        ),
+                    )),
+                    false,
+                    false,
+                    cx.listener(move |host_tools, _event, _window, cx| {
+                        host_tools.select_connection_for_active_tool(
+                            connection_id.clone(),
+                            None,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                ));
+            }
+            wrapper = wrapper.child(popup);
+        }
+        wrapper.into_any_element()
     }
 }
 
@@ -1037,160 +1212,20 @@ impl WorkspaceApp {
         is_running: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(connection) = connections
-            .iter()
-            .find(|connection| connection.connection_id == selected_id)
-            .or_else(|| connections.first())
-        else {
-            return div().into_any_element();
-        };
-
-        let theme = self.tokens.ui;
-        let selected_index = monitor_connection_selected_index(connections, selected_id);
-        let can_switch = monitor_connection_can_switch(connections);
-        let (selector_open, selector_highlighted_index, selector_focus_origin) = {
-            let host_tools = self.host_tools.read(cx);
-            (
-                host_tools.selector_open(),
-                host_tools.selector_highlighted_index(),
-                host_tools.selector_focus_origin(),
+        let tokens = self.tokens;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        let selectable_text = self.selectable_text_render_state(cx);
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_connection_switcher(
+                connections,
+                selected_id,
+                is_running,
+                &tokens,
+                mono_font_family,
+                &selectable_text,
+                cx,
             )
-        };
-        let focus_visible = browser_behavior::browser_focus_visible(
-            selector_focus_origin.is_some(),
-            selector_focus_origin,
-        );
-        // This is a host identity row first and a selector only when multiple
-        // live hosts exist. Keeping it visually inline avoids the old form-field
-        // dropdown sitting between the tabs and each Host Tools page.
-        let selector_bottom_margin = if can_switch && selector_open {
-            let visible_options = connections
-                .len()
-                .max(1)
-                .min(SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS)
-                as f32;
-            SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
-                + (visible_options * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)
-                + (SYSTEM_HEALTH_SELECTOR_GAP * 2.0)
-        } else {
-            0.0
-        };
-        let mut trigger = div()
-            .h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
-            .w_full()
-            .min_w_0()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_1()
-            .rounded(px(self.tokens.radii.md))
-            .when(can_switch, |row| row.cursor_pointer())
-            .when(can_switch && (selector_open || focus_visible), |row| {
-                row.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA))
-            })
-            .when(can_switch, |row| {
-                row.hover(|hovered| hovered.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.host_tools.update(cx, |host_tools, cx| {
-                                host_tools.toggle_selector_from_pointer(selected_index, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-            })
-            .child(Self::render_lucide_icon(
-                LucideIcon::Server,
-                14.0,
-                if is_running {
-                    rgb(MONITOR_EMERALD)
-                } else {
-                    rgb(theme.text_muted)
-                },
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .whitespace_nowrap()
-                    .text_size(px(13.0))
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_color(rgb(theme.text))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "host-tools-connection-endpoint",
-                        connection.connection_id.as_str(),
-                        monitor_connection_label(connection),
-                        theme.text,
-                        cx,
-                    )),
-            );
-        if can_switch {
-            trigger = trigger.child(div().flex_none().opacity(0.75).child(
-                Self::render_lucide_icon(LucideIcon::ChevronDown, 14.0, rgb(theme.text_muted)),
-            ));
-        }
-
-        let mut wrapper = div()
-            .relative()
-            .mb(px(selector_bottom_margin))
-            .child(trigger);
-        if can_switch && selector_open {
-            let highlighted = selector_highlighted_index.unwrap_or(selected_index);
-            let mut popup = select_event_boundary(
-                div()
-                    .absolute()
-                    .top(px(
-                        HOST_TOOLS_CONNECTION_ROW_HEIGHT + SYSTEM_HEALTH_SELECTOR_GAP
-                    ))
-                    .left_0()
-                    .right_0()
-                    .overflow_hidden()
-                    .max_h(px(SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
-                        + (SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS as f32
-                            * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgb(self.tokens.ui.bg_panel))
-                    .p_1()
-                    .shadow_lg(),
-            );
-            for (index, connection) in connections.iter().enumerate() {
-                let connection_id = connection.connection_id.clone();
-                let selected = connection.connection_id == selected_id;
-                let highlighted = highlighted == index;
-                popup = popup.child(select_option_action(
-                    select_option_highlighted(
-                        &self.tokens,
-                        monitor_connection_label(connection),
-                        selected,
-                        highlighted,
-                    )
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
-                        this.host_tools.update(cx, |host_tools, cx| {
-                            host_tools.highlight_selector_index(index, cx);
-                        });
-                    }))
-                    .child(div().mr_2().child(Self::render_lucide_icon(
-                        LucideIcon::Server,
-                        14.0,
-                        rgb(self.tokens.ui.text_muted),
-                    ))),
-                    false,
-                    false,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.select_host_tools_connection(connection_id.clone(), None, cx);
-                        cx.stop_propagation();
-                    }),
-                ));
-            }
-            wrapper = wrapper.child(popup);
-        }
-        wrapper.into_any_element()
+        })
     }
 
     fn select_host_tools_connection(
@@ -1200,57 +1235,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.select_connection(connection_id.clone(), focus_origin, cx);
-            host_tools.dismiss_process_confirm(cx);
-            host_tools.dismiss_docker_confirm(cx);
-            host_tools.dismiss_service_confirm(cx);
-            host_tools.dismiss_tmux_input_dialog(cx);
-            host_tools.dismiss_tmux_confirm(cx);
-            host_tools.dismiss_schedule_confirm(cx);
+            host_tools.select_connection_for_active_tool(connection_id, focus_origin, cx);
         });
-        self.sync_host_tools_lifecycle(true, cx);
-        let active_tool = self.host_tools.read(cx).active_tool();
-        if active_tool == ContextSidebarTool::Services {
-            self.request_host_service_snapshot(connection_id.clone(), cx);
-        }
-        if active_tool == ContextSidebarTool::Logs {
-            self.request_host_logs_snapshot(
-                connection_id.clone(),
-                HostSnapshotFeedback::Silent,
-                cx,
-            );
-        }
-        if active_tool == ContextSidebarTool::Tmux {
-            self.request_host_tmux_snapshot(
-                connection_id.clone(),
-                HostSnapshotFeedback::Silent,
-                cx,
-            );
-        }
-        if active_tool == ContextSidebarTool::Ports {
-            self.request_host_ports_snapshot(
-                connection_id.clone(),
-                HostSnapshotFeedback::Silent,
-                cx,
-            );
-        }
-        if active_tool == ContextSidebarTool::Schedules {
-            self.request_host_schedules_snapshot(
-                connection_id.clone(),
-                HostSnapshotFeedback::Silent,
-                cx,
-            );
-        }
-        if active_tool == ContextSidebarTool::Filesystems {
-            self.request_host_filesystems_snapshot(
-                connection_id.clone(),
-                HostSnapshotFeedback::Silent,
-                cx,
-            );
-        }
-        if active_tool == ContextSidebarTool::Packages {
-            self.request_host_packages_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
-        }
     }
 
     pub(in crate::workspace) fn handle_connection_monitor_select_key(

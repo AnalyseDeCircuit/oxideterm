@@ -173,7 +173,8 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
                         LucideIcon::Plus,
                         13.0,
                         rgb(theme.text),
@@ -199,9 +200,9 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }
                         }),
-                        cx.entity(),
                     ))
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
                         LucideIcon::RefreshCw,
                         13.0,
                         rgb(theme.text),
@@ -225,7 +226,6 @@ impl WorkspaceApp {
                             );
                             cx.stop_propagation();
                         }),
-                        cx.entity(),
                     )),
             )
             .into_any_element()
@@ -560,7 +560,8 @@ impl WorkspaceApp {
             .items_center()
             .justify_end()
             .gap(px(4.0))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Terminal,
                 13.0,
                 rgb(theme.text),
@@ -591,9 +592,9 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Pencil,
                 13.0,
                 rgb(theme.text),
@@ -624,9 +625,9 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Trash2,
                 13.0,
                 rgb(MONITOR_RED),
@@ -656,7 +657,6 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
@@ -765,99 +765,87 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .gap(px(3.0))
-                            .child(
-                                self.workspace_tooltip_icon_button(
-                                    LucideIcon::Pencil,
-                                    12.0,
-                                    rgb(theme.text),
-                                    oxideterm_gpui_ui::button::IconButtonOptions {
-                                        size: 20.0,
-                                        disabled: self
-                                            .host_tools
-                                            .read(cx)
-                                            .tmux_action_running_for(&session.id),
-                                        has_background: true,
-                                        background: Some(rgb(theme.bg_hover)),
-                                        hover_background: Some(rgb(theme.bg_panel)),
-                                        idle_opacity: 1.0,
-                                        ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
-                                            20.0,
-                                        )
-                                    },
-                                    self.i18n.t("sidebar.host_tmux.actions.rename_window"),
-                                    "host-tmux-rename-window",
-                                    true,
-                                    cx.listener({
-                                        let connection_id = connection_id.to_string();
-                                        let session_id = session.id.clone();
-                                        let session_name = session.name.clone();
-                                        let window_id = window.id.clone();
-                                        let window_label =
-                                            format!("#{} {}", window.index, window.name);
-                                        let window_name = window.name.clone();
-                                        move |this, _event, window, cx| {
-                                            this.open_host_tmux_rename_window_dialog(
-                                                connection_id.clone(),
-                                                session_id.clone(),
-                                                session_name.clone(),
-                                                window_id.clone(),
-                                                window_label.clone(),
-                                                window_name.clone(),
-                                                window,
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        }
-                                    }),
-                                    cx.entity(),
-                                ),
-                            )
-                            .child(
-                                self.workspace_tooltip_icon_button(
-                                    LucideIcon::Trash2,
-                                    12.0,
-                                    rgb(MONITOR_RED),
-                                    oxideterm_gpui_ui::button::IconButtonOptions {
-                                        size: 20.0,
-                                        disabled: self
-                                            .host_tools
-                                            .read(cx)
-                                            .tmux_action_running_for(&session.id),
-                                        has_background: true,
-                                        background: Some(rgba(
-                                            (MONITOR_RED << 8) | MONITOR_TINT_ALPHA,
-                                        )),
-                                        hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
-                                        idle_opacity: 1.0,
-                                        ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
-                                            20.0,
-                                        )
-                                    },
-                                    self.i18n.t("sidebar.host_tmux.actions.kill_window"),
-                                    "host-tmux-kill-window",
-                                    true,
-                                    cx.listener({
-                                        let connection_id = connection_id.to_string();
-                                        let session_id = session.id.clone();
-                                        let session_name = session.name.clone();
-                                        let window_id = window.id.clone();
-                                        let window_label =
-                                            format!("#{} {}", window.index, window.name);
-                                        move |this, _event, _window, cx| {
-                                            this.request_host_tmux_kill_window(
-                                                connection_id.clone(),
-                                                session_id.clone(),
-                                                session_name.clone(),
-                                                window_id.clone(),
-                                                window_label.clone(),
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        }
-                                    }),
-                                    cx.entity(),
-                                ),
-                            ),
+                            .child(host_tools_tooltip_icon_button(
+                                &self.tokens,
+                                LucideIcon::Pencil,
+                                12.0,
+                                rgb(theme.text),
+                                oxideterm_gpui_ui::button::IconButtonOptions {
+                                    size: 20.0,
+                                    disabled: self
+                                        .host_tools
+                                        .read(cx)
+                                        .tmux_action_running_for(&session.id),
+                                    has_background: true,
+                                    background: Some(rgb(theme.bg_hover)),
+                                    hover_background: Some(rgb(theme.bg_panel)),
+                                    idle_opacity: 1.0,
+                                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                                },
+                                self.i18n.t("sidebar.host_tmux.actions.rename_window"),
+                                "host-tmux-rename-window",
+                                true,
+                                cx.listener({
+                                    let connection_id = connection_id.to_string();
+                                    let session_id = session.id.clone();
+                                    let session_name = session.name.clone();
+                                    let window_id = window.id.clone();
+                                    let window_label = format!("#{} {}", window.index, window.name);
+                                    let window_name = window.name.clone();
+                                    move |this, _event, window, cx| {
+                                        this.open_host_tmux_rename_window_dialog(
+                                            connection_id.clone(),
+                                            session_id.clone(),
+                                            session_name.clone(),
+                                            window_id.clone(),
+                                            window_label.clone(),
+                                            window_name.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ))
+                            .child(host_tools_tooltip_icon_button(
+                                &self.tokens,
+                                LucideIcon::Trash2,
+                                12.0,
+                                rgb(MONITOR_RED),
+                                oxideterm_gpui_ui::button::IconButtonOptions {
+                                    size: 20.0,
+                                    disabled: self
+                                        .host_tools
+                                        .read(cx)
+                                        .tmux_action_running_for(&session.id),
+                                    has_background: true,
+                                    background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
+                                    hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
+                                    idle_opacity: 1.0,
+                                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                                },
+                                self.i18n.t("sidebar.host_tmux.actions.kill_window"),
+                                "host-tmux-kill-window",
+                                true,
+                                cx.listener({
+                                    let connection_id = connection_id.to_string();
+                                    let session_id = session.id.clone();
+                                    let session_name = session.name.clone();
+                                    let window_id = window.id.clone();
+                                    let window_label = format!("#{} {}", window.index, window.name);
+                                    move |this, _event, _window, cx| {
+                                        this.request_host_tmux_kill_window(
+                                            connection_id.clone(),
+                                            session_id.clone(),
+                                            session_name.clone(),
+                                            window_id.clone(),
+                                            window_label.clone(),
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            )),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -944,89 +932,85 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(3.0))
-                    .child(
-                        self.workspace_tooltip_icon_button(
-                            LucideIcon::Keyboard,
-                            12.0,
-                            rgb(theme.text),
-                            oxideterm_gpui_ui::button::IconButtonOptions {
-                                size: 20.0,
-                                disabled: self
-                                    .host_tools
-                                    .read(cx)
-                                    .tmux_action_running_for(&session.id),
-                                has_background: true,
-                                background: Some(rgb(theme.bg_hover)),
-                                hover_background: Some(rgb(theme.bg_panel)),
-                                idle_opacity: 1.0,
-                                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
-                            },
-                            self.i18n.t("sidebar.host_tmux.actions.send_command"),
-                            "host-tmux-send-pane-command",
-                            true,
-                            cx.listener({
-                                let connection_id = connection_id.to_string();
-                                let session_id = session.id.clone();
-                                let session_name = session.name.clone();
-                                let pane_id = pane.id.clone();
-                                let pane_label = format!("%{} {}", pane.index, pane.command);
-                                move |this, _event, window, cx| {
-                                    this.open_host_tmux_send_pane_command_dialog(
-                                        connection_id.clone(),
-                                        session_id.clone(),
-                                        session_name.clone(),
-                                        pane_id.clone(),
-                                        pane_label.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }
-                            }),
-                            cx.entity(),
-                        ),
-                    )
-                    .child(
-                        self.workspace_tooltip_icon_button(
-                            LucideIcon::Trash2,
-                            12.0,
-                            rgb(MONITOR_RED),
-                            oxideterm_gpui_ui::button::IconButtonOptions {
-                                size: 20.0,
-                                disabled: self
-                                    .host_tools
-                                    .read(cx)
-                                    .tmux_action_running_for(&session.id),
-                                has_background: true,
-                                background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
-                                hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
-                                idle_opacity: 1.0,
-                                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
-                            },
-                            self.i18n.t("sidebar.host_tmux.actions.kill_pane"),
-                            "host-tmux-kill-pane",
-                            true,
-                            cx.listener({
-                                let connection_id = connection_id.to_string();
-                                let session_id = session.id.clone();
-                                let session_name = session.name.clone();
-                                let pane_id = pane.id.clone();
-                                let pane_label = format!("%{} {}", pane.index, pane.command);
-                                move |this, _event, _window, cx| {
-                                    this.request_host_tmux_kill_pane(
-                                        connection_id.clone(),
-                                        session_id.clone(),
-                                        session_name.clone(),
-                                        pane_id.clone(),
-                                        pane_label.clone(),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }
-                            }),
-                            cx.entity(),
-                        ),
-                    ),
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
+                        LucideIcon::Keyboard,
+                        12.0,
+                        rgb(theme.text),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 20.0,
+                            disabled: self
+                                .host_tools
+                                .read(cx)
+                                .tmux_action_running_for(&session.id),
+                            has_background: true,
+                            background: Some(rgb(theme.bg_hover)),
+                            hover_background: Some(rgb(theme.bg_panel)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                        },
+                        self.i18n.t("sidebar.host_tmux.actions.send_command"),
+                        "host-tmux-send-pane-command",
+                        true,
+                        cx.listener({
+                            let connection_id = connection_id.to_string();
+                            let session_id = session.id.clone();
+                            let session_name = session.name.clone();
+                            let pane_id = pane.id.clone();
+                            let pane_label = format!("%{} {}", pane.index, pane.command);
+                            move |this, _event, window, cx| {
+                                this.open_host_tmux_send_pane_command_dialog(
+                                    connection_id.clone(),
+                                    session_id.clone(),
+                                    session_name.clone(),
+                                    pane_id.clone(),
+                                    pane_label.clone(),
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                    ))
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
+                        LucideIcon::Trash2,
+                        12.0,
+                        rgb(MONITOR_RED),
+                        oxideterm_gpui_ui::button::IconButtonOptions {
+                            size: 20.0,
+                            disabled: self
+                                .host_tools
+                                .read(cx)
+                                .tmux_action_running_for(&session.id),
+                            has_background: true,
+                            background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
+                            hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
+                            idle_opacity: 1.0,
+                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                        },
+                        self.i18n.t("sidebar.host_tmux.actions.kill_pane"),
+                        "host-tmux-kill-pane",
+                        true,
+                        cx.listener({
+                            let connection_id = connection_id.to_string();
+                            let session_id = session.id.clone();
+                            let session_name = session.name.clone();
+                            let pane_id = pane.id.clone();
+                            let pane_label = format!("%{} {}", pane.index, pane.command);
+                            move |this, _event, _window, cx| {
+                                this.request_host_tmux_kill_pane(
+                                    connection_id.clone(),
+                                    session_id.clone(),
+                                    session_name.clone(),
+                                    pane_id.clone(),
+                                    pane_label.clone(),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }),
+                    )),
             )
             .into_any_element()
     }
@@ -1810,7 +1794,7 @@ impl HostToolsEntity {
         build_tmux_new_session_command(&os_type, None)
     }
 
-    pub(super) fn request_tmux_snapshot(
+    pub(in crate::workspace::connection_monitor) fn request_tmux_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,
@@ -2113,7 +2097,7 @@ impl HostToolsEntity {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self.tmux_enabled
+        if !self.monitoring.tmux_enabled
             || !self.visibility.is_visible()
             || self.active_tool() != ContextSidebarTool::Tmux
         {

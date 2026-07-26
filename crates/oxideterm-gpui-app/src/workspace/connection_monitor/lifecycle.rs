@@ -23,23 +23,17 @@ impl HostToolsEntity {
     pub(in crate::workspace) fn update_lifecycle(
         &mut self,
         visibility: HostToolsVisibility,
-        gpu_enabled: bool,
-        services_enabled: bool,
-        schedules_enabled: bool,
-        tmux_enabled: bool,
+        monitoring: oxideterm_settings::HostToolsSettings,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
         runtime: tokio::runtime::Handle,
         force_pool_refresh: bool,
         cx: &mut Context<Self>,
     ) {
         self.visibility = visibility;
-        self.gpu_enabled = gpu_enabled;
-        self.services_enabled = services_enabled;
-        self.schedules_enabled = schedules_enabled;
-        self.tmux_enabled = tmux_enabled;
+        self.monitoring = monitoring;
         self.sampling_config = sampling_config;
         self.lifecycle_runtime = Some(runtime.clone());
-        let gpu_visible = gpu_enabled
+        let gpu_visible = self.monitoring.gpu_enabled
             && visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
         let selected_connection_id = self.selected_connection_id_owned();
@@ -110,19 +104,13 @@ impl HostToolsEntity {
     pub(in crate::workspace) fn apply_monitoring_settings(
         &mut self,
         visibility: HostToolsVisibility,
-        gpu_enabled: bool,
-        services_enabled: bool,
-        schedules_enabled: bool,
-        tmux_enabled: bool,
+        monitoring: oxideterm_settings::HostToolsSettings,
         sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) {
         self.visibility = visibility;
-        self.gpu_enabled = gpu_enabled;
-        self.services_enabled = services_enabled;
-        self.schedules_enabled = schedules_enabled;
-        self.tmux_enabled = tmux_enabled;
+        self.monitoring = monitoring;
         self.sampling_config = sampling_config;
         self.lifecycle_runtime = Some(runtime.clone());
         if sampling_config.is_empty() || !visibility.is_visible() {
@@ -139,7 +127,7 @@ impl HostToolsEntity {
             );
         }
 
-        let gpu_visible = gpu_enabled
+        let gpu_visible = self.monitoring.gpu_enabled
             && visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
         let selected_connection_id = self.selected_connection_id_owned();
@@ -241,20 +229,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let visibility = self.host_tools_visibility();
-        let host_tools_settings = &self.settings_store.settings().host_tools;
-        let gpu_enabled = host_tools_settings.gpu_enabled;
-        let services_enabled = host_tools_settings.services_enabled;
-        let schedules_enabled = host_tools_settings.schedules_enabled;
-        let tmux_enabled = host_tools_settings.tmux_enabled;
+        let monitoring = self.settings_store.settings().host_tools.clone();
         let sampling_config = self.resource_sampling_config();
         let runtime = self.forwarding_runtime.handle().clone();
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.update_lifecycle(
                 visibility,
-                gpu_enabled,
-                services_enabled,
-                schedules_enabled,
-                tmux_enabled,
+                monitoring,
                 sampling_config,
                 runtime,
                 force_pool_refresh,
@@ -268,11 +249,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let visibility = self.host_tools_visibility();
-        let host_tools_settings = &self.settings_store.settings().host_tools;
-        let gpu_enabled = host_tools_settings.gpu_enabled;
-        let services_enabled = host_tools_settings.services_enabled;
-        let schedules_enabled = host_tools_settings.schedules_enabled;
-        let tmux_enabled = host_tools_settings.tmux_enabled;
+        let monitoring = self.settings_store.settings().host_tools.clone();
         let sampling_config = self.resource_sampling_config();
         let runtime = self.forwarding_runtime.handle().clone();
         let messages = HostToolsMessages::from_i18n(&self.i18n);
@@ -280,10 +257,7 @@ impl WorkspaceApp {
             host_tools.set_messages(messages);
             host_tools.apply_monitoring_settings(
                 visibility,
-                gpu_enabled,
-                services_enabled,
-                schedules_enabled,
-                tmux_enabled,
+                monitoring,
                 sampling_config,
                 runtime,
                 cx,

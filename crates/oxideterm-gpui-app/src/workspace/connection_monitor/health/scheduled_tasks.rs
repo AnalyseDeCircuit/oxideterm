@@ -225,7 +225,8 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
                         LucideIcon::Terminal,
                         13.0,
                         rgb(theme.text),
@@ -251,9 +252,9 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }
                         }),
-                        cx.entity(),
                     ))
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        &self.tokens,
                         LucideIcon::RefreshCw,
                         13.0,
                         rgb(theme.text),
@@ -277,7 +278,6 @@ impl WorkspaceApp {
                             );
                             cx.stop_propagation();
                         }),
-                        cx.entity(),
                     )),
             )
             .into_any_element()
@@ -623,7 +623,8 @@ impl WorkspaceApp {
             .items_center()
             .justify_end()
             .gap(px(4.0))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::FileText,
                 12.0,
                 rgb(theme.text),
@@ -649,9 +650,9 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Activity,
                 12.0,
                 rgb(theme.text),
@@ -678,9 +679,9 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Play,
                 12.0,
                 rgb(theme.text),
@@ -713,9 +714,9 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 if should_enable {
                     LucideIcon::CheckCircle
                 } else {
@@ -761,7 +762,6 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
@@ -1408,7 +1408,7 @@ impl WorkspaceApp {
                                         .flex()
                                         .items_center()
                                         .gap_1()
-                                        .child(self.workspace_tooltip_icon_button(
+                                        .child(host_tools_tooltip_icon_button(&self.tokens,
                                             LucideIcon::Activity,
                                             14.0,
                                             rgb(theme.text),
@@ -1447,9 +1447,8 @@ impl WorkspaceApp {
                                                     cx.stop_propagation();
                                                 }
                                             }),
-                                            cx.entity(),
                                         ))
-                                        .child(self.workspace_tooltip_icon_button(
+                                        .child(host_tools_tooltip_icon_button(&self.tokens,
                                             LucideIcon::X,
                                             14.0,
                                             rgb(theme.text_muted),
@@ -1477,7 +1476,6 @@ impl WorkspaceApp {
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
-                                            cx.entity(),
                                         )),
                                 ),
                         )
@@ -1563,7 +1561,7 @@ impl HostToolsEntity {
         );
     }
 
-    pub(super) fn request_schedule_snapshot(
+    pub(in crate::workspace::connection_monitor) fn request_schedule_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,
@@ -1955,7 +1953,7 @@ impl HostToolsEntity {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self.schedules_enabled
+        if !self.monitoring.schedules_enabled
             || !self.visibility.is_visible()
             || self.active_tool() != ContextSidebarTool::Schedules
         {

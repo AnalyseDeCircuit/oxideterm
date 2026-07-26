@@ -850,9 +850,14 @@ impl HostToolsVisibility {
     }
 }
 
+#[derive(Clone)]
 pub(in crate::workspace) struct HostToolsMessages {
     pub(super) service_connection_missing: String,
     pub(super) service_action_failed: String,
+    pub(super) log_unknown_error: String,
+    pub(super) port_unknown_error: String,
+    pub(super) filesystem_unknown_error: String,
+    pub(super) package_unknown_error: String,
     pub(super) schedule_unknown_error: String,
     pub(super) tmux_unknown_error: String,
     pub(super) tmux_unavailable: String,
@@ -863,6 +868,10 @@ impl HostToolsMessages {
         Self {
             service_connection_missing: i18n.t("sidebar.host_services.toast.connection_missing"),
             service_action_failed: i18n.t("sidebar.host_services.toast.action_failed"),
+            log_unknown_error: i18n.t("sidebar.host_logs.toast.unknown_error"),
+            port_unknown_error: i18n.t("sidebar.host_ports.toast.unknown_error"),
+            filesystem_unknown_error: i18n.t("sidebar.host_filesystems.toast.unknown_error"),
+            package_unknown_error: i18n.t("sidebar.host_packages.toast.unknown_error"),
             schedule_unknown_error: i18n.t("sidebar.host_schedules.toast.unknown_error"),
             tmux_unknown_error: i18n.t("sidebar.host_tmux.toast.unknown_error"),
             tmux_unavailable: i18n.t("sidebar.host_tmux.unavailable"),

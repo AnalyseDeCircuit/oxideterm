@@ -157,7 +157,8 @@ impl WorkspaceApp {
                 visible_count,
                 self.i18n.t("sidebar.host_docker.count_suffix")
             )))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::RefreshCw,
                 13.0,
                 rgb(theme.text),
@@ -176,7 +177,6 @@ impl WorkspaceApp {
                     this.refresh_host_docker_snapshot(selected_id.clone(), cx);
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
@@ -510,7 +510,8 @@ impl WorkspaceApp {
         );
         let disabled = disabled || unsupported;
         let icon_color = if danger { MONITOR_RED } else { theme.text };
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             icon,
             13.0,
             rgb(icon_color),
@@ -549,7 +550,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -565,7 +565,8 @@ impl WorkspaceApp {
             .host_tools
             .read(cx)
             .docker_logs_supported(connection_id, &container.id);
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             LucideIcon::FileText,
             13.0,
             rgb(theme.text),
@@ -595,7 +596,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -612,7 +612,8 @@ impl WorkspaceApp {
                 .node_router
                 .node_id_for_connection(connection_id)
                 .is_none();
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             LucideIcon::Activity,
             13.0,
             rgb(theme.text),
@@ -643,7 +644,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -660,7 +660,8 @@ impl WorkspaceApp {
                 .node_router
                 .node_id_for_connection(connection_id)
                 .is_none();
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             LucideIcon::Terminal,
             13.0,
             rgb(theme.text),
@@ -691,7 +692,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -1182,7 +1182,7 @@ impl WorkspaceApp {
                                         .flex()
                                         .items_center()
                                         .gap_1()
-                                        .child(self.workspace_tooltip_icon_button(
+                                        .child(host_tools_tooltip_icon_button(&self.tokens,
                                             LucideIcon::Activity,
                                             14.0,
                                             rgb(theme.text),
@@ -1222,9 +1222,8 @@ impl WorkspaceApp {
                                                     cx.stop_propagation();
                                                 }
                                             }),
-                                            cx.entity(),
                                         ))
-                                        .child(self.workspace_tooltip_icon_button(
+                                        .child(host_tools_tooltip_icon_button(&self.tokens,
                                             LucideIcon::X,
                                             14.0,
                                             rgb(theme.text_muted),
@@ -1252,7 +1251,6 @@ impl WorkspaceApp {
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
-                                            cx.entity(),
                                         )),
                                 ),
                         )

@@ -820,7 +820,8 @@ impl WorkspaceApp {
         );
         let disabled = disabled || unsupported;
         let icon_color = if danger { MONITOR_RED } else { theme.text };
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             icon,
             13.0,
             rgb(icon_color),
@@ -859,7 +860,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 

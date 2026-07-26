@@ -172,7 +172,8 @@ impl WorkspaceApp {
                 self.i18n.t("sidebar.host_services.count_suffix"),
                 capability_label
             )))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::RefreshCw,
                 13.0,
                 rgb(theme.text),
@@ -192,7 +193,6 @@ impl WorkspaceApp {
                     this.refresh_host_service_snapshot(selected_id.clone(), cx);
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
@@ -569,7 +569,8 @@ impl WorkspaceApp {
         );
         let disabled = disabled || unsupported;
         let icon_color = if danger { MONITOR_RED } else { theme.text };
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             icon,
             13.0,
             rgb(icon_color),
@@ -608,7 +609,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -624,7 +624,8 @@ impl WorkspaceApp {
             .host_tools
             .read(cx)
             .service_logs_supported(connection_id, &service.id);
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             LucideIcon::FileText,
             13.0,
             rgb(theme.text),
@@ -654,7 +655,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -675,7 +675,8 @@ impl WorkspaceApp {
                 .node_router
                 .node_id_for_connection(connection_id)
                 .is_none();
-        self.workspace_tooltip_icon_button(
+        host_tools_tooltip_icon_button(
+            &self.tokens,
             LucideIcon::Activity,
             13.0,
             rgb(theme.text),
@@ -706,7 +707,6 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }
             }),
-            cx.entity(),
         )
     }
 
@@ -1234,7 +1234,7 @@ impl WorkspaceApp {
                                         .flex()
                                         .items_center()
                                         .gap_1()
-                                        .child(self.workspace_tooltip_icon_button(
+                                        .child(host_tools_tooltip_icon_button(&self.tokens,
                                             LucideIcon::Activity,
                                             14.0,
                                             rgb(theme.text),
@@ -1275,9 +1275,8 @@ impl WorkspaceApp {
                                                     cx.stop_propagation();
                                                 }
                                             }),
-                                            cx.entity(),
                                         ))
-                                        .child(self.workspace_tooltip_icon_button(
+                                        .child(host_tools_tooltip_icon_button(&self.tokens,
                                             LucideIcon::X,
                                             14.0,
                                             rgb(theme.text_muted),
@@ -1302,7 +1301,6 @@ impl WorkspaceApp {
                                                 cx.stop_propagation();
                                                 cx.notify();
                                             }),
-                                            cx.entity(),
                                         )),
                                 ),
                         )
@@ -1377,7 +1375,7 @@ impl HostToolsEntity {
         build_service_follow_logs_command(&os_type, service_id)
     }
 
-    pub(super) fn request_service_snapshot(
+    pub(in crate::workspace::connection_monitor) fn request_service_snapshot(
         &mut self,
         connection_id: String,
         runtime: tokio::runtime::Handle,
@@ -1650,7 +1648,7 @@ impl HostToolsEntity {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self.services_enabled
+        if !self.monitoring.services_enabled
             || !self.visibility.is_visible()
             || self.active_tool() != ContextSidebarTool::Services
         {

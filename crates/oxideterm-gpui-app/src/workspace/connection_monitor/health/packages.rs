@@ -212,7 +212,8 @@ impl WorkspaceApp {
                 self.i18n.t("sidebar.host_packages.count_suffix"),
                 capability_label
             )))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::RefreshCw,
                 13.0,
                 rgb(theme.text),
@@ -236,7 +237,6 @@ impl WorkspaceApp {
                     );
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
@@ -558,7 +558,8 @@ impl WorkspaceApp {
             .items_center()
             .justify_end()
             .gap(px(4.0))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Copy,
                 12.0,
                 rgb(theme.text),
@@ -577,9 +578,9 @@ impl WorkspaceApp {
                     this.copy_host_package_name(package_name.clone(), cx);
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                &self.tokens,
                 LucideIcon::Terminal,
                 12.0,
                 rgb(theme.text),
@@ -606,7 +607,6 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
@@ -952,7 +952,7 @@ impl HostToolsEntity {
             .map(|command| command.command)
     }
 
-    pub(super) fn request_package_snapshot(
+    pub(in crate::workspace::connection_monitor) fn request_package_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,
