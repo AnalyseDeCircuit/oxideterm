@@ -61,6 +61,7 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !remote_desktop_edit_mode
             && !drill_down_mode;
+        let shows_icon_field = connection_icon_field_visible(mode, drill_down_mode, form.transport);
         let title = if drill_down_mode {
             self.i18n.t("ssh.drill_down.title")
         } else if prompt_mode {
@@ -648,13 +649,6 @@ impl WorkspaceApp {
                                             self.i18n.t("ssh.form.post_connect_command_hint"),
                                         ))
                                         .child(self.render_upstream_proxy_policy_section(form, cx))
-                                        .child(self.render_edit_icon_field(
-                                            &form.icon,
-                                            &form.color,
-                                            form.icon_picker_expanded,
-                                            cx,
-                                        ))
-                                        .child(self.render_edit_color_field(&form.color, cx))
                                 })
                                 // Legacy compatibility is a persisted connection property, so it
                                 // remains editable for both new and existing saved connections.
@@ -819,6 +813,30 @@ impl WorkspaceApp {
                                                 .child(self.render_proxy_chain_section(cx))
                                         })
                                 })
+                                    })
+                                    .when(shows_icon_field, |content| {
+                                        content.child(self.render_edit_icon_field(
+                                            &form.icon,
+                                            &form.color,
+                                            &form.icon_background_color,
+                                            form.icon_picker_expanded,
+                                            cx,
+                                        ))
+                                        .child(self.render_edit_color_field(
+                                            self.i18n
+                                                .t("sessionManager.edit_properties.icon_color"),
+                                            &form.color,
+                                            NewConnectionField::Color,
+                                            cx,
+                                        ))
+                                        .child(self.render_edit_color_field(
+                                            self.i18n.t(
+                                                "sessionManager.edit_properties.icon_background_color",
+                                            ),
+                                            &form.icon_background_color,
+                                            NewConnectionField::IconBackgroundColor,
+                                            cx,
+                                        ))
                                     })
                                 ),
                         )

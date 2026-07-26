@@ -196,9 +196,34 @@ impl SessionManagerDisplayItem {
                     .unwrap_or(LucideIcon::Server)
             }
             Self::SshConfig(_) => LucideIcon::FileTerminal,
-            Self::Serial(_) => LucideIcon::Radio,
-            Self::Telnet(_) => LucideIcon::Terminal,
-            Self::RemoteDesktop(_) => LucideIcon::Monitor,
+            Self::Serial(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
+                .unwrap_or(LucideIcon::Radio),
+            Self::Telnet(profile) => session_icons::session_icon_from_id(profile.icon.as_deref())
+                .unwrap_or(LucideIcon::Terminal),
+            Self::RemoteDesktop(profile) => {
+                session_icons::session_icon_from_id(profile.icon.as_deref())
+                    .unwrap_or(LucideIcon::Monitor)
+            }
+        }
+    }
+
+    pub(super) fn icon_color(&self) -> Option<&str> {
+        match self {
+            Self::Connection(connection) => connection.color.as_deref(),
+            Self::Serial(profile) => profile.color.as_deref(),
+            Self::Telnet(profile) => profile.color.as_deref(),
+            Self::RemoteDesktop(profile) => profile.color.as_deref(),
+            Self::SshConfig(_) => None,
+        }
+    }
+
+    pub(super) fn icon_background_color(&self) -> Option<&str> {
+        match self {
+            Self::Connection(connection) => connection.icon_background_color.as_deref(),
+            Self::Serial(profile) => profile.icon_background_color.as_deref(),
+            Self::Telnet(profile) => profile.icon_background_color.as_deref(),
+            Self::RemoteDesktop(profile) => profile.icon_background_color.as_deref(),
+            Self::SshConfig(_) => None,
         }
     }
 }
@@ -1095,30 +1120,25 @@ impl WorkspaceApp {
         item: &SessionManagerDisplayItem,
         text: u32,
     ) -> Div {
-        let bg = match item {
-            SessionManagerDisplayItem::Connection(connection) => connection
-                .color
-                .as_deref()
-                .and_then(parse_hex_color)
-                .map(|color| rgba((color << 8) | 0x33))
-                .unwrap_or_else(|| rgba(0x0ea5e933)),
-            SessionManagerDisplayItem::SshConfig(_) => rgba(0x8b5cf633),
-            SessionManagerDisplayItem::Serial(_) => rgba(0xf59e0b33),
-            SessionManagerDisplayItem::Telnet(_) => rgba(0x22c55e33),
-            SessionManagerDisplayItem::RemoteDesktop(_) => rgba(0x0ea5e933),
+        let (default_background, default_foreground) = match item {
+            SessionManagerDisplayItem::Connection(_)
+            | SessionManagerDisplayItem::RemoteDesktop(_) => (0x0ea5e933, 0x7dd3fc),
+            SessionManagerDisplayItem::SshConfig(_) => (0x8b5cf633, 0xc4b5fd),
+            SessionManagerDisplayItem::Serial(_) => (0xf59e0b33, 0xfcd34d),
+            SessionManagerDisplayItem::Telnet(_) => (0x22c55e33, 0x86efac),
         };
-        let fg = match item {
-            SessionManagerDisplayItem::Connection(connection) => connection
-                .color
-                .as_deref()
-                .and_then(parse_hex_color)
-                .map(rgb)
-                .unwrap_or_else(|| rgb(0x7dd3fc)),
-            SessionManagerDisplayItem::SshConfig(_) => rgb(0xc4b5fd),
-            SessionManagerDisplayItem::Serial(_) => rgb(0xfcd34d),
-            SessionManagerDisplayItem::Telnet(_) => rgb(0x86efac),
-            SessionManagerDisplayItem::RemoteDesktop(_) => rgb(0x7dd3fc),
-        };
+        let configured_foreground = item.icon_color().and_then(parse_hex_color);
+        // Older assets used one accent for both layers; keep that appearance
+        // until an explicit background is selected.
+        let bg = item
+            .icon_background_color()
+            .and_then(parse_hex_color)
+            .map(rgb)
+            .or_else(|| configured_foreground.map(|color| rgba((color << 8) | 0x33)))
+            .unwrap_or_else(|| rgba(default_background));
+        let fg = configured_foreground
+            .map(rgb)
+            .unwrap_or_else(|| rgb(default_foreground));
         div()
             .w(px(MANAGER_ROW_ICON_SIZE))
             .h(px(MANAGER_ROW_ICON_SIZE))

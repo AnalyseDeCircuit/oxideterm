@@ -214,6 +214,8 @@ pub struct EncryptedConnection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub tags: Vec<String>,
     pub options: ConnectionOptions,

@@ -83,6 +83,8 @@ pub struct ProxyHopDraft {
     pub username: String,
     pub auth: ConnectionAuthDraft,
     pub agent_forwarding: bool,
+    pub identity_agent: Option<String>,
+    pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
 }
 
@@ -95,10 +97,13 @@ pub struct ConnectionDraft {
     pub auth: ConnectionAuthDraft,
     pub group: String,
     pub color: String,
+    pub icon_background_color: String,
     pub icon: String,
     pub tags: Vec<String>,
     pub proxy_hops: Vec<ProxyHopDraft>,
     pub agent_forwarding: bool,
+    pub identity_agent: Option<String>,
+    pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
     pub post_connect_command: String,
 }
@@ -115,7 +120,9 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
             port: hop.port.unwrap_or(22),
             username: hop.user.unwrap_or_else(current_username),
             auth: saved_auth_from_ssh_paths(hop.identity_file, hop.certificate_file),
-            agent_forwarding: false,
+            agent_forwarding: hop.agent_forwarding,
+            identity_agent: hop.identity_agent,
+            agent_forwarding_socket: hop.agent_forwarding_socket,
             legacy_ssh_compatibility: false,
         })
         .collect();
@@ -130,11 +137,17 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
         auth,
         proxy_chain,
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
-        options: ConnectionOptions::default(),
+        options: ConnectionOptions {
+            agent_forwarding: host.agent_forwarding,
+            identity_agent: host.identity_agent,
+            agent_forwarding_socket: host.agent_forwarding_socket,
+            ..ConnectionOptions::default()
+        },
         created_at: now,
         last_used_at: None,
         updated_at: Some(now),
         color: None,
+        icon_background_color: None,
         icon: None,
         tags: if has_proxy_command {
             vec![
@@ -192,9 +205,13 @@ pub fn save_request_from_draft(
         proxy_chain: saved_proxy_chain_from_drafts(draft.proxy_hops)?,
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         color: (!draft.color.trim().is_empty()).then(|| draft.color.trim().to_string()),
+        icon_background_color: (!draft.icon_background_color.trim().is_empty())
+            .then(|| draft.icon_background_color.trim().to_string()),
         icon: (!draft.icon.trim().is_empty()).then(|| draft.icon.trim().to_string()),
         tags: draft.tags,
         agent_forwarding: draft.agent_forwarding,
+        identity_agent: draft.identity_agent,
+        agent_forwarding_socket: draft.agent_forwarding_socket,
         legacy_ssh_compatibility: draft.legacy_ssh_compatibility,
         post_connect_command: (!draft.post_connect_command.trim().is_empty())
             .then(|| draft.post_connect_command.trim().to_string()),
@@ -290,6 +307,8 @@ fn saved_proxy_chain_from_drafts(hops: Vec<ProxyHopDraft>) -> Result<Vec<SavedPr
                 username: hop.username.trim().to_string(),
                 auth,
                 agent_forwarding: hop.agent_forwarding,
+                identity_agent: hop.identity_agent,
+                agent_forwarding_socket: hop.agent_forwarding_socket,
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             })
         })
@@ -402,7 +421,13 @@ mod tests {
                 port: Some(2200),
                 identity_file: Some("/keys/jump".to_string()),
                 certificate_file: None,
+                identity_agent: Some("/tmp/jump-agent.sock".to_string()),
+                agent_forwarding: true,
+                agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
             }],
+            identity_agent: Some("/tmp/target-agent.sock".to_string()),
+            agent_forwarding: true,
+            agent_forwarding_socket: Some("/tmp/target-forward.sock".to_string()),
             ..SshConfigHost::default()
         })
         .unwrap();
@@ -415,6 +440,24 @@ mod tests {
             connection.proxy_chain[0].auth,
             SavedAuth::Key { ref key_path, .. } if key_path == "/keys/jump"
         ));
+        assert!(connection.options.agent_forwarding);
+        assert_eq!(
+            connection.options.identity_agent.as_deref(),
+            Some("/tmp/target-agent.sock")
+        );
+        assert_eq!(
+            connection.options.agent_forwarding_socket.as_deref(),
+            Some("/tmp/target-forward.sock")
+        );
+        assert!(connection.proxy_chain[0].agent_forwarding);
+        assert_eq!(
+            connection.proxy_chain[0].identity_agent.as_deref(),
+            Some("/tmp/jump-agent.sock")
+        );
+        assert_eq!(
+            connection.proxy_chain[0].agent_forwarding_socket.as_deref(),
+            Some("/tmp/jump-forward.sock")
+        );
     }
 
     #[test]
@@ -503,6 +546,7 @@ mod tests {
             },
             group: "Ungrouped".to_string(),
             color: String::new(),
+            icon_background_color: String::new(),
             icon: String::new(),
             tags: Vec::new(),
             proxy_hops: vec![ProxyHopDraft {
@@ -514,9 +558,13 @@ mod tests {
                     ..ConnectionAuthDraft::default()
                 },
                 agent_forwarding: false,
+                identity_agent: None,
+                agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
             }],
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             post_connect_command: String::new(),
         };

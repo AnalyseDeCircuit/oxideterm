@@ -1807,6 +1807,8 @@ fn imported_proxy_hop_to_saved(hop: &ImportedProxyHopDraft) -> SavedProxyHop {
         username: hop.username.clone(),
         auth: imported_auth_to_saved(hop.auth_type, hop.key_path.as_ref(), hop.cert_path.as_ref()),
         agent_forwarding: hop.agent_forwarding,
+        identity_agent: None,
+        agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
     }
 }
@@ -1842,6 +1844,7 @@ fn imported_draft_to_saved_connection(
         last_used_at: None,
         updated_at: Some(Utc::now()),
         color: None,
+        icon_background_color: None,
         icon: None,
         tags: draft.tags.clone(),
         post_connect_command: None,

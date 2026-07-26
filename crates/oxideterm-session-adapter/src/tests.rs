@@ -50,6 +50,7 @@ fn saved_connection(auth: SavedAuth) -> SavedConnection {
         last_used_at: None,
         updated_at: Some(now),
         color: None,
+        icon_background_color: None,
         icon: None,
         tags: Vec::new(),
         post_connect_command: None,
@@ -110,6 +111,8 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
         username: "ops".to_string(),
         auth: SavedAuth::Agent,
         agent_forwarding: true,
+        identity_agent: Some("/tmp/jump-agent.sock".to_string()),
+        agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
         legacy_ssh_compatibility: true,
     }];
 
@@ -123,6 +126,14 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
     assert_eq!(chain[0].port, 2222);
     assert_eq!(chain[0].username, "ops");
     assert!(chain[0].agent_forwarding);
+    assert_eq!(
+        chain[0].identity_agent.as_deref(),
+        Some("/tmp/jump-agent.sock")
+    );
+    assert_eq!(
+        chain[0].agent_forwarding_socket.as_deref(),
+        Some("/tmp/jump-forward.sock")
+    );
     assert!(chain[0].legacy_ssh_compatibility);
     let _ = std::fs::remove_file(path);
 }
@@ -137,6 +148,8 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         username: "ops".to_string(),
         auth: SavedAuth::Agent,
         agent_forwarding: true,
+        identity_agent: Some("/tmp/jump-agent.sock".to_string()),
+        agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
         legacy_ssh_compatibility: true,
     }];
     let settings = PersistedSettings::default();
@@ -148,6 +161,11 @@ fn saved_connection_hops_become_independent_runtime_configs() {
 
     assert_eq!(jump.host, "jump.example.com");
     assert!(jump.proxy_chain.is_none());
+    assert_eq!(jump.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
+    assert_eq!(
+        jump.agent_forwarding_socket.as_deref(),
+        Some("/tmp/jump-forward.sock")
+    );
     assert_eq!(target.host, "target.example.com");
     assert!(target.proxy_chain.is_none());
     assert!(ssh_config_for_saved_connection_hop(&store, &settings, &connection, 2).is_none());

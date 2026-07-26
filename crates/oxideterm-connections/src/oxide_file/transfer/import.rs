@@ -531,6 +531,7 @@ fn encrypted_connection_to_saved(
             last_used_at: None,
             updated_at: Some(now),
             color: conn.color,
+            icon_background_color: conn.icon_background_color,
             icon: conn.icon,
             tags: conn.tags,
             post_connect_command: None,
@@ -605,6 +606,8 @@ fn import_proxy_hop(
             import_options,
         )?,
         agent_forwarding: false,
+        identity_agent: None,
+        agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
     })
 }
@@ -884,6 +887,9 @@ fn merge_saved_connection(
         existing.options.post_connect_command = legacy_post_connect_command;
     }
     existing.color = imported.color.or(existing.color);
+    existing.icon_background_color = imported
+        .icon_background_color
+        .or(existing.icon_background_color);
     existing.icon = imported.icon.or(existing.icon);
     existing.tags = merge_tags(existing.tags, imported.tags);
     existing.post_connect_command = None;
@@ -919,6 +925,12 @@ fn merge_options(
         existing.term_type = imported.term_type;
     }
     existing.agent_forwarding |= imported.agent_forwarding;
+    if imported.identity_agent.is_some() {
+        existing.identity_agent = imported.identity_agent;
+    }
+    if imported.agent_forwarding_socket.is_some() {
+        existing.agent_forwarding_socket = imported.agent_forwarding_socket;
+    }
     existing.legacy_ssh_compatibility |= imported.legacy_ssh_compatibility;
     existing.post_connect_command = imported
         .post_connect_command

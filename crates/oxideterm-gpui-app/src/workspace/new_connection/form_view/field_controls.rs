@@ -1341,13 +1341,15 @@ impl WorkspaceApp {
 
     pub(super) fn render_edit_color_field(
         &self,
+        label: String,
         value: &str,
+        field: NewConnectionField,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let swatch = parse_rgb24_hex(value).unwrap_or(TAURI_EDIT_COLOR_FALLBACK);
         form_field(
             &self.tokens,
-            self.i18n.t("sessionManager.edit_properties.color"),
+            label,
             div()
                 .flex()
                 .items_center()
@@ -1363,7 +1365,7 @@ impl WorkspaceApp {
                 .child(div().flex_1().child(self.render_connection_input(
                     value,
                     TAURI_EDIT_COLOR_FALLBACK_TEXT.to_string(),
-                    NewConnectionField::Color,
+                    field,
                     false,
                     cx,
                 )))
@@ -1376,9 +1378,15 @@ impl WorkspaceApp {
                         )
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
+                            cx.listener(move |this, _event, _window, cx| {
                                 if let Some(form) = this.new_connection_form.as_mut() {
-                                    form.color.clear();
+                                    match field {
+                                        NewConnectionField::Color => form.color.clear(),
+                                        NewConnectionField::IconBackgroundColor => {
+                                            form.icon_background_color.clear()
+                                        }
+                                        _ => {}
+                                    }
                                     clear_connection_selection(form);
                                 }
                                 cx.notify();
@@ -1393,11 +1401,15 @@ impl WorkspaceApp {
         &self,
         icon_value: &str,
         color_value: &str,
+        background_color_value: &str,
         expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let preview_color = parse_rgb24_hex(color_value).unwrap_or(theme.accent);
+        let preview_background = parse_rgb24_hex(background_color_value)
+            .map(rgb)
+            .unwrap_or_else(|| rgba((preview_color << 8) | 0x22));
         let active_icon = session_icon_from_id(Some(icon_value)).unwrap_or(LucideIcon::Server);
         let mut grid = div().flex().flex_wrap().gap(px(self.tokens.spacing.two));
 
@@ -1464,7 +1476,7 @@ impl WorkspaceApp {
                                 .rounded(px(self.tokens.radii.md))
                                 .border_1()
                                 .border_color(rgb(theme.border))
-                                .bg(rgba((preview_color << 8) | 0x22))
+                                .bg(preview_background)
                                 .flex()
                                 .items_center()
                                 .justify_center()

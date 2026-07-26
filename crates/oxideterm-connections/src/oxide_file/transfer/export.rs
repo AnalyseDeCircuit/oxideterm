@@ -289,6 +289,7 @@ fn export_connection(
         username: conn.username.clone(),
         auth: export_auth(store, &conn.auth, options)?,
         color: conn.color.clone(),
+        icon_background_color: conn.icon_background_color.clone(),
         icon: conn.icon.clone(),
         tags: conn.tags.clone(),
         options: conn.options.clone(),

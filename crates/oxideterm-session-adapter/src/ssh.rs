@@ -34,6 +34,8 @@ pub fn ssh_config_from_saved_connection(
         .ok()?,
         proxy_command,
         agent_forwarding: conn.options.agent_forwarding,
+        identity_agent: conn.options.identity_agent.clone(),
+        agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
@@ -95,6 +97,8 @@ pub fn proxy_chain_config_from_saved_connection(
                 username: hop.username.clone(),
                 auth: auth_method_from_saved_auth(store, &hop.auth)?,
                 agent_forwarding: hop.agent_forwarding,
+                identity_agent: hop.identity_agent.clone(),
+                agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
                 strict_host_key_checking: true,
                 trust_host_key: None,
@@ -125,6 +129,8 @@ pub fn ssh_config_for_saved_connection_hop(
             )
             .ok()?,
             agent_forwarding: hop.agent_forwarding,
+            identity_agent: hop.identity_agent.clone(),
+            agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             strict_host_key_checking: true,
             ..SshConfig::default()
         });

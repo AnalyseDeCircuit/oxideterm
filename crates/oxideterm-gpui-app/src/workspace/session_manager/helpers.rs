@@ -354,6 +354,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
         save_password,
         group: group_label_for_form(conn.group.as_deref()),
         color: conn.color.clone().unwrap_or_default(),
+        icon_background_color: conn.icon_background_color.clone().unwrap_or_default(),
         icon: conn.icon.clone().unwrap_or_default(),
         tags: conn.tags.clone(),
         post_connect_command: conn.post_connect_command().unwrap_or_default().to_string(),
@@ -367,6 +368,11 @@ pub(in crate::workspace) fn form_from_saved_connection(
         upstream_proxy_remote_dns: upstream_proxy_form.remote_dns,
         upstream_proxy_no_proxy: upstream_proxy_form.no_proxy,
         agent_forwarding: conn.options.agent_forwarding,
+        identity_agent: conn.options.identity_agent.clone(),
+        agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
+        // Probe the saved IdentityAgent when reopening a form so edit,
+        // credential-prompt, and duplicate modes never inherit Unknown.
+        agent_available: oxideterm_ssh::ssh_agent_available(conn.options.identity_agent.as_deref()),
         // Preserve compatibility settings when an existing connection enters edit mode.
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
         save_connection: true,
@@ -479,6 +485,7 @@ pub(super) fn connection_draft_from_form(form: &NewConnectionForm) -> Connection
         auth: auth_draft_from_form(form),
         group: form.group.clone(),
         color: form.color.clone(),
+        icon_background_color: form.icon_background_color.clone(),
         icon: form.icon.clone(),
         tags: form.tags.clone(),
         proxy_hops: form
@@ -487,6 +494,8 @@ pub(super) fn connection_draft_from_form(form: &NewConnectionForm) -> Connection
             .map(proxy_hop_draft_from_form)
             .collect(),
         agent_forwarding: form.agent_forwarding,
+        identity_agent: form.identity_agent.clone(),
+        agent_forwarding_socket: form.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
         post_connect_command: form.post_connect_command.clone(),
     }
@@ -510,6 +519,8 @@ pub(super) fn proxy_hop_draft_from_form(
             ..ConnectionAuthDraft::default()
         },
         agent_forwarding: hop.agent_forwarding,
+        identity_agent: hop.identity_agent.clone(),
+        agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
     }
 }

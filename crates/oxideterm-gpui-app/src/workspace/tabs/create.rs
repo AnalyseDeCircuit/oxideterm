@@ -1256,6 +1256,8 @@ mod create_tests {
                 username: "ops".to_string(),
                 auth: AuthMethod::password("pw"),
                 agent_forwarding: false,
+                identity_agent: None,
+                agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
                 strict_host_key_checking: true,
                 trust_host_key: None,

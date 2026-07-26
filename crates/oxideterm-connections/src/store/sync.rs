@@ -547,6 +547,7 @@ fn build_saved_connection_from_sync_payload(
             .transpose()?,
         updated_at: Some(record_updated_at),
         color: payload.color.clone(),
+        icon_background_color: payload.icon_background_color.clone(),
         icon: payload.icon.clone(),
         tags: payload.tags.clone(),
         post_connect_command: None,
@@ -768,6 +769,8 @@ fn build_synced_proxy_chain(
                     .flatten()
                     .unwrap_or_else(|| saved_auth_from_proxy_hop_info(hop)),
                 agent_forwarding: hop.agent_forwarding,
+                identity_agent: hop.identity_agent.clone(),
+                agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             }
         })

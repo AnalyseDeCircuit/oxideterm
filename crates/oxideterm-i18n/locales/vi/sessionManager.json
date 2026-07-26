@@ -112,6 +112,8 @@
       "hide_icons": "Ẩn biểu tượng",
       "default_icon": "Biểu tượng mặc định",
       "color": "Màu",
+      "icon_color": "Màu biểu tượng",
+      "icon_background_color": "Màu nền biểu tượng",
       "clear_color": "Xóa",
       "cancel": "Hủy",
       "save": "Lưu",

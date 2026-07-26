@@ -112,6 +112,8 @@
       "hide_icons": "收合圖示",
       "default_icon": "預設圖示",
       "color": "顏色",
+      "icon_color": "圖示顏色",
+      "icon_background_color": "圖示背景顏色",
       "clear_color": "清除",
       "cancel": "取消",
       "save": "儲存",

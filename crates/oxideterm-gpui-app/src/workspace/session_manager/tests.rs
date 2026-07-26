@@ -56,9 +56,12 @@ pub(super) fn connection_info_fixture(icon: Option<&str>) -> ConnectionInfo {
         created_at: "2026-06-15T00:00:00Z".to_string(),
         last_used_at: None,
         color: None,
+        icon_background_color: None,
         icon: icon.map(ToOwned::to_owned),
         tags: Vec::new(),
         agent_forwarding: false,
+        identity_agent: None,
+        agent_forwarding_socket: None,
         legacy_ssh_compatibility: false,
         post_connect_command: None,
     }
@@ -82,6 +85,7 @@ pub(super) fn saved_connection_fixture(auth: SavedAuth) -> SavedConnection {
         last_used_at: None,
         updated_at: Some(now),
         color: None,
+        icon_background_color: None,
         icon: None,
         tags: Vec::new(),
         post_connect_command: None,
@@ -141,6 +145,9 @@ pub(super) fn remote_desktop_selection_is_typed_separately_from_ssh_ids() {
         id: "shared-id".to_string(),
         name: "Remote desktop".to_string(),
         group: None,
+        icon: None,
+        color: None,
+        icon_background_color: None,
         protocol: oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
         host: "rdp.example.com".to_string(),
         port: 3389,
@@ -170,14 +177,18 @@ pub(super) fn remote_desktop_selection_is_typed_separately_from_ssh_ids() {
 }
 
 #[test]
-pub(super) fn save_request_from_form_preserves_custom_icon() {
+pub(super) fn save_request_from_form_preserves_custom_icon_and_independent_colors() {
     let form = NewConnectionForm {
         icon: "cloud".to_string(),
+        color: "#7dd3fc".to_string(),
+        icon_background_color: "#082f49".to_string(),
         ..base_form()
     };
     let request = save_request_from_form(&form, Some("conn-1".to_string())).unwrap();
 
     assert_eq!(request.icon.as_deref(), Some("cloud"));
+    assert_eq!(request.color.as_deref(), Some("#7dd3fc"));
+    assert_eq!(request.icon_background_color.as_deref(), Some("#082f49"));
 }
 
 #[test]
@@ -414,6 +425,18 @@ pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
 }
 
 #[test]
+pub(super) fn edit_properties_initializes_saved_agent_availability() {
+    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
+    saved_connection.options.identity_agent = Some("none".to_string());
+
+    // IdentityAgent none is deterministic and proves the edit form replaces
+    // Unknown with a real availability result.
+    let form = form_from_saved_connection(&saved_connection, None);
+
+    assert_eq!(form.agent_available, Some(false));
+}
+
+#[test]
 pub(super) fn duplicate_template_name_uses_unique_tauri_copy_suffix() {
     let name = duplicate_connection_template_name(
         "Prod Copy",
@@ -470,6 +493,8 @@ pub(super) fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() 
 pub(super) fn new_connection_request_carries_proxy_chain() {
     let mut form = NewConnectionForm {
         auth_tab: SshAuthTab::Agent,
+        identity_agent: Some("/tmp/target-agent.sock".to_string()),
+        agent_forwarding_socket: Some("/tmp/target-forward.sock".to_string()),
         ..base_form()
     };
     form.proxy_hops
@@ -485,17 +510,32 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: true,
+            identity_agent: Some("/tmp/jump-agent.sock".to_string()),
+            agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
             legacy_ssh_compatibility: true,
         });
 
     let request = save_request_from_form(&form, None).unwrap();
 
+    assert_eq!(
+        request.identity_agent.as_deref(),
+        Some("/tmp/target-agent.sock")
+    );
+    assert_eq!(
+        request.agent_forwarding_socket.as_deref(),
+        Some("/tmp/target-forward.sock")
+    );
     assert_eq!(request.proxy_chain.len(), 1);
     let hop = &request.proxy_chain[0];
     assert_eq!(hop.host, "jump.example.com");
     assert_eq!(hop.port, 2222);
     assert_eq!(hop.username, "ops");
     assert!(hop.agent_forwarding);
+    assert_eq!(hop.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
+    assert_eq!(
+        hop.agent_forwarding_socket.as_deref(),
+        Some("/tmp/jump-forward.sock")
+    );
     assert!(hop.legacy_ssh_compatibility);
     match &hop.auth {
         SavedAuth::Password {
@@ -525,6 +565,8 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
         });
 

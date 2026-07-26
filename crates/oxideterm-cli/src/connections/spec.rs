@@ -173,6 +173,8 @@ pub(super) fn connection_request_from_spec(
         color: spec
             .color
             .unwrap_or_else(|| existing.and_then(|connection| connection.color.clone())),
+        icon_background_color: existing
+            .and_then(|connection| connection.icon_background_color.clone()),
         icon: existing.and_then(|connection| connection.icon.clone()),
         tags: spec.tags.unwrap_or_else(|| {
             existing
@@ -184,6 +186,9 @@ pub(super) fn connection_request_from_spec(
                 .map(|connection| connection.options.agent_forwarding)
                 .unwrap_or(false)
         }),
+        identity_agent: existing.and_then(|connection| connection.options.identity_agent.clone()),
+        agent_forwarding_socket: existing
+            .and_then(|connection| connection.options.agent_forwarding_socket.clone()),
         legacy_ssh_compatibility: spec.legacy_ssh_compatibility.unwrap_or_else(|| {
             existing
                 .map(|connection| connection.options.legacy_ssh_compatibility)
@@ -278,6 +283,8 @@ fn saved_proxy_hop_from_spec(spec: ConnectionProxyHopSpec, json: bool) -> CliRes
         username: spec.username,
         auth: saved_auth_from_connection_spec(spec.auth, None, json)?,
         agent_forwarding: spec.agent_forwarding,
+        identity_agent: None,
+        agent_forwarding_socket: None,
         legacy_ssh_compatibility: spec.legacy_ssh_compatibility,
     })
 }

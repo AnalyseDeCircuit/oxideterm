@@ -131,6 +131,24 @@ pub(in crate::workspace) fn new_connection_form_mode(
     }
 }
 
+pub(in crate::workspace) fn connection_icon_field_visible(
+    mode: NewConnectionFormMode,
+    drill_down_mode: bool,
+    transport: NewConnectionTransport,
+) -> bool {
+    // Only persisted session assets expose custom icons in this shared form.
+    mode != NewConnectionFormMode::SavedConnectionPrompt
+        && !drill_down_mode
+        && matches!(
+            transport,
+            NewConnectionTransport::Ssh
+                | NewConnectionTransport::Serial
+                | NewConnectionTransport::Telnet
+                | NewConnectionTransport::Rdp
+                | NewConnectionTransport::Vnc
+        )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionSelect {
     Group,
@@ -176,6 +194,7 @@ pub(in crate::workspace) enum NewConnectionField {
     Group,
     PostConnectCommand,
     Color,
+    IconBackgroundColor,
     JumpHost,
     JumpPort,
     JumpUsername,
@@ -340,6 +359,8 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) agent_forwarding: bool,
+    pub(in crate::workspace) identity_agent: Option<String>,
+    pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
 }
 
@@ -358,6 +379,11 @@ impl fmt::Debug for NewConnectionProxyHop {
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
             .field("agent_forwarding", &self.agent_forwarding)
+            .field("identity_agent_configured", &self.identity_agent.is_some())
+            .field(
+                "agent_forwarding_socket_configured",
+                &self.agent_forwarding_socket.is_some(),
+            )
             .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
             .finish()
     }
@@ -377,6 +403,8 @@ impl NewConnectionProxyHop {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
         }
     }
@@ -406,6 +434,8 @@ impl NewConnectionProxyHop {
         self.cert_path = connection.cert_path.clone().unwrap_or_default();
         self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
         self.agent_forwarding = connection.agent_forwarding;
+        self.identity_agent = connection.identity_agent.clone();
+        self.agent_forwarding_socket = connection.agent_forwarding_socket.clone();
         self.legacy_ssh_compatibility = connection.legacy_ssh_compatibility;
     }
 }
@@ -436,6 +466,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) group: String,
     pub(in crate::workspace) post_connect_command: String,
     pub(in crate::workspace) color: String,
+    pub(in crate::workspace) icon_background_color: String,
     pub(in crate::workspace) icon: String,
     pub(in crate::workspace) icon_picker_expanded: bool,
     pub(in crate::workspace) tags: Vec<String>,
@@ -453,6 +484,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) upstream_proxy_remote_dns: bool,
     pub(in crate::workspace) upstream_proxy_no_proxy: String,
     pub(in crate::workspace) agent_forwarding: bool,
+    pub(in crate::workspace) identity_agent: Option<String>,
+    pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
     pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) save_connection: bool,
@@ -506,6 +539,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("group", &self.group)
             .field("post_connect_command", &self.post_connect_command)
             .field("color", &self.color)
+            .field("icon_background_color", &self.icon_background_color)
             .field("icon", &self.icon)
             .field("icon_picker_expanded", &self.icon_picker_expanded)
             .field("tags", &self.tags)
@@ -526,6 +560,11 @@ impl fmt::Debug for NewConnectionForm {
             .field("upstream_proxy_remote_dns", &self.upstream_proxy_remote_dns)
             .field("upstream_proxy_no_proxy", &self.upstream_proxy_no_proxy)
             .field("agent_forwarding", &self.agent_forwarding)
+            .field("identity_agent_configured", &self.identity_agent.is_some())
+            .field(
+                "agent_forwarding_socket_configured",
+                &self.agent_forwarding_socket.is_some(),
+            )
             .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
             .field("agent_available", &self.agent_available)
             .field("save_connection", &self.save_connection)
@@ -574,6 +613,7 @@ impl Default for NewConnectionForm {
             group: String::new(),
             post_connect_command: String::new(),
             color: String::new(),
+            icon_background_color: String::new(),
             icon: String::new(),
             icon_picker_expanded: false,
             tags: Vec::new(),
@@ -591,6 +631,8 @@ impl Default for NewConnectionForm {
             upstream_proxy_remote_dns: true,
             upstream_proxy_no_proxy: String::new(),
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             agent_available: None,
             save_connection: false,
@@ -632,6 +674,9 @@ pub(in crate::workspace) fn form_from_remote_desktop_profile(
         saved_password_keychain_id: profile.credential_ref.clone(),
         save_password: profile.credential_ref.is_some(),
         group: profile.group.clone().unwrap_or(ungrouped_label),
+        icon: profile.icon.clone().unwrap_or_default(),
+        color: profile.color.clone().unwrap_or_default(),
+        icon_background_color: profile.icon_background_color.clone().unwrap_or_default(),
         focused_field: NewConnectionField::Name,
         ..NewConnectionForm::default()
     }
@@ -940,6 +985,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::UpstreamProxyUsername => &mut form.upstream_proxy_username,
         NewConnectionField::UpstreamProxyPassword => &mut form.upstream_proxy_password,
         NewConnectionField::Color => &mut form.color,
+        NewConnectionField::IconBackgroundColor => &mut form.icon_background_color,
         NewConnectionField::JumpHost => {
             &mut form
                 .jump_server_form
@@ -1022,6 +1068,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::UpstreamProxyUsername => &form.upstream_proxy_username,
         NewConnectionField::UpstreamProxyPassword => &form.upstream_proxy_password,
         NewConnectionField::Color => &form.color,
+        NewConnectionField::IconBackgroundColor => &form.icon_background_color,
         NewConnectionField::JumpHost => {
             &form
                 .jump_server_form
@@ -1172,13 +1219,13 @@ mod tests {
         SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
         VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
-        backspace_current_connection_field, connection_secret_field_visible,
-        default_auth_tab_for_family, form_from_remote_desktop_profile,
-        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
-        next_connection_field, remote_desktop_feature_supported,
-        remote_desktop_vnc_preference_selected, select_current_connection_field,
-        text_from_keystroke, toggle_connection_secret_field_visibility,
-        toggle_remote_desktop_feature,
+        backspace_current_connection_field, connection_icon_field_visible,
+        connection_secret_field_visible, default_auth_tab_for_family,
+        form_from_remote_desktop_profile, insert_text_into_current_connection_field,
+        key_source_from_tab, new_connection_form_mode, next_connection_field,
+        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
+        select_current_connection_field, text_from_keystroke,
+        toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1271,6 +1318,9 @@ mod tests {
             id: "remote-1".to_string(),
             name: "Lab desktop".to_string(),
             group: Some("Lab".to_string()),
+            icon: Some("cloud".to_string()),
+            color: Some("#7dd3fc".to_string()),
+            icon_background_color: Some("#082f49".to_string()),
             protocol: RemoteDesktopProtocol::Rdp,
             host: "rdp.example.com".to_string(),
             port: 3389,
@@ -1293,6 +1343,9 @@ mod tests {
         assert_eq!(form.port, "3389");
         assert_eq!(form.username, "operator");
         assert_eq!(form.group, "Lab");
+        assert_eq!(form.icon, "cloud");
+        assert_eq!(form.color, "#7dd3fc");
+        assert_eq!(form.icon_background_color, "#082f49");
         assert_eq!(form.remote_desktop_session_options, session_options);
         assert_eq!(
             form.saved_password_keychain_id.as_deref(),
@@ -1300,6 +1353,39 @@ mod tests {
         );
         assert!(form.save_password);
         assert!(form.password.is_empty());
+    }
+
+    #[test]
+    fn custom_icon_field_is_available_for_all_five_session_assets() {
+        for transport in [
+            NewConnectionTransport::Ssh,
+            NewConnectionTransport::Serial,
+            NewConnectionTransport::Telnet,
+            NewConnectionTransport::Rdp,
+            NewConnectionTransport::Vnc,
+        ] {
+            assert!(connection_icon_field_visible(
+                NewConnectionFormMode::NewConnection,
+                false,
+                transport
+            ));
+        }
+
+        assert!(!connection_icon_field_visible(
+            NewConnectionFormMode::NewConnection,
+            false,
+            NewConnectionTransport::WslGraphics
+        ));
+        assert!(!connection_icon_field_visible(
+            NewConnectionFormMode::SavedConnectionPrompt,
+            false,
+            NewConnectionTransport::Ssh
+        ));
+        assert!(!connection_icon_field_visible(
+            NewConnectionFormMode::NewConnection,
+            true,
+            NewConnectionTransport::Ssh
+        ));
     }
 
     #[test]
@@ -1778,9 +1864,12 @@ mod tests {
             created_at: "2026-06-15T00:00:00Z".to_string(),
             last_used_at: None,
             color: None,
+            icon_background_color: None,
             icon: None,
             tags: Vec::new(),
             agent_forwarding: true,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
             post_connect_command: None,
         };

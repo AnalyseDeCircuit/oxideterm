@@ -4,8 +4,7 @@
 use super::*;
 
 pub(super) fn detect_ssh_agent_available() -> Option<bool> {
-    let sock = std::env::var_os("SSH_AUTH_SOCK")?;
-    Some(!sock.is_empty() && std::path::Path::new(&sock).exists())
+    oxideterm_ssh::ssh_agent_available(None)
 }
 
 pub(super) fn proxy_chain_from_form(
@@ -26,6 +25,8 @@ pub(super) fn proxy_chain_from_form(
             username: hop.username.trim().to_string(),
             auth: auth_method_from_proxy_hop(hop),
             agent_forwarding: hop.agent_forwarding,
+            identity_agent: hop.identity_agent.clone(),
+            agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             strict_host_key_checking: true,
             trust_host_key: None,
@@ -140,6 +141,8 @@ pub(super) fn form_from_runtime_config(
         group: default_group,
         post_connect_command: config.post_connect_command.clone().unwrap_or_default(),
         agent_forwarding: config.agent_forwarding,
+        identity_agent: config.identity_agent.clone(),
+        agent_forwarding_socket: config.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: config.legacy_ssh_compatibility,
         save_password: auth_fields.save_password,
         ..NewConnectionForm::default()
@@ -189,6 +192,8 @@ pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewC
         password: auth_fields.password,
         passphrase: auth_fields.passphrase,
         agent_forwarding: config.agent_forwarding,
+        identity_agent: config.identity_agent,
+        agent_forwarding_socket: config.agent_forwarding_socket,
         legacy_ssh_compatibility: config.legacy_ssh_compatibility,
     }
 }
@@ -306,6 +311,8 @@ mod runtime_save_tests {
             username: "ops".to_string(),
             auth: AuthMethod::password_secret(Zeroizing::new("jump-secret".to_string())),
             agent_forwarding: true,
+            identity_agent: Some("/tmp/jump-agent.sock".to_string()),
+            agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
             legacy_ssh_compatibility: true,
             strict_host_key_checking: true,
             trust_host_key: None,
@@ -315,6 +322,11 @@ mod runtime_save_tests {
         assert_eq!(hop.auth_tab, SshAuthTab::Password);
         assert_eq!(hop.password, "jump-secret");
         assert!(hop.agent_forwarding);
+        assert_eq!(hop.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
+        assert_eq!(
+            hop.agent_forwarding_socket.as_deref(),
+            Some("/tmp/jump-forward.sock")
+        );
         assert!(hop.legacy_ssh_compatibility);
     }
 
@@ -329,6 +341,8 @@ mod runtime_save_tests {
                 Some(Zeroizing::new("key-secret".to_string())),
             ),
             agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             strict_host_key_checking: true,
             trust_host_key: None,
@@ -348,6 +362,8 @@ mod runtime_save_tests {
                 port: 22,
                 username: "deploy".to_string(),
                 auth: AuthMethod::password_secret(Zeroizing::new("target-secret".to_string())),
+                identity_agent: Some("/tmp/target-agent.sock".to_string()),
+                agent_forwarding_socket: Some("/tmp/target-forward.sock".to_string()),
                 ..SshConfig::default()
             },
             None,
@@ -357,6 +373,14 @@ mod runtime_save_tests {
         assert_eq!(form.auth_tab, SshAuthTab::Password);
         assert_eq!(form.password, "target-secret");
         assert!(form.save_password);
+        assert_eq!(
+            form.identity_agent.as_deref(),
+            Some("/tmp/target-agent.sock")
+        );
+        assert_eq!(
+            form.agent_forwarding_socket.as_deref(),
+            Some("/tmp/target-forward.sock")
+        );
     }
 
     #[test]
@@ -507,6 +531,18 @@ pub(super) fn serial_profile_group_from_form(
     } else {
         Some(group.to_string())
     }
+}
+
+pub(super) fn asset_icon_from_form(icon: &str) -> Option<String> {
+    // Empty means the asset should use its transport-specific fallback icon.
+    let icon = icon.trim();
+    (!icon.is_empty()).then(|| icon.to_string())
+}
+
+pub(super) fn asset_color_from_form(color: &str) -> Option<String> {
+    // Empty means the asset should use its transport-specific fallback color.
+    let color = color.trim();
+    (!color.is_empty()).then(|| color.to_string())
 }
 
 pub(super) fn serial_profile_parity_from_terminal(

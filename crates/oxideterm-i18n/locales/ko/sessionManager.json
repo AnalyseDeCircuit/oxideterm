@@ -112,6 +112,8 @@
       "hide_icons": "아이콘 접기",
       "default_icon": "기본 아이콘",
       "color": "색상",
+      "icon_color": "아이콘 색상",
+      "icon_background_color": "아이콘 배경색",
       "clear_color": "삭제",
       "cancel": "취소",
       "save": "저장",

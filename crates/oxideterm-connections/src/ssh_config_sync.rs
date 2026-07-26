@@ -119,7 +119,15 @@ fn sync_resolved_ssh_config_hosts(
         resolved.color = existing.color;
         resolved.icon = existing.icon;
         resolved.tags = merged_ssh_config_tags(&existing.tags, &resolved.tags);
+        let resolved_agent_forwarding = resolved.options.agent_forwarding;
+        let resolved_identity_agent = resolved.options.identity_agent.clone();
+        let resolved_agent_forwarding_socket = resolved.options.agent_forwarding_socket.clone();
         resolved.options = existing.options;
+        // These fields remain owned by the imported OpenSSH config while
+        // unrelated application-specific connection options stay untouched.
+        resolved.options.agent_forwarding = resolved_agent_forwarding;
+        resolved.options.identity_agent = resolved_identity_agent;
+        resolved.options.agent_forwarding_socket = resolved_agent_forwarding_socket;
         resolved.upstream_proxy = existing.upstream_proxy;
         resolved.post_connect_command = existing.post_connect_command;
         pending.push(resolved);
@@ -137,6 +145,9 @@ fn ssh_config_fields_match(existing: &SavedConnection, resolved: &SavedConnectio
         && existing.port == resolved.port
         && existing.username == resolved.username
         && auth_source_matches(&existing.auth, &resolved.auth)
+        && existing.options.agent_forwarding == resolved.options.agent_forwarding
+        && existing.options.identity_agent == resolved.options.identity_agent
+        && existing.options.agent_forwarding_socket == resolved.options.agent_forwarding_socket
         && existing.proxy_chain.len() == resolved.proxy_chain.len()
         && existing
             .proxy_chain
@@ -147,6 +158,9 @@ fn ssh_config_fields_match(existing: &SavedConnection, resolved: &SavedConnectio
                     && existing.port == resolved.port
                     && existing.username == resolved.username
                     && auth_source_matches(&existing.auth, &resolved.auth)
+                    && existing.agent_forwarding == resolved.agent_forwarding
+                    && existing.identity_agent == resolved.identity_agent
+                    && existing.agent_forwarding_socket == resolved.agent_forwarding_socket
             })
         && has_proxy_command_tag(&existing.tags) == has_proxy_command_tag(&resolved.tags)
 }
@@ -243,6 +257,41 @@ mod tests {
     }
 
     #[test]
+    fn sync_updates_agent_options_owned_by_open_ssh_config() {
+        let directory = temp_path("agent-options");
+        std::fs::create_dir_all(&directory).unwrap();
+        let config_path = directory.join("config");
+        let store_path = directory.join("connections.json");
+        std::fs::write(
+            &config_path,
+            "Host production\n  HostName prod.example.com\n  ForwardAgent no\n  IdentityAgent ~/.ssh/agent-a.sock\n",
+        )
+        .unwrap();
+
+        sync_ssh_config_path_into_store(&store_path, &config_path).unwrap();
+        std::fs::write(
+            &config_path,
+            "Host production\n  HostName prod.example.com\n  ForwardAgent yes\n  IdentityAgent ~/.ssh/agent-b.sock\n",
+        )
+        .unwrap();
+
+        let outcome = sync_ssh_config_path_into_store(&store_path, &config_path).unwrap();
+        let store = ConnectionStore::load(&store_path).unwrap();
+        let connection = &store.connections()[0];
+
+        assert_eq!(outcome.updated, vec!["production"]);
+        assert!(connection.options.agent_forwarding);
+        assert!(
+            connection
+                .options
+                .identity_agent
+                .as_deref()
+                .is_some_and(|path| path.ends_with("/.ssh/agent-b.sock"))
+        );
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn sync_never_overwrites_a_same_name_manual_connection() {
         let directory = temp_path("manual-conflict");
         std::fs::create_dir_all(&directory).unwrap();
@@ -262,9 +311,12 @@ mod tests {
                 proxy_chain: Vec::new(),
                 upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
                 color: None,
+                icon_background_color: None,
                 icon: None,
                 tags: Vec::new(),
                 agent_forwarding: false,
+                identity_agent: None,
+                agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
                 post_connect_command: None,
             })

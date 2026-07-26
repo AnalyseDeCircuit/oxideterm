@@ -672,9 +672,12 @@ mod tests {
                 proxy_chain: Vec::new(),
                 upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
                 color: None,
+                icon_background_color: None,
                 icon: None,
                 tags: Vec::new(),
                 agent_forwarding: false,
+                identity_agent: None,
+                agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
                 post_connect_command: None,
             })

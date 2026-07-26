@@ -112,6 +112,8 @@
       "hide_icons": "Symbole ausblenden",
       "default_icon": "Standardsymbol",
       "color": "Farbe",
+      "icon_color": "Symbolfarbe",
+      "icon_background_color": "Symbolhintergrundfarbe",
       "clear_color": "Löschen",
       "cancel": "Abbrechen",
       "save": "Speichern",

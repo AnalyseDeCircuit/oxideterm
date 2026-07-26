@@ -128,6 +128,8 @@ impl WorkspaceApp {
             username: username.clone(),
             auth,
             agent_forwarding: form.agent_forwarding,
+            identity_agent: form.identity_agent.clone(),
+            agent_forwarding_socket: form.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
             proxy_chain,
             upstream_proxy,

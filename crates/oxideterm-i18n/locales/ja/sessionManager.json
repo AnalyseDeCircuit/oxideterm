@@ -112,6 +112,8 @@
       "hide_icons": "アイコンを隠す",
       "default_icon": "既定のアイコン",
       "color": "色",
+      "icon_color": "アイコンの色",
+      "icon_background_color": "アイコンの背景色",
       "clear_color": "クリア",
       "cancel": "キャンセル",
       "save": "保存",

@@ -112,6 +112,8 @@
       "hide_icons": "Nascondi icone",
       "default_icon": "Icona predefinita",
       "color": "Colore",
+      "icon_color": "Colore dell’icona",
+      "icon_background_color": "Colore di sfondo dell’icona",
       "clear_color": "Cancella",
       "cancel": "Annulla",
       "save": "Salva",

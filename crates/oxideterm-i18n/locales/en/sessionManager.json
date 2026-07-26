@@ -112,6 +112,8 @@
       "hide_icons": "Hide icons",
       "default_icon": "Default icon",
       "color": "Color",
+      "icon_color": "Icon color",
+      "icon_background_color": "Icon background color",
       "clear_color": "Clear",
       "cancel": "Cancel",
       "save": "Save",

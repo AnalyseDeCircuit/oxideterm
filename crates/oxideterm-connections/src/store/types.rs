@@ -115,6 +115,10 @@ pub struct ConnectionOptions {
     pub term_type: Option<String>,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,6 +134,10 @@ pub struct SavedProxyHop {
     pub auth: SavedAuth,
     #[serde(default)]
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
 }
@@ -235,6 +243,10 @@ pub struct ProxyHopInfo {
     pub managed_key_id: Option<String>,
     pub managed_key_name: Option<String>,
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
 }
 
@@ -250,6 +262,8 @@ impl From<&SavedProxyHop> for ProxyHopInfo {
             managed_key_id: hop.auth.managed_key_id().map(ToOwned::to_owned),
             managed_key_name: None,
             agent_forwarding: hop.agent_forwarding,
+            identity_agent: hop.identity_agent.clone(),
+            agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
         }
     }
@@ -281,6 +295,8 @@ pub struct SavedConnection {
     pub updated_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -342,9 +358,15 @@ pub struct ConnectionInfo {
     pub last_used_at: Option<String>,
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
@@ -441,9 +463,12 @@ impl From<&SavedConnection> for ConnectionInfo {
             created_at: conn.created_at.to_rfc3339(),
             last_used_at: conn.last_used_at.map(|time| time.to_rfc3339()),
             color: conn.color.clone(),
+            icon_background_color: conn.icon_background_color.clone(),
             icon: conn.icon.clone(),
             tags: conn.tags.clone(),
             agent_forwarding: conn.options.agent_forwarding,
+            identity_agent: conn.options.identity_agent.clone(),
+            agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
             post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         }
@@ -472,6 +497,12 @@ pub struct SerialProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
     pub port_path: String,
     pub baud_rate: u32,
     pub data_bits: u8,
@@ -491,6 +522,9 @@ pub struct SaveSerialProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
     pub port_path: String,
     pub baud_rate: Option<u32>,
     pub data_bits: Option<u8>,
@@ -506,6 +540,12 @@ pub struct TelnetProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
     pub host: String,
     pub port: u16,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -521,6 +561,9 @@ pub struct SaveTelnetProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
     pub host: String,
     pub port: u16,
     pub connect_on_open: Option<bool>,
@@ -532,6 +575,12 @@ pub struct RemoteDesktopProfile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
     pub protocol: RemoteDesktopProtocol,
     pub host: String,
     pub port: u16,
@@ -557,6 +606,9 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub id: Option<String>,
     pub name: String,
     pub group: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
     pub protocol: RemoteDesktopProtocol,
     pub host: String,
     pub port: u16,
@@ -579,6 +631,9 @@ impl SerialProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
             port_path: port_path.into(),
             baud_rate: 115_200,
             data_bits: 8,
@@ -622,6 +677,9 @@ impl TelnetProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
             host: host.into(),
             port,
             connect_on_open: false,
@@ -657,6 +715,9 @@ impl RemoteDesktopProfile {
             id: Uuid::new_v4().to_string(),
             name: name.into(),
             group: None,
+            icon: None,
+            color: None,
+            icon_background_color: None,
             protocol,
             host: host.into(),
             port,
@@ -711,9 +772,12 @@ pub struct SaveConnectionRequest {
     pub proxy_chain: Vec<SavedProxyHop>,
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     pub color: Option<String>,
+    pub icon_background_color: Option<String>,
     pub icon: Option<String>,
     pub tags: Vec<String>,
     pub agent_forwarding: bool,
+    pub identity_agent: Option<String>,
+    pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
     pub post_connect_command: Option<String>,
 }

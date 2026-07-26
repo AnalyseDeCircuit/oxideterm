@@ -17,6 +17,9 @@ pub struct SshConfigHost {
     pub port: Option<u16>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
+    pub identity_agent: Option<String>,
+    pub agent_forwarding: bool,
+    pub agent_forwarding_socket: Option<String>,
     pub proxy_chain: Vec<SshConfigProxyHop>,
     pub proxy_command: Option<Vec<SecretString>>,
     pub already_imported: bool,
@@ -29,6 +32,9 @@ pub struct SshConfigProxyHop {
     pub port: Option<u16>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
+    pub identity_agent: Option<String>,
+    pub agent_forwarding: bool,
+    pub agent_forwarding_socket: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -57,6 +63,8 @@ struct SshHostOptions {
     port: Option<u16>,
     identity_file: Option<String>,
     certificate_file: Option<String>,
+    identity_agent: Option<String>,
+    forward_agent: Option<String>,
     proxy_jump: Option<String>,
     proxy_command: Option<Vec<SecretString>>,
 }
@@ -256,6 +264,12 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
         "certificatefile" if options.certificate_file.is_none() => {
             options.certificate_file = Some(value.clone())
         }
+        "identityagent" if options.identity_agent.is_none() => {
+            options.identity_agent = Some(value.clone())
+        }
+        "forwardagent" if options.forward_agent.is_none() => {
+            options.forward_agent = Some(value.clone())
+        }
         "proxyjump" if options.proxy_jump.is_none() && options.proxy_command.is_none() => {
             options.proxy_jump = Some(value.clone())
         }
@@ -284,6 +298,14 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
         .certificate_file
         .clone()
         .or_else(|| update.certificate_file.clone());
+    base.identity_agent = base
+        .identity_agent
+        .clone()
+        .or_else(|| update.identity_agent.clone());
+    base.forward_agent = base
+        .forward_agent
+        .clone()
+        .or_else(|| update.forward_agent.clone());
     if base.proxy_jump.is_none() && base.proxy_command.is_none() {
         base.proxy_jump = update.proxy_jump.clone();
         base.proxy_command = update.proxy_command.clone();
@@ -329,6 +351,27 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
             options.port,
         ))
     });
+    let resolved_hostname = hostname.as_deref().unwrap_or(alias);
+    let identity_agent = options
+        .identity_agent
+        .as_deref()
+        .map(|value| {
+            expand_agent_selector(
+                value,
+                alias,
+                resolved_hostname,
+                options.user.as_deref(),
+                options.port,
+            )
+        })
+        .transpose()?;
+    let (agent_forwarding, agent_forwarding_socket) = resolve_forward_agent(
+        options.forward_agent.as_deref(),
+        alias,
+        resolved_hostname,
+        options.user.as_deref(),
+        options.port,
+    )?;
     let mut proxy_chain = Vec::new();
     let mut active_aliases = HashSet::from([alias.to_ascii_lowercase()]);
     let mut emitted_aliases = HashSet::new();
@@ -341,7 +384,6 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         &mut proxy_chain,
         0,
     )?;
-    let resolved_hostname = hostname.as_deref().unwrap_or(alias);
     let proxy_command = options
         .proxy_command
         .as_ref()
@@ -368,6 +410,9 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         port: options.port,
         identity_file,
         certificate_file,
+        identity_agent,
+        agent_forwarding,
+        agent_forwarding_socket,
         proxy_chain,
         proxy_command,
         already_imported: false,
@@ -422,7 +467,7 @@ fn append_proxy_jump_chain(
         if !emitted_aliases.insert(target_key) {
             continue;
         }
-        proxy_chain.push(resolved_proxy_jump_hop(target, jump_options));
+        proxy_chain.push(resolved_proxy_jump_hop(target, jump_options)?);
     }
     Ok(())
 }
@@ -430,7 +475,7 @@ fn append_proxy_jump_chain(
 fn resolved_proxy_jump_hop(
     target: ProxyJumpTarget,
     jump_options: SshHostOptions,
-) -> SshConfigProxyHop {
+) -> Result<SshConfigProxyHop> {
     let jump_hostname = jump_options
         .hostname
         .as_deref()
@@ -459,13 +504,36 @@ fn resolved_proxy_jump_hop(
             jump_options.port,
         ))
     });
-    SshConfigProxyHop {
+    let jump_identity_agent = jump_options
+        .identity_agent
+        .as_deref()
+        .map(|value| {
+            expand_agent_selector(
+                value,
+                &target.host,
+                &jump_hostname,
+                jump_options.user.as_deref(),
+                jump_options.port,
+            )
+        })
+        .transpose()?;
+    let (jump_agent_forwarding, jump_agent_forwarding_socket) = resolve_forward_agent(
+        jump_options.forward_agent.as_deref(),
+        &target.host,
+        &jump_hostname,
+        jump_options.user.as_deref(),
+        jump_options.port,
+    )?;
+    Ok(SshConfigProxyHop {
         host: jump_hostname,
         user: target.user.or(jump_options.user),
         port: target.port.or(jump_options.port),
         identity_file: jump_identity,
         certificate_file: jump_certificate,
-    }
+        identity_agent: jump_identity_agent,
+        agent_forwarding: jump_agent_forwarding,
+        agent_forwarding_socket: jump_agent_forwarding_socket,
+    })
 }
 
 fn resolve_options(alias: &str, blocks: &[SshHostBlock]) -> SshHostOptions {
@@ -593,6 +661,126 @@ fn expand_connection_tokens(
         }
     }
     expanded
+}
+
+fn expand_agent_selector(
+    value: &str,
+    alias: &str,
+    hostname: &str,
+    user: Option<&str>,
+    port: Option<u16>,
+) -> Result<String> {
+    if value.eq_ignore_ascii_case("none")
+        || value == "SSH_AUTH_SOCK"
+        || is_agent_environment_selector(value)
+    {
+        return Ok(value.to_string());
+    }
+    let value = expand_ssh_environment_variables(value)?;
+    Ok(expand_home(&expand_agent_tokens(
+        &value, alias, hostname, user, port,
+    )))
+}
+
+fn is_agent_environment_selector(value: &str) -> bool {
+    if let Some(variable) = value
+        .strip_prefix("${")
+        .and_then(|value| value.strip_suffix('}'))
+    {
+        return !variable.is_empty()
+            && variable
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_alphanumeric());
+    }
+    value.strip_prefix('$').is_some_and(|variable| {
+        !variable.is_empty()
+            && variable
+                .chars()
+                .all(|character| character == '_' || character.is_ascii_alphanumeric())
+    })
+}
+
+fn resolve_forward_agent(
+    value: Option<&str>,
+    alias: &str,
+    hostname: &str,
+    user: Option<&str>,
+    port: Option<u16>,
+) -> Result<(bool, Option<String>)> {
+    match value {
+        Some(value) if value.eq_ignore_ascii_case("yes") => Ok((true, None)),
+        Some(value) if value.eq_ignore_ascii_case("no") => Ok((false, None)),
+        Some(value) => Ok((
+            true,
+            Some(expand_agent_selector(value, alias, hostname, user, port)?),
+        )),
+        None => Ok((false, None)),
+    }
+}
+
+fn expand_agent_tokens(
+    value: &str,
+    alias: &str,
+    hostname: &str,
+    remote_user: Option<&str>,
+    port: Option<u16>,
+) -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    let local_user = whoami::username();
+    #[cfg(unix)]
+    let local_uid = {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(&home)
+            .map(|metadata| metadata.uid().to_string())
+            .unwrap_or_default()
+    };
+    #[cfg(not(unix))]
+    let local_uid = String::new();
+
+    let mut expanded = String::with_capacity(value.len());
+    let mut characters = value.chars();
+    while let Some(character) = characters.next() {
+        if character != '%' {
+            expanded.push(character);
+            continue;
+        }
+        match characters.next() {
+            Some('%') => expanded.push('%'),
+            Some('d') => expanded.push_str(&home.to_string_lossy()),
+            Some('h') => expanded.push_str(hostname),
+            Some('i') => expanded.push_str(&local_uid),
+            Some('n') => expanded.push_str(alias),
+            Some('p') => expanded.push_str(&port.unwrap_or(22).to_string()),
+            Some('r') => expanded.push_str(remote_user.unwrap_or_default()),
+            Some('u') => expanded.push_str(&local_user),
+            Some(token) => {
+                expanded.push('%');
+                expanded.push(token);
+            }
+            None => expanded.push('%'),
+        }
+    }
+    expanded
+}
+
+fn expand_ssh_environment_variables(value: &str) -> Result<String> {
+    let mut expanded = String::with_capacity(value.len());
+    let mut remaining = value;
+    while let Some(start) = remaining.find("${") {
+        expanded.push_str(&remaining[..start]);
+        let variable_start = start + 2;
+        let Some(variable_end) = remaining[variable_start..].find('}') else {
+            bail!("unterminated environment variable in SSH agent selector");
+        };
+        let variable_end = variable_start + variable_end;
+        let variable = &remaining[variable_start..variable_end];
+        let value = std::env::var(variable)
+            .with_context(|| format!("environment variable {variable} is not set"))?;
+        expanded.push_str(&value);
+        remaining = &remaining[variable_end + 1..];
+    }
+    expanded.push_str(remaining);
+    Ok(expanded)
 }
 
 fn expand_proxy_command_tokens(
@@ -907,6 +1095,94 @@ mod tests {
             &["*".to_string(), "!production-admin".to_string()],
             "production-admin"
         ));
+    }
+
+    #[test]
+    fn agent_options_keep_first_value_and_expand_connection_tokens() {
+        let blocks = vec![
+            block(
+                &["production"],
+                SshHostOptions {
+                    hostname: Some("prod.example.com".to_string()),
+                    user: Some("deployer".to_string()),
+                    port: Some(2200),
+                    identity_agent: Some("~/.ssh/agents/%n-%h-%r-%p.sock".to_string()),
+                    forward_agent: Some("$FORWARDING_AGENT".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["*"],
+                SshHostOptions {
+                    identity_agent: Some("none".to_string()),
+                    forward_agent: Some("no".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+        ];
+
+        let host = resolve_ssh_config_host("production", &blocks).unwrap();
+        let expected_agent = dirs::home_dir()
+            .unwrap()
+            .join(".ssh/agents/production-prod.example.com-deployer-2200.sock");
+
+        assert_eq!(host.identity_agent.as_deref(), expected_agent.to_str());
+        assert!(host.agent_forwarding);
+        assert_eq!(
+            host.agent_forwarding_socket.as_deref(),
+            Some("$FORWARDING_AGENT")
+        );
+    }
+
+    #[test]
+    fn identity_agent_none_and_forward_agent_no_remain_disabled() {
+        let host = resolve_ssh_config_host(
+            "disabled",
+            &[block(
+                &["disabled"],
+                SshHostOptions {
+                    identity_agent: Some("none".to_string()),
+                    forward_agent: Some("no".to_string()),
+                    ..SshHostOptions::default()
+                },
+            )],
+        )
+        .unwrap();
+
+        assert_eq!(host.identity_agent.as_deref(), Some("none"));
+        assert!(!host.agent_forwarding);
+        assert!(host.agent_forwarding_socket.is_none());
+    }
+
+    #[test]
+    fn proxy_jump_preserves_its_own_agent_options() {
+        let blocks = vec![
+            block(
+                &["production"],
+                SshHostOptions {
+                    proxy_jump: Some("gateway".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+            block(
+                &["gateway"],
+                SshHostOptions {
+                    hostname: Some("gateway.example.com".to_string()),
+                    identity_agent: Some("SSH_AUTH_SOCK".to_string()),
+                    forward_agent: Some("yes".to_string()),
+                    ..SshHostOptions::default()
+                },
+            ),
+        ];
+
+        let host = resolve_ssh_config_host("production", &blocks).unwrap();
+
+        assert_eq!(host.proxy_chain.len(), 1);
+        assert_eq!(
+            host.proxy_chain[0].identity_agent.as_deref(),
+            Some("SSH_AUTH_SOCK")
+        );
+        assert!(host.proxy_chain[0].agent_forwarding);
     }
 
     #[test]
